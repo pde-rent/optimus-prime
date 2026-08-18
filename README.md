@@ -43,6 +43,24 @@ Prime Agent combines a persistent JavaScript/TypeScript control environment with
 - **Agents communicate directly:** running agents can exchange messages and orchestrate one another without routing everything through the user.
 - **Long tasks keep moving:** automatic compaction, persistent goals, heartbeats, schedules, autonomous mode, and retained subagents preserve progress across turns and terminal sessions.
 
+## Upstream
+
+This is a hard fork: Python removed, a single Bun REPL in place of the IPython kernel, Bun-only
+toolchain. Upstream still fixes bugs in code we share, and **neither upstream reaches us
+automatically** — `prime-agent` shares our history and merges; `pi` does not, because prime-agent
+*vendors* pi's source, so every relevant pi fix is a hand-port.
+
+Standing routine, weekly and before any release:
+
+```sh
+bun scripts/upstream-report.ts          # new upstream commits since last triage
+bun scripts/upstream-report.ts --mark   # record them as triaged
+```
+
+Triage each into PORT / N/A / CONFLICTS / SKIP, security and data-loss first. A fix in code we
+deleted is still a signal — we usually inherited the logic, and therefore the bug. Full process,
+including the upstream PRs known to be defective, in [docs/upstream-sync.md](docs/upstream-sync.md).
+
 ## Getting Started
 
 Install the latest stable release on macOS or Linux:
