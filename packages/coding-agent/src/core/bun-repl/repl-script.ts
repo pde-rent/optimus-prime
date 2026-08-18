@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createContext, runInContext } from "node:vm";
+import type { KernelSentAgentMessage } from "../tools/kernel-types.js";
 import { bashCommand, parseCell } from "./cell.js";
 import type {
 	BunReplExecuteRequest,
@@ -79,10 +80,46 @@ function jsonSafe(value: unknown): unknown {
 	}
 }
 
+const SENT_AGENT_MESSAGE_ROLES = ["parent", "sibling", "child"] as const;
+type SentAgentMessageRole = (typeof SENT_AGENT_MESSAGE_ROLES)[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Convert an agent_message.send receipt (AgentSessionMessageReceipt) into a KernelSentAgentMessage. */
+function receiptToKernelSentAgentMessage(reply: unknown, receiverRole?: unknown): KernelSentAgentMessage | undefined {
+	if (!isRecord(reply)) return undefined;
+	const { id, message, deliveryStatus, target } = reply;
+	if (
+		typeof id !== "string" ||
+		typeof message !== "string" ||
+		(deliveryStatus !== "delivered" && deliveryStatus !== "queued") ||
+		!isRecord(target) ||
+		typeof target.activeSessionId !== "string" ||
+		typeof target.sessionId !== "string"
+	) {
+		return undefined;
+	}
+	return {
+		id,
+		message,
+		deliveryStatus,
+		...(SENT_AGENT_MESSAGE_ROLES.includes(receiverRole as SentAgentMessageRole)
+			? { receiverRole: receiverRole as SentAgentMessageRole }
+			: {}),
+		target: {
+			activeSessionId: target.activeSessionId,
+			sessionId: target.sessionId,
+			...(typeof target.sessionName === "string" ? { sessionName: target.sessionName } : {}),
+		},
+	};
+}
+
 const hostBridge = {
 	async hostRequest(requestType: string, payload: Record<string, unknown>): Promise<unknown> {
 		const requestId = crypto.randomUUID();
-		return new Promise((resolve, reject) => {
+		const pending = new Promise((resolve, reject) => {
 			pendingHostRequests.set(requestId, { resolve, reject });
 			const msg: BunReplHostRequest = {
 				type: "hostRequest",
@@ -92,6 +129,17 @@ const hostBridge = {
 			};
 			send(msg);
 		});
+		if (requestType === "agent_message.send") {
+			// Surface a cell's side-agent message back to the host session as a
+			// KernelSentAgentMessage on the current cell result.
+			void pending
+				.then((reply) => {
+					const sent = receiptToKernelSentAgentMessage(reply, payload.receiver_role);
+					if (sent) _sentAgentMessages.push(sent);
+				})
+				.catch(() => {});
+		}
+		return pending;
 	},
 };
 
@@ -134,6 +182,7 @@ const INJECTED = new Set([
 // Per-execute state.
 let _execId: string | null = null;
 let _displayData: Array<{ mime: string; data: unknown }> = [];
+let _sentAgentMessages: KernelSentAgentMessage[] = [];
 
 function sendStdout(chunk: string): void {
 	if (_execId !== null) send({ id: _execId, type: "stdout", chunk });
@@ -216,13 +265,16 @@ context.globalThis = context; // keep the context's own globalThis pointing at i
 // ---------------------------------------------------------------------------
 // %%bash: route to Bun.spawn.
 // ---------------------------------------------------------------------------
-async function runBash(_req: BunReplExecuteRequest, body: string): Promise<void> {
-	const cmd = bashCommand(body);
+async function runBash(req: BunReplExecuteRequest, body: string): Promise<void> {
+	const command = bashCommand(body);
+	const cmd = req.commandPrefix ? `${req.commandPrefix}\n${command}` : command;
 	// `node:child_process` spawn runs under Bun (Bun implements it); using it keeps the
 	// build's types green without requiring @types/bun for the Bun.spawn global.
 	// Bash output is piped and forwarded as JSON protocol frames so it never corrupts
-	// the NDJSON control stream on the child's stdout.
-	const proc = spawn("bash", ["-c", cmd], {
+	// the NDJSON control stream on the child's stdout. Bare %%bash cells run through the
+	// configured shell (shellPath) when one is provided, mirroring the old ipython option.
+	const shell = req.shellPath?.trim() || "bash";
+	const proc = spawn(shell, ["-c", cmd], {
 		cwd: process.cwd(),
 		stdio: ["ignore", "pipe", "pipe"],
 	});
@@ -276,6 +328,7 @@ async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 		status: "ok",
 		value: resultStr,
 		displayData: _displayData.length > 0 ? _displayData : undefined,
+		sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 	});
 }
 
@@ -292,6 +345,7 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 				type: "result",
 				status: "ok",
 				displayData: _displayData.length > 0 ? _displayData : undefined,
+				sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 			});
 		} else {
 			await runJs(req, cell.body);
@@ -304,10 +358,12 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 			status: "error",
 			error: errorMsg,
 			displayData: _displayData.length > 0 ? _displayData : undefined,
+			sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 		});
 	} finally {
 		_execId = null;
 		_displayData = [];
+		_sentAgentMessages = [];
 		send({ id: req.id, type: "idle" });
 	}
 }

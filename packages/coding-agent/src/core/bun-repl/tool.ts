@@ -3,7 +3,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
 import type { ToolDefinition } from "../extensions/types.js";
-import type { KernelAttachment } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelSentAgentMessage } from "../tools/kernel-types.js";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.js";
 import { BunReplProvisioner } from "./provisioner.js";
 
@@ -22,6 +22,8 @@ export interface BunReplToolDetails {
 	result?: string;
 	/** Media attachments emitted via `display()`, loaded into context (surfaced as images). */
 	attachments?: KernelAttachment[];
+	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
+	sentAgentMessages?: KernelSentAgentMessage[];
 	error?: { ename: string; evalue: string; traceback: string[] };
 }
 
@@ -38,6 +40,10 @@ export interface BunReplToolOptions {
 	env?: Record<string, string>;
 	hostHandlers?: Record<string, (payload: Record<string, unknown>) => Promise<Record<string, unknown>>>;
 	snapshotDir?: string;
+	/** Custom shell binary for bare %%bash cells (defaults to "bash"). Mirrors the old ipython shellPath option. */
+	shellPath?: string;
+	/** Command prefix prepended to every %%bash cell. Mirrors the old ipython commandPrefix option. */
+	commandPrefix?: string;
 	provisioner?: BunReplProvisioner;
 }
 
@@ -51,6 +57,8 @@ export function createBunReplToolDefinition(
 			env: _options.env,
 			hostHandlers: _options.hostHandlers,
 			snapshotDir: _options.snapshotDir,
+			shellPath: _options.shellPath,
+			commandPrefix: _options.commandPrefix,
 		});
 
 	return {
@@ -88,6 +96,7 @@ export function createBunReplToolDefinition(
 						stderr: result.stderr,
 						result: result.result,
 						attachments: result.attachments,
+						sentAgentMessages: result.sentAgentMessages,
 						error: result.error,
 					},
 					isError: result.status === "error" || result.status === "aborted",

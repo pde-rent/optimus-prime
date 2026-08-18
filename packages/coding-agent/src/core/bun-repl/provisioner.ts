@@ -7,6 +7,10 @@ export interface BunReplProvisionerOptions {
 	hostHandlers?: Record<string, BunReplHostRequestHandler>;
 	snapshotDir?: string;
 	bunPath?: string;
+	/** Custom shell binary for bare %%bash cells (defaults to "bash"). */
+	shellPath?: string;
+	/** Command prefix prepended to every %%bash cell. */
+	commandPrefix?: string;
 	readyGate?: Promise<void>;
 	onRestore?: (restoredNames: string[]) => void;
 }
@@ -99,6 +103,8 @@ export class BunReplProvisioner {
 			hostHandlers: this.options.hostHandlers,
 			snapshotDir: this.options.snapshotDir,
 			bunPath: this.options.bunPath,
+			shellPath: this.options.shellPath,
+			commandPrefix: this.options.commandPrefix,
 		};
 
 		const manager = new BunReplManager(managerOptions);

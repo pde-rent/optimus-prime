@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { KernelAttachment } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelSentAgentMessage } from "../tools/kernel-types.js";
 import type {
 	BunReplExecuteRequest,
 	BunReplHostRequest,
@@ -28,6 +28,8 @@ export interface BunReplExecuteResult {
 	result?: string;
 	/** Media emitted via the sandbox `display()` helper, converted for the attachment pipeline. */
 	attachments?: KernelAttachment[];
+	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
+	sentAgentMessages?: KernelSentAgentMessage[];
 	status: "ok" | "error" | "aborted";
 	error?: { ename: string; evalue: string; traceback: string[] };
 	durationMs: number;
@@ -58,6 +60,10 @@ export interface BunReplManagerOptions {
 	hostHandlers?: Record<string, BunReplHostRequestHandler>;
 	snapshotDir?: string;
 	bunPath?: string;
+	/** Custom shell binary for bare %%bash cells (defaults to "bash"). */
+	shellPath?: string;
+	/** Command prefix prepended to every %%bash cell. */
+	commandPrefix?: string;
 }
 
 type ReplState = "idle" | "starting" | "running" | "shutdown";
@@ -344,6 +350,8 @@ export class BunReplManager {
 					type: "execute",
 					code,
 					timeout: timeoutMs,
+					shellPath: this._options.shellPath,
+					commandPrefix: this._options.commandPrefix,
 				};
 				this._sendToChild(req as unknown as Record<string, unknown>);
 
@@ -380,6 +388,7 @@ export class BunReplManager {
 					stderr,
 					result: resultMsg.value,
 					attachments: displayDataToAttachments(resultMsg.displayData),
+					sentAgentMessages: resultMsg.sentAgentMessages,
 					status: "ok" as const,
 					durationMs,
 				};

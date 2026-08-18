@@ -8682,6 +8682,8 @@ export class AgentSession {
 				env: this._rlmKernelEnv(),
 				hostHandlers: this._createKernelHostHandlers(),
 				snapshotDir: this._ipythonKernelSnapshotDir,
+				shellPath: this.settingsManager.getShellPath(),
+				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				readyGate: previousDispose,
 				onRestore: notifyRestore ? (names) => this._onIpythonStateRestored(names) : undefined,
 			});
