@@ -36,7 +36,11 @@ function matches(buffer: Uint8Array, offset: number, pattern: ReadonlyArray<numb
  */
 export function imageMimeTypeFromBuffer(buffer: Uint8Array): string | undefined {
 	for (const { mime, offset, bytes } of SIGNATURES) {
-		if (matches(buffer, offset, bytes)) return mime;
+		if (!matches(buffer, offset, bytes)) continue;
+		// A signature alone is not a file. PNG's first chunk must be IHDR, which rejects a
+		// truncated or fabricated header that would otherwise be attached as a valid image.
+		if (mime === "image/png" && !matches(buffer, 12, [0x49, 0x48, 0x44, 0x52])) continue;
+		return mime;
 	}
 	return undefined;
 }

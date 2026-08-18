@@ -1,5 +1,5 @@
 import { open } from "node:fs/promises";
-import { fileTypeFromBuffer } from "file-type";
+import { imageMimeTypeFromBuffer } from "./image-sniff.js";
 
 export const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -14,16 +14,12 @@ export async function detectSupportedImageMimeTypeFromFile(filePath: string): Pr
 			return null;
 		}
 
-		const fileType = await fileTypeFromBuffer(buffer.subarray(0, bytesRead));
-		if (!fileType) {
+		const mime = imageMimeTypeFromBuffer(buffer.subarray(0, bytesRead));
+		if (!mime || !IMAGE_MIME_TYPES.has(mime)) {
 			return null;
 		}
 
-		if (!IMAGE_MIME_TYPES.has(fileType.mime)) {
-			return null;
-		}
-
-		return fileType.mime;
+		return mime;
 	} finally {
 		await fileHandle.close();
 	}
