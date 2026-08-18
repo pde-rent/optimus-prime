@@ -138,6 +138,27 @@ export interface TerminalStopOptions {
 }
 
 /**
+ * Minimal structural type for the parts of `bun:ffi` used by
+ * enableWindowsVTInput(). `bun:ffi` is a Bun builtin with no ambient types in
+ * this package's TypeScript setup and is only reachable at runtime under Bun.
+ */
+interface BunFFI {
+	dlopen: (
+		path: string,
+		symbols: Record<string, { args: unknown[]; returns: unknown }>,
+	) => {
+		symbols: {
+			GetStdHandle: (stdHandle: number) => number;
+			GetConsoleMode: (handle: number, modeOut: number) => boolean;
+			SetConsoleMode: (handle: number, mode: number) => boolean;
+		};
+		close: () => void;
+	};
+	FFIType: Record<string, unknown>;
+	ptr: (view: ArrayBufferView) => number;
+}
+
+/**
  * Real terminal using process.stdin/stdout
  */
 export class ProcessTerminal implements Terminal {
@@ -359,23 +380,28 @@ export class ProcessTerminal implements Terminal {
 	private enableWindowsVTInput(): void {
 		if (process.platform !== "win32") return;
 		try {
-			// Dynamic require to avoid bundling koffi's 74MB of cross-platform
-			// native binaries into every compiled binary. Koffi is only needed
-			// on Windows for VT input support.
-			const koffi = cjsRequire("koffi");
-			const k32 = koffi.load("kernel32.dll");
-			const GetStdHandle = k32.func("void* __stdcall GetStdHandle(int)");
-			const GetConsoleMode = k32.func("bool __stdcall GetConsoleMode(void*, _Out_ uint32_t*)");
-			const SetConsoleMode = k32.func("bool __stdcall SetConsoleMode(void*, uint32_t)");
+			// bun:ffi replaces the optional `koffi` dependency (74MB of cross-platform
+			// native binaries). Required lazily so the module stays importable under
+			// Node, where the require throws and VT input is simply skipped — the same
+			// degradation koffi had when its native binary was missing.
+			const { dlopen, FFIType, ptr } = cjsRequire("bun:ffi") as BunFFI;
+			const kernel32 = dlopen("kernel32.dll", {
+				GetStdHandle: { args: [FFIType.i32], returns: FFIType.ptr },
+				GetConsoleMode: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.bool },
+				SetConsoleMode: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.bool },
+			});
 
 			const STD_INPUT_HANDLE = -10;
 			const ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200;
-			const handle = GetStdHandle(STD_INPUT_HANDLE);
+			const handle = kernel32.symbols.GetStdHandle(STD_INPUT_HANDLE);
 			const mode = new Uint32Array(1);
-			GetConsoleMode(handle, mode);
-			SetConsoleMode(handle, mode[0]! | ENABLE_VIRTUAL_TERMINAL_INPUT);
+			if (kernel32.symbols.GetConsoleMode(handle, ptr(mode))) {
+				kernel32.symbols.SetConsoleMode(handle, mode[0]! | ENABLE_VIRTUAL_TERMINAL_INPUT);
+			}
+			kernel32.close();
 		} catch {
-			// koffi not available — Shift+Tab won't be distinguishable from Tab
+			// bun:ffi unavailable (Node) or the console handle refused the mode —
+			// Shift+Tab won't be distinguishable from Tab.
 		}
 	}
 
