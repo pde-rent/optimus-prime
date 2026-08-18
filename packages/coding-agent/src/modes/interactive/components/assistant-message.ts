@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { LOGIN_RECOVERY_MESSAGE } from "../../../core/auth-guidance.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { clickToToggle, collapseChevron, THINKING_TOGGLE_TARGET } from "./click-target.js";
 import {
 	CollapsibleErrorComponent,
 	normalizeErrorDetails,
@@ -287,7 +288,12 @@ export class AssistantMessageComponent extends Container {
 					.slice(i + 1)
 					.some((c) => (c?.type === "text" && c.text.trim()) || (c?.type === "thinking" && c.thinking.trim()));
 
-				const thinkingLabel = theme.bold(theme.fg("thinkingText", this.hiddenThinkingLabel));
+				// Thinking visibility is one global setting rebuilt from session
+				// messages, so the chevron toggles all thinking blocks, not this one.
+				const thinkingLabel = clickToToggle(
+					`${theme.fg("dim", collapseChevron(!this.hideThinkingBlock))} ${theme.bold(theme.fg("thinkingText", this.hiddenThinkingLabel))}`,
+					THINKING_TOGGLE_TARGET,
+				);
 				if (this.hideThinkingBlock) {
 					// Collapsed row: bold label, a one-line recap of the trace, and the
 					// hint. The row truncates the recap to the render width so it never

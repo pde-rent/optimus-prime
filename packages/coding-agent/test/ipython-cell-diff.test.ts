@@ -396,9 +396,14 @@ describe("IPythonCellComponent diff rendering", () => {
 		const collapsed = new IPythonCellComponent({ ...state, expanded: false }).render(80);
 		const expanded = new IPythonCellComponent({ ...state, expanded: true }).render(80);
 
-		expect(stripAnsi(collapsed[0])).toMatch(/^ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to expand\)$/);
-		expect(stripAnsi(expanded[0])).toMatch(/^ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to collapse\)$/);
-		const upToHint = (line: string) => stripAnsi(line).replace(/· \([^·]*to (expand|collapse)\)$/, "");
+		expect(stripAnsi(collapsed[0])).toMatch(/^ ▸ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to expand\)$/);
+		expect(stripAnsi(expanded[0])).toMatch(/^ ▾ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to collapse\)$/);
+		// Same content and same width either way; only the chevron direction and
+		// the hint flip, so toggling never shifts the layout.
+		const upToHint = (line: string) =>
+			stripAnsi(line)
+				.replace(/· \([^·]*to (expand|collapse)\)$/, "")
+				.replace(/^ [▸▾] /, " ");
 		expect(upToHint(expanded[0])).toBe(upToHint(collapsed[0]));
 
 		const stripped = expanded.map(stripAnsi);

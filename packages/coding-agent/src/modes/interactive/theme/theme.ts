@@ -17,7 +17,7 @@ import { type Static, type TProperties, Type } from "typebox";
 import type { Validator } from "typebox/compile";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
 import type { SourceInfo } from "../../../core/source-info.js";
-import { color as chalk } from "../../../utils/ansi.js";
+import { boldSpan, color as chalk } from "../../../utils/ansi.js";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.js";
 
 // ============================================================================
@@ -528,7 +528,7 @@ export class Theme {
 	}
 
 	bold(text: string): string {
-		return chalk.bold(text);
+		return boldSpan(text);
 	}
 
 	italic(text: string): string {
@@ -1334,8 +1334,11 @@ export function getMarkdownTheme(): MarkdownTheme {
 
 export function getSelectListTheme(): SelectListTheme {
 	return {
-		selectedPrefix: (text: string) => theme.fg("accent", text),
-		selectedText: (text: string) => theme.fg("accent", text),
+		// The selected row is a filled bar with bright text: accent-on-surface
+		// alone renders the selection dimmer than the rows around it.
+		selectedPrefix: (text: string) => theme.bold(theme.fg("accent", text)),
+		selectedText: (text: string) => theme.bold(theme.fg("text", text)),
+		selectedRow: (text: string) => theme.bg("selectedBg", text),
 		description: (text: string) => theme.fg("muted", text),
 		argumentHint: (text: string) => theme.fg("mdCode", text),
 		sourceTag: (text: string) => theme.fg("dim", text),

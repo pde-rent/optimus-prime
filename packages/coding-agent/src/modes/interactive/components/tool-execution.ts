@@ -9,6 +9,7 @@ import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/rend
 import type { AgentConnectionToolDefinition } from "../../agent-connection/index.js";
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
+import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
 import { getIpythonCodeFromArgs, IPythonCellComponent } from "./ipython-cell.js";
 import { ToolPanel } from "./tool-panel.js";
 
@@ -66,7 +67,7 @@ function createReplayBuiltInToolDefinition(
 	}
 }
 
-export class ToolExecutionComponent extends Container {
+export class ToolExecutionComponent extends Container implements Collapsible {
 	private contentPanel: ToolPanel;
 	private selfRenderContainer: Container;
 	private callRendererComponent?: Component;
@@ -78,6 +79,8 @@ export class ToolExecutionComponent extends Container {
 	private toolCallId: string;
 	private args: any;
 	private expanded = false;
+	/** Last global expansion applied, so unrelated re-applies keep a per-block toggle. */
+	private lastGlobalExpanded?: boolean;
 	private agentMessagesExpanded = false;
 	private editDiffsExpanded = false;
 	private showExpandHint = true;
@@ -270,8 +273,22 @@ export class ToolExecutionComponent extends Container {
 		}
 	}
 
+	get toggleTargetId(): string {
+		return `tool:${this.toolCallId}`;
+	}
+
+	/** Global expansion; re-applying the same global value preserves a per-block toggle. */
 	setExpanded(expanded: boolean): void {
+		if (this.lastGlobalExpanded === expanded) {
+			return;
+		}
+		this.lastGlobalExpanded = expanded;
 		this.expanded = expanded;
+		this.updateDisplay();
+	}
+
+	toggleExpandedSelf(): void {
+		this.expanded = !this.expanded;
 		this.updateDisplay();
 	}
 
@@ -362,6 +379,7 @@ export class ToolExecutionComponent extends Container {
 					showExpandHint: this.showExpandHint,
 					showImages: this.showImages,
 					cwd: this.cwd,
+					toggleTargetId: this.toggleTargetId,
 				};
 				if (!this.ipythonCellComponent) {
 					this.ipythonCellComponent = new IPythonCellComponent(state);
@@ -483,7 +501,9 @@ export class ToolExecutionComponent extends Container {
 
 	private panelHeader(): string {
 		const label = this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
-		return `${theme.fg("muted", label)}${theme.fg("dim", " · ")}${this.panelStatus()}`;
+		const chevron = theme.fg("dim", collapseChevron(this.expanded));
+		const head = clickToToggle(`${chevron} ${theme.fg("muted", label)}`, this.toggleTargetId);
+		return `${head}${theme.fg("dim", " · ")}${this.panelStatus()}`;
 	}
 
 	private panelStatus(): string {

@@ -1,19 +1,23 @@
 import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
-import { stripAnsi } from "../../../utils/ansi.js";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	type TruncationResult,
 	truncateTail,
 } from "../../../core/tools/truncate.js";
+import { stripAnsi } from "../../../utils/ansi.js";
 import { theme } from "../theme/theme.js";
+import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { expandCollapseHint, keyText } from "./keybinding-hints.js";
 import { truncateToVisualLines } from "./visual-truncate.js";
 
 const PREVIEW_LINES = 20;
 
-export class BashExecutionComponent extends Container {
+let nextBashBlockId = 0;
+
+export class BashExecutionComponent extends Container implements Collapsible {
+	readonly toggleTargetId = `bash:${nextBashBlockId++}`;
 	private command: string;
 	private outputLines: string[] = [];
 	private status: "running" | "complete" | "cancelled" | "error" = "running";
@@ -23,6 +27,7 @@ export class BashExecutionComponent extends Container {
 	private truncationResult?: TruncationResult;
 	private fullOutputPath?: string;
 	private expanded = false;
+	private lastGlobalExpanded?: boolean;
 	private contentContainer: Container;
 
 	constructor(command: string, ui: TUI, excludeFromContext = false, options: { suppressLeadingSpace?: boolean } = {}) {
@@ -59,7 +64,16 @@ export class BashExecutionComponent extends Container {
 	 * Set whether the output is expanded (shows full output) or collapsed (preview only).
 	 */
 	setExpanded(expanded: boolean): void {
+		if (this.lastGlobalExpanded === expanded) {
+			return;
+		}
+		this.lastGlobalExpanded = expanded;
 		this.expanded = expanded;
+		this.updateDisplay();
+	}
+
+	toggleExpandedSelf(): void {
+		this.expanded = !this.expanded;
 		this.updateDisplay();
 	}
 
@@ -127,7 +141,12 @@ export class BashExecutionComponent extends Container {
 
 		this.contentContainer.clear();
 
-		const header = new Text(theme.fg("bashMode", theme.bold(`$ ${this.command}`)), 1, 0);
+		const chevron = availableLines.length > 0 ? `${theme.fg("dim", collapseChevron(this.expanded))} ` : "";
+		const header = new Text(
+			clickToToggle(`${chevron}${theme.fg("bashMode", theme.bold(`$ ${this.command}`))}`, this.toggleTargetId),
+			1,
+			0,
+		);
 		this.contentContainer.addChild(header);
 
 		if (availableLines.length > 0) {

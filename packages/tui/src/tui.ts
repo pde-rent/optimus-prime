@@ -316,6 +316,12 @@ export class TUI extends Container {
 	public onCopy?: (text: string) => void;
 	/** Opens hyperlinks clicked in the fullscreen viewport; when unset, the platform opener is used. */
 	public onOpenUrl?: (url: string) => void;
+	/**
+	 * First refusal on a clicked OSC 8 link. Apps mark in-transcript click
+	 * targets (collapse toggles and the like) with their own URL scheme and
+	 * consume them here; returning true stops the platform opener.
+	 */
+	public onActivateLink?: (url: string) => boolean;
 	private renderRequested = false;
 	private renderTimer: NodeJS.Timeout | undefined;
 	private lastRenderAt = 0;
@@ -765,6 +771,7 @@ export class TUI extends Container {
 	// so clicks the TUI consumes must open OSC 8 hyperlinks itself.
 	private openHyperlink(url: string): void {
 		if (/\p{Cc}/u.test(url)) return;
+		if (this.onActivateLink?.(url)) return;
 		let href: string;
 		try {
 			const parsed = new URL(url);

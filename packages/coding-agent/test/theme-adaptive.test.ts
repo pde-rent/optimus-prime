@@ -135,14 +135,17 @@ describe("adaptive TUI theme colors", () => {
 		initTheme("light");
 		setDefaultTerminalColors({
 			foreground: { r: 0, g: 0, b: 0 },
-			background: { r: 200, g: 200, b: 200 },
+			background: { r: 180, g: 180, b: 180 },
 		});
 
+		// Anchored to the theme's own selectedBg rather than a hardcoded literal, so
+		// retuning the light palette cannot silently flip which blend branch runs.
+		const base = extractRgbLuminance(theme.bg("selectedBg", "x"));
+		expect(base).toBeGreaterThan(180); // premise: brighter than the terminal background
 		const rendered = theme.getSelectionBackgroundColor()("x");
 		expect(rendered).not.toBe(theme.bg("selectedBg", "x"));
-		// light theme selectedBg #d0d0e0 has luminance ~209.7, terminal has 200.
-		expect(extractRgbLuminance(rendered)).toBeGreaterThan(209.7);
-		expect(Math.abs(extractRgbLuminance(rendered) - 200)).toBeGreaterThanOrEqual(27.5);
+		expect(extractRgbLuminance(rendered)).toBeGreaterThan(base);
+		expect(Math.abs(extractRgbLuminance(rendered) - 180)).toBeGreaterThanOrEqual(27.5);
 	});
 
 	it("crosses the background when the selection sits at the blend endpoint", () => {

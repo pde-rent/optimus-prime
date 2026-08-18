@@ -177,6 +177,12 @@ import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
 import { type FullPaneOverlayOptions, showFullPaneOverlay } from "./components/centered-overlay.js";
 import {
+	isCollapsible,
+	parseToggleTarget,
+	setClickTargetsEnabled,
+	THINKING_TOGGLE_TARGET,
+} from "./components/click-target.js";
+import {
 	CompactionOutcomeMessageComponent,
 	MalformedCompactionOutcomeMessageComponent,
 } from "./components/compaction-outcome-message.js";
@@ -459,7 +465,7 @@ export class BrandSplashHeader implements Component {
 	 * leaving art fragments beside the shorter rows.
 	 */
 	private overlayMetaBlock(extraMetadata: readonly BrandSplashMetadataLine[]): { lines: string[]; width: number } {
-		const brand = "optimus prime";
+		const brand = "Optimus Prime";
 		const entries = [
 			{ label: "version", value: `v${this.version}` },
 			{ label: "model", value: this.getModelId() ?? "—" },
@@ -503,7 +509,7 @@ export class BrandSplashHeader implements Component {
 			const firstBlockRow = Math.max(0, this.logoRaw.length - block.lines.length);
 			// Art keeps everything left of the block minus one blank gutter column.
 			const artEnd = Math.max(0, blockStart - 1);
-			const lines = this.options.topPadding ? [""] : [];
+			const lines = this.options.topPadding ? ["", ""] : [];
 			lines.push(
 				...this.logoRaw.map((line, index) => {
 					const meta = block.lines[index - firstBlockRow];
@@ -544,7 +550,7 @@ export class BrandSplashHeader implements Component {
 				]
 			: [];
 		const metaStart = Math.max(0, Math.floor((this.logoRaw.length - metaLines.length) / 2));
-		const lines = this.options.topPadding ? [""] : [];
+		const lines = this.options.topPadding ? ["", ""] : [];
 		lines.push(
 			...this.logoRaw.map((line, index) => {
 				const colored = theme.fg("text", line);
@@ -1156,6 +1162,7 @@ export class InteractiveMode {
 		this.ui.onCopy = (text) => {
 			void this.copyFullscreenSelection(text);
 		};
+		this.ui.onActivateLink = (url) => this.activateToggleTarget(url);
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
 		this.shortcutGuideContainer = new Container();
@@ -7229,6 +7236,11 @@ export class InteractiveMode {
 
 	/** Enter or leave fullscreen rendering without touching the persisted setting. */
 	private applyFullscreen(enabled: boolean): void {
+		// Chevrons are only wrapped as clickable links where the TUI itself
+		// consumes the click; otherwise the terminal would try to open the URL.
+		const clickable = enabled && process.stdout.isTTY && this.settingsManager.getFullscreenMouse();
+		setClickTargetsEnabled(clickable);
+		this.chatContainer.invalidate();
 		if (enabled) {
 			if (!process.stdout.isTTY) return;
 			this.ui.enterFullscreen({
@@ -7286,6 +7298,35 @@ export class InteractiveMode {
 	/** Expansion state for a chat component: agent messages toggle separately from tools. */
 	private expansionStateFor(component: unknown): boolean {
 		return component instanceof AgentMessageComponent ? this.agentMessagesExpanded : this.toolOutputExpanded;
+	}
+
+	/**
+	 * Click on a collapse chevron in the transcript (fullscreen only, where mouse
+	 * reporting is on). Returns true once consumed so the URL never reaches the
+	 * platform opener.
+	 */
+	private activateToggleTarget(url: string): boolean {
+		const target = parseToggleTarget(url);
+		if (target === null) {
+			return false;
+		}
+		if (target === THINKING_TOGGLE_TARGET) {
+			this.toggleThinkingBlockVisibility();
+			return true;
+		}
+		for (const child of this.chatContainer.children) {
+			if (isCollapsible(child) && child.toggleTargetId === target) {
+				child.toggleExpandedSelf();
+				// Blocks above the viewport change height; stay anchored.
+				if (this.ui.isFullscreen()) {
+					this.ui.requestRender();
+				} else {
+					this.ui.requestRenderPreservingViewport();
+				}
+				return true;
+			}
+		}
+		return true;
 	}
 
 	private applyChatExpansion(): void {

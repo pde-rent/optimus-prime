@@ -43,12 +43,58 @@ Prime Agent combines a persistent JavaScript/TypeScript control environment with
 - **Agents communicate directly:** running agents can exchange messages and orchestrate one another without routing everything through the user.
 - **Long tasks keep moving:** automatic compaction, persistent goals, heartbeats, schedules, autonomous mode, and retained subagents preserve progress across turns and terminal sessions.
 
+## What this fork changes
+
+Optimus Prime is a hard fork of [`prime-agent`](https://github.com/PrimeIntellect-ai/prime-agent).
+Three themes: **no Python**, **no runtime dependencies we can write ourselves**, **Bun everywhere**.
+
+### Runtime, not Python
+
+| | prime-agent | Optimus Prime |
+|---|---|---|
+| Model REPL | IPython kernel (Python) | single Bun JS/TS REPL (`src/core/bun-repl/`) |
+| `.py` files in tree | 23 | 1 (a logo render script) |
+| Daemon transport | `zeromq` | Bun IPC |
+| Test runner | Vitest | `bun test` |
+
+### Runtime dependencies
+
+Vendored in place of a package wherever the package was doing something small: ANSI styling,
+East Asian width, fuzzy matching, partial-JSON parsing, Markdown parsing, UUIDv7, Google wire
+types. Provider SDKs are replaced by plain `fetch`.
+
+| Package | prime-agent | Optimus Prime | Dropped |
+|---|---|---|---|
+| `tui` | 5 | **0** | `chalk`, `marked`, `get-east-asian-width`, `mime-types`, `@types/mime-types` |
+| `ai` | 11 | **1** | `@anthropic-ai/sdk`, `@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@mistralai/mistralai`, `openai`, `chalk`, `partial-json`, `proxy-agent`, `undici`, `zod-to-json-schema` |
+| `coding-agent` | 23 | **17** | `chalk`, `strip-ansi`, `marked`, `undici`, `uuid`, `zeromq` |
+| `agent` | 2 | 2 | — |
+
+### TUI
+
+The TUI keeps its differential renderer and zero dependencies; these are additions on top.
+
+- **Collapsible blocks are clickable.** Tool calls, bash runs, agent messages, and IPython cells
+  carry a `▸`/`▾` chevron that toggles that one block. Clicking rides the existing OSC 8 hyperlink
+  path — no layout or bounds tracking — and is active in fullscreen mouse mode; the keybindings
+  (`Ctrl+O` / `Ctrl+P` / `Ctrl+J` / `Ctrl+T`) still drive everything globally.
+- **Per-block state survives global toggles.** Expanding one tool is no longer wiped by an
+  unrelated global expand.
+- **Higher-contrast selection.** Autocomplete and selector rows are a filled bar with bold text
+  and a `❯` marker, instead of a dark accent color that rendered the selected row dimmer than its
+  neighbours.
+
+### Other
+
+- Self-hosted **SearXNG** websearch backend, with per-category engine curation and infoboxes.
+- Full 32-provider model catalogue, no longer regenerated at build time.
+- `bun:ffi` for Windows VT input.
+
 ## Upstream
 
-This is a hard fork: Python removed, a single Bun REPL in place of the IPython kernel, Bun-only
-toolchain. Upstream still fixes bugs in code we share, and **neither upstream reaches us
-automatically** — `prime-agent` shares our history and merges; `pi` does not, because prime-agent
-*vendors* pi's source, so every relevant pi fix is a hand-port.
+Upstream still fixes bugs in code we share, and **neither upstream reaches us automatically** —
+`prime-agent` shares our history and merges; `pi` does not, because prime-agent *vendors* pi's
+source, so every relevant pi fix is a hand-port.
 
 Standing routine, weekly and before any release:
 

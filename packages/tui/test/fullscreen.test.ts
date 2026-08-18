@@ -952,6 +952,47 @@ describe("TUI fullscreen mode", () => {
 		tui.stop();
 	});
 
+	it("routes a clicked app-scheme link to onActivateLink instead of the URL opener", async () => {
+		const transcript = lines(20);
+		transcript[12] = "\x1b]8;;pi-toggle://tool%3Acall_42\x1b\\\x1b[36m> bash\x1b[39m\x1b]8;;\x1b\\ · done";
+		const { terminal, tui, chat, dock } = setup(transcript);
+		const opened: string[] = [];
+		const activated: string[] = [];
+		tui.onOpenUrl = (url) => opened.push(url);
+		tui.onActivateLink = (url) => {
+			activated.push(url);
+			return url.startsWith("pi-toggle://");
+		};
+		tui.enterFullscreen({ scroll: [chat], dock });
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<0;3;1M");
+		terminal.sendInput("\x1b[<0;3;1m");
+		await terminal.waitForRender();
+		assert.deepStrictEqual(activated, ["pi-toggle://tool%3Acall_42"]);
+		assert.deepStrictEqual(opened, [], "a consumed link never reaches the platform opener");
+
+		tui.stop();
+	});
+
+	it("still opens http links when onActivateLink declines them", async () => {
+		const transcript = lines(20);
+		transcript[12] = "see \x1b]8;;https://example.com/docs\x1b\\\x1b[36mdocs\x1b[39m\x1b]8;;\x1b\\ here";
+		const { terminal, tui, chat, dock } = setup(transcript);
+		const opened: string[] = [];
+		tui.onOpenUrl = (url) => opened.push(url);
+		tui.onActivateLink = () => false;
+		tui.enterFullscreen({ scroll: [chat], dock });
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<0;6;1M");
+		terminal.sendInput("\x1b[<0;6;1m");
+		await terminal.waitForRender();
+		assert.deepStrictEqual(opened, ["https://example.com/docs"]);
+
+		tui.stop();
+	});
+
 	it("clicking a bare URL opens it when OSC 8 metadata is absent", async () => {
 		const transcript = lines(20);
 		transcript[12] = "see https://example.com/docs here";

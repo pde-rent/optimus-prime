@@ -5,6 +5,8 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
 const MIN_DESCRIPTION_WIDTH = 10;
+/** Heavier than "› " so the selected row is legible without relying on color alone. */
+const SELECTED_MARKER = "❯ ";
 
 const normalizeToSingleLine = (text: string): string => text.replace(/[\r\n]+/g, " ").trim();
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(value, max));
@@ -21,6 +23,12 @@ export interface SelectItem {
 export interface SelectListTheme {
 	selectedPrefix: (text: string) => string;
 	selectedText: (text: string) => string;
+	/**
+	 * Wraps the selected row after it is padded to the full list width, so a
+	 * background reads as one continuous bar. Without it the row is only
+	 * recolored, which is easy to miss on a busy popup.
+	 */
+	selectedRow?: (text: string) => string;
 	description: (text: string) => string;
 	argumentHint?: (text: string) => string;
 	sourceTag?: (text: string) => string;
@@ -135,6 +143,13 @@ export class SelectList implements Component {
 		}
 	}
 
+	/** Pad a selected row to the full width so `selectedRow` can paint a solid bar. */
+	private fillSelected(content: string, width: number): string {
+		const clamped = truncateToWidth(content, width, "");
+		const padded = clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped)));
+		return this.theme.selectedRow ? this.theme.selectedRow(padded) : padded;
+	}
+
 	private renderItem(
 		item: SelectItem,
 		isSelected: boolean,
@@ -142,7 +157,7 @@ export class SelectList implements Component {
 		descriptionSingleLine: string | undefined,
 		primaryColumnWidth: number,
 	): string {
-		const prefix = isSelected ? "› " : "  ";
+		const prefix = isSelected ? SELECTED_MARKER : "  ";
 		const prefixWidth = visibleWidth(prefix);
 
 		if (this.layout.showItemMetadata) {
@@ -161,7 +176,10 @@ export class SelectList implements Component {
 			if (remainingWidth > MIN_DESCRIPTION_WIDTH) {
 				const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "…");
 				if (isSelected) {
-					return this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`);
+					return this.fillSelected(
+						this.theme.selectedText(`${prefix}${truncatedValue}${spacing}${truncatedDesc}`),
+						width,
+					);
 				}
 
 				const descText = this.theme.description(spacing + truncatedDesc);
@@ -172,7 +190,7 @@ export class SelectList implements Component {
 		const maxWidth = width - prefixWidth - 2;
 		const truncatedValue = this.truncatePrimary(item, isSelected, maxWidth, maxWidth);
 		if (isSelected) {
-			return this.theme.selectedText(`${prefix}${truncatedValue}`);
+			return this.fillSelected(this.theme.selectedText(`${prefix}${truncatedValue}`), width);
 		}
 
 		return prefix + truncatedValue;
@@ -207,7 +225,8 @@ export class SelectList implements Component {
 		const styledPrefix = isSelected ? this.theme.selectedPrefix(prefix) : prefix;
 		const styledPrimary = isSelected ? this.theme.selectedText(primary) : primary;
 		if (!showMetadata) {
-			return truncateToWidth(`${styledPrefix}${styledPrimary}`, width, "");
+			const row = truncateToWidth(`${styledPrefix}${styledPrimary}`, width, "");
+			return isSelected ? this.fillSelected(row, width) : row;
 		}
 
 		const spacing = " ".repeat(Math.max(1, effectivePrimaryColumnWidth - visibleWidth(primary)));
@@ -227,7 +246,8 @@ export class SelectList implements Component {
 				(this.theme.sourceTag ?? this.theme.description)(truncateToWidth(sourceTag, remainingWidth, "…")),
 			);
 		}
-		return truncateToWidth(`${styledPrefix}${styledPrimary}${spacing}${metadata.join("")}`, width, "");
+		const row = truncateToWidth(`${styledPrefix}${styledPrimary}${spacing}${metadata.join("")}`, width, "");
+		return isSelected ? this.fillSelected(row, width) : row;
 	}
 
 	private getPrimaryColumnWidth(): number {

@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { type AgentSessionMessage, formatAgentMessageParticipant } from "../../../core/agent-messages.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
 
 function collapseText(text: string): string {
@@ -54,10 +55,11 @@ class AgentMessageBodyComponent implements Component {
 	invalidate(): void {}
 }
 
-export class AgentMessageComponent extends Container {
+export class AgentMessageComponent extends Container implements Collapsible {
 	private readonly content = new Container();
 	private readonly header = new Text("", 1, 0);
 	private expanded = false;
+	private lastGlobalExpanded?: boolean;
 
 	constructor(
 		private readonly message: AgentSessionMessage,
@@ -70,11 +72,22 @@ export class AgentMessageComponent extends Container {
 		this.updateDisplay();
 	}
 
+	get toggleTargetId(): string {
+		return `agent-msg:${this.message.details.id}`;
+	}
+
+	/** Global expansion; re-applying the same global value preserves a per-block toggle. */
 	setExpanded(expanded: boolean): void {
-		if (this.expanded === expanded) {
+		if (this.lastGlobalExpanded === expanded) {
 			return;
 		}
+		this.lastGlobalExpanded = expanded;
 		this.expanded = expanded;
+		this.updateDisplay();
+	}
+
+	toggleExpandedSelf(): void {
+		this.expanded = !this.expanded;
 		this.updateDisplay();
 	}
 
@@ -100,12 +113,14 @@ export class AgentMessageComponent extends Container {
 			this.message.details.from,
 		);
 		const hint = expandCollapseHint("app.messages.expand", this.expanded);
+		const chevron = theme.fg("dim", collapseChevron(this.expanded));
+		const decorate = (line: string) => clickToToggle(`${chevron} ${line}`, this.toggleTargetId);
 		if (this.expanded) {
-			return `${agentMessageSummaryLine(label, participant)} ${hint}`;
+			return `${decorate(agentMessageSummaryLine(label, participant))} ${hint}`;
 		}
 
-		const prefixWidth = visibleWidth(`◆ ${label} · ${participant} · `);
+		const prefixWidth = visibleWidth(`▸ ◆ ${label} · ${participant} · `);
 		const preview = agentMessagePreview(prefixWidth, this.message.details.message);
-		return `${agentMessageSummaryLine(label, participant, preview)} ${hint}`;
+		return `${decorate(agentMessageSummaryLine(label, participant, preview))} ${hint}`;
 	}
 }

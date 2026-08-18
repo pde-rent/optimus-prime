@@ -11,6 +11,7 @@ import { generateDiffString } from "../../../core/tools/edit-diff.js";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../theme/working-icon.js";
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";
+import { clickToToggle, collapseChevron } from "./click-target.js";
 import { normalizeErrorDetails, summarizeErrorDetails } from "./collapsible-error.js";
 import { renderDiffSeparator, renderRichDiff } from "./diff.js";
 import { countChangedLines, FILE_CHANGE_DIFF_INDENT, formatFileChangeSummaryLine } from "./edit-summary.js";
@@ -33,6 +34,8 @@ export interface IPythonCellState {
 	agentMessagesExpanded?: boolean;
 	editDiffsExpanded?: boolean;
 	showExpandHint?: boolean;
+	/** Click-target id for the collapse chevron; omitted when the cell is not toggleable. */
+	toggleTargetId?: string;
 	executionStarted?: boolean;
 	argsComplete?: boolean;
 	showImages?: boolean;
@@ -390,7 +393,9 @@ export class IPythonCellComponent implements Component {
 		const isBashCell = parseIpythonBashCell(code) !== undefined;
 		const preview = previewIpythonCode(code);
 		const languageLabel = isBashCell && preview.language !== "bash" ? `bash · ${preview.language}` : preview.language;
-		const parts = [`${this.marker(details)} ${theme.fg("muted", languageLabel)}`];
+		const chevron = theme.fg("dim", collapseChevron(this.state.expanded === true));
+		const head = `${chevron} ${this.marker(details)} ${theme.fg("muted", languageLabel)}`;
+		const parts = [this.state.toggleTargetId === undefined ? head : clickToToggle(head, this.state.toggleTargetId)];
 
 		if (preview.text) {
 			parts.push(this.highlightInputLine(preview.text, preview.language === "bash"));

@@ -34,7 +34,7 @@ describe("InteractiveMode startup hints", () => {
 		return mode;
 	}
 
-	it("keeps a blank row above the shared splash and limits its metadata", () => {
+	it("keeps two blank rows above the shared splash and limits its metadata", () => {
 		const header = new BrandSplashHeader(
 			"0.0.0",
 			() => "test-model",
@@ -50,7 +50,8 @@ describe("InteractiveMode startup hints", () => {
 		const output = stripAnsi(lines.join("\n"));
 
 		expect(lines[0]).toBe("");
-		expect(output).toContain("optimus prime");
+		expect(lines[1]).toBe("");
+		expect(output).toContain("Optimus Prime");
 		expect(output).toContain("v0.0.0");
 		expect(output).toContain("test-model");
 		expect(output).toContain("/tmp/project");
@@ -80,7 +81,7 @@ describe("InteractiveMode startup hints", () => {
 		const artRows = rendered.slice(0, logoRows.length);
 
 		const metaLines = [
-			"optimus prime",
+			"Optimus Prime",
 			"version v0.0.0",
 			"model   deepseek/deepseek-v4-flash-0731",
 			"cwd     /tmp/project",

@@ -99,3 +99,13 @@ function build(open: string[]): Style {
 
 /** Drop-in for chalk's default export, covering the styles this codebase uses. */
 export const color = build([]);
+
+/**
+ * Bold that closes with SGR 22 (bold off) instead of a full reset, so it can be
+ * nested inside a background span — tool panels and selected rows paint a
+ * background around already-styled text, and a full reset would strip the
+ * background for the remainder of the line.
+ */
+export function boldSpan(text: string): string {
+	return colorEnabled() ? `\u001b[1m${text}\u001b[22m` : text;
+}
