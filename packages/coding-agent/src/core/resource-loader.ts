@@ -19,6 +19,7 @@ import { SettingsManager } from "./settings-manager.js";
 import type { Skill } from "./skills.js";
 import { loadSkills } from "./skills.js";
 import { createSourceInfo, type SourceInfo } from "./source-info.js";
+import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -273,6 +274,43 @@ export class DefaultResourceLoader implements ResourceLoader {
 		return { skills: this.skills, diagnostics: this.skillDiagnostics };
 	}
 
+	/**
+	 * Nudge the user to configure web search when the bundled skill is loaded but
+	 * neither backend is set up. Self-hosted SearXNG is recommended first: it is
+	 * free and keyless, and the public instance pool is not a usable fallback
+	 * (a probe of the healthiest public instances found none that answer a
+	 * programmatic JSON query - they return 429/403/418 by design).
+	 */
+	private warnIfWebsearchUnconfigured(): void {
+		const websearch = this.skills.find((s) => s.name === WEBSEARCH_SKILL_NAME);
+		const bundledDir = this.bundledSkillsDir;
+		// Only for the skill we ship: a user override may use another backend entirely.
+		if (!websearch || !bundledDir || !websearch.filePath.startsWith(bundledDir)) {
+			return;
+		}
+		if (process.env.SEARXNG_URL?.trim() || process.env[SERPER_ENV_VAR]?.trim() || this.hasStoredSerperKey()) {
+			return;
+		}
+		this.skillDiagnostics.push({
+			type: "warning",
+			message:
+				"web search is not configured: set SEARXNG_URL to a self-hosted SearXNG " +
+				"(recommended, free and keyless: `docker run -d -p 8888:8080 searxng/searxng`), " +
+				'or add a Serper key via /login -> MCP Connections -> "Serper (web search)"',
+			path: websearch.filePath,
+		});
+	}
+
+	/** @returns True when a Serper key was stored via /login (auth.json). */
+	private hasStoredSerperKey(): boolean {
+		try {
+			const auth = JSON.parse(readFileSync(join(this.agentDir, "auth.json"), "utf-8"));
+			return auth?.[SERPER_CREDENTIAL_ID]?.type === "api_key" && Boolean(auth[SERPER_CREDENTIAL_ID].key);
+		} catch {
+			return false; // missing/unreadable auth.json => not configured
+		}
+	}
+
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] } {
 		return { prompts: this.prompts, diagnostics: this.promptDiagnostics };
 	}
@@ -447,6 +485,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				this.skillDiagnostics.push({ type: "error", message: "Skill path does not exist", path: p });
 			}
 		}
+		this.warnIfWebsearchUnconfigured();
 
 		const promptPaths = this.noPromptTemplates
 			? this.mergePaths(cliEnabledPrompts, this.additionalPromptTemplatePaths)

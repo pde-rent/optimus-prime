@@ -1,46 +1,107 @@
 ---
 name: websearch
-description: Search Google via the Serper API. Configure access via /login, then MCP Connections, then Serper (web search). Takes one query and returns titles, URLs, snippets, and knowledge-graph data.
+description: Search the web and read pages, via a self-hosted SearXNG instance (SEARXNG_URL, free and keyless) or the Serper API. Returns a short, deduplicated, character-capped list of titles, URLs, and snippets.
 ---
 
 # Web Search
 
-Search the web via the Serper Google Search API.
+One bounded search interface over two backends. Pick either; SearXNG is recommended.
 
 ## Setup
 
-Get a free API key at https://serper.dev, then run `/login` in Prime Agent,
-switch to **MCP Connections**, and choose **Serper (web search)** to paste it.
-The key is stored in Prime Agent and made available to this skill automatically.
+### Option 1: self-hosted SearXNG (recommended - free, keyless, private)
 
-If web search reports a missing key, walk the user through those two steps;
-don't ask them to set environment variables.
+```sh
+docker run -d -p 8888:8080 searxng/searxng
+export SEARXNG_URL=http://localhost:8888
+```
 
-Optional overrides (environment variables):
+Then in the instance's `settings.yml`:
 
-- `PRIME_AGENT_WEBSEARCH_TIMEOUT` - HTTP timeout in seconds (default 45).
-- `PRIME_AGENT_WEBSEARCH_NUM_RESULTS` - number of organic results to return (default 5).
+```yaml
+search:
+  formats: [html, json]   # the JSON API is OFF by default
+server:
+  limiter: false          # the bot limiter blocks programmatic clients
+```
+
+Restart the container after editing. Nothing leaves your machine except the
+searches themselves, and there is no rate limit to work around.
+
+### Option 2: Serper (hosted Google API)
+
+Get a key at https://serper.dev, then run `/login`, switch to **MCP Connections**,
+and choose **Serper (web search)**. The key is stored with your other credentials
+and supplied to this skill automatically. `SERPER_API_KEY` also works.
+
+### Why not public SearXNG instances?
+
+They are not used, deliberately. A probe of the healthiest, fastest public
+instances from `searx.space` found effectively none that answer a programmatic
+JSON query: they return `429`, `403`, or `418` on the first request from a clean
+IP, because operators turn the JSON API off and run a bot limiter. Rotating
+between instances to get around that would be circumventing anti-abuse controls
+on volunteer-run servers. Self-host instead - it is one command.
+
+## Backend selection
+
+In order:
+
+1. `options.backend` (`"searxng"` or `"serper"`), or `PRIME_AGENT_WEBSEARCH_BACKEND`
+2. `SEARXNG_URL`
+3. A Serper key
+4. Otherwise: a message explaining both options. Never a silent fallback.
+
+An explicit choice that is not configured returns the setup message rather than
+quietly switching backends.
 
 ## Usage
 
-Call the prepared `websearch` object directly in the JS REPL:
+```js
+console.log(await websearch.run("bun test runner docs"));
+```
 
 ```js
-console.log(await websearch.run("latest Prime Agent release"));
+// Narrow the query and tighten the budget.
+await websearch.run("searxng json api", { count: 3, maxChars: 800, time_range: "year" });
+
+// Force a backend.
+await websearch.run("rust async runtimes", { backend: "serper" });
+
+// Read one page as text.
+console.log(await websearch.read("https://docs.searxng.org/", { maxChars: 2000 }));
 ```
+
+## Token cost
+
+Output is capped because it lands directly in the agent's context.
+
+| Call | Chars | ≈ Tokens |
+|---|---|---|
+| `run(q)` (defaults: `count: 6`, `maxChars: 2400`) | 1300-1600 typical, 2400 hard cap | ~350-400 typical, ~600 max |
+| `run(q, { count: 3, maxChars: 800 })` | ≤800 | ~200 |
+| `read(url)` (default `maxChars: 4000`) | ≤4000 | ~1000 |
+
+Results are deduplicated by URL and by domain (max 2 per site), near-identical
+titles from different engines are collapsed, HTML is stripped, and tracking
+params (`utm_*`, `fbclid`, `gclid`, ...) are dropped. When the budget bites, the
+output says so explicitly: `[truncated: showing N of M results, X char budget]`.
 
 ## API
 
-- `await websearch.run(query, options?)` — run one Google search and return
-  formatted results as a string. Options (all optional):
-  - `max_output` — truncate output to this many chars (default 8192);
-    the middle is replaced with a `... [output truncated, N chars total] ...` marker.
-  - `timeout` — HTTP timeout in seconds (default `PRIME_AGENT_WEBSEARCH_TIMEOUT` or 45).
-  - `num_results` — organic results to return (default `PRIME_AGENT_WEBSEARCH_NUM_RESULTS` or 5).
+- `await websearch.run(query, options?)` → `Promise<string>`
+  - `count` (default 6) - results to return.
+  - `maxChars` (default 2400) - hard cap on the whole response.
+  - `timeout` (default 15) - seconds.
+  - `backend` - `"searxng"` or `"serper"`, overriding the default order.
+  - `language` - SearXNG only, e.g. `"en"`.
+  - `time_range` - SearXNG only: `day`, `week`, `month`, `year`.
 
-```js
-await websearch.run("bun test runner docs", { num_results: 10, timeout: 20 });
-```
+- `await websearch.read(url, options?)` → `Promise<string>`
+  - `maxChars` (default 4000), `timeout` (default 15).
+  - HTML → text via tag stripping and whitespace collapsing; it is not a
+    readability implementation, so site navigation may appear in the output.
+    Non-text content types are refused.
 
-Network and API errors are returned inside the result string rather than
-thrown, so a failed search never breaks the surrounding cell.
+Network, configuration, and API errors are returned inside the result string
+rather than thrown, so a failed search never breaks the surrounding cell.

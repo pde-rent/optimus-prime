@@ -468,9 +468,10 @@ Content`,
 			const { skills } = loader.getSkills();
 			const websearch = skills.find((s) => s.name === "websearch");
 			expect(websearch).toBeDefined();
-			expect(websearch?.description).toContain("/login");
-			expect(websearch?.description).toContain("MCP Connections");
-			expect(websearch?.description).toContain("Serper (web search)");
+			expect(websearch?.description).toContain("Search the web");
+			// Both backends are advertised, so the agent knows how to get it working.
+			expect(websearch?.description).toContain("SEARXNG_URL");
+			expect(websearch?.description).toContain("Serper");
 			expect(websearch?.kind).toBe("js");
 			if (websearch?.kind === "js") {
 				expect(websearch.js.importName).toBe("websearch");

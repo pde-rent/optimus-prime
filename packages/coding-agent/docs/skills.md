@@ -59,36 +59,77 @@ Prime Agent ships with built-in skills that load by default:
 - `prime-intellect` - markdown. Prime Intellect products and workflows via the prime CLI: verifiers environments and the Environments Hub, evaluations (local and hosted), Hosted Training and prime-rl, sandboxes, tunnels, Prime Inference, GPU compute, and storage. Reference docs for each area load on demand from the skill's `references/` directory.
 - `refine` - JS-backed. Trigger continual harness refinement from the REPL.
 - `skill-creator` - markdown. Teaches the agent to create new skills: markdown skill layout, frontmatter rules, placement and precedence, and the full JS-backed skill contract (`skill.js` detection, the factory signature, the skill context, verification) with a working template in `references/js-skills.md`.
-- `websearch` - JS-backed Google search skill using the [Serper](https://serper.dev) API.
+- `websearch` - JS-backed web search and page reader. Backed by a self-hosted [SearXNG](https://docs.searxng.org) instance (free, keyless) or the [Serper](https://serper.dev) API.
 
 Built-in skills behave like any other skill but have the lowest precedence: a user, project, package, or `--skill` skill with the same name overrides the built-in one.
 
 ### websearch
 
-Setup: get a free API key at [serper.dev](https://serper.dev), then run `/login`,
+Search the web and read pages. Two backends; pick either.
+
+**Option 1: self-hosted SearXNG (recommended - free, keyless, private)**
+
+```bash
+docker run -d -p 8888:8080 searxng/searxng
+export SEARXNG_URL=http://localhost:8888
+```
+
+The JSON API is **off by default**, and the bot limiter blocks programmatic
+clients, so set both in the instance's `settings.yml` and restart it:
+
+```yaml
+search:
+  formats: [html, json]
+server:
+  limiter: false
+```
+
+**Option 2: Serper (hosted Google API)**
+
+Get a free API key at [serper.dev](https://serper.dev), then run `/login`,
 switch to **MCP Connections** using the displayed tab shortcuts, and choose
 **Serper (web search)** to paste it. The key is stored alongside your other
 credentials (in `auth.json`) and read by the skill on each call — no environment
 variables required, and it works even if you add the key mid-session.
-
-Optional overrides (environment variables):
-
-```bash
-export PRIME_AGENT_WEBSEARCH_TIMEOUT=45
-export PRIME_AGENT_WEBSEARCH_NUM_RESULTS=5
-```
-
 A `SERPER_API_KEY` in the environment, if set, takes precedence over the stored key.
+
+**Why public SearXNG instances are not used**
+
+Deliberately unsupported. A probe of the healthiest, fastest public instances
+listed on [searx.space](https://searx.space) found effectively none that answer a
+programmatic JSON query — they return `429`, `403`, or `418` on the first request
+from a clean IP, because operators disable the JSON API and run a bot limiter.
+Rotating between instances to work around that would be circumventing anti-abuse
+controls on volunteer-run servers, so Prime Agent does not ship it. Self-host
+instead: it is one command, faster, and rate-limit free.
+
+**Backend selection**, in order: `options.backend` (or
+`PRIME_AGENT_WEBSEARCH_BACKEND`) → `SEARXNG_URL` → a Serper key → a message
+explaining both options. There is never a silent fallback. When neither backend
+is configured, Prime Agent also shows a startup notice recommending SearXNG.
+
+**Token cost.** Output is bounded because it goes straight into the agent's
+context: results are deduplicated by URL and by domain (max 2 per site), HTML is
+stripped, tracking params are dropped, and a hard character budget applies —
+truncation is stated explicitly in the output.
+
+| Call | Chars | ≈ Tokens |
+|---|---|---|
+| `run(q)` (defaults `count: 6`, `maxChars: 2400`) | 1300-1600 typical, 2400 cap | ~350-400 typical, ~600 max |
+| `run(q, { count: 3, maxChars: 800 })` | ≤800 | ~200 |
+| `read(url)` (default `maxChars: 4000`) | ≤4000 | ~1000 |
 
 Once loaded, the model can call it directly in the REPL by binding name:
 
 ```js
 console.log(await websearch.run("latest Prime Agent release"));
-console.log(await websearch.run("bun test runner docs", { num_results: 10, timeout: 20 }));
+console.log(await websearch.run("bun test runner docs", { count: 3, maxChars: 800 }));
+console.log(await websearch.run("rust async runtimes", { backend: "serper" }));
+console.log(await websearch.read("https://docs.searxng.org/", { maxChars: 2000 }));
 ```
 
-Until a key is configured, web search returns a clear message telling the agent
-to walk you through `/login`.
+Until a backend is configured, web search returns a clear message describing both
+setup paths rather than failing silently.
 
 Disable only the built-in `websearch` skill in settings:
 
