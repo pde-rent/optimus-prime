@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
-import { describe, expect, it } from "vitest";
 
 describe("export HTML skill block rendering", () => {
 	const templateJs = readFileSync(new URL("../src/core/export-html/template.js", import.meta.url), "utf-8");

@@ -1,5 +1,5 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import type { ModelRegistry } from "../src/core/model-registry.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
@@ -25,8 +25,9 @@ const modeMocks = vi.hoisted(() => ({
 	clientRequest: vi.fn<() => Promise<unknown>>(),
 }));
 
-vi.mock("../src/config.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/config.js")>();
+const actualSrcConfigJs = await import("../src/config.js");
+vi.mock("../src/config.js", () => {
+	const actual = actualSrcConfigJs;
 	return { ...actual, appendRotatingLog: vi.fn() };
 });
 
@@ -45,8 +46,9 @@ vi.mock("../src/modes/agent-connection/daemon-agent-connection.js", () => ({
 	}),
 }));
 
-vi.mock("../src/modes/interactive/interactive-mode.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../src/modes/interactive/interactive-mode.js")>();
+const actualSrcModesInteractiveInteractiveModeJs = await import("../src/modes/interactive/interactive-mode.js");
+vi.mock("../src/modes/interactive/interactive-mode.js", () => {
+	const actual = actualSrcModesInteractiveInteractiveModeJs;
 	return {
 		...actual,
 		InteractiveMode: class {

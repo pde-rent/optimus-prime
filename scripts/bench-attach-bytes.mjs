@@ -4,7 +4,7 @@
  * daemon session loaded from a given session file. Uses an isolated agent dir
  * so no test sessions leak into the shared sessions directory.
  *
- *   node scripts/bench-attach-bytes.mjs <session.jsonl>
+ *   bun scripts/bench-attach-bytes.mjs <session.jsonl>
  */
 import { spawn } from "node:child_process";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";

@@ -9,7 +9,7 @@
  * - Abort handling during summarization
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { API_KEY, createTestSession, type TestSessionContext } from "./utilities.js";
 
 describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {

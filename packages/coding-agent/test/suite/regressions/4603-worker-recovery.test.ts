@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
 	chmodSync,
@@ -12,7 +13,6 @@ import {
 } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { APP_NAME, ENV_AGENT_DIR } from "../../../src/config.js";
 import { getProcessStartId } from "../../../src/core/session-lease.js";
 import { DaemonAgentConnection } from "../../../src/modes/agent-connection/daemon-agent-connection.js";
@@ -38,6 +38,7 @@ import {
 	type PrivateFrame,
 	PrivateFrameDecoder,
 } from "../../../src/modes/session-worker/private-framing.js";
+import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, type Harness } from "../harness.js";
 
 interface OwnerRecord {
@@ -93,8 +94,6 @@ interface TestPaths {
 const fixturePath = resolve(__dirname, "../../fixtures/eng-4600-supervisor-fixture.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
-const tsxPath = resolve(__dirname, "../../../../../node_modules/tsx/dist/cli.mjs");
-const tsconfigPath = resolve(__dirname, "../../../../../tsconfig.json");
 const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const handles = new Set<ProcessHandle>();
 const harnesses: Harness[] = [];
@@ -130,7 +129,7 @@ async function createPaths(): Promise<TestPaths> {
 	// libnode through an @loader_path rpath, so a copy/hard link outside the install
 	// prefix fails with a dyld error. A symlink keeps the APP_NAME launcher path while
 	// dyld still resolves the real binary.
-	symlinkSync(process.execPath, executablePath);
+	symlinkSync(BUN_PATH, executablePath);
 	const socketTmpDir = `/tmp/eng-4603-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 	mkdirSync(socketTmpDir, { recursive: true, mode: 0o700 });
 	socketTempDirs.add(socketTmpDir);
@@ -151,7 +150,7 @@ async function createPaths(): Promise<TestPaths> {
 
 function spawnSupervisor(paths: TestPaths): ProcessHandle {
 	return trackProcess(
-		spawn(paths.executablePath, [tsxPath, fixturePath], {
+		spawn(paths.executablePath, [fixturePath], {
 			cwd: paths.agentDir,
 			env: {
 				...process.env,
@@ -164,7 +163,6 @@ function spawnSupervisor(paths: TestPaths): ProcessHandle {
 				ENG_4600_SOCKET_PATH: paths.socketPath,
 				PI_OFFLINE: "1",
 				TMPDIR: paths.socketTmpDir,
-				TSX_TSCONFIG_PATH: tsconfigPath,
 			},
 			stdio: ["ignore", "pipe", "pipe", "ipc"],
 		}),
@@ -179,26 +177,21 @@ function spawnStandaloneWorker(
 	extraEnv: NodeJS.ProcessEnv = {},
 ): ProcessHandle {
 	return trackProcess(
-		spawn(
-			paths.executablePath,
-			[tsxPath, cliPath, "--mode", "daemon", "--daemon-socket", workerSocketPath, "--offline"],
-			{
-				cwd: paths.agentDir,
-				env: {
-					...process.env,
-					...extraEnv,
-					[supervisorRegistryDirEnv]: paths.registryDir,
-					[ENV_AGENT_DIR]: paths.agentDir,
-					[DAEMON_WORKER_ROLE_ENV]: "1",
-					[DAEMON_WORKER_TOKEN_ENV]: token,
-					[DAEMON_WORKER_ACTIVE_SESSION_ID_ENV]: "eng-4603-worker",
-					[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV]: paths.socketPath,
-					PI_OFFLINE: "1",
-					TSX_TSCONFIG_PATH: tsconfigPath,
-				},
-				stdio: ["ignore", "pipe", "pipe"],
+		spawn(paths.executablePath, [cliPath, "--mode", "daemon", "--daemon-socket", workerSocketPath, "--offline"], {
+			cwd: paths.agentDir,
+			env: {
+				...process.env,
+				...extraEnv,
+				[supervisorRegistryDirEnv]: paths.registryDir,
+				[ENV_AGENT_DIR]: paths.agentDir,
+				[DAEMON_WORKER_ROLE_ENV]: "1",
+				[DAEMON_WORKER_TOKEN_ENV]: token,
+				[DAEMON_WORKER_ACTIVE_SESSION_ID_ENV]: "eng-4603-worker",
+				[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV]: paths.socketPath,
+				PI_OFFLINE: "1",
 			},
-		),
+			stdio: ["ignore", "pipe", "pipe"],
+		}),
 		"worker",
 	);
 }
@@ -681,7 +674,7 @@ async function runCli(
 	extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	const handle = trackProcess(
-		spawn(process.execPath, [tsxPath, cliPath, ...args], {
+		spawn(BUN_PATH, [cliPath, ...args], {
 			cwd: paths.agentDir,
 			env: {
 				...process.env,
@@ -690,7 +683,6 @@ async function runCli(
 				[ENV_AGENT_DIR]: paths.agentDir,
 				PI_OFFLINE: "1",
 				TMPDIR: paths.socketTmpDir,
-				TSX_TSCONFIG_PATH: tsconfigPath,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
 		}),

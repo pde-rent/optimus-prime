@@ -10,7 +10,6 @@ import { createInterface } from "node:readline";
 import { type Api, type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import { registerBuiltinMcpOAuthProviders } from "@earendil-works/pi-ai/mcp";
 import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pi-tui";
-import { color as chalk } from "./utils/ansi.js";
 import { type Args, type Mode, parseArgs } from "./cli/args.js";
 import { formatTopLevelHelp } from "./cli/command-registry.js";
 import {
@@ -110,6 +109,7 @@ import { ExtensionSelectorComponent } from "./modes/interactive/components/exten
 import { shouldRunOnboarding } from "./modes/interactive/onboarding.js";
 import { initTheme, preloadCodeHighlighter, stopThemeWatcher } from "./modes/interactive/theme/theme.js";
 import { handleConfigCommand } from "./package-manager-cli.js";
+import { color as chalk } from "./utils/ansi.js";
 import { isLocalPath } from "./utils/paths.js";
 import { isTruthyEnvVar } from "./utils/shared.js";
 

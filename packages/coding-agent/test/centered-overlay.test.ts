@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { type Component, type Focusable, type TUI, visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
 import { CenteredOverlayComponent, showFullPaneOverlay } from "../src/modes/interactive/components/centered-overlay.js";
 
 class TestComponent implements Component, Focusable {

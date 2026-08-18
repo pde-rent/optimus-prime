@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 
 type FakeUi = {

@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { color as chalk } from "../utils/ansi.js";
 import { APP_NAME, getAgentDir, VERSION } from "../config.js";
 import { isOrphanProcessIdentityCurrent, readActiveOrphanProcesses } from "../core/orphan-process-journal.js";
 import { getProcessStartId } from "../core/session-lease.js";
@@ -14,6 +13,7 @@ import {
 import { defaultDaemonSocketDir, defaultDaemonSocketPath } from "../modes/daemon/daemon-socket.js";
 import { acquireDaemonShutdownAdmission } from "../modes/daemon/daemon-supervisor-ownership.js";
 import type { DaemonWorkerDescriptor } from "../modes/daemon/daemon-worker-protocol.js";
+import { color as chalk } from "../utils/ansi.js";
 import { signalProcessGroupOrProcess } from "../utils/child-process.js";
 import { readJsonFile } from "../utils/shared.js";
 import { formatDaemonListTable } from "./daemon-ps-format.js";

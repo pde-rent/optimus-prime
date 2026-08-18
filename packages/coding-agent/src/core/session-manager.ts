@@ -18,11 +18,11 @@ import {
 } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
-import { v7 as uuidv7 } from "../utils/uuid.js";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
 import { readFirstLineSync, readLinesAsBuffers } from "../utils/file-lines.js";
 import { captureGitContext, type GitContext, gitContextsEqual } from "../utils/git.js";
 import { ensureDir } from "../utils/shared.js";
+import { v7 as uuidv7 } from "../utils/uuid.js";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -107,9 +107,13 @@ export interface SessionMessageEntry extends SessionEntryBase {
 
 type AssistantSessionMessageEntry = SessionMessageEntry & { message: AssistantMessage };
 
+/** Who or what moved the level; `model_self`/`escalation` are dynamic-effort moves. */
+export type ThinkingLevelChangeReason = "user" | "model_self" | "escalation" | "spawn" | "model_switch" | "resume";
+
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
 	type: "thinking_level_change";
 	thinkingLevel: string;
+	reason?: ThinkingLevelChangeReason;
 }
 
 export interface ServiceTierChangeEntry extends SessionEntryBase {
@@ -1401,13 +1405,14 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	appendThinkingLevelChange(thinkingLevel: string): string {
+	appendThinkingLevelChange(thinkingLevel: string, reason?: ThinkingLevelChangeReason): string {
 		const entry: ThinkingLevelChangeEntry = {
 			type: "thinking_level_change",
 			id: generateId(this.byId),
 			parentId: this.leafId,
 			timestamp: new Date().toISOString(),
 			thinkingLevel,
+			...(reason ? { reason } : {}),
 		};
 		this._appendEntry(entry);
 		return entry.id;

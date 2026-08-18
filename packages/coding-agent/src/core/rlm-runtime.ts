@@ -16,6 +16,8 @@ export interface RlmSpawnHandle {
 	name: string;
 	session_dir: string;
 	model: string;
+	/** Level the child actually got, after clamping to its model's supported set. */
+	effort: string;
 }
 
 export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
@@ -89,6 +91,28 @@ export function normalizeRequestedRlmSubagentModel(value: unknown): string | und
 		throw new Error("rlm.run model must not be empty");
 	}
 	return model;
+}
+
+/** Reasoning-effort levels the model may name; a subset is supported per model. */
+export const RLM_EFFORT_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Validate an orchestrator-supplied effort level. An unknown name throws so a
+ * typo surfaces at the call site; a known-but-unsupported level is returned and
+ * clamped downstream, which never throws.
+ */
+export function normalizeRequestedRlmEffort(value: unknown): ThinkingLevel | undefined {
+	if (value === undefined || value === null) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error("rlm effort must be a string");
+	}
+	const effort = value.trim().toLowerCase();
+	if (!RLM_EFFORT_LEVELS.includes(effort as ThinkingLevel)) {
+		throw new Error(`rlm effort must be one of: ${RLM_EFFORT_LEVELS.join(", ")}`);
+	}
+	return effort as ThinkingLevel;
 }
 
 /** Create a readable, collision-resistant default name usable as an agent-message selector. */
@@ -196,6 +220,55 @@ export function createRlmDeleteSubagentHostHandler(handler: RlmDeleteSubagentHan
 		const { subagent, outcome } = await handler(payload.target.trim());
 		return outcome === undefined ? { subagent } : { subagent, outcome };
 	};
+}
+
+/** Why a model-initiated effort change was not applied. */
+export type RlmEffortRefusal = "disabled" | "band" | "floor" | "lower_after_raise";
+
+export interface RlmSetEffortResult {
+	effort: string;
+	clamped: boolean;
+	/** The run already spent its effort-change budget; the level is unchanged. */
+	capped?: boolean;
+	refused?: RlmEffortRefusal;
+}
+
+export interface RlmSetMaxDepthResult {
+	max_depth: number;
+	capped: boolean;
+	/** Why a requested change was not applied, when it was not. */
+	refused?: "cap" | "no_trigger" | "thrash" | "disabled";
+}
+
+export interface RlmGetMaxDepthResult {
+	max_depth: number;
+	depth: number;
+	/** Ceiling on a model-initiated raise. */
+	model_max: number;
+}
+
+export interface RlmGetEffortResult {
+	effort: string;
+	available: string[];
+}
+
+export type RlmSetEffortHandler = (level: ThinkingLevel) => RlmSetEffortResult | Promise<RlmSetEffortResult>;
+export type RlmGetEffortHandler = () => RlmGetEffortResult | Promise<RlmGetEffortResult>;
+
+/** Let the model raise or lower its own reasoning effort for the next turn. */
+export function createRlmSetEffortHostHandler(handler: RlmSetEffortHandler): HostRequestHandler {
+	return async (payload) => {
+		const level = normalizeRequestedRlmEffort(payload.level);
+		if (level === undefined) {
+			throw new Error(`rlm.set_effort level must be one of: ${RLM_EFFORT_LEVELS.join(", ")}`);
+		}
+		return { ...(await handler(level)) };
+	};
+}
+
+/** Report the level in force plus the levels the current model actually supports. */
+export function createRlmGetEffortHostHandler(handler: RlmGetEffortHandler): HostRequestHandler {
+	return async () => ({ ...(await handler()) });
 }
 
 export interface RlmSubagentRuntime {

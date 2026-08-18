@@ -1141,6 +1141,21 @@ bar`,
 			assert.ok(joined.includes("\x1b]8;;\x1b\\"), "Should contain OSC 8 close sequence");
 		});
 
+		it("should stop a bare URL at trailing punctuation but keep balanced parens", () => {
+			setCapabilities({ images: null, trueColor: false, hyperlinks: true });
+			const markdown = new Markdown(
+				"Ref (https://ex.com/a_(b)), then https://ex.com/c. Done",
+				0,
+				0,
+				defaultMarkdownTheme,
+			);
+
+			const joined = markdown.render(80).join("");
+
+			assert.ok(joined.includes("\x1b]8;;https://ex.com/a_(b)\x1b\\"), "Should keep the balanced closing paren");
+			assert.ok(joined.includes("\x1b]8;;https://ex.com/c\x1b\\"), "Should drop the sentence-ending period");
+		});
+
 		it("should use OSC 8 for bare URLs when terminal supports hyperlinks", () => {
 			setCapabilities({ images: null, trueColor: false, hyperlinks: true });
 			const markdown = new Markdown("Visit https://example.com for more", 0, 0, defaultMarkdownTheme);

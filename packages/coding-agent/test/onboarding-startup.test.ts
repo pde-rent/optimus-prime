@@ -1,5 +1,5 @@
+import { describe, expect, test } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, test } from "vitest";
 import type { AuthStatus } from "../src/core/auth-storage.js";
 import { PRIME_INFERENCE_PROVIDER_ID } from "../src/core/prime-inference-auth.js";
 import {

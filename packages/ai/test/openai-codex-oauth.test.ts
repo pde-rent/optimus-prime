@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { refreshOpenAICodexToken } from "../src/utils/oauth/openai-codex.js";
 
 describe("OpenAI Codex OAuth", () => {

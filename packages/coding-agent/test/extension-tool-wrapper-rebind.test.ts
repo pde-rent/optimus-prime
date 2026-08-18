@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { ExtensionRunner } from "../src/core/extensions/runner.js";
 import type { RegisteredTool } from "../src/core/extensions/types.js";
 import { wrapRegisteredTools } from "../src/core/extensions/wrapper.js";

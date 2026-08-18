@@ -1,5 +1,13 @@
-import { Marked, type Token, Tokenizer, type TokenizerExtension, type Tokens } from "marked";
 import { latexToUnicode } from "../latex.js";
+import {
+	blockDigest,
+	type ListNode,
+	lexMarkdown,
+	type MarkdownNode,
+	type MathNode,
+	type TableCellNode,
+	type TableNode,
+} from "../markdown-ast.js";
 import {
 	extractTableCellSelectionRegions,
 	markTableCell,
@@ -10,122 +18,6 @@ import {
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
 import type { Component } from "../tui.js";
 import { applyBackgroundToLine, stripAnsi, visibleWidth, wrapTextWithAnsi } from "../utils.js";
-
-const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
-
-class StrictStrikethroughTokenizer extends Tokenizer {
-	override del(src: string): Tokens.Del | undefined {
-		const match = STRICT_STRIKETHROUGH_REGEX.exec(src);
-		if (!match) {
-			return undefined;
-		}
-
-		const text = match[2];
-		return {
-			type: "del",
-			raw: match[0],
-			text,
-			tokens: this.lexer.inlineTokens(text),
-		};
-	}
-}
-
-interface MathToken {
-	type: "blockMath" | "inlineMath";
-	raw: string;
-	/** Raw LaTeX source without the delimiters. */
-	text: string;
-}
-
-// Math must tokenize before marked's escape/emphasis handling, or \[ collapses
-// to [ and underscores inside formulas become italics. Unterminated delimiters
-// never match, so partially streamed math stays plain text until the closing
-// delimiter arrives. Leading indentation is consumed because models often
-// indent display math, which would otherwise lex as an indented code block.
-const BLOCK_MATH_REGEX = /^[ \t]*(?:\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\])[ \t]*(?:\n|$)/;
-
-function minIndex(a: number, b: number): number | undefined {
-	if (a === -1) {
-		return b === -1 ? undefined : b;
-	}
-	return b === -1 ? a : Math.min(a, b);
-}
-
-const blockMathExtension: TokenizerExtension = {
-	name: "blockMath",
-	level: "block",
-	// start() runs on every paragraph continuation; scanning only the current
-	// paragraph keeps it cheap, and later math is caught at its block boundary.
-	start: (src: string) => {
-		const paragraphEnd = src.indexOf("\n\n");
-		const window = paragraphEnd === -1 ? src : src.slice(0, paragraphEnd);
-		return minIndex(window.indexOf("$$"), window.indexOf("\\["));
-	},
-	tokenizer(src: string): Tokens.Generic | undefined {
-		const first = src.charCodeAt(0);
-		if (first !== 0x24 /* $ */ && first !== 0x5c /* \ */ && first !== 0x20 /* space */ && first !== 0x09 /* tab */) {
-			return undefined;
-		}
-		const match = BLOCK_MATH_REGEX.exec(src);
-		if (!match) {
-			return undefined;
-		}
-		const token: MathToken = { type: "blockMath", raw: match[0], text: (match[1] ?? match[2]).trim() };
-		return token;
-	},
-};
-
-// $...$ uses the pandoc/GitHub rules to avoid matching prose dollar amounts:
-// the opening $ must be followed by a non-space, the closing $ preceded by a
-// non-space and not followed by a digit ("between $5 and $10" never matches).
-const INLINE_MATH_PATTERNS = [
-	/^\$\$([\s\S]+?)\$\$/, // display math used mid-paragraph
-	/^\\\[([\s\S]+?)\\\]/,
-	/^\\\(([\s\S]+?)\\\)/,
-	/^\$([^\s$](?:[^$\n]*[^\s$])?)\$(?!\d)/,
-];
-
-const inlineMathExtension: TokenizerExtension = {
-	name: "inlineMath",
-	level: "inline",
-	// Only "$" needs a start() hint: backslashes already terminate text runs,
-	// but the text tokenizer would swallow a bare "$" without one.
-	start: (src: string) => {
-		const index = src.indexOf("$");
-		return index === -1 ? undefined : index;
-	},
-	tokenizer(src: string): Tokens.Generic | undefined {
-		const first = src.charCodeAt(0);
-		if (first !== 0x24 /* $ */ && first !== 0x5c /* \ */) {
-			return undefined;
-		}
-		for (const pattern of INLINE_MATH_PATTERNS) {
-			const match = pattern.exec(src);
-			if (match) {
-				const token: MathToken = { type: "inlineMath", raw: match[0], text: match[1].trim() };
-				return token;
-			}
-		}
-		return undefined;
-	},
-};
-
-const markdownParser = new Marked();
-markdownParser.setOptions({
-	tokenizer: new StrictStrikethroughTokenizer(),
-});
-
-// Registered extensions measurably slow marked's lexing even when they never
-// match, so math-free text (the common case) uses a parser without them.
-const mathMarkdownParser = new Marked();
-mathMarkdownParser.setOptions({
-	tokenizer: new StrictStrikethroughTokenizer(),
-});
-mathMarkdownParser.use({ extensions: [blockMathExtension, inlineMathExtension] });
-
-function pickMarkdownParser(text: string): Marked {
-	return text.includes("$") || text.includes("\\(") || text.includes("\\[") ? mathMarkdownParser : markdownParser;
-}
 
 /**
  * Default text styling for markdown content.
@@ -184,7 +76,7 @@ export class Markdown implements Component {
 	private selectionRegions: TableCellSelectionRegion[] = [];
 	private tableIdentities: object[] = [];
 	// Per-block render cache so streaming appends only re-render the changing
-	// final block instead of the whole document. Keyed by width/type/nextType/raw;
+	// final block instead of the whole document. Keyed by width/nextType/digest;
 	// rebuilt each render so it stays bounded to the current document's blocks.
 	private blockCache = new Map<string, string[]>();
 
@@ -240,12 +132,7 @@ export class Markdown implements Component {
 
 		const normalizedText = this.text.replace(/\t/g, "   ");
 
-		// Parse markdown to HTML-like tokens
-		const tokens = pickMarkdownParser(normalizedText).lexer(normalizedText);
-
-		// Reference-link definitions make a block's rendering depend on other
-		// blocks, so per-block caching is disabled when any are present.
-		const cacheable = Object.keys(tokens.links).length === 0;
+		const tokens = lexMarkdown(normalizedText);
 
 		// Render, wrap, and pad per top-level block so unchanged blocks can be
 		// served from the cache. The final block is never cached: while streaming,
@@ -256,8 +143,8 @@ export class Markdown implements Component {
 		for (let i = 0; i < tokens.length; i++) {
 			const token = tokens[i];
 			const nextTokenType = tokens[i + 1]?.type;
-			const useCache = cacheable && i < tokens.length - 1;
-			const key = useCache ? `${width}|${token.type}|${nextTokenType ?? ""}|${token.raw}` : "";
+			const useCache = i < tokens.length - 1;
+			const key = useCache ? `${width}|${nextTokenType ?? ""}|${blockDigest(token)}` : "";
 			let blockLines = useCache ? (nextCache.get(key) ?? this.blockCache.get(key)) : undefined;
 			if (!blockLines) {
 				blockLines = this.renderBlock(token, nextTokenType, width, contentWidth);
@@ -277,8 +164,8 @@ export class Markdown implements Component {
 			emptyLines.push(line);
 		}
 
-		const markedResult = [...emptyLines, ...contentLines, ...emptyLines];
-		const { lines: result, regions } = extractTableCellSelectionRegions(markedResult, (index) => {
+		const paddedLines = [...emptyLines, ...contentLines, ...emptyLines];
+		const { lines: result, regions } = extractTableCellSelectionRegions(paddedLines, (index) => {
 			this.tableIdentities[index] ??= {};
 			return this.tableIdentities[index];
 		});
@@ -296,7 +183,12 @@ export class Markdown implements Component {
 	}
 
 	/** Render one top-level block: token lines, wrapping, margins, background. */
-	private renderBlock(token: Token, nextTokenType: string | undefined, width: number, contentWidth: number): string[] {
+	private renderBlock(
+		token: MarkdownNode,
+		nextTokenType: string | undefined,
+		width: number,
+		contentWidth: number,
+	): string[] {
 		const tokenLines = this.renderToken(token, contentWidth, nextTokenType);
 
 		const leftMargin = " ".repeat(this.paddingX);
@@ -406,7 +298,7 @@ export class Markdown implements Component {
 	}
 
 	private renderToken(
-		token: Token,
+		token: MarkdownNode,
 		width: number,
 		nextTokenType?: string,
 		styleContext?: InlineStyleContext,
@@ -436,16 +328,15 @@ export class Markdown implements Component {
 				const headingText = this.renderInlineTokens(token.tokens || [], headingStyleContext);
 				const styledHeading = headingLevel >= 3 ? headingStyleFn(headingPrefix) + headingText : headingText;
 				lines.push(styledHeading);
-				if (nextTokenType && nextTokenType !== "space") {
-					lines.push(""); // Add spacing after headings (unless space token follows)
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after headings
 				}
 				break;
 			}
 
 			case "paragraph": {
-				const paragraphText = this.renderInlineTokens(token.tokens || [], styleContext);
-				lines.push(paragraphText);
-				if (nextTokenType && nextTokenType !== "list" && nextTokenType !== "space") {
+				lines.push(this.renderInlineTokens(token.tokens, styleContext));
+				if (nextTokenType) {
 					lines.push("");
 				}
 				break;
@@ -453,28 +344,30 @@ export class Markdown implements Component {
 
 			case "code": {
 				lines.push(...this.renderCodeBlock(token));
-				if (nextTokenType && nextTokenType !== "space") {
-					lines.push(""); // Add spacing after code blocks (unless space token follows)
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after code blocks
 				}
 				break;
 			}
 
 			case "blockMath": {
-				lines.push(...this.renderMathBlock(token as unknown as MathToken));
-				if (nextTokenType && nextTokenType !== "space") {
-					lines.push(""); // Add spacing after math blocks (unless space token follows)
+				lines.push(...this.renderMathBlock(token as MathNode));
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after math blocks
 				}
 				break;
 			}
 
 			case "list": {
-				const listLines = this.renderList(token as any, 0, styleContext);
-				lines.push(...listLines);
+				lines.push(...this.renderList(token, 0, styleContext));
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after lists
+				}
 				break;
 			}
 
 			case "table": {
-				const tableLines = this.renderTable(token as any, width, nextTokenType, styleContext);
+				const tableLines = this.renderTable(token, width, nextTokenType, styleContext);
 				lines.push(...tableLines);
 				break;
 			}
@@ -520,27 +413,24 @@ export class Markdown implements Component {
 						lines.push(this.theme.quoteBorder("│ ") + wrappedLine);
 					}
 				}
-				if (nextTokenType && nextTokenType !== "space") {
-					lines.push(""); // Add spacing after blockquotes (unless space token follows)
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after blockquotes
 				}
 				break;
 			}
 
 			case "hr":
 				lines.push(this.theme.hr("─".repeat(Math.min(width, 80))));
-				if (nextTokenType && nextTokenType !== "space") {
-					lines.push(""); // Add spacing after horizontal rules (unless space token follows)
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after horizontal rules
 				}
 				break;
 
 			case "html":
-				if ("raw" in token && typeof token.raw === "string") {
-					lines.push(this.applyDefaultStyle(token.raw.trim()));
+				lines.push(this.applyDefaultStyle(token.raw.trim()));
+				if (nextTokenType) {
+					lines.push(""); // Add spacing after raw HTML blocks
 				}
-				break;
-
-			case "space":
-				lines.push("");
 				break;
 
 			default:
@@ -552,7 +442,7 @@ export class Markdown implements Component {
 		return lines;
 	}
 
-	private renderInlineTokens(tokens: Token[], styleContext?: InlineStyleContext): string {
+	private renderInlineTokens(tokens: MarkdownNode[], styleContext?: InlineStyleContext): string {
 		let result = "";
 		const resolvedStyleContext = styleContext ?? this.getDefaultInlineStyleContext();
 		const { applyText, stylePrefix } = resolvedStyleContext;
@@ -593,7 +483,7 @@ export class Markdown implements Component {
 
 				case "inlineMath": {
 					const mathStyle = this.theme.math ?? this.theme.code;
-					const converted = latexToUnicode((token as unknown as MathToken).text).replace(/\s*\n\s*/g, " ");
+					const converted = latexToUnicode((token as MathNode).text).replace(/\s*\n\s*/g, " ");
 					result += mathStyle(converted) + stylePrefix;
 					break;
 				}
@@ -618,10 +508,6 @@ export class Markdown implements Component {
 					}
 					break;
 				}
-
-				case "br":
-					result += "\n";
-					break;
 
 				case "del": {
 					const delContent = this.renderInlineTokens(token.tokens || [], resolvedStyleContext);
@@ -652,11 +538,7 @@ export class Markdown implements Component {
 	/**
 	 * Render a list with proper nesting support
 	 */
-	private renderList(
-		token: Token & { items: any[]; ordered: boolean; start?: number },
-		depth: number,
-		styleContext?: InlineStyleContext,
-	): string[] {
+	private renderList(token: ListNode, depth: number, styleContext?: InlineStyleContext): string[] {
 		const lines: string[] = [];
 		const indent = "  ".repeat(depth);
 		const startNumber = token.start ?? 1;
@@ -700,14 +582,14 @@ export class Markdown implements Component {
 	 * Render list item tokens, handling nested lists
 	 * Returns lines WITHOUT the parent indent (renderList will add it)
 	 */
-	private renderListItem(tokens: Token[], parentDepth: number, styleContext?: InlineStyleContext): string[] {
+	private renderListItem(tokens: MarkdownNode[], parentDepth: number, styleContext?: InlineStyleContext): string[] {
 		const lines: string[] = [];
 
 		for (const token of tokens) {
 			if (token.type === "list") {
 				// Nested list - render with one additional indent level
 				// These lines will have their own indent, so we just add them as-is
-				const nestedLines = this.renderList(token as any, parentDepth + 1, styleContext);
+				const nestedLines = this.renderList(token, parentDepth + 1, styleContext);
 				lines.push(...nestedLines);
 			} else if (token.type === "text") {
 				// Text content (may have inline tokens)
@@ -725,7 +607,7 @@ export class Markdown implements Component {
 				lines.push(...this.renderCodeBlock(token));
 			} else if (token.type === "blockMath") {
 				// Display math in list item
-				lines.push(...this.renderMathBlock(token as unknown as MathToken));
+				lines.push(...this.renderMathBlock(token as MathNode));
 			} else {
 				// Other token types - try to render as inline
 				const text = this.renderInlineTokens([token], styleContext);
@@ -738,7 +620,7 @@ export class Markdown implements Component {
 		return lines;
 	}
 
-	private renderCodeBlock(token: Token): string[] {
+	private renderCodeBlock(token: MarkdownNode): string[] {
 		if (!("text" in token) || typeof token.text !== "string") {
 			return [];
 		}
@@ -754,7 +636,7 @@ export class Markdown implements Component {
 	}
 
 	/** Render display math: converted to Unicode, indented like a code block. */
-	private renderMathBlock(token: MathToken): string[] {
+	private renderMathBlock(token: MathNode): string[] {
 		const indent = this.theme.codeBlockIndent ?? "  ";
 		const style = this.theme.mathBlock ?? this.theme.codeBlock;
 		const mathLines = latexToUnicode(token.text)
@@ -794,7 +676,7 @@ export class Markdown implements Component {
 	 * Cells that don't fit are wrapped to multiple lines.
 	 */
 	private renderTable(
-		token: Token & { header: any[]; rows: any[][]; raw?: string },
+		token: TableNode,
 		availableWidth: number,
 		nextTokenType?: string,
 		styleContext?: InlineStyleContext,
@@ -810,9 +692,12 @@ export class Markdown implements Component {
 		const borderOverhead = 3 * numCols + 1;
 		const availableForCells = availableWidth - borderOverhead;
 		if (availableForCells < numCols) {
-			// Too narrow to render a stable table. Fall back to raw markdown.
-			const fallbackLines = token.raw ? wrapTextWithAnsi(token.raw, availableWidth) : [];
-			if (nextTokenType && nextTokenType !== "space") {
+			// Too narrow to render a stable table. Fall back to pipe-delimited source.
+			const toRow = (cells: TableCellNode[]) =>
+				`| ${cells.map((cell) => this.renderInlineTokens(cell.tokens, styleContext)).join(" | ")} |`;
+			const source = [toRow(token.header), ...token.rows.map(toRow)].join("\n");
+			const fallbackLines = wrapTextWithAnsi(source, availableWidth);
+			if (nextTokenType) {
 				fallbackLines.push("");
 			}
 			return fallbackLines;
@@ -952,7 +837,7 @@ export class Markdown implements Component {
 		const bottomBorderCells = columnWidths.map((w) => "─".repeat(w));
 		lines.push(markTableEnd(`└─${bottomBorderCells.join("─┴─")}─┘`));
 
-		if (nextTokenType && nextTokenType !== "space") {
+		if (nextTokenType) {
 			lines.push(""); // Add spacing after table
 		}
 		return lines;

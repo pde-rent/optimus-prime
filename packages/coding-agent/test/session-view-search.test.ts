@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createSessionSearchText, matchesSearchText } from "../src/modes/agents-view/session-view-search.js";
 
 describe("session view search", () => {

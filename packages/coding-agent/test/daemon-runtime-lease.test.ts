@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	acquireSessionLease,
 	SESSION_LEASE_OWNER_ID_ENV,

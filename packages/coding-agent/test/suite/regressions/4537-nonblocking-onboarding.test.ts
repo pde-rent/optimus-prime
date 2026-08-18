@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "bun:test";
 import { shouldRunOnboarding } from "../../../src/modes/interactive/onboarding.js";
 import { createHarness, type Harness } from "../harness.js";
 

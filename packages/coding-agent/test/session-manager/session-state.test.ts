@@ -1,7 +1,7 @@
+import { describe, expect, it } from "bun:test";
 import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
 import { loadEntriesFromFile, SessionManager, type SessionStateEntry } from "../../src/core/session-manager.js";
 import { inactiveLifecycleForSession } from "../../src/modes/daemon/daemon-session-list.js";
 import { assistantMsg, userMsg } from "../utilities.js";

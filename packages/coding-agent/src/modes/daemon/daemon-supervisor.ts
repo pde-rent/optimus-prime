@@ -5,7 +5,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { getLogger } from "@earendil-works/pi-ai";
-import { createCliSubprocessEnv, createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
+import { createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
 import {
 	appendRotatingLog,
 	getCronJobsPath,
@@ -2174,7 +2174,7 @@ export class DaemonSupervisor {
 		const orphanProcessJournalPath =
 			existing?.descriptor.orphanProcessJournalPath ?? join(this.descriptorDir, `${workerId}.orphans.jsonl`);
 		const launch = createCliSubprocessLaunchSpec(["--mode", "daemon", "--daemon-socket", socketPath]);
-		const workerEnvironment = createCliSubprocessEnv({
+		const workerEnvironment: NodeJS.ProcessEnv = {
 			...process.env,
 			...launchEnv,
 			[DAEMON_WORKER_ROLE_ENV]: "1",
@@ -2186,7 +2186,7 @@ export class DaemonSupervisor {
 			[ORPHAN_PROCESS_JOURNAL_ENV]: orphanProcessJournalPath,
 			[SESSION_LEASES_ENABLED_ENV]: "1",
 			[SESSION_LEASE_OWNER_ID_ENV]: rootActiveSessionId,
-		});
+		};
 		delete workerEnvironment.RLM_DEPTH;
 		await this.assertRecoveryAllowed();
 		const child: ChildProcess = spawn(launch.command, launch.args, {
@@ -5211,7 +5211,7 @@ export class DaemonSupervisor {
 		await this.runCleanupStep("daemon ownership", async () => ownership?.release());
 		if (relaunch) {
 			const launch = createCliSubprocessLaunchSpec(["--mode", "daemon", "--daemon-socket", this.socketPath]);
-			const environment = createCliSubprocessEnv();
+			const environment: NodeJS.ProcessEnv = { ...process.env };
 			delete environment[DAEMON_CATALOG_ROLE_ENV];
 			delete environment[DAEMON_WORKER_ROLE_ENV];
 			delete environment[DAEMON_WORKER_TOKEN_ENV];

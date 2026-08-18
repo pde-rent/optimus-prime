@@ -1,7 +1,12 @@
+type StdoutConsoleMethod = "log" | "info" | "debug";
+
+const STDOUT_CONSOLE_METHODS: readonly StdoutConsoleMethod[] = ["log", "info", "debug"];
+
 interface StdoutTakeoverState {
 	rawStdoutWrite: (chunk: string, callback?: (error?: Error | null) => void) => boolean;
 	rawStderrWrite: (chunk: string, callback?: (error?: Error | null) => void) => boolean;
 	originalStdoutWrite: typeof process.stdout.write;
+	originalConsoleMethods: Pick<Console, StdoutConsoleMethod>;
 }
 
 let stdoutTakeoverState: StdoutTakeoverState | undefined;
@@ -26,10 +31,18 @@ export function takeOverStdout(): void {
 		return rawStderrWrite(String(chunk), callback);
 	}) as typeof process.stdout.write;
 
+	// Bun's console writes straight to fd 1 instead of going through
+	// process.stdout.write, so the patch above does not cover it.
+	const originalConsoleMethods = { log: console.log, info: console.info, debug: console.debug };
+	for (const method of STDOUT_CONSOLE_METHODS) {
+		console[method] = console.error.bind(console);
+	}
+
 	stdoutTakeoverState = {
 		rawStdoutWrite,
 		rawStderrWrite,
 		originalStdoutWrite,
+		originalConsoleMethods,
 	};
 }
 
@@ -39,6 +52,9 @@ export function restoreStdout(): void {
 	}
 
 	process.stdout.write = stdoutTakeoverState.originalStdoutWrite;
+	for (const method of STDOUT_CONSOLE_METHODS) {
+		console[method] = stdoutTakeoverState.originalConsoleMethods[method];
+	}
 	stdoutTakeoverState = undefined;
 }
 

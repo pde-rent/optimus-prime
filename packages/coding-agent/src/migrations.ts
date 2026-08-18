@@ -2,7 +2,6 @@
  * One-time migrations that run on startup.
  */
 
-import { color as chalk } from "./utils/ansi.js";
 import {
 	type Dirent,
 	existsSync,
@@ -18,6 +17,7 @@ import {
 import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir, getSessionsDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
+import { color as chalk } from "./utils/ansi.js";
 import { readFirstLineSync } from "./utils/file-lines.js";
 import { ensureDir } from "./utils/shared.js";
 

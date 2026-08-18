@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import { BunReplProvisioner } from "../src/core/bun-repl/provisioner.js";
 
@@ -62,6 +62,69 @@ describe("Bun REPL", () => {
 			const r = await manager.execute("const p = await import('node:path'); typeof p.join");
 			expect(r.status).toBe("ok");
 			expect(r.result).toBe('"function"');
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	// A vm script cannot run a static import, and the engine reports it as
+	// "import call expects one or two arguments" — a message that reads like a
+	// mis-called function, so agents retried the same shape instead of switching to
+	// `await import`. The transformer rewrites the statement instead.
+	it('runs the documented `import { $ } from "bun"` idiom', async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r = await manager.execute(
+				'import { $ } from "bun";\n(await $`echo hi`.quiet()).stdout.toString().trim()',
+			);
+			expect(r.status).toBe("ok");
+			expect(r.result).toBe('"hi"');
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	it("keeps statically imported bindings alive in later cells", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r1 = await manager.execute('import { join } from "node:path"\nimport * as os from "node:os"');
+			expect(r1.status).toBe("ok");
+
+			const r2 = await manager.execute('join("a", "b")');
+			expect(r2.status).toBe("ok");
+			expect(r2.result).toBe('"a/b"');
+
+			const r3 = await manager.execute("typeof os.tmpdir");
+			expect(r3.status).toBe("ok");
+			expect(r3.result).toBe('"function"');
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	it("erases type-only imports instead of trying to load them", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r = await manager.execute('import type { Stats } from "node:fs"\n"still here"');
+			expect(r.status).toBe("ok");
+			expect(r.result).toBe('"still here"');
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	// The forms the transformer refuses to guess at must still fail legibly.
+	it("tells the model to use await import() when an import cannot be rewritten", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r = await manager.execute("const spec = 'node:path'\nimport { join } from spec");
+			expect(r.status).toBe("error");
+			expect(r.error?.ename).toBe("SyntaxError");
+			expect(r.error?.evalue).toContain('await import("module")');
 		} finally {
 			await manager.dispose().catch(() => {});
 		}

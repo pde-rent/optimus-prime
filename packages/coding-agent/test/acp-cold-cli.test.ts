@@ -1,10 +1,12 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.js";
+import { BUN_PATH } from "./bun-path.js";
+import { hasTag } from "./test-tags.js";
 
 /**
  * Cold real-CLI ACP coverage.
@@ -17,7 +19,6 @@ import { ENV_AGENT_DIR } from "../src/config.js";
  */
 
 const cliPath = resolve(__dirname, "../src/cli.ts");
-const tsxPath = resolve(__dirname, "../../../node_modules/tsx/dist/cli.mjs");
 
 const tempDirs: string[] = [];
 const servers: Server[] = [];
@@ -72,9 +73,8 @@ async function driveAcpTurn(baseUrl: string): Promise<AcpResult> {
 	);
 
 	const child = spawn(
-		process.execPath,
+		BUN_PATH,
 		[
-			tsxPath,
 			cliPath,
 			"--mode",
 			"acp",
@@ -93,7 +93,6 @@ async function driveAcpTurn(baseUrl: string): Promise<AcpResult> {
 				...process.env,
 				[ENV_AGENT_DIR]: agentDir,
 				HOME: agentDir,
-				TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 			},
 			stdio: ["pipe", "pipe", "pipe"],
 		},
@@ -186,32 +185,35 @@ async function driveAcpTurn(baseUrl: string): Promise<AcpResult> {
 }
 
 describe("ACP mode over a cold real CLI process", () => {
-	it("reports a provider failure instead of a silent end_turn", {
-		tags: ["kernel-heavy"],
-		timeout: 180_000,
-	}, async () => {
-		const baseUrl = await startRejectingProvider();
-		const { responses, updates } = await driveAcpTurn(baseUrl);
+	it.skipIf(!hasTag("kernel-heavy"))(
+		"reports a provider failure instead of a silent end_turn",
+		{
+			timeout: 180_000,
+		},
+		async () => {
+			const baseUrl = await startRejectingProvider();
+			const { responses, updates } = await driveAcpTurn(baseUrl);
 
-		const initialize = responses.find((frame) => frame.id === 1);
-		expect(initialize, "the real CLI must answer initialize on stdout").toBeDefined();
+			const initialize = responses.find((frame) => frame.id === 1);
+			expect(initialize, "the real CLI must answer initialize on stdout").toBeDefined();
 
-		const prompt = responses.find((frame) => frame.id === 3);
-		expect(prompt, "session/prompt must answer").toBeDefined();
+			const prompt = responses.find((frame) => frame.id === 3);
+			expect(prompt, "session/prompt must answer").toBeDefined();
 
-		// The provider rejected, so the turn must not claim a clean completion.
-		// Before this was fixed the answer was {stopReason: "end_turn"} with
-		// updates === 0, which a client reads as a successful empty turn.
-		const result = (prompt as { result?: { stopReason?: string } }).result;
-		const error = (prompt as { error?: unknown }).error;
-		expect(
-			error !== undefined || result?.stopReason !== "end_turn",
-			`a failed turn must not report end_turn (updates=${updates}, frame=${JSON.stringify(prompt)})`,
-		).toBe(true);
+			// The provider rejected, so the turn must not claim a clean completion.
+			// Before this was fixed the answer was {stopReason: "end_turn"} with
+			// updates === 0, which a client reads as a successful empty turn.
+			const result = (prompt as { result?: { stopReason?: string } }).result;
+			const error = (prompt as { error?: unknown }).error;
+			expect(
+				error !== undefined || result?.stopReason !== "end_turn",
+				`a failed turn must not report end_turn (updates=${updates}, frame=${JSON.stringify(prompt)})`,
+			).toBe(true);
 
-		// Failing loudly is only half of it: the client also has to be able to
-		// tell *why*. Assert the provider's own rejection reaches the client
-		// rather than a bare "Internal error".
-		expect(JSON.stringify(error)).toContain("unauthorized in test");
-	});
+			// Failing loudly is only half of it: the client also has to be able to
+			// tell *why*. Assert the provider's own rejection reaches the client
+			// rather than a bare "Internal error".
+			expect(JSON.stringify(error)).toContain("unauthorized in test");
+		},
+	);
 });

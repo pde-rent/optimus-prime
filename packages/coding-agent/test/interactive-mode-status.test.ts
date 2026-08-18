@@ -1,3 +1,4 @@
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -13,7 +14,6 @@ import {
 	type TUI,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
 import { formatNoModelsAvailableMessage } from "../src/core/auth-guidance.js";
 import { type AuthStatus, AuthStorage } from "../src/core/auth-storage.js";

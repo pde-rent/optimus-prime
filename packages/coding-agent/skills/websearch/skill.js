@@ -18,6 +18,9 @@ const DEFAULT_COUNT = 6;
 const DEFAULT_MAX_CHARS = 2400; // ≈600 tokens
 const SNIPPET_CHARS = 220;
 const DEFAULT_READ_CHARS = 4000;
+/** Extracted-text cache bounds: this module lives in a long-running REPL. */
+const READ_CACHE_ENTRIES = 5;
+const READ_CACHE_CHARS = 600_000;
 const USER_AGENT = "prime-agent-websearch/1.0 (+https://github.com/PrimeIntellect-ai/prime-agent)";
 
 const SERPER_URL = "https://google.serper.dev/search";
@@ -84,12 +87,55 @@ async function serperKey(env) {
 }
 
 /**
+ * Resolve the SearXNG base URL: env var first, then the `searxng` entry in
+ * auth.json. The env-only path breaks whenever a long-lived daemon was started
+ * before the variable was exported, so the stored value is the durable source.
+ *
+ * @returns {Promise<string>} The base URL, or "" when none is configured.
+ */
+async function searxngUrl(env) {
+	const fromEnv = String(env.SEARXNG_URL || "").trim();
+	if (fromEnv) return fromEnv;
+	try {
+		const auth = JSON.parse(await Bun.file(`${agentDir(env)}/auth.json`).text());
+		const cred = auth?.searxng;
+		if (cred?.type !== "api_key") return "";
+		const value = String(cred.key || "").trim();
+		// Stored values may name an env var; "!command" refs cannot be run here.
+		return value.startsWith("!") ? "" : String(env[value] || value).trim();
+	} catch {
+		return ""; // missing/unreadable auth.json => not configured
+	}
+}
+
+/**
  * Strip HTML to readable text: drop script/style bodies, unwrap tags, decode
  * the entities that actually show up, collapse whitespace.
  *
  * @param {string} html
  * @returns {string} Plain text.
  */
+const HTML_ENTITIES = {
+	nbsp: " ",
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	"#39": "'",
+	apos: "'",
+	mdash: "\u2014",
+	ndash: "\u2013",
+	hellip: "\u2026",
+};
+
+/** Decode the entity forms that actually appear in fetched pages. */
+function decodeEntities(text) {
+	return String(text)
+		.replace(/&(nbsp|amp|lt|gt|quot|#39|apos|mdash|ndash|hellip);/gi, (_, e) => HTML_ENTITIES[e.toLowerCase()] ?? " ")
+		.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(Number.parseInt(h, 16)));
+}
+
 export function stripHtml(html) {
 	const entities = {
 		nbsp: " ",
@@ -103,8 +149,24 @@ export function stripHtml(html) {
 		ndash: "–",
 		hellip: "…",
 	};
-	return (
-		String(html ?? "")
+	// Preformatted blocks are lifted out before the whitespace collapse below and
+	// restored afterwards. Without this, `[^\S\n]+` flattens every code sample
+	// fetched from documentation to a single leading space -- cosmetic in most
+	// languages, syntactically wrong in Python.
+	const preserved = [];
+	const withPlaceholders = String(html ?? "").replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, body) => {
+		preserved.push(body);
+		return `\n\uE000${preserved.length - 1}\uE001\n`;
+	});
+	const restore = (text) =>
+		text.replace(/\uE000(\d+)\uE001/g, (_, index) => {
+			const body = preserved[Number(index)] ?? "";
+			// Tags and entities still need handling; indentation does not.
+			return decodeEntities(body.replace(/<[^>]+>/g, "")).replace(/[ \t]+$/gm, "");
+		});
+
+	return restore(
+		withPlaceholders
 			.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, " ")
 			.replace(/<!--[\s\S]*?-->/g, " ")
 			// Keep block boundaries so words do not run together.
@@ -112,10 +174,161 @@ export function stripHtml(html) {
 			.replace(/<[^>]+>/g, " ")
 			.replace(/&(nbsp|amp|lt|gt|quot|#39|apos|mdash|ndash|hellip);/gi, (_, e) => entities[e.toLowerCase()] ?? " ")
 			.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+			// Hex numeric entities: sites that escape apostrophes emit &#x27; far more
+			// often than &#39;, so skipping these leaks raw entity text into context.
+			.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(Number.parseInt(h, 16)))
 			.replace(/[^\S\n]+/g, " ")
 			.replace(/\n\s*\n\s*/g, "\n")
-			.trim()
+			.trim(),
 	);
+}
+
+/**
+ * Depth-aware scan for the element opened at `openEnd`, so nested elements of
+ * the same name do not end it early.
+ *
+ * @returns {number} Index of the matching close tag, or -1 when unclosed.
+ */
+function closeIndex(html, tag, openEnd) {
+	const re = new RegExp(`<(/?)${tag}\\b[^>]*?(/?)>`, "gi");
+	re.lastIndex = openEnd;
+	let depth = 1;
+	for (let m = re.exec(html); m; m = re.exec(html)) {
+		if (m[2] === "/") continue; // self-closing: opens and closes at once
+		depth += m[1] === "/" ? -1 : 1;
+		if (depth === 0) return m.index;
+	}
+	return -1;
+}
+
+/**
+ * Inner HTML of the first element matching `openRe`, or null when absent or
+ * unclosed. `openRe` must capture the tag name in group 1.
+ *
+ * @returns {string|null}
+ */
+function firstElement(html, openRe) {
+	const open = openRe.exec(html);
+	if (!open) return null;
+	const end = closeIndex(html, open[1], open.index + open[0].length);
+	return end === -1 ? null : html.slice(open.index + open[0].length, end);
+}
+
+/** Delete every `tags` subtree, honouring nesting. Unclosed tags are kept. */
+function dropSubtrees(html, tags) {
+	const re = new RegExp(`<(${tags.join("|")})\\b[^>]*?(/?)>`, "gi");
+	let out = "";
+	let last = 0;
+	for (let m = re.exec(html); m; m = re.exec(html)) {
+		if (m.index < last) continue; // inside an already-dropped subtree
+		out += html.slice(last, m.index);
+		if (m[2] === "/") {
+			last = re.lastIndex; // self-closing: drop the tag alone
+			continue;
+		}
+		const end = closeIndex(html, m[1], re.lastIndex);
+		if (end === -1) {
+			out += m[0]; // unclosed: keep it rather than swallow the rest of the page
+			last = re.lastIndex;
+			continue;
+		}
+		last = html.indexOf(">", end) + 1 || end;
+		re.lastIndex = last;
+	}
+	return out + html.slice(last);
+}
+
+/** Containers that hold the primary content, in order of confidence. */
+const MAIN_CONTAINERS = [
+	/<(main)\b[^>]*>/i,
+	/<(article)\b[^>]*>/i,
+	/<([a-z][a-z0-9-]*)\b[^>]*\brole\s*=\s*["']?main\b[^>]*>/i,
+	/<([a-z][a-z0-9-]*)\b[^>]*\bid\s*=\s*["']?content["'\s>][^>]*>/i,
+	/<(body)\b[^>]*>/i,
+];
+
+/**
+ * Readable text of a page's main content: pick the primary container, drop
+ * navigation chrome (nav, header, footer, aside, form, script, style), then
+ * strip to text. Generic — no per-site rules.
+ *
+ * @param {string} html
+ * @returns {string} Plain text of the article body.
+ */
+export function extractMainText(html) {
+	const src = String(html ?? "")
+		.replace(/<!--[\s\S]*?-->/g, " ")
+		.replace(/<(script|style|noscript|svg|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ");
+	let main = null;
+	for (const re of MAIN_CONTAINERS) {
+		main = firstElement(src, re);
+		if (main !== null) break;
+	}
+	return stripHtml(dropSubtrees(main ?? src, ["nav", "header", "footer", "aside", "form"]));
+}
+
+/**
+ * LRU of extracted page text, keyed by cleaned URL. A continuation must agree
+ * with the slice already shown, and a live page can change between fetches, so
+ * the text is pinned here rather than re-fetched.
+ *
+ * @type {Map<string, string>}
+ */
+const readCache = new Map();
+
+/** @returns {string|undefined} Cached text, marked most-recently-used. */
+function cacheGet(url) {
+	const hit = readCache.get(url);
+	if (hit === undefined) return undefined;
+	readCache.delete(url);
+	readCache.set(url, hit);
+	return hit;
+}
+
+/** Store `text`, then evict oldest entries until both bounds hold. */
+function cacheSet(url, text) {
+	readCache.delete(url);
+	readCache.set(url, text);
+	let total = 0;
+	for (const v of readCache.values()) total += v.length;
+	while (readCache.size > 1 && (readCache.size > READ_CACHE_ENTRIES || total > READ_CACHE_CHARS)) {
+		const oldest = readCache.keys().next().value;
+		total -= readCache.get(oldest).length;
+		readCache.delete(oldest);
+	}
+}
+
+/** Reset the read cache. Exported for tests. */
+export function clearReadCache() {
+	readCache.clear();
+}
+
+/**
+ * Return the slice of `text` starting at `offset`, within `maxChars`, ending
+ * with either a continuation hint or an end-of-document marker.
+ *
+ * @returns {string}
+ */
+export function sliceDocument(url, text, { maxChars = DEFAULT_READ_CHARS, offset = 0 } = {}) {
+	const total = text.length;
+	const head = `${url}\n\n`;
+	const start = Math.min(Math.max(Math.trunc(Number(offset) || 0), 0), total);
+	// Upper bound on the footer, so the slice below can never push past maxChars.
+	const reserve = `\n\n[chars ${start}-${total} of ${total} — continue with { offset: ${total} }]`.length;
+	const room = maxChars - head.length - reserve;
+	if (room < 1) return `${head}[document is ${total} chars; maxChars ${maxChars} leaves no room for text]`;
+
+	let body = text.slice(start, start + room);
+	if (start + body.length < total) {
+		const space = body.lastIndexOf(" ");
+		if (space > room * 0.6) body = body.slice(0, space); // do not split a word across slices
+	}
+	const end = start + body.length;
+	const footer =
+		end >= total
+			? `\n\n[end of document — chars ${start}-${end} of ${total}]`
+			: `\n\n[chars ${start}-${end} of ${total} — continue with { offset: ${end} }]`;
+	return head + body.trimEnd() + footer;
 }
 
 /**
@@ -304,7 +517,7 @@ export default function createSkill(ctx = {}) {
 		const choice = String(explicit || env.PRIME_AGENT_WEBSEARCH_BACKEND || "")
 			.trim()
 			.toLowerCase();
-		const url = String(env.SEARXNG_URL || "").trim();
+		const url = await searxngUrl(env);
 		const key = await serperKey(env);
 
 		if (choice === "searxng") return url ? { backend: "searxng", url } : { backend: "none" };
@@ -357,35 +570,43 @@ export default function createSkill(ctx = {}) {
 		},
 
 		/**
-		 * Fetch one URL and return its readable text, bounded like search results.
+		 * Fetch one URL and return a bounded slice of its readable main content.
 		 *
-		 * A small HTML-to-text pass, not a full readability implementation.
+		 * Navigation chrome is dropped before truncation, the extracted text is
+		 * cached per URL, and `offset` returns the next slice instead of
+		 * repeating what the caller already read. The last line always states the
+		 * range returned and how to continue, or that the document is exhausted.
 		 *
 		 * @param {string} url - Absolute http(s) URL.
 		 * @param {object} [options]
-		 * @param {number} [options.maxChars=4000] - Hard cap on returned text (≈1000 tokens).
+		 * @param {number} [options.maxChars=4000] - Hard cap on the response (≈1000 tokens).
+		 * @param {number} [options.offset=0] - Start position in the extracted text.
+		 * @param {boolean} [options.refresh=false] - Re-fetch instead of using the cache.
 		 * @param {number} [options.timeout=15] - Timeout in seconds.
 		 * @returns {Promise<string>} Readable page text, or an error message.
 		 */
 		async read(url, options = {}) {
-			const { maxChars = DEFAULT_READ_CHARS, timeout = 15 } = options;
+			const { maxChars = DEFAULT_READ_CHARS, timeout = 15, offset = 0, refresh = false } = options;
+			const key = cleanUrl(url);
 			try {
-				const resp = await fetch(url, {
-					headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
-					signal: AbortSignal.timeout(timeout * 1000),
-					redirect: "follow",
-				});
-				if (!resp.ok) return `Fetch failed for ${url}: HTTP ${resp.status}`;
+				let text = refresh ? undefined : cacheGet(key);
+				if (text === undefined) {
+					const resp = await fetch(url, {
+						headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
+						signal: AbortSignal.timeout(timeout * 1000),
+						redirect: "follow",
+					});
+					if (!resp.ok) return `Fetch failed for ${url}: HTTP ${resp.status}`;
 
-				const type = resp.headers.get("content-type") ?? "";
-				if (!/text\/|json|xml/i.test(type)) {
-					return `Fetch skipped for ${url}: unsupported content-type "${type.split(";")[0]}"`;
+					const type = resp.headers.get("content-type") ?? "";
+					if (!/text\/|json|xml/i.test(type)) {
+						return `Fetch skipped for ${url}: unsupported content-type "${type.split(";")[0]}"`;
+					}
+					const body = await resp.text();
+					text = /html/i.test(type) ? extractMainText(body) : stripHtml(body);
+					cacheSet(key, text);
 				}
-
-				const head = `${cleanUrl(url)}\n\n`;
-				const text = stripHtml(await resp.text());
-				if (head.length + text.length <= maxChars) return head + text;
-				return `${head}${clip(text, maxChars - head.length - 40)}\n\n[truncated to ${maxChars} chars]`;
+				return sliceDocument(key, text, { maxChars, offset });
 			} catch (e) {
 				return `Fetch failed for ${url}: ${e?.message || e}`;
 			}

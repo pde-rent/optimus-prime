@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { convertMessages } from "../src/providers/openai-completions.js";
 import type { AssistantMessage, Context, Model, OpenAICompletionsCompat, Usage } from "../src/types.js";
 

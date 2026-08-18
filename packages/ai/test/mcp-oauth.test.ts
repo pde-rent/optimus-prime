@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createMcpOAuthProvider } from "../src/mcp/oauth.js";
 
 function jsonResponse(body: unknown, status = 200): Response {

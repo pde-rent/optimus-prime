@@ -11,8 +11,9 @@ import {
 import { tmpdir } from "node:os";
 
 const linkFailure = vi.hoisted(() => ({ code: undefined as string | undefined }));
-vi.mock("node:fs", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:fs")>();
+const actualNodeFs = await import("node:fs");
+vi.mock("node:fs", () => {
+	const actual = actualNodeFs;
 	return {
 		...actual,
 		linkSync: (
@@ -29,9 +30,9 @@ vi.mock("node:fs", async (importOriginal) => {
 	};
 });
 
+import { describe, expect, it, vi } from "bun:test";
 import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
 import type { CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
 import type { CreateRlmSubagentRuntimeOptions, SubagentRuntimeHost } from "../src/core/rlm-runtime.js";
 import { canonicalSessionPath } from "../src/core/session-lease.js";

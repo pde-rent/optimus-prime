@@ -1,6 +1,6 @@
 ---
 name: edit
-description: Replace an exact, unique string in an existing file. Use for targeted single-occurrence edits to files from the IPython kernel instead of rewriting the whole file.
+description: Replace an exact, unique string in an existing file with `await edit(path, old_str, new_str)` (also `edit.run(...)`). Use for targeted single-occurrence edits to files from the REPL instead of rewriting the whole file.
 ---
 
 # Edit

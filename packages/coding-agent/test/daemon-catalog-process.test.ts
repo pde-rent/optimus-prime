@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { SessionInfo } from "../src/core/session-manager.js";
 import { resolveCatalogSessionMatch } from "../src/modes/daemon/daemon-catalog-process.js";
 

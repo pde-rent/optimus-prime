@@ -1,7 +1,7 @@
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { type Component, setKeybindings, TUI, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, test } from "vitest";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.js";

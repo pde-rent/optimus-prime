@@ -1,21 +1,22 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR } from "../../../src/config.js";
+import { BUN_PATH } from "../../bun-path.js";
 
 /**
  * Regression test for https://github.com/earendil-works/pi-mono/issues/2791
  *
  * fs.watch() returns an FSWatcher (EventEmitter). If the watcher emits an
- * 'error' event after creation and no error handler is attached, Node.js
+ * 'error' event after creation and no error handler is attached, the runtime
  * treats it as an uncaught exception and terminates the process.
  *
  * We test this by spawning a child process that:
- * 1. Sets up a custom theme with the watcher enabled
- * 2. Finds the FSWatcher via process._getActiveHandles()
- * 3. Emits a synthetic 'error' event on it
+ * 1. Wraps fs.watch so every FSWatcher the theme module creates is captured
+ * 2. Sets up a custom theme with the watcher enabled
+ * 3. Emits a synthetic 'error' event on the captured watcher
  * 4. If the watcher has no error handler -> crash (exit != 0) -> bug present
  * 5. If the watcher has an error handler -> clean exit (exit 0) -> bug fixed
  */
@@ -46,22 +47,35 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 		// Script that sets up the watcher and emits a synthetic error on it.
 		// If no .on('error') handler is attached, EventEmitter.emit('error')
 		// throws, which either crashes the process or gets caught by our try/catch.
-		const scriptPath = join(tempRoot, "test-watcher-error.mts");
+		const scriptPath = join(tempRoot, "test-watcher-error.ts");
 		writeFileSync(
 			scriptPath,
 			`
-import { setTheme, stopThemeWatcher } from "${themeModulePath}";
+import { createRequire } from "node:module";
 
 process.env[${JSON.stringify(ENV_AGENT_DIR)}] = ${JSON.stringify(agentDir)};
 
+// Capture every FSWatcher created after this point. The theme module imports
+// \`watch\` from "node:fs" lazily (it is only pulled in when the module below is
+// dynamically imported), so patching the builtin first is enough to intercept.
+const nodeRequire = createRequire(import.meta.url);
+const fs = nodeRequire("node:fs");
+const realWatch = fs.watch;
+const watchers: any[] = [];
+fs.watch = (...args: any[]) => {
+	const watcher = realWatch(...args);
+	watchers.push(watcher);
+	return watcher;
+};
+
+const { setTheme, stopThemeWatcher } = await import("${themeModulePath}");
+
 setTheme("custom-test", true);
 
-// Find the FSWatcher among active handles
-const handles = (process as any)._getActiveHandles();
-const fsWatcher = handles.find((h: any) => h.constructor?.name === "FSWatcher");
+const fsWatcher = watchers.at(-1);
 
 if (!fsWatcher) {
-	process.stderr.write("no FSWatcher found among active handles\\n");
+	process.stderr.write("no FSWatcher was created by setTheme\\n");
 	process.exit(2);
 }
 
@@ -88,7 +102,7 @@ process.exit(0);
 		let stderr = "";
 		let exitCode: number;
 		try {
-			_stdout = execFileSync("npx", ["tsx", scriptPath], {
+			_stdout = execFileSync(BUN_PATH, [scriptPath], {
 				timeout: 10000,
 				encoding: "utf-8",
 				env: { ...process.env, [ENV_AGENT_DIR]: agentDir },

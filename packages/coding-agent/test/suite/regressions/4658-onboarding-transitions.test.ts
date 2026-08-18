@@ -1,5 +1,5 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { type Component, type OverlayHandle, setKeybindings, type TUI } from "@earendil-works/pi-tui";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.js";
 import type { ModelRegistry } from "../../../src/core/model-registry.js";
 import type { AgentConnectionModel } from "../../../src/modes/agent-connection/types.js";

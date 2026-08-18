@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { afterAll, describe, expect, it } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import {
 	getHarnessStatePath,
@@ -72,17 +72,24 @@ describe("rlm.harness sandbox surface", () => {
 		try {
 			await manager.start();
 
-			const methods = await manager.execute(
-				`JSON.stringify([
-					"create_memory","update_memory","delete_memory",
-					"create_skill","update_skill","delete_skill",
-					"create_subagent","update_subagent","delete_subagent",
-					"create_prompt_note","update_prompt_note","delete_prompt_note",
-					"record_refinement","overview",
-				].map((name) => typeof rlm.harness[name]).concat(typeof rlm.get_harness_state, typeof rlm.delete_subagent))`,
+			// Derived from the host request list in both directions, so a new `harness.*`
+			// type or a new sandbox method cannot land without its counterpart.
+			const surface = await manager.execute(
+				`JSON.stringify({
+					names: Object.keys(rlm.harness).sort(),
+					kinds: [...new Set(Object.keys(rlm.harness).map((name) => typeof rlm.harness[name]))],
+					getState: typeof rlm.get_harness_state,
+				})`,
 			);
-			expect(methods.status).toBe("ok");
-			expect(jsonResult(methods.result)).toEqual(new Array(16).fill("function"));
+			expect(surface.status).toBe("ok");
+			const exposed = jsonResult(surface.result) as { names: string[]; kinds: string[]; getState: string };
+			// `get_state` is reached as rlm.get_harness_state(), not through rlm.harness.
+			const expectedNames = HARNESS_HOST_REQUEST_TYPES.filter((type) => type !== "harness.get_state")
+				.map((type) => type.slice("harness.".length))
+				.sort();
+			expect(exposed.names).toEqual(expectedNames);
+			expect(exposed.kinds).toEqual(["function"]);
+			expect(exposed.getState).toBe("function");
 
 			const created = await manager.execute(
 				`JSON.stringify(await rlm.harness.create_memory({ title: "Build cmd", content: "Use bun, never npm." }))`,
@@ -104,6 +111,18 @@ describe("rlm.harness sandbox surface", () => {
 			expect(updatedPayload.entry.version).toBe(2);
 			// Unspecified fields are preserved on a partial update.
 			expect(updatedPayload.entry.title).toBe("Build cmd");
+
+			const searched = await manager.execute(
+				`JSON.stringify(await rlm.harness.search_memory({ query: "bunx", top_k: 3 }))`,
+			);
+			expect(searched.status).toBe("ok");
+			const searchPayload = jsonResult(searched.result) as {
+				total_matches: number;
+				results: { id: string; snippet: string }[];
+			};
+			expect(searchPayload.total_matches).toBe(1);
+			expect(searchPayload.results[0].id).toBe("build_cmd");
+			expect(searchPayload.results[0].snippet).toContain("bunx");
 
 			const overview = await manager.execute(`JSON.stringify(await rlm.harness.overview())`);
 			expect((jsonResult(overview.result) as { counts: { memory: number } }).counts.memory).toBe(1);
@@ -203,6 +222,181 @@ describe("harness host handlers", () => {
 		expect(() =>
 			handleHarnessHostRequest("harness.create_memory", { title: "t", content: "c", global: "yes" }, ctx),
 		).toThrow(/global must be a boolean/);
+	});
+
+	it("reads memories without touching the store", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content: "auth uses jwt" }, ctx);
+		handleHarnessHostRequest(
+			"harness.create_memory",
+			{ title: "Auth policy", content: "auth rotates hourly", global: true },
+			ctx,
+		);
+		const localBefore = readFileSync(getHarnessStatePath(ctx.localDir!));
+		const globalBefore = readFileSync(getHarnessStatePath(ctx.globalDir));
+		const rebuildsBefore = ctx.rebuilds;
+
+		handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx);
+		handleHarnessHostRequest("harness.get_memory", { id: "auth_flow" }, ctx);
+
+		expect(readFileSync(getHarnessStatePath(ctx.localDir!)).equals(localBefore)).toBe(true);
+		expect(readFileSync(getHarnessStatePath(ctx.globalDir)).equals(globalBefore)).toBe(true);
+		expect(ctx.rebuilds).toBe(rebuildsBefore);
+	});
+
+	it("requires a non-blank query string", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content: "auth uses jwt" }, ctx);
+		for (const query of [undefined, "", "   ", 12, null]) {
+			expect(() => handleHarnessHostRequest("harness.search_memory", { query }, ctx)).toThrow(
+				/requires a non-empty query string/,
+			);
+		}
+	});
+
+	it("clamps top_k instead of throwing, and honours the topK alias", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content: "auth uses jwt" }, ctx);
+		const topK = (payload: Record<string, unknown>) =>
+			(handleHarnessHostRequest("harness.search_memory", { query: "auth", ...payload }, ctx) as any).top_k;
+
+		expect(topK({})).toBe(5);
+		expect(topK({ top_k: 0 })).toBe(1);
+		expect(topK({ top_k: -1 })).toBe(1);
+		expect(topK({ top_k: 50 })).toBe(10);
+		expect(topK({ top_k: 2.5 })).toBe(3);
+		expect(topK({ top_k: "3" })).toBe(3);
+		expect(topK({ topK: 4 })).toBe(4);
+		// Both keys present: the wire name wins.
+		expect(topK({ top_k: 2, topK: 9 })).toBe(2);
+		expect(() => topK({ top_k: "abc" })).toThrow(/must be a number/);
+	});
+
+	it("scopes search by scope or by the global flag", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest("harness.create_memory", { title: "Auth local", content: "auth is local" }, ctx);
+		handleHarnessHostRequest(
+			"harness.create_memory",
+			{ title: "Auth global", content: "auth is global", global: true },
+			ctx,
+		);
+
+		expect(() => handleHarnessHostRequest("harness.search_memory", { query: "auth", scope: "session" }, ctx)).toThrow(
+			/scope must be "local" or "global"/,
+		);
+
+		const globalOnly = handleHarnessHostRequest("harness.search_memory", { query: "auth", global: true }, ctx) as any;
+		expect(globalOnly.scope).toBe("global");
+		expect(globalOnly.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_global"]);
+
+		const localOnly = handleHarnessHostRequest(
+			"harness.search_memory",
+			{ query: "auth", scope: "local" },
+			ctx,
+		) as any;
+		expect(localOnly.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_local"]);
+
+		// An explicit scope wins over a disagreeing global flag.
+		const conflicting = handleHarnessHostRequest(
+			"harness.search_memory",
+			{ query: "auth", scope: "local", global: true },
+			ctx,
+		) as any;
+		expect(conflicting.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_local"]);
+
+		const both = handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx) as any;
+		expect(both.scope).toBe("all");
+		expect(both.total_matches).toBe(2);
+		expect(both.query_terms).toEqual(["auth"]);
+	});
+
+	it("keeps colliding local and global ids apart through the merged key", () => {
+		const ctx = makeContext();
+		const payload = { title: "Build cmd", content: "Use bun, never npm." };
+		handleHarnessHostRequest("harness.create_memory", payload, ctx);
+		handleHarnessHostRequest("harness.create_memory", { ...payload, global: true }, ctx);
+
+		// Default responses omit `key`: it is `scope:id`, so `scope` already
+		// disambiguates a collision and the model fetches with `get_memory({ id, scope })`.
+		const found = handleHarnessHostRequest("harness.search_memory", { query: "bun" }, ctx) as any;
+		expect(found.results).toHaveLength(2);
+		expect(found.results.every((hit: { id: string }) => hit.id === "build_cmd")).toBe(true);
+		expect(found.results.map((hit: { scope: string }) => hit.scope).sort()).toEqual(["global", "local"]);
+		expect(found.results.every((hit: { key?: string }) => hit.key === undefined)).toBe(true);
+		// Both are reachable and distinct despite sharing an id.
+		const local = handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", scope: "local" }, ctx) as any;
+		const global = handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", scope: "global" }, ctx) as any;
+		expect(local.scope).toBe("local");
+		expect(global.scope).toBe("global");
+
+		const verbose = handleHarnessHostRequest("harness.search_memory", { query: "bun", verbose: true }, ctx) as any;
+		const keys = verbose.results.map((hit: { key: string }) => hit.key).sort();
+		expect(keys).toEqual(["build_cmd", "local:build_cmd"]);
+		expect(new Set(keys).size).toBe(2);
+	});
+
+	it("omits diagnostic envelope fields unless verbose is requested", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest(
+			"harness.create_memory",
+			{ title: "Auth flow", content: "auth uses jwt with a fifteen minute expiry" },
+			ctx,
+		);
+
+		const lean = handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx) as any;
+		expect(Object.keys(lean.results[0]).sort()).toEqual(["id", "path", "scope", "score", "snippet", "title"]);
+
+		const verbose = handleHarnessHostRequest("harness.search_memory", { query: "auth", verbose: true }, ctx) as any;
+		const keys = Object.keys(verbose.results[0]);
+		for (const field of ["key", "version", "updated_at", "coverage", "matched_terms", "content_chars"]) {
+			expect(keys).toContain(field);
+		}
+		// The envelope was ~50% of the payload; the lean shape must stay strictly smaller.
+		expect(JSON.stringify(lean).length).toBeLessThan(JSON.stringify(verbose).length);
+	});
+
+	it("returns whole memories through get_memory", () => {
+		const ctx = makeContext();
+		const content = "auth uses jwt with a 15 minute expiry and refresh on the hour";
+		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content }, ctx);
+
+		const got = handleHarnessHostRequest("harness.get_memory", { id: "auth_flow" }, ctx) as any;
+		expect(got.id).toBe("auth_flow");
+		expect(got.scope).toBe("local");
+		expect(got.content).toBe(content);
+		expect(got.content_chars).toBe(content.length);
+		expect(got.truncated).toBe(false);
+		expect(got.title).toBe("Auth flow");
+		expect(got.metadata).toEqual({});
+
+		// The display-only merged prefix resolves the same entry.
+		expect((handleHarnessHostRequest("harness.get_memory", { id: "local:auth_flow" }, ctx) as any).content).toBe(
+			content,
+		);
+
+		expect(() => handleHarnessHostRequest("harness.get_memory", { id: "nope_at_all" }, ctx)).toThrow(/nope_at_all/);
+		expect(() => handleHarnessHostRequest("harness.get_memory", {}, ctx)).toThrow(/requires id/);
+	});
+
+	it("prefers the local entry for an ambiguous id and caps oversized content", () => {
+		const ctx = makeContext();
+		handleHarnessHostRequest("harness.create_memory", { title: "Build cmd", content: "local body" }, ctx);
+		handleHarnessHostRequest(
+			"harness.create_memory",
+			{ title: "Build cmd", content: "global body", global: true },
+			ctx,
+		);
+		expect((handleHarnessHostRequest("harness.get_memory", { id: "build_cmd" }, ctx) as any).scope).toBe("local");
+		expect(
+			(handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", global: true }, ctx) as any).scope,
+		).toBe("global");
+
+		const huge = "x".repeat(25_000);
+		handleHarnessHostRequest("harness.create_memory", { title: "Huge note", content: huge }, ctx);
+		const got = handleHarnessHostRequest("harness.get_memory", { id: "huge_note" }, ctx) as any;
+		expect(got.content).toHaveLength(20_000);
+		expect(got.content_chars).toBe(25_000);
+		expect(got.truncated).toBe(true);
 	});
 
 	it("refuses local writes when the session has no local store", () => {

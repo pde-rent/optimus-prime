@@ -1,3 +1,4 @@
+import { describe, expect, it, vi } from "bun:test";
 import { EventEmitter } from "node:events";
 import {
 	chmodSync,
@@ -14,7 +15,6 @@ import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
 import {
 	AGENT_FAMILY_REACH_ERROR,
 	type AgentSessionMessageController,

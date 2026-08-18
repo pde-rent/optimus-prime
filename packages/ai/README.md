@@ -88,7 +88,7 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 ## Installation
 
 ```bash
-npm install prime-agent-ai
+bun add prime-agent-ai
 ```
 
 TypeBox exports are re-exported from `prime-agent-ai`: `Type`, `Static`, and `TSchema`.
@@ -1101,9 +1101,9 @@ For paid Cloud Code Assist subscriptions, set `GOOGLE_CLOUD_PROJECT` or `GOOGLE_
 The quickest way to authenticate:
 
 ```bash
-npx prime-agent-ai login              # interactive provider selection
-npx prime-agent-ai login anthropic    # login to specific provider
-npx prime-agent-ai list               # list available providers
+bunx prime-agent-ai login              # interactive provider selection
+bunx prime-agent-ai login anthropic    # login to specific provider
+bunx prime-agent-ai list               # list available providers
 ```
 
 Credentials are saved to `auth.json` in the current directory.

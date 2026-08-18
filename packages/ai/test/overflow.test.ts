@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "../src/types.js";
 import { isContextOverflow } from "../src/utils/overflow.js";
 

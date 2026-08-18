@@ -25,11 +25,11 @@
  *     not auto-continue.
  */
 
+import { afterEach, describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR } from "../../src/config.js";
 import { ORPHAN_PROCESS_JOURNAL_ENV } from "../../src/core/orphan-process-journal.js";
 import { SESSION_LEASE_OWNER_ID_ENV, SESSION_LEASES_ENABLED_ENV } from "../../src/core/session-lease.js";
@@ -41,10 +41,9 @@ import {
 	DAEMON_WORKER_SUPERVISOR_SOCKET_ENV,
 	DAEMON_WORKER_TOKEN_ENV,
 } from "../../src/modes/daemon/daemon-worker-protocol.js";
+import { BUN_PATH } from "../bun-path.js";
 
 const cliPath = resolve(__dirname, "../../src/cli.ts");
-const tsxPath = resolve(__dirname, "../../../../node_modules/tsx/dist/cli.mjs");
-const repoTsconfigPath = resolve(__dirname, "../../../../tsconfig.json");
 const fauxRefineExtensionPath = resolve(__dirname, "../fixtures/eng-4685-faux-refine-extension.ts");
 const eventOrderExtensionPath = resolve(__dirname, "../fixtures/eng-4685-event-order-extension.ts");
 const children = new Set<ChildProcess>();
@@ -83,10 +82,9 @@ async function runCli(
 	args: string[],
 	options: { agentDir: string; stdin?: string; environment?: NodeJS.ProcessEnv },
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
-	const child = spawn(process.execPath, [tsxPath, cliPath, ...args], {
+	const child = spawn(BUN_PATH, [cliPath, ...args], {
 		env: {
 			...process.env,
-			TSX_TSCONFIG_PATH: repoTsconfigPath,
 			[ENV_AGENT_DIR]: options.agentDir,
 			PI_SKIP_VERSION_CHECK: "1",
 			PRIME_AGENT_INTERNAL_LEGACY_OWNED_WORKER_FRONTEND: "0",

@@ -120,13 +120,29 @@ export type McpServerConfig =
 			disabledTools?: string[];
 	  };
 
+/**
+ * How much the model may move its own reasoning effort.
+ * - `off`: static; the configured level is the only level.
+ * - `banded`: free movement within low/medium/high; xhigh/max need an escalation trigger.
+ * - `free`: no band; only the thrash guard applies.
+ */
+export type DynamicEffortMode = "off" | "banded" | "free";
+
+export const DEFAULT_DYNAMIC_EFFORT_MODE: DynamicEffortMode = "banded";
+
 export interface Settings {
 	onboardingShown?: boolean;
 	onboardingCompleted?: boolean;
 	defaultProvider?: string;
 	defaultModel?: string;
 	recentModels?: string[]; // "provider/id" keys, most-recently-used first
+	/** Floor for dynamic effort, not a fixed level: the model may raise above it, never below. */
 	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+	dynamicEffort?: DynamicEffortMode; // default: "banded"
+	/** Let an agent raise its own recursion limit after an observed failure. default: true */
+	dynamicDepth?: boolean;
+	/** Show the live sub-agent graph while children are running. default: true */
+	subagentGraph?: boolean;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
 	idleEvictionMinutes?: number | "off"; // global daemon policy; default: 90
@@ -742,6 +758,37 @@ export class SettingsManager {
 	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"): void {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
+		this.save();
+	}
+
+	getDynamicEffort(): DynamicEffortMode {
+		return this.settings.dynamicEffort ?? DEFAULT_DYNAMIC_EFFORT_MODE;
+	}
+
+	setDynamicEffort(mode: DynamicEffortMode): void {
+		this.globalSettings.dynamicEffort = mode;
+		this.markModified("dynamicEffort");
+		this.save();
+	}
+
+	/** Opt out to pin recursion at the configured `rlmMaxDepth`. */
+	getDynamicDepth(): boolean {
+		return this.settings.dynamicDepth ?? true;
+	}
+
+	setDynamicDepth(enabled: boolean): void {
+		this.globalSettings.dynamicDepth = enabled;
+		this.markModified("dynamicDepth");
+		this.save();
+	}
+
+	getSubagentGraph(): boolean {
+		return this.settings.subagentGraph ?? true;
+	}
+
+	setSubagentGraph(enabled: boolean): void {
+		this.globalSettings.subagentGraph = enabled;
+		this.markModified("subagentGraph");
 		this.save();
 	}
 

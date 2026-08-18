@@ -1,6 +1,6 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { type AutocompleteProvider, setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.js";
 import type { AgentConnectionModel, AgentConnectionModelCatalog } from "../../../src/modes/agent-connection/types.js";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.js";

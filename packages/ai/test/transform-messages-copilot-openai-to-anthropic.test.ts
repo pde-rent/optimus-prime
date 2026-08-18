@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { transformMessages } from "../src/providers/transform-messages.js";
 import type { AssistantMessage, Message, Model, ToolCall } from "../src/types.js";
 

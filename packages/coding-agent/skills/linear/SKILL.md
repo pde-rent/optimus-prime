@@ -1,6 +1,6 @@
 ---
 name: linear
-description: Read and write Linear issues, projects, cycles, comments, and more via Linear's official MCP server. Tools are auto-discovered from the server at runtime.
+description: Read and write Linear issues, projects, cycles, comments, and more via Linear's official MCP server. Tools are auto-discovered at runtime and callable as `await linear.<tool_name>(args)`; use `await linear.list_tools()` to see them and `await linear.call_tool(name, args)` for names that are not valid identifiers.
 ---
 
 # Linear

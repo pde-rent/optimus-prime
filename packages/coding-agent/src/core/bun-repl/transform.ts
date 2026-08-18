@@ -11,6 +11,10 @@
  * Only *top-level* declarations are rewritten. Declarations nested inside
  * blocks, loops, functions, classes, or other braces keep their normal block
  * scoping and are left untouched.
+ *
+ * Top-level static `import` statements get the same treatment: a vm script cannot
+ * run them at all, so they are rewritten to `await import(...)` with their bindings
+ * assigned onto `globalThis` (see rewriteImport below).
  */
 
 export interface TransformResult {
@@ -21,7 +25,7 @@ export interface TransformResult {
 }
 
 /** After a top-level `}`, does the following token continue the current statement? */
-function isContinuationAfterBrace(src: string, i: number): boolean {
+function isContinuationAfterBrace(src: string, i: number, current: string): boolean {
 	let j = i;
 	while (j < src.length && /\s/.test(src[j])) j++;
 	if (j >= src.length) return false;
@@ -33,6 +37,10 @@ function isContinuationAfterBrace(src: string, i: number): boolean {
 	// identifier or keyword (class/function/const/let/var/…) starts a new statement.
 	if (/[A-Za-z_$]/.test(ch)) {
 		const word = /[A-Za-z_$][\w$]*/.exec(src.slice(j))?.[0] ?? "";
+		// `from` only continues an import clause (`import { a }\nfrom "m"`). Anywhere else
+		// it is an ordinary identifier that legitimately starts a new statement, e.g.
+		// `class C {}` followed by a `from(...)` call.
+		if (word === "from") return /^import\b/.test(maskComments(current).trim());
 		return ["else", "catch", "finally", "of", "in", "instanceof", "extends", "as", "satisfies"].includes(word);
 	}
 	return false;
@@ -97,7 +105,17 @@ function splitTopLevelSegments(src: string): Seg[] {
 		}
 		if (lineComment) {
 			current += ch;
-			if (ch === "\n") lineComment = false;
+			if (ch === "\n") {
+				lineComment = false;
+				// A line comment swallows its own newline, so a statement that ends in one
+				// merges with the next line. That is harmless for ordinary statements (the
+				// engine's ASI sorts them out) but fatal for an import, which has to be
+				// recognised as a whole statement to be rewritten, so end it here.
+				if (depth === 0 && STATIC_IMPORT_HEAD.test(maskComments(current).trim())) {
+					flush();
+					current = "";
+				}
+			}
 			i++;
 			continue;
 		}
@@ -173,7 +191,7 @@ function splitTopLevelSegments(src: string): Seg[] {
 			// follow on the same line (`function f(){} class C{}`), unless the next token
 			// continues the current statement (`.`/`(`/`[`, or `else`/`catch`/`finally`/`of`).
 			// A `)`/`]` never ends a statement — `(…) {}` continues the same one.
-			if (ch === "}" && depth === 0 && !isContinuationAfterBrace(src, i)) {
+			if (ch === "}" && depth === 0 && !isContinuationAfterBrace(src, i, current)) {
 				flush();
 				current = "";
 			}
@@ -396,10 +414,229 @@ function findTopLevelChar(str: string, target: string): number {
 	return -1;
 }
 
+// ---------------------------------------------------------------------------
+// Static `import` statements.
+//
+// The REPL evaluates cells as vm scripts, not modules, so a static import is a
+// hard SyntaxError whose message ("import call expects one or two arguments")
+// reads like a mis-called function and tells the author nothing. Models write the
+// documented ESM idiom by habit, so the transformer rewrites the top-level forms
+// into `await import(...)` and binds the results onto `globalThis`, exactly like a
+// top-level `const`, so imported names survive into later cells.
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this statement start a static `import`?
+ *
+ * Deliberately excludes `import(` (already dynamic) and `import.meta`, and requires
+ * a separator so identifiers such as `importAll()` are not matched.
+ */
+const STATIC_IMPORT_HEAD = /^import(?:\s+["'*{A-Za-z_$]|\s*["'*{])/;
+
+/**
+ * Blank out every comment, leaving string literals and character offsets intact.
+ *
+ * Import statements are matched and parsed against this masked copy, so a comment
+ * before, after, or inside one cannot defeat the parse, while offsets still index
+ * into the original source for the parts the rewrite keeps verbatim.
+ */
+const STRING_OR_COMMENT = /(["'`])(?:\\[\s\S]|(?!\1)[^\\])*\1?|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+function maskComments(src: string): string {
+	return src.replace(STRING_OR_COMMENT, (m) => (m.startsWith("/") ? " ".repeat(m.length) : m));
+}
+
+/** True when `src` contains a top-level static import statement. */
+export function hasStaticImport(src: string): boolean {
+	return splitTopLevelSegments(src).some((s) => STATIC_IMPORT_HEAD.test(maskComments(s.src).trim()));
+}
+
+/** If `text` is exactly one single/double-quoted string literal, return it verbatim; else null. */
+function wholeStringLiteral(text: string): string | null {
+	const s = text.trim();
+	const quote = s[0];
+	if (quote !== '"' && quote !== "'") return null;
+	let i = 1;
+	while (i < s.length) {
+		if (s[i] === "\\") {
+			i += 2;
+			continue;
+		}
+		if (s[i] === quote) return i === s.length - 1 ? s : null;
+		if (s[i] === "\n") return null;
+		i++;
+	}
+	return null;
+}
+
+/** Index of the last top-level `from` keyword in an import clause, or -1. */
+function lastTopLevelFrom(text: string): number {
+	let found = -1;
+	let depth = 0;
+	let quote: "'" | '"' | "`" | null = null;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (quote) {
+			if (ch === "\\") i++;
+			else if (ch === quote) quote = null;
+			continue;
+		}
+		if (ch === "'" || ch === '"' || ch === "`") {
+			quote = ch;
+			continue;
+		}
+		if (ch === "(" || ch === "[" || ch === "{") {
+			depth++;
+			continue;
+		}
+		if (ch === ")" || ch === "]" || ch === "}") {
+			if (depth > 0) depth--;
+			continue;
+		}
+		if (depth !== 0) continue;
+		if (text.startsWith("from", i) && (i === 0 || !/[\w$]/.test(text[i - 1])) && !/[\w$]/.test(text[i + 4] ?? " ")) {
+			found = i;
+		}
+	}
+	return found;
+}
+
+interface NamedSpecifier {
+	/** The exported name on the module namespace. */
+	name: string;
+	/** The local binding it is exposed as. */
+	local: string;
+}
+
+/**
+ * Parse one entry of an `{ … }` import clause.
+ *
+ * Returns `undefined` for a type-only specifier (erased), `null` when the shape is
+ * not understood (the whole statement is then left alone).
+ */
+function parseNamedSpecifier(raw: string): NamedSpecifier | null | undefined {
+	const tokens = raw.trim().split(/\s+/).filter(Boolean);
+	const isName = (t: string): boolean => /^[A-Za-z_$][\w$]*$/.test(t);
+	// `type` is also a legal binding name: `{ type }` and `{ type as t }` import it,
+	// while `{ type A }` / `{ type A as B }` are TypeScript type-only specifiers.
+	if (tokens[0] === "type" && tokens.length > 1 && tokens[1] !== "as") return undefined;
+	if (tokens.length === 1 && isName(tokens[0])) return { name: tokens[0], local: tokens[0] };
+	if (tokens.length === 3 && tokens[1] === "as" && isName(tokens[0]) && isName(tokens[2])) {
+		return { name: tokens[0], local: tokens[2] };
+	}
+	return null;
+}
+
+/**
+ * Rewrite a top-level static import into dynamic-import assignments, or return null
+ * when the form is not understood. Returning the original statement unchanged is far
+ * safer than guessing: it fails loudly (with the hint added in repl-script) instead of
+ * silently binding the wrong thing.
+ *
+ * `masked` is the statement with its comments blanked (see maskComments).
+ */
+function rewriteImport(masked: string, index: number): string | null {
+	const stmt = masked.replace(/;+\s*$/, "").trim();
+	const rest = stmt.slice("import".length).trim();
+
+	// `import "m"` — side effect only.
+	const bare = wholeStringLiteral(rest);
+	if (bare !== null) return `await import(${bare});`;
+
+	const fromIdx = lastTopLevelFrom(rest);
+	if (fromIdx < 0) return null;
+	const specifier = wholeStringLiteral(rest.slice(fromIdx + 4));
+	if (specifier === null) return null;
+	const clause = rest.slice(0, fromIdx).trim();
+	if (!clause) return null;
+
+	// `import type X from "m"` / `import type { A } from "m"` are erased entirely.
+	// `import type from "m"` (clause is exactly `type`) is a default import named `type`.
+	if (/^type\s/.test(clause)) return "";
+
+	let defaultLocal: string | null = null;
+	let namespaceLocal: string | null = null;
+	const named: NamedSpecifier[] = [];
+	let sawTypeOnly = false;
+	let sawBraces = false;
+
+	// A `{ … }` group can only be the last clause part, so splitting on top-level commas
+	// keeps the braced group intact as one part.
+	for (const part of splitTopLevel(clause, ",")) {
+		const p = part.trim();
+		if (!p) continue;
+		if (p.startsWith("{")) {
+			if (!p.endsWith("}")) return null;
+			sawBraces = true;
+			for (const spec of splitTopLevel(p.slice(1, -1), ",")) {
+				if (!spec.trim()) continue;
+				const parsed = parseNamedSpecifier(spec);
+				if (parsed === null) return null;
+				if (parsed === undefined) {
+					sawTypeOnly = true;
+					continue;
+				}
+				named.push(parsed);
+			}
+			continue;
+		}
+		const ns = /^\*\s*as\s+([A-Za-z_$][\w$]*)$/.exec(p);
+		if (ns) {
+			if (namespaceLocal) return null;
+			namespaceLocal = ns[1];
+			continue;
+		}
+		if (/^[A-Za-z_$][\w$]*$/.test(p)) {
+			if (defaultLocal) return null;
+			defaultLocal = p;
+			continue;
+		}
+		return null;
+	}
+
+	// Every specifier was type-only: TypeScript elides the statement, so do the same.
+	if (!defaultLocal && !namespaceLocal && named.length === 0) {
+		if (sawTypeOnly) return "";
+		// `import {} from "m"` still runs the module for its side effects.
+		return sawBraces ? `await import(${specifier});` : null;
+	}
+
+	const mod = `__mod${index}`;
+	const lines = [`const ${mod} = await import(${specifier});`];
+	if (defaultLocal) lines.push(`globalThis.${defaultLocal} = ${mod}.default;`);
+	if (namespaceLocal) lines.push(`globalThis.${namespaceLocal} = ${mod};`);
+	for (const { name, local } of named) lines.push(`globalThis.${local} = ${mod}[${JSON.stringify(name)}];`);
+	// Wrapped in a block so the module temp cannot collide with a second import in the
+	// same cell, and so it does not leak into the namespace listing.
+	return `{ ${lines.join(" ")} }`;
+}
+
 /** Transform a single top-level segment. */
-function transformSegment(seg: Seg): Seg {
+function transformSegment(seg: Seg, index: number): Seg {
 	const trimmed = seg.src.trim();
 	if (!trimmed) return seg;
+	// Comments are masked (not removed) so `codeStart` still indexes the real source,
+	// keeping any comment that precedes the statement in the emitted output.
+	const masked = maskComments(seg.src);
+	const codeStart = masked.search(/\S/);
+	const stmt = codeStart < 0 ? "" : masked.slice(codeStart).trim();
+	if (STATIC_IMPORT_HEAD.test(stmt)) {
+		const rewritten = rewriteImport(stmt, index);
+		// An import binds names for the rest of the session, so it behaves like a
+		// declaration: never the cell's result value. An unrecognized form keeps its
+		// original source and fails with the hint runJs attaches.
+		seg.out = rewritten === null ? seg.src : seg.src.slice(0, codeStart) + rewritten;
+		seg.isDecl = true;
+		seg.isExpression = false;
+		return seg;
+	}
+	if (!stmt) {
+		// Comment-only segment. Capturing it as the cell's result would emit
+		// `return (// done);`, so a cell that merely ends in a comment fails to compile.
+		seg.out = seg.src;
+		seg.isDecl = false;
+		seg.isExpression = false;
+		return seg;
+	}
 	const isDecl = /^(async\s+)?(const|let|var|class|function)\b/.test(trimmed);
 	seg.isDecl = isDecl;
 	if (isDecl) {
@@ -419,7 +656,7 @@ function transformSegment(seg: Seg): Seg {
 }
 
 export function transformTopLevel(src: string): TransformResult {
-	const segs = splitTopLevelSegments(src).map(transformSegment);
+	const segs = splitTopLevelSegments(src).map((seg, i) => transformSegment(seg, i));
 	// Last top-level expression becomes the cell's result value (like IPython's `Out`),
 	// so it is emitted as a `return` rather than executed a second time.
 	let lastIndex = -1;

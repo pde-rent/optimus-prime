@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { formatKeyText } from "../src/modes/interactive/components/keybinding-hints.js";
 
 describe("keybinding hint formatting", () => {

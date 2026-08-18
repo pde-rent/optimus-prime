@@ -1,6 +1,6 @@
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	AgentsViewMode,

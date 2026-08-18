@@ -1,7 +1,7 @@
+import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import { Readable } from "node:stream";
-import { describe, expect, test } from "vitest";
 import { attachJsonlLineReader, serializeJsonLine } from "../src/modes/rpc/jsonl.js";
 
 /**

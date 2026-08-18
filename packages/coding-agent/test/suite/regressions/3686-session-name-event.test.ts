@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "../../../src/index.js";
 import { createHarness, type Harness } from "../harness.js";
 

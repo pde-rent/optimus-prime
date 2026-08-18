@@ -1,5 +1,5 @@
+import { describe, expect, test } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import { describe, expect, test } from "vitest";
 import {
 	defaultModelPerProvider,
 	findInitialModel,

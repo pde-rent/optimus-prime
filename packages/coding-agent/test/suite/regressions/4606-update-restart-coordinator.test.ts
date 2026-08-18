@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	DaemonUpdateRestartStatusWriter,
 	launchDaemonUpdateRestartCoordinator,
@@ -12,6 +12,7 @@ import { DaemonAgentConnection } from "../../../src/modes/agent-connection/daemo
 import { DaemonClient } from "../../../src/modes/daemon/daemon-client.js";
 import type { DaemonResponse } from "../../../src/modes/daemon/daemon-protocol.js";
 import type { SessionSummary } from "../../../src/modes/daemon/daemon-session-list.js";
+import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, type Harness } from "../harness.js";
 
 interface SupervisorHandle {
@@ -29,8 +30,6 @@ interface SupervisorOwnerRecord {
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const launcherFixturePath = resolve(__dirname, "../../fixtures/eng-4606-update-launcher.ts");
-const tsxPath = resolve(__dirname, "../../../../../node_modules/tsx/dist/cli.mjs");
-const tsconfigPath = resolve(__dirname, "../../../../../tsconfig.json");
 const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const supervisors = new Set<SupervisorHandle>();
 const harnesses: Harness[] = [];
@@ -47,27 +46,21 @@ function spawnSupervisor(paths: {
 	registryDir: string;
 	socketPath: string;
 }): SupervisorHandle {
-	const child = spawn(
-		process.execPath,
-		[tsxPath, cliPath, "--mode", "daemon", "--daemon-socket", paths.socketPath, "--offline"],
-		{
-			cwd: paths.agentDir,
-			env: {
-				...process.env,
-				[supervisorRegistryDirEnv]: paths.registryDir,
-				[ENV_AGENT_DIR]: paths.agentDir,
-				ENG_4606_AGENT_DIR: paths.agentDir,
-				ENG_4606_CLI_PATH: cliPath,
-				ENG_4606_COMPLETION_PATH: paths.completionPath,
-				ENG_4606_PID_PATH: paths.pidPath,
-				ENG_4606_SOCKET_PATH: paths.socketPath,
-				ENG_4606_TSX_PATH: tsxPath,
-				PI_OFFLINE: "1",
-				TSX_TSCONFIG_PATH: tsconfigPath,
-			},
-			stdio: ["ignore", "pipe", "pipe"],
+	const child = spawn(BUN_PATH, [cliPath, "--mode", "daemon", "--daemon-socket", paths.socketPath, "--offline"], {
+		cwd: paths.agentDir,
+		env: {
+			...process.env,
+			[supervisorRegistryDirEnv]: paths.registryDir,
+			[ENV_AGENT_DIR]: paths.agentDir,
+			ENG_4606_AGENT_DIR: paths.agentDir,
+			ENG_4606_CLI_PATH: cliPath,
+			ENG_4606_COMPLETION_PATH: paths.completionPath,
+			ENG_4606_PID_PATH: paths.pidPath,
+			ENG_4606_SOCKET_PATH: paths.socketPath,
+			PI_OFFLINE: "1",
 		},
-	);
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 	const handle: SupervisorHandle = { child, stdout: "", stderr: "" };
 	supervisors.add(handle);
 	child.stdout?.on("data", (chunk: Buffer) => {
@@ -191,20 +184,18 @@ async function withSourceCliEntrypoint<T>(action: () => Promise<T>): Promise<T> 
 		throw new Error("Test process has no CLI entrypoint");
 	}
 	const previousExecArgv = [...process.execArgv];
-	const previousTsconfigPath = process.env.TSX_TSCONFIG_PATH;
+	// Vitest workers run under Node; the coordinator must relaunch the TypeScript
+	// CLI with Bun.
+	const previousExecPath = process.execPath;
 	process.argv[1] = cliPath;
-	process.execArgv.splice(0, process.execArgv.length, tsxPath);
-	process.env.TSX_TSCONFIG_PATH = tsconfigPath;
+	process.execArgv.splice(0, process.execArgv.length);
+	process.execPath = BUN_PATH;
 	try {
 		return await action();
 	} finally {
 		process.argv[1] = previousEntrypoint;
 		process.execArgv.splice(0, process.execArgv.length, ...previousExecArgv);
-		if (previousTsconfigPath === undefined) {
-			delete process.env.TSX_TSCONFIG_PATH;
-		} else {
-			process.env.TSX_TSCONFIG_PATH = previousTsconfigPath;
-		}
+		process.execPath = previousExecPath;
 	}
 }
 
@@ -385,7 +376,7 @@ describe("ENG-4606 update restart coordinator", () => {
 			),
 		);
 		const originalActiveSessionId = created.activeSessionId ?? created.id;
-		const updateCommand = [process.execPath, tsxPath, launcherFixturePath].map(shellQuote).join(" ");
+		const updateCommand = [BUN_PATH, launcherFixturePath].map(shellQuote).join(" ");
 		const executeResponse = await client.request(
 			{ type: "execute_bash", activeSessionId: originalActiveSessionId, command: updateCommand },
 			5000,

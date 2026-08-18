@@ -1,5 +1,5 @@
+import { beforeAll, describe, expect, it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it } from "vitest";
 import { BashExecutionComponent } from "../src/modes/interactive/components/bash-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 

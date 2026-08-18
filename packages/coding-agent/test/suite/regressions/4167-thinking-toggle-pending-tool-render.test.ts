@@ -1,8 +1,8 @@
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { Container, Text, type TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, test, vi } from "vitest";
 import type {
 	AgentConnectionSessionContext,
 	AgentConnectionSessionEvent,

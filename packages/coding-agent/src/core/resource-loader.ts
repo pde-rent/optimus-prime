@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { color as chalk } from "../utils/ansi.js";
 import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
+import { color as chalk } from "../utils/ansi.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
 
 export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.js";
@@ -19,7 +19,12 @@ import { SettingsManager } from "./settings-manager.js";
 import type { Skill } from "./skills.js";
 import { loadSkills } from "./skills.js";
 import { createSourceInfo, type SourceInfo } from "./source-info.js";
-import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
+import {
+	SEARXNG_CREDENTIAL_ID,
+	SERPER_CREDENTIAL_ID,
+	SERPER_ENV_VAR,
+	WEBSEARCH_SKILL_NAME,
+} from "./websearch-credential.js";
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -288,7 +293,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		if (!websearch || !bundledDir || !websearch.filePath.startsWith(bundledDir)) {
 			return;
 		}
-		if (process.env.SEARXNG_URL?.trim() || process.env[SERPER_ENV_VAR]?.trim() || this.hasStoredSerperKey()) {
+		if (
+			process.env.SEARXNG_URL?.trim() ||
+			this.hasStoredCredential(SEARXNG_CREDENTIAL_ID) ||
+			process.env[SERPER_ENV_VAR]?.trim() ||
+			this.hasStoredCredential(SERPER_CREDENTIAL_ID)
+		) {
 			return;
 		}
 		this.skillDiagnostics.push({
@@ -301,11 +311,16 @@ export class DefaultResourceLoader implements ResourceLoader {
 		});
 	}
 
-	/** @returns True when a Serper key was stored via /login (auth.json). */
-	private hasStoredSerperKey(): boolean {
+	/**
+	 * @returns True when a websearch backend was configured in auth.json.
+	 * Stored config is checked alongside the env vars because a long-lived daemon
+	 * keeps the environment it was started with: exporting SEARXNG_URL afterwards
+	 * does not reach it, and the warning would fire despite a working backend.
+	 */
+	private hasStoredCredential(credentialId: string): boolean {
 		try {
 			const auth = JSON.parse(readFileSync(join(this.agentDir, "auth.json"), "utf-8"));
-			return auth?.[SERPER_CREDENTIAL_ID]?.type === "api_key" && Boolean(auth[SERPER_CREDENTIAL_ID].key);
+			return auth?.[credentialId]?.type === "api_key" && Boolean(auth[credentialId].key);
 		} catch {
 			return false; // missing/unreadable auth.json => not configured
 		}

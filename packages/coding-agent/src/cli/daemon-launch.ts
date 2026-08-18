@@ -24,7 +24,7 @@ import {
 	DAEMON_WORKER_TOKEN_ENV,
 } from "../modes/daemon/daemon-worker-protocol.js";
 import { isHelpCommandRequest, PUBLIC_COMMAND_NAMES, REMOVED_COMMAND_NAMES } from "./command-registry.js";
-import { createCliSubprocessEnv, formatCurrentCliCommand } from "./subprocess-launch.js";
+import { formatCurrentCliCommand } from "./subprocess-launch.js";
 
 const DAEMON_STARTUP_TIMEOUT_MS = 30_000;
 const DAEMON_STARTUP_LOG_TAIL_BYTES = 4 * 1024;
@@ -357,7 +357,7 @@ async function ensureDaemonRunning(socketPath: string, spawnCwd?: string): Promi
 	// a CLI running inside a daemon worker (e.g. a test spawned by the Prime
 	// Agent daemon) would launch the supervisor in worker mode, which listens
 	// on the socket but never sends the daemon_hello handshake.
-	const env = createCliSubprocessEnv();
+	const env: NodeJS.ProcessEnv = { ...process.env };
 	delete env[DAEMON_WORKER_ROLE_ENV];
 	delete env[DAEMON_WORKER_TOKEN_ENV];
 	delete env[DAEMON_WORKER_ACTIVE_SESSION_ID_ENV];

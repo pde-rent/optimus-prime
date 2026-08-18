@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { convertTools } from "../src/providers/google-shared.js";
 import type { Tool } from "../src/types.js";
 

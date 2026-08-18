@@ -1,5 +1,5 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { setKeybindings, type TUI } from "@earendil-works/pi-tui";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { ModelSelectorComponent } from "../src/modes/interactive/components/model-selector.js";

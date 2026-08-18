@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { parseGitUrl } from "../src/utils/git.js";
 
 describe("Git URL Parsing", () => {

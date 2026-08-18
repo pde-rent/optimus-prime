@@ -1,14 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 // @ts-expect-error - bundled skill is plain JS with JSDoc types, no .d.ts
 import * as websearch from "../skills/websearch/skill.js";
 
-const { default: createSkill, cleanUrl, dedupeResults, formatResults, NOT_CONFIGURED_MESSAGE, stripHtml } = websearch;
+const {
+	default: createSkill,
+	cleanUrl,
+	clearReadCache,
+	dedupeResults,
+	extractMainText,
+	formatResults,
+	NOT_CONFIGURED_MESSAGE,
+	stripHtml,
+} = websearch;
 
 type Result = { title: string; url: string; snippet: string };
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
 	globalThis.fetch = realFetch;
+	clearReadCache(); // the read cache is module scope: keep tests independent
 });
 
 /** Stub `fetch`, recording every request made. */
@@ -254,7 +264,7 @@ describe("websearch: read()", () => {
 		}));
 		const out = await createSkill({ env: {} }).read("https://x.test/page", { maxChars: 500 });
 		expect(out.length).toBeLessThanOrEqual(500);
-		expect(out).toContain("[truncated");
+		expect(out).toContain("continue with { offset:");
 		expect(out).not.toContain("<p>");
 	});
 
@@ -266,5 +276,219 @@ describe("websearch: read()", () => {
 	it("reports an HTTP error without throwing", async () => {
 		stubFetch(() => response("", { status: 404, contentType: "text/html" }));
 		expect(await createSkill({ env: {} }).read("https://x.test/missing")).toContain("404");
+	});
+});
+
+/**
+ * A Wikipedia-shaped page: Vector-2022 nests the article in `<main id="content">`
+ * and everything else in nav/header/footer/aside landmarks.
+ */
+const WIKI_HTML = `<html><head><title>Decentralized finance - Wikipedia</title></head><body>
+<header class="vector-header"><a href="#content">Jump to content</a>
+  <nav class="vector-main-menu-landmark" aria-label="Site"><h3>Main menu</h3><span>move to sidebar</span>
+    <ul><li><a>Main page</a></li><li><a>Donate</a></li><li><a>Create account</a></li><li><a>Log in</a></li></ul>
+  </nav>
+</header>
+<div class="vector-sidebar">
+  <nav id="mw-panel-toc" aria-label="Contents"><span>Toggle the table of contents</span>
+    <ul><li>1 History</li><li>2 Key characteristics</li><li>3 Decentralized exchanges</li></ul>
+  </nav>
+</div>
+<main id="content" class="mw-body">
+  <h1>Decentralized finance</h1>
+  <nav aria-label="Namespaces"><ul><li><a>Talk</a></li><li><a>Read</a></li><li><a>View history</a></li></ul></nav>
+  <div id="mw-content-text">
+    <p>Decentralized finance provides financial instruments through smart contracts on a permissionless blockchain.</p>
+    <p>DeFi platforms enable users to lend or borrow funds and earn interest in savings-like accounts.</p>
+  </div>
+  <footer class="mw-content-footer"><a>Retrieved from the wiki database</a></footer>
+</main>
+<aside id="p-lang" class="vector-column-end"><h3>Languages</h3>
+  <ul><li>Afrikaans</li><li>Azerbaycanca</li><li>Deutsch</li><li>Nederlands</li></ul>
+</aside>
+<footer class="mw-footer"><ul><li>This page was last edited on 1 January 2026</li></ul></footer>
+<script>window.RLQ = [];</script>
+</body></html>`;
+
+/** The chrome that used to eat the first ~1500 chars of every Wikipedia read. */
+const CHROME = [
+	"Jump to content",
+	"Main menu",
+	"move to sidebar",
+	"Donate",
+	"Create account",
+	"Toggle the table of contents",
+	"Key characteristics",
+	"Afrikaans",
+	"Azerbaycanca",
+	"Nederlands",
+	"View history",
+	"Retrieved from",
+	"last edited",
+	"window.RLQ",
+];
+
+describe("websearch: main-content extraction", () => {
+	it("drops navigation chrome and keeps the article prose", () => {
+		const text = extractMainText(WIKI_HTML);
+		for (const chrome of CHROME) expect(text).not.toContain(chrome);
+		expect(text).toContain("Decentralized finance provides financial instruments");
+		expect(text).toContain("earn interest in savings-like accounts");
+	});
+
+	it("removes far more than it keeps on a chrome-heavy page", () => {
+		expect(extractMainText(WIKI_HTML).length).toBeLessThan(stripHtml(WIKI_HTML).length / 2);
+	});
+
+	it("prefers <article> when there is no <main>", () => {
+		const html = `<body><nav>Skip</nav><article><p>Body text.</p></article><aside>Related</aside></body>`;
+		expect(extractMainText(html)).toBe("Body text.");
+	});
+
+	it("falls back through role=main, id=content, then body", () => {
+		expect(extractMainText(`<body><nav>Skip</nav><div role="main"><p>Roled.</p></div></body>`)).toBe("Roled.");
+		expect(extractMainText(`<body><nav>Skip</nav><div id="content"><p>Ided.</p></div></body>`)).toBe("Ided.");
+		expect(extractMainText(`<body><nav>Skip</nav><p>Bodied.</p></body>`)).toBe("Bodied.");
+	});
+
+	it("handles nested containers of the same name", () => {
+		const html = `<main><div><nav>Outer<nav>Inner</nav>Still nav</nav></div><p>Kept.</p></main>`;
+		expect(extractMainText(html)).toBe("Kept.");
+	});
+
+	it("keeps an unclosed nav from swallowing the rest of the page", () => {
+		expect(extractMainText("<main><nav><p>Kept anyway.</p></main>")).toContain("Kept anyway.");
+	});
+
+	it("reads a page through read() without the chrome", async () => {
+		stubFetch(() => response(WIKI_HTML, { contentType: "text/html; charset=utf-8" }));
+		const out = await createSkill({ env: {} }).read("https://en.wikipedia.test/wiki/Decentralized_finance");
+		for (const chrome of CHROME) expect(out).not.toContain(chrome);
+		expect(out).toContain("permissionless blockchain");
+	});
+});
+
+/** Fixed-width tokens so `w0007` can never match as a substring of another. */
+const TOKENS = Array.from({ length: 1200 }, (_, i) => `w${String(i).padStart(4, "0")}`);
+const LONG_HTML = `<html><body><main><p>${TOKENS.join(" ")}</p></main></body></html>`;
+
+/** The slice between the URL header and the trailing range marker. */
+function bodyOf(out: string): string {
+	return out.split("\n\n")[1] ?? "";
+}
+
+/** The `offset` the marker tells the caller to continue from, or null at the end. */
+function nextOffset(out: string): number | null {
+	const m = out.match(/continue with \{ offset: (\d+) \}/);
+	return m ? Number(m[1]) : null;
+}
+
+describe("websearch: read() continuation", () => {
+	it("returns the next slice instead of repeating the first", async () => {
+		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+
+		const first = await skill.read("https://x.test/long", { maxChars: 600 });
+		const offset = nextOffset(first);
+		expect(offset).not.toBeNull();
+
+		const second = await skill.read("https://x.test/long", { maxChars: 600, offset });
+		const firstBody = bodyOf(first);
+		const secondBody = bodyOf(second);
+
+		expect(firstBody).toContain("w0000");
+		expect(secondBody).not.toContain("w0000");
+		// The two slices are adjacent: nothing repeated, nothing skipped.
+		const lastOfFirst = firstBody.trim().split(" ").at(-1) as string;
+		const firstOfSecond = secondBody.trim().split(" ")[0];
+		expect(secondBody).not.toContain(lastOfFirst);
+		expect(Number(firstOfSecond.slice(1))).toBe(Number(lastOfFirst.slice(1)) + 1);
+	});
+
+	it("states the range and total in the marker", async () => {
+		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const out = await createSkill({ env: {} }).read("https://x.test/long", { maxChars: 600 });
+		expect(out).toMatch(/\[chars 0-\d+ of \d+ — continue with \{ offset: \d+ \}\]$/);
+	});
+
+	it("marks the end of the document only when it is exhausted", async () => {
+		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+
+		let out = await skill.read("https://x.test/long", { maxChars: 900 });
+		let offset = nextOffset(out);
+		let hops = 0;
+		while (offset !== null && hops < 50) {
+			expect(out).not.toContain("[end of document");
+			out = await skill.read("https://x.test/long", { maxChars: 900, offset });
+			offset = nextOffset(out);
+			hops += 1;
+		}
+		expect(hops).toBeGreaterThan(1); // it really did take several slices
+		expect(out).toContain("[end of document");
+		expect(bodyOf(out)).toContain(TOKENS.at(-1) as string);
+	});
+
+	it("does not claim a continuation when the whole page fits", async () => {
+		stubFetch(() =>
+			response("<html><body><main><p>Short page.</p></main></body></html>", { contentType: "text/html" }),
+		);
+		const out = await createSkill({ env: {} }).read("https://x.test/short");
+		expect(out).toContain("Short page.");
+		expect(out).toContain("[end of document");
+		expect(nextOffset(out)).toBeNull();
+	});
+
+	it("still caps output at maxChars on every slice", async () => {
+		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+		for (const offset of [0, 1000, 4000]) {
+			const out = await skill.read("https://x.test/long", { maxChars: 400, offset });
+			expect(out.length).toBeLessThanOrEqual(400);
+		}
+	});
+});
+
+describe("websearch: read() cache", () => {
+	it("does not re-fetch for a continuation", async () => {
+		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+		const first = await skill.read("https://x.test/long", { maxChars: 600 });
+		await skill.read("https://x.test/long", { maxChars: 600, offset: nextOffset(first) });
+		await skill.read("https://x.test/long", { maxChars: 600, offset: 0 });
+		expect(calls).toHaveLength(1);
+	});
+
+	it("re-fetches when refresh is set", async () => {
+		let body = "<html><body><main><p>First version.</p></main></body></html>";
+		const calls = stubFetch(() => response(body, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+
+		expect(await skill.read("https://x.test/live")).toContain("First version.");
+		body = "<html><body><main><p>Second version.</p></main></body></html>";
+		expect(await skill.read("https://x.test/live")).toContain("First version."); // cached
+		expect(calls).toHaveLength(1);
+
+		expect(await skill.read("https://x.test/live", { refresh: true })).toContain("Second version.");
+		expect(calls).toHaveLength(2);
+	});
+
+	it("keys the cache by cleaned URL, so tracking params do not split it", async () => {
+		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+		await skill.read("https://x.test/long?utm_source=a");
+		await skill.read("https://x.test/long");
+		expect(calls).toHaveLength(1);
+	});
+
+	it("evicts old entries rather than growing without bound", async () => {
+		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const skill = createSkill({ env: {} });
+		for (let i = 0; i < 6; i++) await skill.read(`https://x.test/p${i}`);
+		expect(calls).toHaveLength(6);
+		await skill.read("https://x.test/p0"); // evicted: fetched again
+		expect(calls).toHaveLength(7);
+		await skill.read("https://x.test/p5"); // still resident
+		expect(calls).toHaveLength(7);
 	});
 });

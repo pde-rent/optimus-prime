@@ -1,10 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { appendFileSync, chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type * as PiAi from "@earendil-works/pi-ai";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	appendGlobalRefinement,
 	applyRefinementProposal,
@@ -34,8 +33,9 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof PiAi>();
+const actualEarendilWorksPiAi = await import("@earendil-works/pi-ai");
+vi.mock("@earendil-works/pi-ai", () => {
+	const actual = actualEarendilWorksPiAi;
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
@@ -604,9 +604,13 @@ describe("harness refinement", () => {
 		expect(Object.values(merged.entries.memory).map((entry) => `${entry.scope}:${entry.content}`)).toEqual(
 			expect.arrayContaining(["global:Global content.", "local:Local content."]),
 		);
+		// Merged memories stay out of the cached system prompt; they are reachable only
+		// through `rlm.harness.search_memory`.
 		const promptOverview = formatHarnessStateForPrompt(merged);
-		expect(promptOverview).toContain("[global:shared]");
-		expect(promptOverview).toContain("[local:shared]");
+		expect(promptOverview).not.toContain("[global:shared]");
+		expect(promptOverview).not.toContain("[local:shared]");
+		expect(promptOverview).not.toContain("Global content.");
+		expect(promptOverview).not.toContain("Local content.");
 		expect(globalState.entries.memory.shared.scope).toBe("global");
 	});
 

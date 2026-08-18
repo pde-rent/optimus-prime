@@ -1,5 +1,5 @@
+import { beforeAll, describe, expect, it } from "bun:test";
 import { setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentCronJob, AgentHeartbeatManagementAction } from "../src/core/cron-jobs.js";
 import { KEYBINDINGS, KeybindingsManager } from "../src/core/keybindings.js";
 import type { AgentConnectionHeartbeat } from "../src/modes/agent-connection/types.js";

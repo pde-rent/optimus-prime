@@ -39,10 +39,25 @@ export function v7(): string {
 
 	const h = HEX;
 	return (
-		h[bytes[0]!]! + h[bytes[1]!]! + h[bytes[2]!]! + h[bytes[3]!]! +
-		"-" + h[bytes[4]!]! + h[bytes[5]!]! +
-		"-" + h[bytes[6]!]! + h[bytes[7]!]! +
-		"-" + h[bytes[8]!]! + h[bytes[9]!]! +
-		"-" + h[bytes[10]!]! + h[bytes[11]!]! + h[bytes[12]!]! + h[bytes[13]!]! + h[bytes[14]!]! + h[bytes[15]!]!
+		h[bytes[0]!]! +
+		h[bytes[1]!]! +
+		h[bytes[2]!]! +
+		h[bytes[3]!]! +
+		"-" +
+		h[bytes[4]!]! +
+		h[bytes[5]!]! +
+		"-" +
+		h[bytes[6]!]! +
+		h[bytes[7]!]! +
+		"-" +
+		h[bytes[8]!]! +
+		h[bytes[9]!]! +
+		"-" +
+		h[bytes[10]!]! +
+		h[bytes[11]!]! +
+		h[bytes[12]!]! +
+		h[bytes[13]!]! +
+		h[bytes[14]!]! +
+		h[bytes[15]!]!
 	);
 }

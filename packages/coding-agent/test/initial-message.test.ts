@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import type { Args } from "../src/cli/args.js";
 import { buildInitialMessage } from "../src/cli/initial-message.js";
 

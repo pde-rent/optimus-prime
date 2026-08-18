@@ -1,6 +1,6 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { execSync, spawn } from "child_process";
 import { platform } from "os";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { copyToClipboard } from "../src/utils/clipboard.js";
 
 const mocks = vi.hoisted(() => {

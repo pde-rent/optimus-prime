@@ -1,5 +1,5 @@
+import { describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../../../src/core/session-manager.js";
 import { startSideQuestion } from "../../../src/core/side-question.js";
 import type { DaemonSocketClient } from "../../../src/modes/daemon/active-session-state.js";

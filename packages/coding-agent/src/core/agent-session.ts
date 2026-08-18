@@ -35,6 +35,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
+import { Semaphore } from "../utils/semaphore.js";
 import { ensureDir } from "../utils/shared.js";
 import { sleep } from "../utils/sleep.js";
 import {
@@ -207,14 +208,20 @@ import {
 	createDefaultRlmSubagentSessionName,
 	createRlmDeleteSubagentHostHandler,
 	createRlmFindModelsHostHandler,
+	createRlmGetEffortHostHandler,
 	createRlmListSubagentsHostHandler,
 	createRlmRunHostHandler,
+	createRlmSetEffortHostHandler,
 	findRlmModelMatches,
+	normalizeRequestedRlmEffort,
 	normalizeRequestedRlmSubagentModel,
 	normalizeRequestedRlmSubagentSessionName,
 	type RlmDeleteSubagentResult,
 	type RlmFindModelsResult,
+	type RlmGetEffortResult,
 	type RlmListSubagentsResult,
+	type RlmSetEffortResult,
+	type RlmSetMaxDepthResult,
 	type RlmSpawnHandle,
 	type RlmSubagentRegistryEntry,
 	type RlmSubagentRuntime,
@@ -238,7 +245,13 @@ import {
 	transitionSessionAction,
 	type WakePolicy,
 } from "./session-action-store.js";
-import type { BranchSummaryEntry, CompactionEntry, SessionContext, SessionMessageEntry } from "./session-manager.js";
+import type {
+	BranchSummaryEntry,
+	CompactionEntry,
+	SessionContext,
+	SessionMessageEntry,
+	ThinkingLevelChangeReason,
+} from "./session-manager.js";
 import {
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
@@ -282,6 +295,8 @@ export interface RlmChildAgentSnapshot {
 	activeSessionId?: string;
 	sessionName?: string;
 	model?: string;
+	/** Effective reasoning level: the child's live level once it exists, else the requested one. */
+	effort?: string;
 	label: string;
 	status: RlmChildAgentStatus;
 	durationMs?: number;
@@ -876,8 +891,37 @@ interface RlmSubagentModelSelection {
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/**
+ * Dynamic-effort guards. More tokens do not reliably buy accuracy, so the model
+ * starts at the user's floor and only climbs on observed failure. The change cap
+ * and the no-lowering-after-raising rule bound the oscillation that policy invites.
+ */
+const MAX_EFFORT_CHANGES_PER_RUN = 3;
+/**
+ * Ceiling on a model-initiated recursion-depth raise. Past 3 every extra level
+ * only adds a relay hop for results and one more place to lose them: agent
+ * messaging reaches parent/sibling/child only, so cousins at depth 4 cannot talk
+ * to each other anyway. A user can still configure more explicitly.
+ */
+const MODEL_MAX_RLM_DEPTH = 3;
+const MAX_DEPTH_CHANGES_PER_RUN = 2;
+const EFFORT_ESCALATION_TOOL_ERROR_THRESHOLD = 3;
+const BANDED_EFFORT_MIN: ThinkingLevel = "low";
+const BANDED_EFFORT_MAX: ThinkingLevel = "high";
+
 const KERNEL_STATE_LISTING_TIMEOUT_MS = 5000;
 const RLM_MAX_DEPTH_STATE_CUSTOM_TYPE = "rlm_max_depth_state";
+
+/**
+ * Every spawned child boots its own REPL kernel, so an unbounded fan-out is a
+ * memory and process-count incident rather than merely an expensive one. These
+ * bound the boot, not the admission: `rlm()` must keep resolving immediately
+ * (see prompts/rlm.ts), so a gate in front of it would turn a parallel
+ * `Promise.all([rlm(a), rlm(b)])` into a serial one and stall the calling cell.
+ */
+const GLOBAL_RLM_KERNEL_BOOT_LIMIT = 8;
+const ROOT_RLM_KERNEL_BOOT_LIMIT = 4;
+const globalRlmKernelBoots = new Semaphore(GLOBAL_RLM_KERNEL_BOOT_LIMIT);
 
 function noopRlmChildAbort(): void {}
 function noopRlmChildEventUnsubscribe(): void {}
@@ -1033,6 +1077,14 @@ export class AgentSession {
 	private _goalAbortInProgress = false;
 	private _autonomousState: AutonomousRuntimeState;
 	private _autonomousContinuationSuppressionDepth = 0;
+	/** Dynamic-effort run state; all four reset on `agent_start`. */
+	private _effortChangesThisRun = 0;
+	private _effortRaisedThisRun = false;
+	private _effortEscalationTriggered = false;
+	private _depthChangesThisRun = 0;
+	private _effortToolErrorStreaks = new Map<string, number>();
+	/** A user interrupt ends the run it happened in, so its trigger is carried into the next one. */
+	private _effortEscalationCarryOver = false;
 	private _autonomousContinuationSuppressedMessages = new WeakSet<AgentMessage>();
 
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -1104,6 +1156,11 @@ export class AgentSession {
 	private _ipythonRuntimeBuilt = false;
 	private readonly _prewarmIpythonKernel: boolean;
 	private _rlmDepth: number;
+	/**
+	 * Per-session boot gate. Depth-weighted so a subtree cannot multiply out: a
+	 * root allows 4 concurrent boots, its children 2, theirs 1.
+	 */
+	private _rlmKernelBootGate: Semaphore | undefined;
 	private readonly _configuredRlmMaxDepth: number | undefined;
 	private _rlmMaxDepth: number;
 	private _rlmMaxDepthSource: RlmMaxDepthSource;
@@ -3193,6 +3250,9 @@ export class AgentSession {
 			cwd: this._cwd,
 			signal,
 		});
+		if (this._autonomousState.lastGateFailure) {
+			this.markEffortEscalationTrigger();
+		}
 		if (autonomousMessage && this._sessionInputArrivalEpoch !== arrivalEpoch) {
 			this._restoreAutonomousRuntimeSnapshot(autonomousSnapshot);
 			return [];
@@ -3600,6 +3660,7 @@ export class AgentSession {
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
+			this._resetDynamicEffortRunState();
 			this.sessionManager.recordGitStateIfChanged();
 			await this._extensionRunner.emit({ type: "agent_start" });
 		} else if (event.type === "agent_end") {
@@ -3665,6 +3726,7 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 		} else if (event.type === "tool_execution_end") {
+			this._recordEffortToolOutcome(event.toolName, event.isError);
 			const extensionEvent: ToolExecutionEndEvent = {
 				type: "tool_execution_end",
 				toolCallId: event.toolCallId,
@@ -6507,6 +6569,10 @@ export class AgentSession {
 	}
 
 	requestAbort(): void {
+		// A user interrupt rejects the current approach. It also ends the run it
+		// fires in, so the trigger carries into the next run rather than expiring.
+		this._effortEscalationCarryOver = true;
+		this.markEffortEscalationTrigger();
 		this._sessionInputPumpRequested = false;
 		this._sessionInputPumpEpoch++;
 		this._sessionInputPumpSuspended = true;
@@ -6614,7 +6680,7 @@ export class AgentSession {
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingLevel(thinkingLevel, { reason: "model_switch" });
 		this._clampServiceTierForModel(serviceTier);
 
 		const emitPromise = this._queueModelSelectEmit(model, previousModel, "set");
@@ -6681,7 +6747,7 @@ export class AgentSession {
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
 		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
 
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingLevel(thinkingLevel, { reason: "model_switch" });
 		this._clampServiceTierForModel(serviceTier);
 
 		const emitPromise = this._queueModelSelectEmit(next.model, currentModel, "cycle");
@@ -6720,7 +6786,7 @@ export class AgentSession {
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
 
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingLevel(thinkingLevel, { reason: "model_switch" });
 		this._clampServiceTierForModel(serviceTier);
 
 		const emitPromise = this._queueModelSelectEmit(nextModel, currentModel, "cycle");
@@ -6738,7 +6804,17 @@ export class AgentSession {
 		};
 	}
 
-	setThinkingLevel(level: ThinkingLevel): void {
+	/**
+	 * @param options.persistDefault Write the level back as the user's global
+	 * default. True for deliberate user choices (`/effort`, cycling, model
+	 * switches). Callers that adjust the level on the user's behalf must pass
+	 * false: an automatic adjustment is scoped to the run that made it, and
+	 * persisting it would silently rewrite a setting the user never touched.
+	 */
+	setThinkingLevel(
+		level: ThinkingLevel,
+		options: { persistDefault?: boolean; reason?: ThinkingLevelChangeReason } = {},
+	): void {
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
@@ -6748,8 +6824,8 @@ export class AgentSession {
 		this.agent.state.thinkingLevel = effectiveLevel;
 
 		if (isChanging) {
-			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (this.supportsThinking() || effectiveLevel !== "off") {
+			this.sessionManager.appendThinkingLevelChange(effectiveLevel, options.reason ?? "user");
+			if (options.persistDefault !== false && (this.supportsThinking() || effectiveLevel !== "off")) {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
@@ -6837,6 +6913,159 @@ export class AgentSession {
 
 	private _clampThinkingLevel(level: ThinkingLevel, _availableLevels: ThinkingLevel[]): ThinkingLevel {
 		return this.model ? (clampThinkingLevel(this.model, level) as ThinkingLevel) : "off";
+	}
+
+	private _thinkingLevelRank(level: ThinkingLevel): number {
+		return THINKING_LEVELS.indexOf(level);
+	}
+
+	/** The user's configured level is a floor: the model may climb above it, never below. */
+	private _effortFloor(): ThinkingLevel {
+		return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
+	}
+
+	get effortChangesThisRun(): number {
+		return this._effortChangesThisRun;
+	}
+
+	get effortEscalationTriggered(): boolean {
+		return this._effortEscalationTriggered;
+	}
+
+	/**
+	 * Latch an observed failure that justifies xhigh/max for the rest of this run.
+	 * Triggers mirror the autonomous-continuation signals: a failed quality gate,
+	 * exhausted retries, a user interrupt, or the same tool failing repeatedly.
+	 */
+	markEffortEscalationTrigger(): void {
+		this._effortEscalationTriggered = true;
+	}
+
+	private _resetDynamicEffortRunState(): void {
+		this._effortChangesThisRun = 0;
+		this._effortRaisedThisRun = false;
+		this._effortEscalationTriggered = this._effortEscalationCarryOver;
+		this._depthChangesThisRun = 0;
+		this._effortEscalationCarryOver = false;
+		this._effortToolErrorStreaks.clear();
+	}
+
+	private _recordEffortToolOutcome(toolName: string, isError: boolean): void {
+		if (!isError) {
+			this._effortToolErrorStreaks.delete(toolName);
+			return;
+		}
+		const streak = (this._effortToolErrorStreaks.get(toolName) ?? 0) + 1;
+		this._effortToolErrorStreaks.set(toolName, streak);
+		if (streak >= EFFORT_ESCALATION_TOOL_ERROR_THRESHOLD) {
+			this.markEffortEscalationTrigger();
+		}
+	}
+
+	getEffortState(): RlmGetEffortResult {
+		return { effort: this.thinkingLevel, available: this.getAvailableThinkingLevels() };
+	}
+
+	/**
+	 * Model-initiated effort change, taking effect on the next turn. It never
+	 * persists the user's global default and never throws: a refusal is reported
+	 * back so the model can observe the policy instead of losing a turn to an error.
+	 */
+	/**
+	 * Apply the dynamic-effort band to a level requested for a CHILD. Spawning was
+	 * otherwise an escape hatch around the band: a parent capped at `high` could
+	 * hand a child `max` and buy unbounded reasoning through the back door. Clamping
+	 * is silent by design here (portable spawn code must not become model-specific),
+	 * so the caller echoes the effective level back in the admission handle.
+	 */
+	private _bandLimitedChildEffort(requested: ThinkingLevel | undefined): ThinkingLevel | undefined {
+		if (requested === undefined) return undefined;
+		if (this.settingsManager.getDynamicEffort() !== "banded") return requested;
+		const rank = this._thinkingLevelRank(requested);
+		if (rank > this._thinkingLevelRank(BANDED_EFFORT_MAX) && !this._effortEscalationTriggered) {
+			return BANDED_EFFORT_MAX;
+		}
+		if (rank < this._thinkingLevelRank(BANDED_EFFORT_MIN)) {
+			return BANDED_EFFORT_MIN;
+		}
+		return requested;
+	}
+
+	/**
+	 * Model-initiated recursion-depth change. Session-scoped: it never writes the
+	 * user's global `rlmMaxDepth`, mirroring the effort gate.
+	 *
+	 * Raising is gated on the same observed-failure triggers as effort rather than
+	 * on predicted task shape, and capped at MODEL_MAX_RLM_DEPTH. Note the cost:
+	 * `setRlmMaxDepth` rebuilds the system prompt, and for a child at the old limit
+	 * this newly renders the recursion block, so a raise voids that agent's prompt
+	 * cache. Prefer setting depth before spawning a subtree, not mid-run.
+	 */
+	async setModelRequestedMaxDepth(maxDepth: number): Promise<RlmSetMaxDepthResult> {
+		const current = this._rlmMaxDepth;
+		if (!isNonNegativeInteger(maxDepth)) {
+			throw new Error("rlm max depth must be a non-negative integer");
+		}
+		if (!this.settingsManager.getDynamicDepth()) {
+			return { max_depth: current, capped: false, refused: "disabled" };
+		}
+		if (maxDepth === current) {
+			return { max_depth: current, capped: false };
+		}
+		const isRaise = maxDepth > current;
+		if (isRaise && maxDepth > MODEL_MAX_RLM_DEPTH) {
+			return { max_depth: current, capped: true, refused: "cap" };
+		}
+		if (isRaise && !this._effortEscalationTriggered) {
+			return { max_depth: current, capped: false, refused: "no_trigger" };
+		}
+		if (this._depthChangesThisRun >= MAX_DEPTH_CHANGES_PER_RUN) {
+			return { max_depth: current, capped: true, refused: "thrash" };
+		}
+		this._depthChangesThisRun += 1;
+		await this.setRlmMaxDepth(maxDepth);
+		return { max_depth: this._rlmMaxDepth, capped: false };
+	}
+
+	setModelRequestedThinkingLevel(level: ThinkingLevel): RlmSetEffortResult {
+		const current = this.thinkingLevel;
+		if (this.settingsManager.getDynamicEffort() === "off") {
+			return { effort: current, clamped: false, refused: "disabled" };
+		}
+
+		const effective = this._clampThinkingLevel(level, this.getAvailableThinkingLevels());
+		const clamped = effective !== level;
+		if (effective === current) {
+			return { effort: current, clamped };
+		}
+
+		const rank = this._thinkingLevelRank(effective);
+		// `off` stays user-only: a model must not silently switch its own reasoning off.
+		if (effective === "off" || rank < this._thinkingLevelRank(this._effortFloor())) {
+			return { effort: current, clamped, refused: "floor" };
+		}
+		if (this.settingsManager.getDynamicEffort() === "banded") {
+			const belowBand = rank < this._thinkingLevelRank(BANDED_EFFORT_MIN);
+			const aboveBand = rank > this._thinkingLevelRank(BANDED_EFFORT_MAX);
+			if (belowBand || (aboveBand && !this._effortEscalationTriggered)) {
+				return { effort: current, clamped, refused: "band" };
+			}
+		}
+		if (this._effortChangesThisRun >= MAX_EFFORT_CHANGES_PER_RUN) {
+			return { effort: current, clamped: false, capped: true };
+		}
+		const isRaise = rank > this._thinkingLevelRank(current);
+		if (this._effortRaisedThisRun && !isRaise) {
+			return { effort: current, clamped, refused: "lower_after_raise" };
+		}
+
+		this.setThinkingLevel(effective, {
+			persistDefault: false,
+			reason: isRaise && this._effortEscalationTriggered ? "escalation" : "model_self",
+		});
+		this._effortChangesThisRun++;
+		if (isRaise) this._effortRaisedThisRun = true;
+		return { effort: this.thinkingLevel, clamped };
 	}
 
 	private async _notifyKernelStateAfterCompaction(): Promise<void> {
@@ -8616,6 +8845,20 @@ export class AgentSession {
 			"rlm.run": createRlmRunHostHandler(async ({ prompt, kwargs, cellSourceCode }) => ({
 				...(await this.runRlmChild(prompt, kwargs, cellSourceCode)),
 			})),
+			"rlm.set_effort": createRlmSetEffortHostHandler((level) => this.setModelRequestedThinkingLevel(level)),
+			"rlm.get_effort": createRlmGetEffortHostHandler(() => this.getEffortState()),
+			"rlm.set_max_depth": async (payload) => {
+				const requested = (payload as { maxDepth?: unknown }).maxDepth;
+				if (typeof requested !== "number") {
+					throw new Error("rlm.set_max_depth maxDepth must be a number");
+				}
+				return (await this.setModelRequestedMaxDepth(requested)) as unknown as Record<string, unknown>;
+			},
+			"rlm.get_max_depth": async () => ({
+				max_depth: this._rlmMaxDepth,
+				depth: this._rlmDepth,
+				model_max: MODEL_MAX_RLM_DEPTH,
+			}),
 			"rlm.find_models": createRlmFindModelsHostHandler((query, limit) => this.findRlmModels(query, limit)),
 			"rlm.list_subagents": createRlmListSubagentsHostHandler(() => this.listRlmSubagents()),
 			"rlm.delete_subagent": createRlmDeleteSubagentHostHandler((target) => this.deleteRlmSubagent(target)),
@@ -8884,6 +9127,7 @@ export class AgentSession {
 		spawnCode?: string;
 		sessionDir: string;
 		model: Model<any>;
+		effort?: ThinkingLevel;
 	}): CreateRlmSubagentRuntimeOptions {
 		return {
 			parentSession: this,
@@ -8893,7 +9137,7 @@ export class AgentSession {
 			spawnCode: options.spawnCode,
 			sessionDir: options.sessionDir,
 			model: options.model,
-			thinkingLevel: clampThinkingLevel(options.model, this.thinkingLevel) as ThinkingLevel,
+			thinkingLevel: clampThinkingLevel(options.model, options.effort ?? this.thinkingLevel) as ThinkingLevel,
 			serviceTier:
 				this.serviceTier === "priority" && !supportsFastMode(options.model) ? "default" : this.serviceTier,
 			scopedModels: [...this._scopedModels],
@@ -8906,6 +9150,16 @@ export class AgentSession {
 			rlmMaxDepth: this._rlmMaxDepth,
 			rlmParentNodeId: options.id,
 		};
+	}
+
+	/**
+	 * Bound concurrent kernel boots. The session gate is taken first so a busy
+	 * subtree queues on its own permits rather than holding global ones; the
+	 * order is fixed everywhere, so the pair cannot deadlock.
+	 */
+	private async _acquireKernelBootSlot<T>(boot: () => Promise<T>): Promise<T> {
+		this._rlmKernelBootGate ??= new Semaphore(Math.max(1, ROOT_RLM_KERNEL_BOOT_LIMIT >> this._rlmDepth));
+		return await this._rlmKernelBootGate.run(() => globalRlmKernelBoots.run(boot));
 	}
 
 	private async _createRlmSubagentRuntime(options: CreateRlmSubagentRuntimeOptions): Promise<RlmSubagentRuntime> {
@@ -8925,7 +9179,7 @@ export class AgentSession {
 			});
 		}
 		childSessionManager.appendModelChange(options.model.provider, options.model.id);
-		childSessionManager.appendThinkingLevelChange(options.thinkingLevel);
+		childSessionManager.appendThinkingLevelChange(options.thinkingLevel, "spawn");
 		childSessionManager.appendServiceTierChange(options.serviceTier);
 
 		const childAgent = new Agent({
@@ -9544,13 +9798,14 @@ export class AgentSession {
 		kwargs: Record<string, unknown> = {},
 		spawnCode?: string,
 	): Promise<RlmSpawnHandle> {
-		const { name: rawName, model: rawModel, ...unsupported } = kwargs;
+		const { name: rawName, model: rawModel, effort: rawEffort, ...unsupported } = kwargs;
 		const unsupportedKwargs = Object.keys(unsupported);
 		if (unsupportedKwargs.length > 0) {
 			throw new Error(`Unsupported rlm.run kwargs: ${unsupportedKwargs.sort().join(", ")}`);
 		}
 		const requestedSessionName = normalizeRequestedRlmSubagentSessionName(rawName);
 		const requestedModel = normalizeRequestedRlmSubagentModel(rawModel);
+		const requestedEffort = this._bandLimitedChildEffort(normalizeRequestedRlmEffort(rawEffort));
 		if (requestedSessionName) assertDirectAgentMessageTarget(requestedSessionName);
 		if (this._rlmDepth >= this._rlmMaxDepth) {
 			throw new Error(
@@ -9608,6 +9863,9 @@ export class AgentSession {
 					parentId: this._rlmParentNodeId,
 					sessionName: childSession?.sessionName ?? sessionName,
 					model: `${childModel.provider}/${childModel.id}`,
+					// `subagentOptions` is declared below this closure, so reading it here
+					// would be a TDZ crash on the first emit; requestedEffort is already bound.
+					effort: childSession?.thinkingLevel ?? requestedEffort,
 					label,
 					status: run.status,
 					durationMs,
@@ -9640,6 +9898,7 @@ export class AgentSession {
 				spawnCode,
 				sessionDir: childSessionDir,
 				model: modelSelection.model,
+				effort: requestedEffort,
 			}),
 			onSessionPublished: publishChildSession,
 		};
@@ -9671,7 +9930,12 @@ export class AgentSession {
 		void (async () => {
 			let childRuntime: RlmSubagentRuntime | undefined;
 			try {
-				childRuntime = await this._createRlmSubagentRuntime(subagentOptions);
+				childRuntime = await this._acquireKernelBootSlot(async () => {
+					// Re-checked after queueing: a run cancelled while waiting must
+					// release its slot without paying for a kernel.
+					throwIfCancelled();
+					return await this._createRlmSubagentRuntime(subagentOptions);
+				});
 				const child = childRuntime.session;
 				if (run.status === "cancelled") throw new Error(run.error ?? "RLM child cancelled");
 				if (child.sessionName !== sessionName) child.setSessionName(sessionName);
@@ -9887,6 +10151,7 @@ export class AgentSession {
 			name: sessionName,
 			session_dir: childSessionDir,
 			model: `${modelSelection.model.provider}/${modelSelection.model.id}`,
+			effort: subagentOptions.thinkingLevel,
 		};
 	}
 
@@ -10089,6 +10354,7 @@ export class AgentSession {
 		this._retryAttempt++;
 
 		if (this._retryAttempt > settings.maxRetries) {
+			this.markEffortEscalationTrigger();
 			this._markProviderAuthStaleForRetryFailure(message, options);
 			this._emit({
 				type: "auto_retry_end",

@@ -1,6 +1,6 @@
-import { color as chalk } from "../utils/ansi.js";
 import { formatSessionDisplayId } from "../modes/daemon/daemon-session-id.js";
 import type { SessionSummary } from "../modes/daemon/daemon-session-list.js";
+import { color as chalk } from "../utils/ansi.js";
 
 // Display status derived from the lifecycle + activity axes.
 type ListStatus = "working" | "idle" | "archived";

@@ -1,6 +1,6 @@
 ---
 name: compact
-description: Check context usage and compact the conversation from the REPL. Use when context is filling up and substantial work remains, so the session is summarized and you keep working instead of stopping early.
+description: Check context usage with `await compact.status()` and compact the conversation with `await compact.run(instructions?)` from the REPL. Use when context is filling up and substantial work remains, so the session is summarized and you keep working instead of stopping early.
 ---
 
 # Compact

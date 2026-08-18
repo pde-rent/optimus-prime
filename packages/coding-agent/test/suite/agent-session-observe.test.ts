@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import type { AgentObserveController } from "../../src/core/agent-observe.js";
 import { createHarness } from "./harness.js";
 

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { color as chalk } from "../../utils/ansi.js";
 import { APP_NAME } from "../../config.js";
 import type { SessionStats } from "../../core/session-stats.js";
+import { color as chalk } from "../../utils/ansi.js";
 
 export type ResumeHintStats = Pick<SessionStats, "sessionId" | "sessionFile" | "userMessages">;
 

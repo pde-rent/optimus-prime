@@ -43,3 +43,6 @@ collect.sh
 
 __pycache__/
 *.pyc
+
+# Local IDE/tool permission state
+.qoder/

@@ -25,6 +25,7 @@ export interface AppKeybindings {
 	"app.edits.expand": true;
 	"app.thinking.toggle": true;
 	"app.subagents.focus": true;
+	"app.subagents.graph": true;
 	"app.heartbeats.open": true;
 	"app.heartbeats.openSelected": true;
 	"app.editor.external": true;
@@ -102,6 +103,10 @@ export const KEYBINDINGS = {
 	"app.subagents.focus": {
 		defaultKeys: "alt+a",
 		description: "Open child agents",
+	},
+	"app.subagents.graph": {
+		defaultKeys: "alt+g",
+		description: "Toggle the live subagent graph",
 	},
 	"app.heartbeats.open": {
 		defaultKeys: "ctrl+r",

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { getModel } from "../src/models.js";
 import { streamSimple } from "../src/stream.js";
 import type { Model } from "../src/types.js";

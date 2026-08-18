@@ -1,6 +1,6 @@
-import { Container, setKeybindings } from "@earendil-works/pi-tui";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { Container, setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	BrandSplashHeader,
@@ -9,6 +9,7 @@ import {
 	START_HINTS,
 } from "../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
+import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
 
 describe("InteractiveMode startup hints", () => {
 	beforeAll(() => {
@@ -49,9 +50,10 @@ describe("InteractiveMode startup hints", () => {
 		const output = stripAnsi(lines.join("\n"));
 
 		expect(lines[0]).toBe("");
-		expect(output).toContain("version  v0.0.0");
-		expect(output).toContain("model    test-model");
-		expect(output).toContain("cwd      /tmp/project");
+		expect(output).toContain("optimus prime");
+		expect(output).toContain("v0.0.0");
+		expect(output).toContain("test-model");
+		expect(output).toContain("/tmp/project");
 		expect(output).toContain('Try "refactor @<filepath>"');
 		expect(output).not.toContain("input");
 		expect(output).not.toContain("files");
@@ -63,6 +65,85 @@ describe("InteractiveMode startup hints", () => {
 			() => "/tmp/project",
 		);
 		expect(unpadded.render(120)[0]).not.toBe("");
+	});
+
+	it("paints splash metadata over the bottom-right of the mark", () => {
+		const header = new BrandSplashHeader(
+			"0.0.0",
+			() => "deepseek/deepseek-v4-flash-0731",
+			() => "/tmp/project",
+		);
+
+		const logoRows = OPTIMUS_LOGO.split("\n");
+		const canvasWidth = logoRows.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
+		const rendered = header.render(120).map((line) => stripAnsi(line).slice(1));
+		const artRows = rendered.slice(0, logoRows.length);
+
+		const metaLines = [
+			"optimus prime",
+			"version v0.0.0",
+			"model   deepseek/deepseek-v4-flash-0731",
+			"cwd     /tmp/project",
+		];
+		const blockWidth = Math.max(...metaLines.map((line) => line.length));
+		const blockStart = canvasWidth - blockWidth;
+		const blockTop = artRows.length - metaLines.length;
+
+		// Rows above the block keep the mark byte for byte.
+		for (const [index, row] of artRows.slice(0, blockTop).entries()) {
+			expect(row.trimEnd()).toBe(logoRows[index]);
+		}
+
+		for (const [index, meta] of metaLines.entries()) {
+			const row = artRows[blockTop + index] ?? "";
+			// Right-aligned against the art canvas, not against the trimmed row.
+			expect(row.slice(blockStart, canvasWidth).trimEnd()).toBe(meta);
+			// One blank gutter column keeps the ink from touching the text.
+			expect(row[blockStart - 1]).toBe(" ");
+			expect(row.slice(0, blockStart - 1)).toBe((logoRows[blockTop + index] ?? "").slice(0, blockStart - 1));
+		}
+
+		expect(rendered.some((row) => row.includes("type to search sessions"))).toBe(true);
+	});
+
+	it("shows the whole model id instead of truncating it", () => {
+		const modelId = "deepseek/deepseek-v4-flash-0731";
+		const header = new BrandSplashHeader(
+			"0.0.0",
+			() => modelId,
+			() => "/tmp/project",
+		);
+
+		for (const width of [80, 120]) {
+			expect(stripAnsi(header.render(width).join("\n"))).toContain(modelId);
+		}
+	});
+
+	it("starts the mark at the head row with no orphan antenna glyph", () => {
+		const logoRows = OPTIMUS_LOGO.split("\n");
+		const inkColumn = (row: string) => [...row].findIndex((char) => char !== "⠀" && char !== " ");
+		const inkCount = (row: string) => [...row].filter((char) => char !== "⠀" && char !== " ").length;
+
+		expect(logoRows).toHaveLength(18);
+		expect(inkColumn(logoRows[0] ?? "")).toBe(16);
+		// A row carrying a single glyph reads as a rendering artifact, not as art.
+		expect(logoRows.filter((row) => inkCount(row) <= 1)).toEqual([]);
+	});
+
+	it("does not wrap or throw in narrow terminals", () => {
+		const header = new BrandSplashHeader(
+			"0.0.0",
+			() => "test-model",
+			() => "/tmp/project",
+		);
+
+		for (const width of [60, 80, 120]) {
+			const lines = header.render(width);
+			for (const line of lines) {
+				expect(stripAnsi(line)).not.toContain("\n");
+				expect(visibleWidth(line)).toBe(width);
+			}
+		}
 	});
 
 	it("randomly selects from five concise filepath prompts", () => {

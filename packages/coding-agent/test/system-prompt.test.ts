@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import { buildRlmPrompt } from "../src/core/prompts/index.js";
-import type { HarnessState } from "../src/core/refinement/index.js";
+import type { HarnessEntry, HarnessState, RefinementKind } from "../src/core/refinement/index.js";
 import type { Skill } from "../src/core/skills.js";
 import { buildSystemPrompt } from "../src/core/system-prompt.js";
 
@@ -34,6 +34,23 @@ function jsSkill(name: string, importName = name.replaceAll("-", "_")): Skill {
 	};
 }
 
+function harnessEntry(kind: RefinementKind, id: string, title: string, path: string, content: string): HarnessEntry {
+	return {
+		id,
+		kind,
+		title,
+		content,
+		path,
+		reference: {},
+		arguments: {},
+		metadata: {},
+		source: "refine",
+		created_at: "2026-06-08T00:00:00.000Z",
+		updated_at: "2026-06-08T00:00:00.000Z",
+		version: 1,
+	};
+}
+
 describe("buildRlmPrompt", () => {
 	test("builds the rlm prompt without recursion", () => {
 		const prompt = buildRlmPrompt({
@@ -62,7 +79,6 @@ describe("buildRlmPrompt", () => {
 				"Treat this as clarity guidance, not a claim of formal ASD-STE100 compliance. Preserve a user-requested format, tone, terminology, and necessary precision.",
 				"",
 				"Working directory: /repo",
-				"Conversation log: /repo/.pi/sessions/session.jsonl",
 				"Recursive agent depth: 0",
 				"REPL runtime: Bun (Bun.file, Bun.write, Bun.Glob, Bun.spawn), native fetch, Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, URL/URLSearchParams.",
 				"",
@@ -86,15 +102,51 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
 				"",
-				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 				"",
 				"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
+				"",
+				"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await rlm('sub-task', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped, raise only after observed failure, and lower once a task proves trivial.",
+				"Recursion depth is dynamic too: `await rlm.get_max_depth()` reports the current limit, your depth, and the ceiling; `await rlm.set_max_depth(n)` raises it only after an observed failure and never past the ceiling. A raise rebuilds the system prompt, so set it before spawning a subtree rather than mid-run.",
 				"",
 				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 				"",
 				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable facts/preferences into memories, and narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
+				"",
+				// Last on purpose: the only per-agent-unique line, kept out of the
+				// cacheable prefix so siblings share it.
+				"Conversation log: /repo/.pi/sessions/session.jsonl",
 			].join("\n"),
 		);
+	});
+
+	test("keeps the per-agent conversation log out of the cacheable prefix", () => {
+		// Siblings spawned from one parent differ only by their session file. If that
+		// path appears anywhere but the tail, it splits the shared prefix and every
+		// sibling pays a full cache write instead of a read.
+		const base = {
+			cwd: "/repo",
+			installedSkills: ["websearch", "refine"],
+			activeTools: ["ipython"],
+			allowRecursion: false,
+		};
+		const first = buildRlmPrompt({ ...base, messagesPath: "/repo/.pi/sessions/child-a.jsonl" });
+		const second = buildRlmPrompt({ ...base, messagesPath: "/repo/.pi/sessions/child-b.jsonl" });
+
+		expect(first).not.toBe(second);
+
+		let shared = 0;
+		while (shared < first.length && shared < second.length && first[shared] === second[shared]) {
+			shared++;
+		}
+		// The prompts may only diverge at or after the trailing log line, so
+		// everything before it is a byte-identical shared prefix.
+		const logStart = first.lastIndexOf("Conversation log:");
+		expect(logStart).toBeGreaterThan(0);
+		expect(shared).toBeGreaterThanOrEqual(logStart);
+		expect(second.slice(0, logStart)).toBe(first.slice(0, logStart));
+		// The unique tail is a single short line, not a meaningful slice of the prompt.
+		expect(first.length - logStart).toBeLessThan(120);
 	});
 
 	test("defaults omitted activeTools to ipython guidance", () => {
@@ -386,12 +438,24 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("a durable fact/preference should become a memory");
 		expect(prompt).toContain("a narrow behavioral policy should become a prompt addendum");
 		expect(prompt).toContain("validation shows a continual harness entry is wrong");
-		expect(prompt).toContain("[global:focused_edits] Focused edits (policy, v1)");
-		expect(prompt).toContain("[global:validation] Validation (repo/prime-agent, v2): Run `npm run check`");
-		expect(prompt).toContain("[global:review_refinement] Review refinement (quality, v1)");
-		expect(prompt).toContain("[global:refinement_reviewer] Refinement reviewer (review, v1)");
-		expect(prompt).toContain("recent refinements: 1");
-		expect(prompt).toContain("[refine_1] Observed validation miss: create memory:validation");
+		expect(prompt).toContain("[global:focused_edits] Focused edits (policy)");
+		expect(prompt).toContain("[global:review_refinement] Review refinement (quality)");
+		expect(prompt).toContain("[global:refinement_reviewer] Refinement reviewer (review)");
+		expect(prompt).toContain(
+			'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`',
+		);
+		expect(prompt).toContain("`await rlm.harness.get_memory({ id, scope })`");
+		expect(prompt).toContain(
+			"Refinement history is not injected; call `await rlm.harness.overview()` for recent refinement events.",
+		);
+		// Memory bodies must never reach the cached system prompt, and no rendered line may
+		// carry a version, a count, or the refinement log: all of them churn the cache.
+		expect(prompt).not.toContain("[global:validation]");
+		expect(prompt).not.toContain("Run `npm run check`");
+		expect(prompt).not.toContain("recent refinements");
+		expect(prompt).not.toContain("[refine_1] Observed validation miss");
+		expect(prompt).not.toContain("(policy, v1)");
+		expect(prompt).not.toContain("memory: 1");
 		expect(prompt.indexOf("# Continual Harness State")).toBeGreaterThan(prompt.indexOf("Conversation log:"));
 	});
 
@@ -414,12 +478,29 @@ describe("buildSystemPrompt", () => {
 				version: 1,
 			};
 		}
+		const skillEntries: HarnessState["entries"]["skill"] = {};
+		for (let i = 0; i < 8; i++) {
+			skillEntries[`skill_${i}`] = {
+				id: `skill_${i}`,
+				kind: "skill",
+				title: `Skill ${i}`,
+				content: longContent,
+				path: "overflow",
+				reference: {},
+				arguments: {},
+				metadata: {},
+				source: "refine",
+				created_at: "2026-06-08T00:00:00.000Z",
+				updated_at: "2026-06-08T00:00:00.000Z",
+				version: 1,
+			};
+		}
 		const harnessState: HarnessState = {
 			schema: 1,
 			entries: {
 				prompt: {},
 				memory: memoryEntries,
-				skill: {},
+				skill: skillEntries,
 				subagent: {},
 			},
 			refinements: [],
@@ -433,10 +514,111 @@ describe("buildSystemPrompt", () => {
 			harnessState,
 		});
 
-		expect(prompt).toContain("memory: 8");
-		expect(prompt).toContain("- +2 more memory entries");
-		expect(prompt).toContain(`${"x".repeat(177)}...`);
+		expect(prompt).toContain("- +2 more skill entries");
+		expect(prompt).toContain(`[global:skill_0] Skill 0 (overflow): ${"x".repeat(177)}...`);
 		expect(prompt).not.toContain(longContent);
+		expect(prompt).not.toContain("memory: 8");
+		expect(prompt).not.toContain("[global:memory_0]");
+		expect(prompt).not.toContain("more memory entries");
+	});
+
+	test("describes memory as unreachable when ipython is inactive", () => {
+		const harnessState: HarnessState = {
+			schema: 1,
+			entries: {
+				prompt: {},
+				memory: {
+					validation: harnessEntry("memory", "validation", "Validation", "repo/prime-agent", "Run bun run check."),
+				},
+				skill: {},
+				subagent: {},
+			},
+			refinements: [],
+		};
+
+		const prompt = buildSystemPrompt({
+			selectedTools: ["bash"],
+			contextFiles: [],
+			skills: [],
+			cwd: "/repo",
+			harnessState,
+		});
+
+		expect(prompt).toContain(
+			"memory: not reachable in this session (no `ipython` tool); memory contents are never injected into this prompt.",
+		);
+		expect(prompt).toContain("Refinement history is not injected.");
+		expect(prompt).not.toContain("rlm.harness.search_memory");
+		expect(prompt).not.toContain("rlm.harness.get_memory");
+		expect(prompt).not.toContain("Run bun run check.");
+	});
+
+	test("harness writes do not change the cacheable system prompt", () => {
+		const before: HarnessState = {
+			schema: 1,
+			entries: {
+				prompt: {},
+				memory: {
+					validation: harnessEntry("memory", "validation", "Validation", "repo/prime-agent", "Run bun run check."),
+				},
+				skill: {
+					review: harnessEntry("skill", "review", "Review", "quality", "Check rollback safety."),
+				},
+				subagent: {},
+			},
+			refinements: [
+				{
+					id: "refine_1",
+					trigger: "Observed validation miss",
+					changes: ["create memory:validation"],
+					evidence: "manual test",
+					outcome: "",
+					created_at: "2026-06-08T00:00:00.000Z",
+				},
+			],
+		};
+		// An ordinary write: one new memory, a version bump plus a fresh timestamp on an
+		// existing skill whose visible fields are unchanged, and one more refinement event.
+		const after: HarnessState = {
+			schema: 1,
+			entries: {
+				prompt: {},
+				memory: {
+					...before.entries.memory,
+					deploys: harnessEntry("memory", "deploys", "Deploys", "repo/ops", "Deploy from main only."),
+				},
+				skill: {
+					review: {
+						...before.entries.skill.review,
+						version: 7,
+						updated_at: "2026-08-19T00:00:00.000Z",
+					},
+				},
+				subagent: {},
+			},
+			refinements: [
+				...before.refinements,
+				{
+					id: "refine_2",
+					trigger: "Recorded a deploy rule",
+					changes: ["create memory:deploys"],
+					evidence: "user correction",
+					outcome: "",
+					created_at: "2026-08-19T00:00:00.000Z",
+				},
+			],
+		};
+
+		const build = (harnessState: HarnessState) =>
+			buildSystemPrompt({
+				selectedTools: ["ipython"],
+				contextFiles: [],
+				skills: [],
+				cwd: "/repo",
+				harnessState,
+			});
+
+		expect(build(after)).toBe(build(before));
 	});
 
 	test("uses the model-agnostic rlm harness prompt", () => {
@@ -504,7 +686,8 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("# Continual Harness State");
 		expect(prompt).toContain("Installed skills ship no CLI entry points, so never invoke them as shell commands");
 		expect(prompt).not.toContain("use installed skills as shell commands");
-		expect(prompt).toContain("subagent: 1");
+		expect(prompt).toContain("subagent specs (delegation roles to match a task against):");
+		expect(prompt).toContain("[global:worker] Worker (review)");
 		expect(prompt).not.toContain("IPython is the agent's long-lived notebook");
 		expect(prompt).not.toContain("Default to non-blocking subagents");
 		expect(prompt).not.toContain("agent_observe.list_agents");
@@ -596,7 +779,11 @@ describe("buildSystemPrompt", () => {
 
 		expect(prompt).toContain("custom body");
 		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("[global:custom_memory] Custom memory (custom, v1)");
+		expect(prompt).toContain(
+			'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`',
+		);
+		expect(prompt).not.toContain("[global:custom_memory]");
+		expect(prompt).not.toContain("Custom prompts still receive harness state.");
 		expect(prompt).not.toContain("# IPython Kernel Guidance");
 		expect(prompt).not.toContain("You are a general purpose agent that uses code to solve tasks.");
 		expect(prompt.indexOf("Current working directory: /repo")).toBeLessThan(

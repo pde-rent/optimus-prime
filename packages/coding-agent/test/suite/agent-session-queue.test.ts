@@ -1,10 +1,10 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AGENT_MESSAGE_SOURCE,
 	type AgentSessionMessagePayload,

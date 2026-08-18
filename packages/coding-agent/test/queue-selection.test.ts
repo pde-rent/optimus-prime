@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { QueueSelection } from "../src/modes/interactive/queue-selection.js";
 
 const queue = { steering: ["s1", "s2"], followUp: ["f1", "f2"] };

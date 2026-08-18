@@ -1,6 +1,6 @@
 ---
 name: agent-message
-description: Message an agent's parent, siblings, or direct children through the daemon. Use the family roster to discover reachable agents and send direct text without spoofing sender identity.
+description: Message an agent's parent, siblings, or direct children through the daemon — `await agent_message.list_agents()` for the family roster, `await agent_message.send(text, { receiver_role, receiver_name })` to send direct, or `await agent_message.send("all", { broadcast_message })` to broadcast. Sender identity is derived by the host and cannot be spoofed.
 ---
 
 # Agent Message

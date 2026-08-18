@@ -1,6 +1,6 @@
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ExtensionSelectorComponent } from "../src/modes/interactive/components/extension-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 

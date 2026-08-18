@@ -1,5 +1,5 @@
+import { describe, expect, it, vi } from "bun:test";
 import { getEventListeners } from "node:events";
-import { describe, expect, it, vi } from "vitest";
 import { MutationDrainLatch } from "../src/modes/daemon/mutation-drain-latch.js";
 
 describe("MutationDrainLatch", () => {

@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
-import { afterEach, describe, expect, test } from "vitest";
 import {
 	detectInstallMethod,
 	ENV_LEGACY_SESSION_DIR,

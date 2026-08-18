@@ -1,7 +1,7 @@
+import { describe, expect, it, vi } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
 import { createAgentSessionRuntime } from "../src/core/agent-session-runtime.js";
 import { MissingSessionCwdError } from "../src/core/session-cwd.js";
 import { SessionLease } from "../src/core/session-lease.js";

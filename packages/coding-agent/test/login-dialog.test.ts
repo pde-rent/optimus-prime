@@ -1,3 +1,4 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import {
 	resetCapabilitiesCache,
 	setCapabilities,
@@ -6,11 +7,10 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { LoginDialogComponent } from "../src/modes/interactive/components/login-dialog.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
-import { PRIME_BUTTERFLY_LOGO } from "../src/themes/prime-logo.js";
+import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
 
 const mocks = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),
@@ -144,7 +144,7 @@ describe("LoginDialogComponent", () => {
 
 		dialog.showAuth("https://example.com/challenge", "Code: abc-123");
 		const output = stripAnsi(dialog.render(88).join("\n"));
-		const firstLogoLine = PRIME_BUTTERFLY_LOGO.split("\n")[0]?.trim() ?? "";
+		const firstLogoLine = OPTIMUS_LOGO.split("\n")[0]?.trim() ?? "";
 
 		expect(output).toContain("Login to Prime Inference");
 		expect(output).toContain(firstLogoLine);

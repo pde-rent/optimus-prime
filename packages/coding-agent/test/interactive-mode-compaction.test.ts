@@ -1,6 +1,6 @@
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { Container } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, test, vi } from "vitest";
 import { AgentActivityTracker } from "../src/modes/interactive/agent-activity.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";

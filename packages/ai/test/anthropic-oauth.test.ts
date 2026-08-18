@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { loginAnthropic, refreshAnthropicToken } from "../src/utils/oauth/anthropic.js";
 
 function jsonResponse(body: unknown, status: number = 200): Response {

@@ -1,3 +1,4 @@
+import { describe, expect, it, vi } from "bun:test";
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
@@ -7,7 +8,6 @@ import {
 	type UserMessage,
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { describe, expect, it, vi } from "vitest";
 import { agentLoop, agentLoopContinue, runAgentLoop } from "../src/agent-loop.js";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.js";
 

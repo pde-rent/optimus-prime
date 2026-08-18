@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamAnthropic } from "../src/providers/anthropic.js";
 import type { Context, ToolCall } from "../src/types.js";

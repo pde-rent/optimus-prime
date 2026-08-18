@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "bun:test";
 import type { Model } from "../src/types.js";
 
 let models: Model<"openai-completions">[] = [];

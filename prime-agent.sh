@@ -62,20 +62,21 @@ if [[ "$NO_ENV" == "true" ]]; then
   echo "Running Prime Agent without API keys..."
 fi
 
-# --dist runs the bundled build (what users get; ~3x faster startup than tsx).
+# --dist runs the bundled build (what users get; faster startup than the TS entrypoint).
 if [[ "$USE_DIST" == "true" ]]; then
   BUNDLE="$SCRIPT_DIR/packages/coding-agent/dist/bundle/cli.js"
   if [[ ! -f "$BUNDLE" ]]; then
-    echo "Bundle not found at $BUNDLE. Run npm run build first." >&2
+    echo "Bundle not found at $BUNDLE. Run bun run build first." >&2
     exit 1
   fi
-  exec node "$BUNDLE" ${ARGS[@]+"${ARGS[@]}"}
+  exec bun "$BUNDLE" ${ARGS[@]+"${ARGS[@]}"}
 fi
 
-TSX_BIN="$SCRIPT_DIR/node_modules/.bin/tsx"
-if [[ ! -x "$TSX_BIN" ]]; then
-  echo "tsx not found at $TSX_BIN. Run npm install from the repo root first." >&2
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bun not found on PATH. Install Bun (https://bun.sh) first." >&2
   exit 1
 fi
 
-"$TSX_BIN" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}
+# The daemon is spawned with process.execPath (src/cli/daemon-launch.ts), so the
+# launcher runtime decides the daemon runtime. Bun only.
+exec bun "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}

@@ -1,5 +1,5 @@
+import { describe, expect, test } from "bun:test";
 import type { AssistantMessage, AssistantMessageEvent, UserMessage } from "@earendil-works/pi-ai";
-import { describe, expect, test } from "vitest";
 import { AgentActivityTracker, formatTokenCount } from "../src/modes/interactive/agent-activity.js";
 
 function createAssistantMessage(outputTokens = 0): AssistantMessage {

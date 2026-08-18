@@ -34,7 +34,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-	console.log(`Usage: node scripts/session-context-stats.mjs [options]
+	console.log(`Usage: bun scripts/session-context-stats.mjs [options]
 
 Options:
   --sessions-dir <path>  Sessions directory (default: ~/.pi/agent/sessions)

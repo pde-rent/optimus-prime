@@ -25,7 +25,7 @@
 - After code changes (not documentation changes): `bun run check` (get full output, no tail). Fix all errors, warnings, and infos before committing.
 - Note: `bun run check` does not run tests.
 - NEVER run: `bun run dev`, `bun run build`, `bun run test`
-- Only run specific tests if user instructs: `bunx vitest --run test/specific.test.ts`
+- Only run specific tests if user instructs: `bun test --preload ../../scripts/test-preload.ts test/specific.test.ts`
 - Run tests from the package root, not the repo root.
 - If you create or modify a test file, you MUST run that test file and iterate until it passes.
 - When writing tests, run them, identify issues in either the test or implementation, and iterate until fixed.
@@ -43,8 +43,7 @@
 
 ## Dependencies
 
-- A 7-day minimum release age applies to all dependency updates: `.npmrc` sets `min-release-age=7` and `.github/dependabot.yml` uses a matching `cooldown`. Never bypass it for routine updates.
-- `bun install` does not enforce `min-release-age`; check a package's publish date before adding or bumping it.
+- A 7-day minimum release age applies to all dependency updates: `bunfig.toml` sets `minimumReleaseAge = 604800` and `.github/dependabot.yml` uses a matching `cooldown`. Never bypass it for routine updates.
 - The toolchain is Bun only: `bun`, `bunx`, `bun run`, `bun install`. Never use npm, npx, or node.
 
 ## GitHub Workflow

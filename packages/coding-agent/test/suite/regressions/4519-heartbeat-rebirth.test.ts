@@ -1,6 +1,6 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../../../src/core/agent-session.js";
 import type { CreateAgentSessionRuntimeFactory } from "../../../src/core/agent-session-runtime.js";
 import type { AgentCronJob, AgentCronJobStore, AgentCronScheduler } from "../../../src/core/cron-jobs.js";

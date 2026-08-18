@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 
 const daemonClientMock = vi.hoisted(() => {
 	type Listener = (message: { type: string; activeSessionId?: string; event?: { type: string } }) => void;
@@ -121,8 +121,9 @@ const spawnMock = vi.hoisted(() => {
 	};
 });
 
-vi.mock("node:child_process", async (importOriginal) => {
-	const original = (await importOriginal()) as Record<string, unknown>;
+const actualNodeChildProcess = await import("node:child_process");
+vi.mock("node:child_process", () => {
+	const original = actualNodeChildProcess as Record<string, unknown>;
 	return { ...original, spawn: spawnMock.mockSpawn as never };
 });
 

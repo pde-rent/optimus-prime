@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { getLogger, type LogEntry, setLogSink, stringifyLogEntry } from "../src/log.js";
 
 afterEach(() => {

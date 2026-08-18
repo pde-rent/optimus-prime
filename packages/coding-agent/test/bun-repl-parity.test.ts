@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BunReplManager, DEFAULT_MAX_OUTPUT_CHARS } from "../src/core/bun-repl/index.js";
 import { BunReplProvisioner } from "../src/core/bun-repl/provisioner.js";
 
@@ -20,6 +20,66 @@ describe("Bun REPL parity", () => {
 		if (tempDir) {
 			rmSync(tempDir, { recursive: true, force: true });
 			tempDir = "";
+		}
+	});
+
+	// DEFAULT_RLM_RUNTIME_LABELS tells every agent that Bun and native fetch are
+	// available. The vm context starts empty, so those globals only exist if they
+	// are injected; when they were not, the documented API threw ReferenceError
+	// and agents burned turns rediscovering that the prompt had lied to them.
+	it("exposes every global the system prompt advertises", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r = await manager.execute(
+				`JSON.stringify({
+					bunFile: typeof Bun?.file,
+					bunWrite: typeof Bun?.write,
+					bunGlob: typeof Bun?.Glob,
+					bunSpawn: typeof Bun?.spawn,
+					fetch: typeof fetch,
+					randomUUID: typeof crypto?.randomUUID,
+					subtle: typeof crypto?.subtle,
+					Buffer: typeof Buffer,
+					TextEncoder: typeof TextEncoder,
+					TextDecoder: typeof TextDecoder,
+					URL: typeof URL,
+					URLSearchParams: typeof URLSearchParams,
+				})`,
+			);
+			expect(r.status).toBe("ok");
+			expect(JSON.parse(JSON.parse(r.result ?? '""'))).toEqual({
+				bunFile: "function",
+				bunWrite: "function",
+				bunGlob: "function",
+				bunSpawn: "function",
+				fetch: "function",
+				randomUUID: "function",
+				subtle: "object",
+				Buffer: "function",
+				TextEncoder: "function",
+				TextDecoder: "function",
+				URL: "function",
+				URLSearchParams: "function",
+			});
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	it("round-trips a real file through the advertised Bun APIs", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const target = join(tempDir, "bun-api-probe.txt");
+			const r = await manager.execute(
+				`(await Bun.write(${JSON.stringify(target)}, "written-by-sandbox"), await Bun.file(${JSON.stringify(target)}).text())`,
+			);
+			expect(r.status).toBe("ok");
+			expect(JSON.parse(r.result ?? '""')).toBe("written-by-sandbox");
+			expect(readFileSync(target, "utf8")).toBe("written-by-sandbox");
+		} finally {
+			await manager.dispose().catch(() => {});
 		}
 	});
 

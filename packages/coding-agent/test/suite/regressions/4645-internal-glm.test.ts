@@ -1,6 +1,6 @@
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../../../src/core/auth-storage.js";
 import { ModelRegistry } from "../../../src/core/model-registry.js";
 import { findInitialModel, restoreModelFromSession } from "../../../src/core/model-resolver.js";

@@ -77,7 +77,7 @@ Run focused tests from the package root. For example:
 
 ```bash
 cd packages/coding-agent
-bunx vitest --run test/specific.test.ts
+bun test --preload ../../scripts/test-preload.ts test/specific.test.ts
 ```
 
 If you create or modify a test file, run that file and iterate until it passes. Coding-agent suite regressions belong under `test/suite/regressions/` and use the suite harness and faux provider rather than live provider credentials.

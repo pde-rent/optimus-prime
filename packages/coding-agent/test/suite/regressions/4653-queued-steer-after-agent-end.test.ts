@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, getUserTexts, type Harness } from "../harness.js";
 
 describe("ENG-4653 queued messages after agent end", () => {

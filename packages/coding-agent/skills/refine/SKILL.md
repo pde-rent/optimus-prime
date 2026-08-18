@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Trigger continual harness refinement from the REPL. Use when you notice a repeated failure, reusable tactic, delegation role, or behavior policy that should be persisted as a harness entry. Returns immediately; refinement runs when the current turn ends.
+description: Trigger continual harness refinement from the REPL with `await refine.run({ instructions?, global? })`, and read pending state with `await refine.status()`. Use when you notice a repeated failure, reusable tactic, delegation role, or behavior policy that should be persisted as a harness entry. Returns immediately; refinement runs when the current turn ends.
 ---
 
 # Refine

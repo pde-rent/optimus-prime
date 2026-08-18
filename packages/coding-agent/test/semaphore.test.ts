@@ -2,7 +2,7 @@
  * Tests for the async Semaphore used to bound subagent kernel-boot concurrency.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { Semaphore } from "../src/utils/semaphore.js";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {

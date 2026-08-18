@@ -22,9 +22,9 @@
  * Fixtures are generated fresh on each run.
  */
 
+import { beforeAll, describe, expect, it } from "bun:test";
 import { writeFileSync } from "fs";
 import { Type } from "typebox";
-import { beforeAll, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { completeSimple, getEnvApiKey } from "../src/stream.js";
 import type { Api, AssistantMessage, Message, Model, Tool, ToolResultMessage } from "../src/types.js";

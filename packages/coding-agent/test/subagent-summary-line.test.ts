@@ -1,8 +1,9 @@
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../src/modes/agent-connection/types.js";
+import { SubagentGraphPanel } from "../src/modes/interactive/components/subagent-graph-panel.js";
 import {
 	countDirectSubagentStatuses,
 	SubagentSummaryLine,
@@ -95,6 +96,7 @@ describe("SubagentSummaryLine", () => {
 			rlmNodeId: undefined,
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
+			subagentGraphPanel: new SubagentGraphPanel(),
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -121,6 +123,7 @@ describe("SubagentSummaryLine", () => {
 			rlmNodeId: undefined,
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
+			subagentGraphPanel: new SubagentGraphPanel(),
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -150,6 +153,7 @@ describe("SubagentSummaryLine", () => {
 			rlmNodeId: undefined,
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
+			subagentGraphPanel: new SubagentGraphPanel(),
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -182,6 +186,7 @@ describe("SubagentSummaryLine", () => {
 			rlmNodeId: undefined,
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
+			subagentGraphPanel: new SubagentGraphPanel(),
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),

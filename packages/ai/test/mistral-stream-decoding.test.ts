@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { getModel } from "../src/models.js";
 import { streamMistral } from "../src/providers/mistral.js";
 import type { Context } from "../src/types.js";

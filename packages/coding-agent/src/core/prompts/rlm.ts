@@ -52,9 +52,12 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
 	"",
-	"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+	"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 	"",
 	"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
+	"",
+	"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await rlm('sub-task', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped, raise only after observed failure, and lower once a task proves trivial.",
+	"Recursion depth is dynamic too: `await rlm.get_max_depth()` reports the current limit, your depth, and the ceiling; `await rlm.set_max_depth(n)` raises it only after an observed failure and never past the ceiling. A raise rebuilds the system prompt, so set it before spawning a subtree rather than mid-run.",
 	"",
 	"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 ].join("\n");
@@ -80,6 +83,12 @@ export function buildChildAgentDoctrine(options: ChildAgentDoctrineOptions): str
 			'When a task calls for an answer, reply explicitly with `await agent_message.send(message, { receiver_role: "parent" })`. Not every message or task needs a reply; continue cleanup after sending and go idle normally.',
 		);
 	}
+	// A parent cannot check a child's reasoning, only its evidence. A sound summary
+	// and a fabricated one look identical; a path, a URL, or a rerunnable command
+	// does not.
+	lines.push(
+		"Report sources, not claims. Cite what your parent can independently re-open or re-run: file paths with line numbers, URLs, exact symbol and package names, and the commands you ran with their output. When you assert a fact, name where it came from. If you could not verify something, say so plainly instead of presenting it as established.",
+	);
 	return lines.join("\n");
 }
 
@@ -103,7 +112,6 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		SIMPLIFIED_TECHNICAL_ENGLISH_PROMPT,
 		"",
 		`Working directory: ${cwd}`,
-		`Conversation log: ${messagesPath}`,
 		`Recursive agent depth: ${depth}`,
 		`REPL runtime: ${DEFAULT_RLM_RUNTIME_LABELS.join(", ")}.`,
 	];
@@ -191,6 +199,14 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		}
 	}
 
+	// Kept last on purpose: this is the only per-agent-unique line in the prompt.
+	// Anywhere earlier it splits the cacheable prefix, so sibling agents spawned
+	// from the same parent stop sharing ~6.7k identical prefix tokens and each
+	// pays a full cache write instead of a read.
+	if (messagesPath) {
+		parts.push("", `Conversation log: ${messagesPath}`);
+	}
+
 	return parts.join("\n");
 }
 
@@ -222,6 +238,9 @@ export function buildSubagentGuidance(
 	lines.push(
 		"Have children write files and read those files for fan-in.",
 		"Delegate parallel context-heavy research or independent implementation; do a single known lookup, edit, or command inline.",
+		// A page read lands in the parent's history and is then re-sent every
+		// remaining turn, so the cost is the size times the turns left, not once.
+		"Delegate a read when the source is large and you need a conclusion rather than the text: a long article, a full build log, a wide search sweep. Have the child report the conclusion with its sources. Read inline when you need the actual bytes, such as a file you are about to edit.",
 	);
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");

@@ -1,5 +1,5 @@
+import { describe, expect, test, vi } from "bun:test";
 import stripAnsi from "strip-ansi";
-import { describe, expect, test, vi } from "vitest";
 import { AgentsViewMode } from "../../../src/modes/agents-view/agents-view-mode.js";
 import type { SessionSummary } from "../../../src/modes/daemon/daemon-session-list.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";

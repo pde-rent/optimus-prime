@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { complete } from "../src/stream.js";
 import type { Api, Context, Model, StreamOptions, Tool } from "../src/types.js";

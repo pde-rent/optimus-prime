@@ -4,7 +4,7 @@
  * socket until it accepts a connection. This is the readiness gate every
  * interactive cold start waits on.
  *
- *   node scripts/bench-daemon-startup.mjs [--runs N]
+ *   bun scripts/bench-daemon-startup.mjs [--runs N]
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

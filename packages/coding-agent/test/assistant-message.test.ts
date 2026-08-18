@@ -1,7 +1,7 @@
+import { describe, expect, test } from "bun:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { describe, expect, test } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent, thinkingRecap } from "../src/modes/interactive/components/assistant-message.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";

@@ -15,7 +15,6 @@ export const REFINE_SKILL_NAME = "refine";
 const HARNESS_STATE_DIR_NAME = "harness";
 const REFINEMENT_HISTORY_FILE_NAME = "refinements.jsonl";
 const DEFAULT_OVERVIEW_ENTRY_LIMIT = 6;
-const DEFAULT_OVERVIEW_REFINEMENT_LIMIT = 5;
 const DEFAULT_OVERVIEW_CONTENT_LIMIT = 180;
 
 export type RefinementKind = "prompt" | "memory" | "skill" | "subagent";
@@ -404,7 +403,6 @@ export function formatHarnessStateForPrompt(
 	state: HarnessState,
 	options: {
 		maxEntriesPerKind?: number;
-		maxRefinements?: number;
 		maxContentLength?: number;
 		includeIpythonExamples?: boolean;
 		includeShellExamples?: boolean;
@@ -412,7 +410,6 @@ export function formatHarnessStateForPrompt(
 	} = {},
 ): string {
 	const maxEntriesPerKind = options.maxEntriesPerKind ?? DEFAULT_OVERVIEW_ENTRY_LIMIT;
-	const maxRefinements = options.maxRefinements ?? DEFAULT_OVERVIEW_REFINEMENT_LIMIT;
 	const maxContentLength = options.maxContentLength ?? DEFAULT_OVERVIEW_CONTENT_LIMIT;
 	const includeIpythonExamples = options.includeIpythonExamples ?? true;
 	const includeRefineExamples = options.includeRefineExamples ?? includeIpythonExamples;
@@ -436,21 +433,41 @@ export function formatHarnessStateForPrompt(
 		"",
 	];
 
-	let totalEntries = 0;
+	// Every line below must be a pure function of the live entries' (id, scope, title,
+	// path, content). Counts, versions, timestamps, and the refinement log all churn on
+	// ordinary harness writes, and the whole system prompt sits behind one cache
+	// breakpoint, so emitting any of them invalidates the entire conversation cache.
+	let listedEntries = 0;
 	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
 		const entries = Object.values(state.entries[kind]).sort((a, b) =>
 			[a.path, a.title, a.id].join("\0").localeCompare([b.path, b.title, b.id].join("\0")),
 		);
-		totalEntries += entries.length;
-		// Render subagent specs as a task-shaped roster the model can match against — the
-		// analogue of Claude Code's agent-type menu — rather than a bare count. In
-		// `ipython` REPL sessions, include the native `rlm` invocation hint.
-		if (kind === "subagent" && entries.length > 0 && includeIpythonExamples) {
+		if (kind === "memory") {
 			lines.push(
-				`${kind}: ${entries.length} (invoke a spec by turning it into a concise task prompt and spawning with \`await rlm('<task>')\`; admission returns a child handle, never the answer)`,
+				includeIpythonExamples
+					? 'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`; contents are never injected into this prompt. Read one in full with `await rlm.harness.get_memory({ id, scope })`.'
+					: "memory: not reachable in this session (no `ipython` tool); memory contents are never injected into this prompt.",
 			);
+			lines.push("");
+			continue;
+		}
+		if (entries.length === 0) {
+			continue;
+		}
+		listedEntries += entries.length;
+		// Render subagent specs as a task-shaped roster the model can match against — the
+		// analogue of Claude Code's agent-type menu. In `ipython` REPL sessions, include
+		// the native `rlm` invocation hint.
+		if (kind === "subagent" && includeIpythonExamples) {
+			lines.push(
+				"subagent specs (invoke a spec by turning it into a concise task prompt and spawning with `await rlm('<task>')`; admission returns a child handle, never the answer):",
+			);
+		} else if (kind === "subagent") {
+			lines.push("subagent specs (delegation roles to match a task against):");
+		} else if (kind === "skill") {
+			lines.push("skills (call the binding named in each entry's `ref`, with the documented `args`):");
 		} else {
-			lines.push(`${kind}: ${entries.length}`);
+			lines.push("prompt notes (supplemental notes on top of the immutable base prompt):");
 		}
 		for (const entry of entries.slice(0, maxEntriesPerKind)) {
 			const argumentsText =
@@ -462,12 +479,14 @@ export function formatHarnessStateForPrompt(
 					? ` ref=${compactText(JSON.stringify(entry.reference), maxContentLength)}`
 					: "";
 			lines.push(
-				`- [${entry.scope ?? "global"}:${entry.id}] ${entry.title} (${entry.path}, v${entry.version})${referenceText}${argumentsText}: ${compactText(
+				`- [${entry.scope ?? "global"}:${entry.id}] ${entry.title} (${entry.path})${referenceText}${argumentsText}: ${compactText(
 					entry.content,
 					maxContentLength,
 				)}`,
 			);
 		}
+		// The only count kept: it is a pure function of the live entries and the sole
+		// signal that entries were hidden by the per-kind cap.
 		const overflow = entries.length - Math.min(entries.length, maxEntriesPerKind);
 		if (overflow > 0) {
 			lines.push(`- +${overflow} more ${kind} entries`);
@@ -475,20 +494,15 @@ export function formatHarnessStateForPrompt(
 		lines.push("");
 	}
 
-	if (totalEntries === 0) {
-		lines.push("No saved harness entries yet.", "");
+	if (listedEntries === 0) {
+		lines.push("No saved prompt notes, skills, or subagent specs yet.", "");
 	}
 
-	lines.push(`recent refinements: ${state.refinements.length}`);
-	for (const event of state.refinements.slice(-maxRefinements)) {
-		const changes = event.changes.length > 0 ? event.changes.join(", ") : "no applied edits";
-		const outcome = event.outcome ? `; outcome: ${compactText(event.outcome, maxContentLength)}` : "";
-		lines.push(`- [${event.id}] ${compactText(event.trigger, maxContentLength)}: ${changes}${outcome}`);
-	}
-	const refinementOverflow = state.refinements.length - Math.min(state.refinements.length, maxRefinements);
-	if (refinementOverflow > 0) {
-		lines.push(`- +${refinementOverflow} older refinement events`);
-	}
+	lines.push(
+		includeIpythonExamples
+			? "Refinement history is not injected; call `await rlm.harness.overview()` for recent refinement events."
+			: "Refinement history is not injected.",
+	);
 
 	return lines.join("\n").trim();
 }

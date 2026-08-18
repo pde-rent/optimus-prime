@@ -1,5 +1,5 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { type Component, Container } from "@earendil-works/pi-tui";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 
@@ -65,6 +65,7 @@ describe("ENG-4741 hint placement", () => {
 		const featureHintContainer = new Container();
 		const queuedMessagesContainer = new Container();
 		const sideQuestionContainer = new Container();
+		const subagentGraphContainer = new Container();
 		const editorContainer = new Container();
 		const subagentSummaryLine = new Container();
 		const footerSlot = new Container();
@@ -73,6 +74,7 @@ describe("ENG-4741 hint placement", () => {
 			featureHintContainer,
 			queuedMessagesContainer,
 			sideQuestionContainer,
+			subagentGraphContainer,
 			editorContainer,
 			subagentSummaryLine,
 			footerSlot,
@@ -83,6 +85,7 @@ describe("ENG-4741 hint placement", () => {
 			featureHintContainer,
 			queuedMessagesContainer,
 			sideQuestionContainer,
+			subagentGraphContainer,
 		]);
 		expect(callPrivate(mode, "getPromptDockComponents")).toEqual([editorContainer, subagentSummaryLine, footerSlot]);
 	});
@@ -98,6 +101,7 @@ describe("ENG-4741 hint placement", () => {
 			const featureHintContainer = new Container();
 			const queuedMessagesContainer = new Container();
 			const sideQuestionContainer = new Container();
+			const subagentGraphContainer = new Container();
 			const widgetContainerBelow = new Container();
 			const promptDock = new Container();
 			const enterFullscreen = vi.fn();
@@ -109,6 +113,7 @@ describe("ENG-4741 hint placement", () => {
 				featureHintContainer,
 				queuedMessagesContainer,
 				sideQuestionContainer,
+				subagentGraphContainer,
 				widgetContainerBelow,
 				promptDock,
 				ui: { enterFullscreen },
@@ -126,6 +131,7 @@ describe("ENG-4741 hint placement", () => {
 					featureHintContainer,
 					queuedMessagesContainer,
 					sideQuestionContainer,
+					subagentGraphContainer,
 					widgetContainerBelow,
 				],
 				dock: promptDock,

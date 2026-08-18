@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { getModel } from "../src/models.js";
 import { completeSimple } from "../src/stream.js";
 

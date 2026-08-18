@@ -1,6 +1,6 @@
 ---
 name: websearch
-description: Search the web and read pages, via a self-hosted SearXNG instance (SEARXNG_URL, free and keyless) or the Serper API. Returns a short, deduplicated, character-capped list of titles, URLs, and snippets.
+description: Search the web with `await websearch.run(query, options?)` and read one page as text with `await websearch.read(url, options?)`, via a self-hosted SearXNG instance (SEARXNG_URL, free and keyless) or the Serper API. Output is deduplicated and character-capped; `read` strips site navigation and supports `{ offset }` continuation.
 ---
 
 # Web Search
@@ -68,8 +68,12 @@ await websearch.run("searxng json api", { count: 3, maxChars: 800, time_range: "
 // Force a backend.
 await websearch.run("rust async runtimes", { backend: "serper" });
 
-// Read one page as text.
+// Read one page as text. Navigation chrome is stripped; the last line states
+// the range returned and how to continue.
 console.log(await websearch.read("https://docs.searxng.org/", { maxChars: 2000 }));
+
+// Continue from where the previous read stopped - no re-fetch, no repetition.
+await websearch.read("https://docs.searxng.org/", { maxChars: 2000, offset: 2000 });
 ```
 
 ## Token cost
@@ -80,7 +84,7 @@ Output is capped because it lands directly in the agent's context.
 |---|---|---|
 | `run(q)` (defaults: `count: 6`, `maxChars: 2400`) | 1300-1600 typical, 2400 hard cap | ~350-400 typical, ~600 max |
 | `run(q, { count: 3, maxChars: 800 })` | ≤800 | ~200 |
-| `read(url)` (default `maxChars: 4000`) | ≤4000 | ~1000 |
+| `read(url)` (default `maxChars: 4000`) | ≤4000 per slice | ~1000 |
 
 Results are deduplicated by URL and by domain (max 2 per site), near-identical
 titles from different engines are collapsed, HTML is stripped, and tracking
@@ -98,10 +102,24 @@ output says so explicitly: `[truncated: showing N of M results, X char budget]`.
   - `time_range` - SearXNG only: `day`, `week`, `month`, `year`.
 
 - `await websearch.read(url, options?)` → `Promise<string>`
-  - `maxChars` (default 4000), `timeout` (default 15).
-  - HTML → text via tag stripping and whitespace collapsing; it is not a
-    readability implementation, so site navigation may appear in the output.
-    Non-text content types are refused.
+  - `maxChars` (default 4000) - hard cap on the response.
+  - `offset` (default 0) - start position in the extracted text, for continuing
+    a previous read.
+  - `refresh` (default false) - re-fetch instead of serving the cached text.
+  - `timeout` (default 15) - seconds.
+  - Main content is extracted before truncation: the first `<main>`, `<article>`,
+    `role="main"`, or `id="content"` container (else `<body>`), minus `script`,
+    `style`, `noscript`, `nav`, `header`, `footer`, `aside`, and `form`
+    subtrees. Generic, not per-site; on a Wikipedia article it removes the
+    ~1500 characters of menu, table of contents, and language list that
+    otherwise arrive before the first sentence. Non-text content types are
+    refused.
+  - The extracted text is cached per URL (small LRU) so a continuation costs no
+    round trip and cannot disagree with the slice already returned. `refresh`
+    bypasses it.
+  - Every response ends with its range, either
+    `[chars 6000-14000 of 48213 - continue with { offset: 14000 }]` or
+    `[end of document - chars 40000-48213 of 48213]`.
 
 Network, configuration, and API errors are returned inside the result string
 rather than thrown, so a failed search never breaks the surrounding cell.

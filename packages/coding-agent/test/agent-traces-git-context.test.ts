@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { activeGitContext } from "../src/core/agent-traces.js";
 import type { SessionHeader } from "../src/core/session-manager.js";
 

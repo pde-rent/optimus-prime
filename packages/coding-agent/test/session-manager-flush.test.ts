@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import {
 	appendFileSync,
 	chmodSync,
@@ -16,7 +17,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 type ChmodSync = typeof chmodSync;
 type ChownSync = typeof chownSync;
@@ -30,8 +30,9 @@ const fsMocks = vi.hoisted(() => ({
 	renameSync: vi.fn<RenameSync>(),
 	writeFileSync: vi.fn<WriteFileSync>(),
 }));
-vi.mock("node:fs", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:fs")>();
+const actualNodeFs = await import("node:fs");
+vi.mock("node:fs", () => {
+	const actual = actualNodeFs;
 	fsMocks.actualWriteFileSync = actual.writeFileSync;
 	fsMocks.chmodSync.mockImplementation(actual.chmodSync);
 	fsMocks.chownSync.mockImplementation(actual.chownSync);

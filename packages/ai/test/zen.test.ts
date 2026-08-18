@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { MODELS } from "../src/models.generated.js";
 import { complete } from "../src/stream.js";
 import type { Model } from "../src/types.js";

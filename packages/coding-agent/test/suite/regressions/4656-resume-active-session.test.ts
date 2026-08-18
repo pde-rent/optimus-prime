@@ -1,5 +1,5 @@
+import { describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { describe, expect, it, vi } from "vitest";
 import { DaemonAgentConnection } from "../../../src/modes/agent-connection/daemon-agent-connection.js";
 import type { AgentConnectionEvent, AgentConnectionState } from "../../../src/modes/agent-connection/types.js";
 import type { DaemonSocketClient } from "../../../src/modes/daemon/active-session-state.js";

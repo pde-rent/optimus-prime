@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { getModel } from "../src/models.js";
 import { convertResponsesMessages } from "../src/providers/openai-responses-shared.js";
 import type { AssistantMessage, Context, ToolResultMessage, Usage } from "../src/types.js";

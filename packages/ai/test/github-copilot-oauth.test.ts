@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { loginGitHubCopilot } from "../src/utils/oauth/github-copilot.js";
 
 function jsonResponse(body: unknown, status: number = 200): Response {

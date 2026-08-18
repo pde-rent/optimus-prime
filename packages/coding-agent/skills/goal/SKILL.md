@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Manage the persistent thread goal from the REPL. Use to read goal status and budget usage, to start a goal when the user explicitly asks for one, or to mark the active goal complete once its objective is fully achieved.
+description: Manage the persistent thread goal from the REPL — `await goal.get()` for status and budget usage, `await goal.create(objective, tokenBudget?)` to start one when the user explicitly asks, `await goal.complete()` once its objective is fully achieved.
 ---
 
 # Goal

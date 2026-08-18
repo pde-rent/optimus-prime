@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { complete } from "../src/stream.js";
 import type { Model } from "../src/types.js";
 import { mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";

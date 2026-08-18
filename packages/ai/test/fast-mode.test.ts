@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { supportsFastMode } from "../src/models.js";
 import { buildBaseOptions } from "../src/providers/simple-options.js";
 import type { Api, Model } from "../src/types.js";

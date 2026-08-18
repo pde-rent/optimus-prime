@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import { parseNewSessionCommand } from "../src/core/new-session-command.js";
 import {
 	BUILTIN_SLASH_COMMANDS,

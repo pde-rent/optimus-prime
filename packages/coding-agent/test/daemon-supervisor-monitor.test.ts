@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -5,7 +6,6 @@ import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { getProcessStartId } from "../src/core/session-lease.js";
 import type { DaemonSocketClient } from "../src/modes/daemon/active-session-state.js";
 import { CommandRecoveryJournal } from "../src/modes/daemon/command-recovery-journal.js";
@@ -36,13 +36,14 @@ const workerLaunchTestState = vi.hoisted(() => ({
 	forceMissingProcessStartId: false,
 	fixtureMode: "worker" as "worker" | "close-gate" | "rollback-gate" | "successful-gate",
 	gateMarkerPath: "",
-	tsxCliPath: "",
+	loaderCliPath: "",
 	cliEntrypoint: "",
 	spawned: [] as Array<{ child: ChildProcess; args: readonly string[] }>,
 }));
 
-vi.mock("node:child_process", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, unknown> & {
+const actualNodeChildProcess = await import("node:child_process");
+vi.mock("node:child_process", () => {
+	const actual = actualNodeChildProcess as Record<string, unknown> & {
 		spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
 	};
 	return {
@@ -57,8 +58,9 @@ vi.mock("node:child_process", async (importOriginal) => {
 	};
 });
 
-vi.mock("../src/cli/subprocess-launch.js", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, unknown>;
+const actualSrcCliSubprocessLaunchJs = await import("../src/cli/subprocess-launch.js");
+vi.mock("../src/cli/subprocess-launch.js", () => {
+	const actual = actualSrcCliSubprocessLaunchJs as Record<string, unknown>;
 	return {
 		...actual,
 		createCliSubprocessLaunchSpec(args: readonly string[]) {
@@ -96,14 +98,15 @@ vi.mock("../src/cli/subprocess-launch.js", async (importOriginal) => {
 			}
 			return {
 				command: process.execPath,
-				args: [workerLaunchTestState.tsxCliPath, workerLaunchTestState.cliEntrypoint, ...args],
+				args: [workerLaunchTestState.loaderCliPath, workerLaunchTestState.cliEntrypoint, ...args],
 			};
 		},
 	};
 });
 
-vi.mock("../src/core/session-lease.js", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, unknown> & {
+const actualSrcCoreSessionLeaseJs = await import("../src/core/session-lease.js");
+vi.mock("../src/core/session-lease.js", () => {
+	const actual = actualSrcCoreSessionLeaseJs as Record<string, unknown> & {
 		getProcessStartId(pid: number): string | undefined;
 	};
 	return {
@@ -286,7 +289,7 @@ describe("daemon worker supervisor monitoring", () => {
 		workerLaunchTestState.forceMissingProcessStartId = false;
 		workerLaunchTestState.fixtureMode = "worker";
 		workerLaunchTestState.gateMarkerPath = "";
-		workerLaunchTestState.tsxCliPath = "";
+		workerLaunchTestState.loaderCliPath = "";
 		workerLaunchTestState.cliEntrypoint = "";
 		workerLaunchTestState.spawned.length = 0;
 		vi.useRealTimers();

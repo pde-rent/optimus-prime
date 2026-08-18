@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
 import { findInitialModel, PRIME_INFERENCE_DEFAULT_MODEL_ID } from "../../../src/core/model-resolver.js";
 import { PRIME_INFERENCE_PROVIDER_ID } from "../../../src/core/prime-inference-auth.js";
 import { SettingsManager } from "../../../src/core/settings-manager.js";

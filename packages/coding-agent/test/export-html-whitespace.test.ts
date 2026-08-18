@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import type { Component } from "@earendil-works/pi-tui";
 import { readFileSync } from "fs";
-import { describe, expect, it } from "vitest";
 import { ansiLinesToHtml } from "../src/core/export-html/ansi-to-html.js";
 import { createToolHtmlRenderer } from "../src/core/export-html/tool-renderer.js";
 import type { ToolDefinition } from "../src/core/extensions/types.js";

@@ -5,8 +5,8 @@
  * Uses fake model streams only — no real model/sandbox.
  */
 
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AgentSessionRuntimeConfig, mergeAgentSessionRuntimeConfig } from "../../src/core/agent-session-config.js";
 import type { AgentRlmHeartbeatController } from "../../src/core/cron-jobs.js";
 import { createHarness, type Harness } from "./harness.js";

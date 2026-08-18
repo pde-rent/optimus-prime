@@ -1,8 +1,8 @@
+import { afterAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
 import { HARNESS_MODULE_MANIFEST, reloadHarnessModules } from "../src/core/harness-reloader.js";
 
 const coreDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "core");

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import { formatTmuxWarningNotice } from "../src/modes/shared/startup-notices.js";
 

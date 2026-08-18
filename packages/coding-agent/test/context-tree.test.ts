@@ -1,10 +1,10 @@
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, getModel, type Usage } from "@earendil-works/pi-ai";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { type ContextTreeNode, loadContextTreeChildrenFromDisk } from "../src/core/context-tree.js";

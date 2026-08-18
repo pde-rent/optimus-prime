@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "bun:test";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 
 function createSettingsManager(warnings: { anthropicExtraUsage?: boolean } = {}) {

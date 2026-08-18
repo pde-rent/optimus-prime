@@ -1,6 +1,6 @@
+import { beforeAll, describe, expect, it } from "bun:test";
 import { type Component, TruncatedText, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, it } from "vitest";
 import {
 	getMenuListLayout,
 	MenuList,

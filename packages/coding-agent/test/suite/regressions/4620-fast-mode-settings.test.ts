@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import type { AgentSession } from "../../../src/core/agent-session.js";
 import { createAgentSession } from "../../../src/core/sdk.js";
 import { SessionManager } from "../../../src/core/session-manager.js";

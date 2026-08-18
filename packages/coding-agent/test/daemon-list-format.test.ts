@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import stripAnsi from "strip-ansi";
-import { describe, expect, it } from "vitest";
 import { formatSessionListTable } from "../src/cli/daemon-list-format.js";
 import type { SessionActivity, SessionLifecycle, SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 

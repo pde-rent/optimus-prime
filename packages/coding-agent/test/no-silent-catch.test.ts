@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const EMPTY_CATCH = /catch(\s*\([^)]*\))?\s*\{\s*\}/g;

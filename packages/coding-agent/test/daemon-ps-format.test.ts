@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import stripAnsi from "strip-ansi";
-import { describe, expect, it } from "vitest";
 import type { DaemonInfo } from "../src/cli/daemon-ps.js";
 import { formatDaemonListTable, formatUptime } from "../src/cli/daemon-ps-format.js";
 

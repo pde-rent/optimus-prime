@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "bun:test";
 import { setLogSink } from "../src/log.js";
 import type { AssistantMessage } from "../src/types.js";
 import {

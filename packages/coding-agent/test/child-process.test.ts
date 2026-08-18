@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
 import { isProcessAlive, isZombieProcess, waitForChildProcess } from "../src/utils/child-process.js";
 
 describe("waitForChildProcess", () => {

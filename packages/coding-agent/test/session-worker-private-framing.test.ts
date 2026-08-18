@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
 import {
 	encodePrivateFrame,
 	PrivateFrameDecoder,

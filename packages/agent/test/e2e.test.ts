@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import {
 	type AssistantMessage,
 	type FauxProviderRegistration,
@@ -10,7 +11,6 @@ import {
 	type ToolResultMessage,
 	type UserMessage,
 } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
 import { Agent, type AgentEvent } from "../src/index.js";
 import { calculateTool } from "./utils/calculate.js";
 

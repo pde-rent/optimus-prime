@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { SELF_UPDATE_INTERACTIVE_CHILD_ENV } from "../src/config.js";
 
 const mocks = vi.hoisted(() => ({

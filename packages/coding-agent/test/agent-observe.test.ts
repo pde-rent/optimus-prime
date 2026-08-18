@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
 import {
 	createAgentObserveMessagePreview,
 	normalizeObserveLimit,

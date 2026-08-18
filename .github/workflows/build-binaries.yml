@@ -40,6 +40,12 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
+      - name: Setup Bun
+        # TODO: pin to a verified commit SHA like the other actions here.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Resolve release context
         id: context
         env:
@@ -72,7 +78,7 @@ jobs:
             build_ref="$REF_NAME"
             publish_production=true
           else
-            production_version=$(node -p "require('./package.json').version")
+            production_version=$(bun -p "require('./package.json').version")
             build_ref="$GITHUB_SHA_VALUE"
             beta_version="${production_version}-beta.${RUN_NUMBER}.${RUN_ATTEMPT}.${GITHUB_SHA_VALUE::7}"
             publish_beta=true
@@ -80,7 +86,7 @@ jobs:
             previous_version=
             if [ -n "$BEFORE_SHA" ] && ! printf '%s\n' "$BEFORE_SHA" | grep -Eq '^0+$' && git cat-file -e "${BEFORE_SHA}:package.json"; then
               git show "${BEFORE_SHA}:package.json" > /tmp/previous-package.json
-              previous_version=$(node -p "require('/tmp/previous-package.json').version")
+              previous_version=$(bun -p "require('/tmp/previous-package.json').version")
             fi
 
             if [ -z "$previous_version" ] || [ "$production_version" != "$previous_version" ]; then
@@ -212,6 +218,12 @@ jobs:
           ref: ${{ env.BUILD_REF }}
           persist-credentials: false
 
+      - name: Setup Bun
+        # TODO: pin to a verified commit SHA like the other actions here.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Download production artifacts
         if: env.PUBLISH_PRODUCTION == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -232,7 +244,7 @@ jobs:
           export INSTALL_BASE_URL
           test -n "$INSTALL_BASE_URL"
 
-          node - <<'NODE'
+          bun - <<'BUNJS'
           const fs = require("node:fs");
           const baseUrl = process.env.INSTALL_BASE_URL;
           if (!baseUrl) throw new Error("INSTALL_BASE_URL is required");
@@ -242,7 +254,7 @@ jobs:
             .replaceAll("__PRIME_AGENT_DEFAULT_RELEASE_CHANNEL__", channel);
           fs.writeFileSync("/tmp/prime-agent-install.sh", renderInstaller("stable"));
           fs.writeFileSync("/tmp/prime-agent-install-beta.sh", renderInstaller("beta"));
-          NODE
+          BUNJS
 
       - name: Extract production release notes
         if: env.PUBLISH_PRODUCTION == 'true'

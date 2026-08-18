@@ -1,7 +1,7 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { CommandRecoveryJournal } from "../src/modes/daemon/command-recovery-journal.js";
 
 describe("CommandRecoveryJournal", () => {

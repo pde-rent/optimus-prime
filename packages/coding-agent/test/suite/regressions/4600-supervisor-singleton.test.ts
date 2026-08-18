@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import {
 	existsSync,
@@ -12,7 +13,6 @@ import {
 } from "node:fs";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR, getCronJobsPath } from "../../../src/config.js";
 import { getProcessStartId } from "../../../src/core/session-lease.js";
 import { DaemonAgentConnection } from "../../../src/modes/agent-connection/daemon-agent-connection.js";
@@ -23,6 +23,7 @@ import {
 	persistDaemonStartupFenceFromOwner,
 	waitForDaemonStartupFence,
 } from "../../../src/modes/daemon/daemon-supervisor-ownership.js";
+import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, type Harness } from "../harness.js";
 
 type FixtureMessage =
@@ -70,8 +71,6 @@ interface CleanupProcessIdentity {
 const fixturePath = resolve(__dirname, "../../fixtures/eng-4600-supervisor-fixture.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
-const tsxPath = resolve(__dirname, "../../../../../node_modules/tsx/dist/cli.mjs");
-const tsconfigPath = resolve(__dirname, "../../../../../tsconfig.json");
 const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const handles = new Set<FixtureHandle>();
 const harnesses: Harness[] = [];
@@ -128,7 +127,7 @@ function spawnFixture(
 	paths: { agentDir: string; descriptorDir: string; registryDir: string; socketPath: string },
 	options: { extraEnv?: NodeJS.ProcessEnv; generation?: string } = {},
 ): FixtureHandle {
-	const child = spawn(process.execPath, [tsxPath, fixturePath], {
+	const child = spawn(BUN_PATH, [fixturePath], {
 		cwd: paths.agentDir,
 		env: {
 			...process.env,
@@ -142,7 +141,6 @@ function spawnFixture(
 			ENG_4600_REGISTRY_DIR: paths.registryDir,
 			ENG_4600_SOCKET_PATH: paths.socketPath,
 			PI_OFFLINE: "1",
-			TSX_TSCONFIG_PATH: tsconfigPath,
 		},
 		stdio: ["ignore", "pipe", "pipe", "ipc"],
 	});
@@ -167,22 +165,17 @@ function spawnRealSupervisor(
 	paths: { agentDir: string; registryDir: string; socketPath: string },
 	extraEnv: NodeJS.ProcessEnv,
 ): FixtureHandle {
-	const child = spawn(
-		process.execPath,
-		[tsxPath, cliPath, "--mode", "daemon", "--daemon-socket", paths.socketPath, "--offline"],
-		{
-			cwd: paths.agentDir,
-			env: {
-				...process.env,
-				...extraEnv,
-				[supervisorRegistryDirEnv]: paths.registryDir,
-				[ENV_AGENT_DIR]: paths.agentDir,
-				PI_OFFLINE: "1",
-				TSX_TSCONFIG_PATH: tsconfigPath,
-			},
-			stdio: ["ignore", "pipe", "pipe"],
+	const child = spawn(BUN_PATH, [cliPath, "--mode", "daemon", "--daemon-socket", paths.socketPath, "--offline"], {
+		cwd: paths.agentDir,
+		env: {
+			...process.env,
+			...extraEnv,
+			[supervisorRegistryDirEnv]: paths.registryDir,
+			[ENV_AGENT_DIR]: paths.agentDir,
+			PI_OFFLINE: "1",
 		},
-	);
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 	const handle: FixtureHandle = {
 		child,
 		diagnostics: { stdout: "", stderr: "" },

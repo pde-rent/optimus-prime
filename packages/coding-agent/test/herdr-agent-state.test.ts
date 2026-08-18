@@ -1,8 +1,8 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import {
 	createHerdrAgentStateExtension,
 	hasFileBasedHerdrIntegration,

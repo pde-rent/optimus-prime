@@ -89,7 +89,7 @@ function parseArgs(args) {
 }
 
 function printHelp() {
-	console.log(`Usage: node scripts/pack-prime-agent-release.mjs --base-url url [--channel stable|beta] [--version x.y.z] [--out-dir path]
+	console.log(`Usage: bun scripts/pack-prime-agent-release.mjs --base-url url [--channel stable|beta] [--version x.y.z] [--out-dir path]
 
 Creates private npm tarballs for R2 distribution:
 
@@ -138,7 +138,7 @@ function packageJsonPath(packageDir) {
 function requireBuiltPackage(packageDir) {
 	const dist = join(packagePath(packageDir), "dist");
 	if (!existsSync(dist)) {
-		throw new Error(`Missing ${dist}. Run npm run build before packing a release.`);
+		throw new Error(`Missing ${dist}. Run bun run build before packing a release.`);
 	}
 }
 

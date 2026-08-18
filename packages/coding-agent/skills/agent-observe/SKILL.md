@@ -1,6 +1,6 @@
 ---
 name: agent-observe
-description: Read-only observation of an agent's parent, siblings, and direct children. Use to inspect family status and bounded recent-message previews without mutating sessions.
+description: Read-only observation of an agent's parent, siblings, and direct children — `await agent_observe.list_agents()`, `await agent_observe.get_agent(target)`, `await agent_observe.recent_messages(target, limit?, maxChars?)`. Inspects family status and bounded message previews without mutating sessions.
 ---
 
 # Agent Observe

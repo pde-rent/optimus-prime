@@ -13,11 +13,11 @@ import {
 	rgbTo256,
 	type SelectListTheme,
 } from "@earendil-works/pi-tui";
-import { color as chalk } from "../../../utils/ansi.js";
 import { type Static, type TProperties, Type } from "typebox";
 import type { Validator } from "typebox/compile";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
 import type { SourceInfo } from "../../../core/source-info.js";
+import { color as chalk } from "../../../utils/ansi.js";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.js";
 
 // ============================================================================
@@ -820,11 +820,11 @@ function getDefaultTheme(): string {
 // Global Theme Instance
 // ============================================================================
 
-// Use globalThis to share theme across module loaders (tsx + jiti in dev mode)
+// Use globalThis to share theme across module loaders (jiti loads harness modules in dev)
 const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
 
 // Export theme as a getter that reads from globalThis
-// This ensures all module instances (tsx, jiti) see the same theme
+// This ensures all module instances (bun, jiti) see the same theme
 export const theme: Theme = new Proxy({} as Theme, {
 	get(_target, prop) {
 		const t = (globalThis as Record<symbol, Theme>)[THEME_KEY];

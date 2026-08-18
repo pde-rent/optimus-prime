@@ -3,12 +3,12 @@
  * Release script for pi-mono
  *
  * Usage:
- *   node scripts/release.mjs <major|minor|patch>
- *   node scripts/release.mjs <x.y.z>
+ *   bun scripts/release.mjs <major|minor|patch>
+ *   bun scripts/release.mjs <x.y.z>
  *
  * Steps:
  * 1. Check for uncommitted changes
- * 2. Bump version via npm run version:xxx or set an explicit version
+ * 2. Bump version via bun run version:xxx or set an explicit version
  * 3. Update CHANGELOG.md files: [Unreleased] -> [version] - date
  * 4. Commit and tag
  * 5. Publish to npm
@@ -25,7 +25,7 @@ const BUMP_TYPES = new Set(["major", "minor", "patch"]);
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 if (!RELEASE_TARGET || (!BUMP_TYPES.has(RELEASE_TARGET) && !SEMVER_RE.test(RELEASE_TARGET))) {
-	console.error("Usage: node scripts/release.mjs <major|minor|patch|x.y.z>");
+	console.error("Usage: bun scripts/release.mjs <major|minor|patch|x.y.z>");
 	process.exit(1);
 }
 
@@ -80,7 +80,7 @@ function bumpOrSetVersion(target) {
 
 	if (BUMP_TYPES.has(target)) {
 		console.log(`Bumping version (${target})...`);
-		run(`npm run version:${target}`);
+		run(`bun run version:${target}`);
 		return getVersion();
 	}
 
@@ -91,7 +91,7 @@ function bumpOrSetVersion(target) {
 
 	console.log(`Setting explicit version (${target})...`);
 	run(
-		`npm version ${target} -ws --no-git-tag-version && node scripts/sync-versions.js && npx shx rm -rf node_modules packages/*/node_modules package-lock.json && npm install`,
+		`bun pm version ${target} --no-git-tag-version && bun scripts/sync-versions.js && bunx shx rm -rf node_modules packages/*/node_modules bun.lock && bun install`,
 	);
 	return getVersion();
 }
@@ -167,7 +167,7 @@ run(`git tag v${version}`);
 console.log();
 
 console.log("Publishing to npm...");
-run("npm run publish");
+run("bun run publish");
 console.log();
 
 console.log("Adding [Unreleased] sections for next cycle...");

@@ -1,8 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as DaemonUpdateRestartModule from "../src/cli/daemon-update-restart.js";
 import {
 	acquireDaemonUpdateRestartCoordinator,
 	type DaemonUpdateRestartStatus,
@@ -20,7 +19,6 @@ import {
 } from "../src/config.js";
 import type { AgentSessionRuntimeMetadata } from "../src/core/agent-session-runtime.js";
 import { DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_ID } from "../src/modes/daemon/daemon-protocol.js";
-import type * as DaemonSocketModule from "../src/modes/daemon/daemon-socket.js";
 import {
 	handlePackageCommand,
 	prepareDaemonUpdateRestart,
@@ -198,8 +196,9 @@ vi.mock("child_process", () => ({
 	})),
 }));
 
-vi.mock("../src/cli/daemon-update-restart.js", async (importOriginal) => {
-	const original = await importOriginal<typeof DaemonUpdateRestartModule>();
+const actualSrcCliDaemonUpdateRestartJs = await import("../src/cli/daemon-update-restart.js");
+vi.mock("../src/cli/daemon-update-restart.js", () => {
+	const original = actualSrcCliDaemonUpdateRestartJs;
 	return {
 		...original,
 		launchDaemonUpdateRestartCoordinator: vi.fn(async (options: { socketPath: string }) => {
@@ -218,8 +217,9 @@ vi.mock("../src/cli/daemon-update-restart.js", async (importOriginal) => {
 	};
 });
 
-vi.mock("../src/modes/daemon/daemon-socket.js", async (importOriginal) => ({
-	...(await importOriginal<typeof DaemonSocketModule>()),
+const actualSrcModesDaemonDaemonSocketJs = await import("../src/modes/daemon/daemon-socket.js");
+vi.mock("../src/modes/daemon/daemon-socket.js", () => ({
+	...actualSrcModesDaemonDaemonSocketJs,
 	defaultDaemonSocketPath: () => mockState.socketPath,
 }));
 

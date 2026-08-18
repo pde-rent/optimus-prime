@@ -1,5 +1,5 @@
+import { describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../../../src/core/session-manager.js";
 import type { HostRequestHandlers } from "../../../src/core/tools/kernel-types.js";
 import { createHarness } from "../harness.js";

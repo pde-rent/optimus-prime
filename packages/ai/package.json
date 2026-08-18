@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/pi-ai",
-	"version": "0.7.3",
+	"version": "1.0.0",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -60,7 +60,7 @@
 		"build": "tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"dev:tsc": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
-		"test": "bunx vitest --run",
+		"test": "bun test --preload ../../scripts/test-preload.ts --isolate test/",
 		"prepublishOnly": "bun run clean && bun run build"
 	},
 	"dependencies": {
@@ -90,8 +90,7 @@
 		"@mistralai/mistralai": "^2.2.0",
 		"@types/node": "^24.3.0",
 		"canvas": "^3.2.0",
-		"openai": "6.47.0",
-		"vitest": "^4.1.10"
+		"openai": "6.47.0"
 	},
 	"peerDependencies": {
 		"openai": "6.47.0"

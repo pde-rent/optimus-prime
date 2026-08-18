@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { convertMessages } from "../src/providers/google-shared.js";
 import type { Context, Model } from "../src/types.js";
 

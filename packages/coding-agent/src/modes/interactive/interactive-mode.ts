@@ -127,7 +127,7 @@ import {
 } from "../../core/telemetry.js";
 import type { KernelSentAgentMessage } from "../../core/tools/kernel-types.js";
 import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
-import { PRIME_BUTTERFLY_LOGO } from "../../themes/prime-logo.js";
+import { OPTIMUS_LOGO, OPTIMUS_LOGO_META_MAX_ROWS } from "../../themes/optimus-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { readClipboardImage } from "../../utils/clipboard-image.js";
@@ -211,6 +211,7 @@ import {
 	styleSlashCommandText,
 } from "./components/slash-command-message.js";
 import { SlashCommandResultMessageComponent } from "./components/slash-command-result-message.js";
+import { SubagentGraphPanel } from "./components/subagent-graph-panel.js";
 import { countDirectSubagentStatuses, SubagentSummaryLine } from "./components/subagent-summary-line.js";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.js";
 import {
@@ -432,6 +433,8 @@ export class BrandSplashHeader implements Component {
 	private readonly logoCanvasWidth: number;
 	private readonly gutter = 4;
 	private readonly labelWidth = 9;
+	/** Overlay geometry is measured against OPTIMUS_LOGO; custom marks keep the right-hand meta column. */
+	private readonly overlayMeta: boolean;
 
 	constructor(
 		private readonly version: string,
@@ -440,7 +443,9 @@ export class BrandSplashHeader implements Component {
 		private readonly verboseInstructions?: string,
 		private readonly options: BrandSplashHeaderOptions = {},
 	) {
-		this.logoRaw = (options.logo ?? PRIME_BUTTERFLY_LOGO).split("\n");
+		const logo = options.logo ?? OPTIMUS_LOGO;
+		this.overlayMeta = logo === OPTIMUS_LOGO;
+		this.logoRaw = logo.split("\n");
 		this.logoCanvasWidth = this.logoRaw.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	}
 
@@ -448,10 +453,76 @@ export class BrandSplashHeader implements Component {
 		// Render output is derived from current theme/session state.
 	}
 
+	/**
+	 * Meta block painted over the bottom-right of OPTIMUS_LOGO. Lines are padded
+	 * to a shared `width` so the overlay clears one aligned rectangle instead of
+	 * leaving art fragments beside the shorter rows.
+	 */
+	private overlayMetaBlock(extraMetadata: readonly BrandSplashMetadataLine[]): { lines: string[]; width: number } {
+		const brand = "optimus prime";
+		const entries = [
+			{ label: "version", value: `v${this.version}` },
+			{ label: "model", value: this.getModelId() ?? "—" },
+			{ label: "cwd", value: formatSplashCwd(this.getCwd()) },
+			...extraMetadata,
+		].slice(0, OPTIMUS_LOGO_META_MAX_ROWS - 1);
+		const labelWidth = entries.reduce((max, entry) => Math.max(max, visibleWidth(entry.label)), 0) + 1;
+		// One column stays blank between the art ink and the block.
+		const valueWidth = Math.max(1, this.logoCanvasWidth - 1 - labelWidth);
+		const rows = entries.map((entry) => ({
+			label: entry.label.padEnd(labelWidth),
+			value:
+				entry.label === "cwd"
+					? truncatePathMiddle(entry.value, valueWidth)
+					: truncateToWidth(entry.value, valueWidth),
+		}));
+		const width = rows.reduce((max, row) => Math.max(max, labelWidth + visibleWidth(row.value)), visibleWidth(brand));
+		const pad = (text: string) => " ".repeat(Math.max(0, width - visibleWidth(text)));
+		return {
+			width,
+			lines: [
+				theme.fg("text", brand) + pad(brand),
+				...rows.map(
+					(row) => theme.fg("dim", row.label) + theme.fg("muted", row.value) + pad(row.label + row.value),
+				),
+			],
+		};
+	}
+
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const paddingX = safeWidth > 1 ? 1 : 0;
 		const contentWidth = Math.max(1, safeWidth - paddingX * 2);
+		const frame = (content: string) => {
+			const clamped = truncateToWidth(content, contentWidth, "");
+			return " ".repeat(paddingX) + clamped + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(clamped)));
+		};
+		if (this.overlayMeta) {
+			const block = this.overlayMetaBlock(this.options.getExtraMetadata?.() ?? []);
+			const blockStart = Math.max(0, this.logoCanvasWidth - block.width);
+			const firstBlockRow = Math.max(0, this.logoRaw.length - block.lines.length);
+			// Art keeps everything left of the block minus one blank gutter column.
+			const artEnd = Math.max(0, blockStart - 1);
+			const lines = this.options.topPadding ? [""] : [];
+			lines.push(
+				...this.logoRaw.map((line, index) => {
+					const meta = block.lines[index - firstBlockRow];
+					if (meta === undefined) {
+						return frame(theme.fg("text", line));
+					}
+					// Trailing blanks are trimmed from the art, so pad before slicing.
+					const padded = line + " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line)));
+					const art = truncateToWidth(padded, artEnd, "");
+					return frame(theme.fg("text", art) + " ".repeat(blockStart - artEnd) + meta);
+				}),
+			);
+			if (!(this.options.getHideStartHint?.() ?? false)) {
+				lines.push(frame(""));
+				lines.push(frame(theme.fg("dim", this.options.getStartHint?.() ?? "type to search sessions")));
+			}
+			this.appendVerboseInstructions(lines, frame, safeWidth, contentWidth);
+			return lines;
+		}
 		const metaWidth = contentWidth - this.logoCanvasWidth - this.gutter;
 		const showMeta = metaWidth >= this.labelWidth + 8;
 		const valueWidth = Math.max(1, metaWidth - this.labelWidth);
@@ -481,24 +552,28 @@ export class BrandSplashHeader implements Component {
 				const padding = showMeta
 					? " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line) + this.gutter))
 					: "";
-				const content = truncateToWidth(colored + padding + meta, contentWidth, "");
-				return (
-					" ".repeat(paddingX) + content + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(content)))
-				);
+				return frame(colored + padding + meta);
 			}),
 		);
 
-		if (this.verboseInstructions) {
-			lines.push(" ".repeat(safeWidth));
-			for (const instruction of this.verboseInstructions.split("\n")) {
-				const content = truncateToWidth(instruction, contentWidth);
-				lines.push(
-					" ".repeat(paddingX) + content + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(content))),
-				);
-			}
-		}
+		this.appendVerboseInstructions(lines, frame, safeWidth, contentWidth);
 
 		return lines;
+	}
+
+	private appendVerboseInstructions(
+		lines: string[],
+		frame: (content: string) => string,
+		safeWidth: number,
+		contentWidth: number,
+	): void {
+		if (!this.verboseInstructions) {
+			return;
+		}
+		lines.push(" ".repeat(safeWidth));
+		for (const instruction of this.verboseInstructions.split("\n")) {
+			lines.push(frame(truncateToWidth(instruction, contentWidth)));
+		}
 	}
 }
 
@@ -959,6 +1034,9 @@ export class InteractiveMode {
 
 	// One summary line below the editor, backed by the existing child-status stream.
 	private subagentSummaryLine: SubagentSummaryLine;
+	// The same stream rendered as a live tree above the prompt while a fan-out runs.
+	private subagentGraphPanel = new SubagentGraphPanel();
+	private subagentGraphContainer!: Container;
 	private subagentSnapshots = new Map<string, AgentConnectionRlmChildAgentSnapshot>();
 	private rlmNodeId: string | undefined;
 
@@ -1089,6 +1167,8 @@ export class InteractiveMode {
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
 		this.recapContainer = new Container();
+		this.subagentGraphContainer = new Container();
+		this.subagentGraphContainer.addChild(this.subagentGraphPanel);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -4083,6 +4163,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.edits.expand", () => this.toggleEditDiffExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.subagents.focus", () => this.focusSubagentSummary());
+		this.defaultEditor.onAction("app.subagents.graph", () => this.toggleSubagentGraph());
 		this.defaultEditor.onAction("app.heartbeats.open", () => {
 			void this.showHeartbeatManager();
 		});
@@ -5850,6 +5931,12 @@ export class InteractiveMode {
 		this.subagentSummaryLine.setSubagentCounts(
 			countDirectSubagentStatuses(this.subagentSnapshots.values(), this.rlmNodeId, activeHeartbeatSessionIds),
 		);
+		// Disabled by setting => feed the panel nothing, so it renders zero rows and
+		// the alt+g toggle has nothing to reveal.
+		this.subagentGraphPanel.setChildren(
+			this.settingsManager.getSubagentGraph() ? this.subagentSnapshots.values() : [],
+			this.rlmNodeId,
+		);
 		if (!this.subagentSummaryLine.isSelectable() && this.subagentSummaryLine.focused) this.focusEditor();
 	}
 
@@ -5874,6 +5961,17 @@ export class InteractiveMode {
 	private focusEditor(): void {
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
+	}
+
+	private toggleSubagentGraph(): boolean {
+		if (this.subagentGraphPanel.getRows().length === 0) {
+			this.showStatus("No subagents to graph yet");
+			return false;
+		}
+		const visible = this.subagentGraphPanel.toggle();
+		this.ui.requestRender();
+		if (!visible) this.showStatus("Subagent graph hidden");
+		return true;
 	}
 
 	private focusSubagentSummary(): boolean {
@@ -7116,7 +7214,13 @@ export class InteractiveMode {
 	}
 
 	private getPromptContextContainers(): Container[] {
-		return [this.recapContainer, this.featureHintContainer, this.queuedMessagesContainer, this.sideQuestionContainer];
+		return [
+			this.recapContainer,
+			this.featureHintContainer,
+			this.queuedMessagesContainer,
+			this.sideQuestionContainer,
+			this.subagentGraphContainer,
+		];
 	}
 
 	private getPromptDockComponents(): Component[] {
@@ -9727,6 +9831,7 @@ ${shortcutsKey ? `\`${shortcutsKey}\` quick shortcuts · ` : ""}\`/hotkeys\` ful
 		const expandEdits = this.getAppKeyDisplay("app.edits.expand");
 		const toggleThinking = this.getAppKeyDisplay("app.thinking.toggle");
 		const focusSubagents = this.getAppKeyDisplay("app.subagents.focus");
+		const toggleSubagentGraph = this.getAppKeyDisplay("app.subagents.graph");
 		const manageHeartbeats = this.getAppKeyDisplay("app.heartbeats.open");
 		const externalEditor = this.getAppKeyDisplay("app.editor.external");
 		const promptStash = this.getAppKeyDisplay("app.prompt.stash");
@@ -9777,6 +9882,7 @@ ${interrupt ? `| \`${interrupt}\` | Interrupt current operation |\n` : ""}${shor
 | \`${expandEdits}\` | Toggle edit diff expansion |
 | \`${toggleThinking}\` | Toggle thinking block visibility |
 | \`${focusSubagents}\` | Focus the subagent summary / open the scoped agents view |
+| \`${toggleSubagentGraph}\` | Toggle the live subagent graph |
 | \`${manageHeartbeats}\` | Manage heartbeats |
 | \`${externalEditor}\` | Edit message in external editor |
 | \`${promptStash}\` | Stash or restore draft prompt |

@@ -331,13 +331,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	if (hasExistingSession) {
 		agent.state.messages = existingSession.messages;
 		if (!hasThinkingEntry) {
-			sessionManager.appendThinkingLevelChange(thinkingLevel);
+			sessionManager.appendThinkingLevelChange(thinkingLevel, "resume");
 		}
 	} else {
 		if (model) {
 			sessionManager.appendModelChange(model.provider, model.id);
 		}
-		sessionManager.appendThinkingLevelChange(thinkingLevel);
+		sessionManager.appendThinkingLevelChange(thinkingLevel, "user");
 	}
 	if (!hasServiceTierEntry) {
 		sessionManager.appendServiceTierChange(serviceTierPreference);

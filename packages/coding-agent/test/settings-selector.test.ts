@@ -1,6 +1,6 @@
+import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { beforeAll, describe, expect, test, vi } from "vitest";
 import {
 	type SettingsCallbacks,
 	type SettingsConfig,

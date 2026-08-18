@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "../harness.js";
 
 describe("regression #3982: message_end cost override", () => {

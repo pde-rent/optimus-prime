@@ -15,7 +15,7 @@ import type {
 	BunReplHostToRepl,
 	BunReplReplToHost,
 } from "./protocol.js";
-import { transformTopLevel } from "./transform.js";
+import { hasStaticImport, transformTopLevel } from "./transform.js";
 
 // ---------------------------------------------------------------------------
 // Persistent vm context. Top-level declarations persist by being rewritten to
@@ -157,6 +157,8 @@ const harnessObj = {
 	create_memory: (options?: HarnessOptions) => harnessRequest("harness.create_memory", options),
 	update_memory: (options?: HarnessOptions) => harnessRequest("harness.update_memory", options),
 	delete_memory: (options?: HarnessOptions) => harnessRequest("harness.delete_memory", options),
+	search_memory: (options?: HarnessOptions) => harnessRequest("harness.search_memory", options),
+	get_memory: (options?: HarnessOptions) => harnessRequest("harness.get_memory", options),
 	create_skill: (options?: HarnessOptions) => harnessRequest("harness.create_skill", options),
 	update_skill: (options?: HarnessOptions) => harnessRequest("harness.update_skill", options),
 	delete_skill: (options?: HarnessOptions) => harnessRequest("harness.delete_skill", options),
@@ -179,6 +181,11 @@ const rlmObj = Object.assign(rlm, {
 	run: rlm,
 	harness: harnessObj,
 	get_harness_state: (options?: HarnessOptions) => harnessRequest("harness.get_state", options),
+	// Applies to the next turn, never to the cell that calls it.
+	set_effort: (level: string) => hostBridge.hostRequest("rlm.set_effort", { level }),
+	get_effort: () => hostBridge.hostRequest("rlm.get_effort", {}),
+	set_max_depth: (maxDepth: number) => hostBridge.hostRequest("rlm.set_max_depth", { maxDepth }),
+	get_max_depth: () => hostBridge.hostRequest("rlm.get_max_depth", {}),
 	find_models: (query: string) => hostBridge.hostRequest("rlm.find_models", { query }),
 	list_subagents: () => hostBridge.hostRequest("rlm.list_subagents", {}),
 	delete_subagent: (target: string) => hostBridge.hostRequest("rlm.delete_subagent", { target }),
@@ -330,6 +337,9 @@ const importModule = async (specifier: string): Promise<unknown> => import(speci
 
 // Curated set of globals exposed to the sandbox. The sandbox deliberately does
 // not get `process`, so user code cannot kill the REPL child or touch its host.
+// The Bun runtime object, resolved dynamically so the build needs no @types/bun.
+const bunGlobal = (globalThis as { Bun?: unknown }).Bun;
+
 Object.assign(context, {
 	globalThis: context,
 	console: sandboxConsole(),
@@ -346,6 +356,31 @@ Object.assign(context, {
 	atob,
 	btoa,
 	crypto,
+	// The vm context starts empty, so every global the prompt advertises has to be
+	// injected explicitly. DEFAULT_RLM_RUNTIME_LABELS promises Bun and native
+	// fetch; without these the documented API throws ReferenceError and the model
+	// burns turns rediscovering that the prompt was wrong.
+	// Read off globalThis rather than the bare identifier: `Bun` has no ambient
+	// type without @types/bun, the same tradeoff runBash documents below.
+	Bun: bunGlobal,
+	// Bun's shell, pre-bound. `import { $ } from "bun"` is the documented idiom but
+	// static imports cannot run in this vm, so exposing it as a global removes the
+	// trap rather than leaving a syntax error as the only feedback.
+	$: (bunGlobal as { $?: unknown } | undefined)?.$,
+	fetch,
+	Request,
+	Response,
+	Headers,
+	FormData,
+	Blob,
+	File,
+	AbortController,
+	AbortSignal,
+	structuredClone,
+	performance,
+	ReadableStream,
+	WritableStream,
+	TransformStream,
 	display,
 	sys: { display },
 	util,
@@ -439,6 +474,24 @@ function stripTypes(body: string): string | null {
 	}
 }
 
+/**
+ * Guidance appended to a syntax error raised by a cell that still contains a static
+ * import. The engine's own message ("import call expects one or two arguments") reads
+ * like a mis-called function and says nothing about the fix, so an agent that hits it
+ * retries the same shape instead of switching to the form that works.
+ */
+const STATIC_IMPORT_HINT =
+	'This REPL evaluates cells in a vm where static `import` statements are unavailable; use `await import("module")` instead.';
+
+function withStaticImportHint(err: unknown, body: string): unknown {
+	if (!isSyntaxError(err) || !hasStaticImport(body)) return err;
+	const e = err as { message?: unknown };
+	if (typeof e.message === "string" && !e.message.includes(STATIC_IMPORT_HINT)) {
+		e.message = `${e.message}\n${STATIC_IMPORT_HINT}`;
+	}
+	return err;
+}
+
 async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 	// vm `timeout` bounds synchronous execution; a runaway async `await` cannot be
 	// aborted in-process, so the host hard-kills this child process instead.
@@ -458,11 +511,11 @@ async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 		// that failed to compile ran none of its statements. If the retry also fails to
 		// compile it was a genuine JS mistake, so the original error is what surfaces.
 		const stripped = isSyntaxError(err) ? stripTypes(body) : null;
-		if (stripped === null) throw err;
+		if (stripped === null) throw withStaticImportHint(err, body);
 		try {
 			value = await evaluate(wrapCell(stripped));
 		} catch (retryErr: unknown) {
-			throw isSyntaxError(retryErr) ? err : retryErr;
+			throw isSyntaxError(retryErr) ? withStaticImportHint(err, body) : retryErr;
 		}
 	}
 	const resultStr = value !== undefined ? serializeValue(value) : undefined;

@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
 import {
 	CompactAssistantStreamReconstructor,
 	createCompactAssistantDelta,

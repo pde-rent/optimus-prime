@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { DaemonClient, DaemonClientRequestOptions } from "../src/modes/daemon/daemon-client.js";
 import type { DaemonCommand, DaemonResponse } from "../src/modes/daemon/daemon-protocol.js";
 import {

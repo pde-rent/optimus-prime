@@ -197,7 +197,7 @@ export class BunReplManager {
 		});
 
 		const bunPath = this._options.bunPath ?? "bun";
-		// Prefer the source `.ts` when running from the tree (vitest/dev), falling back
+		// Prefer the source `.ts` when running from the tree (tests/dev), falling back
 		// to the compiled `.js` emitted by tsc into dist/. Bun can run both.
 		const dir = fileURLToPath(new URL(".", import.meta.url));
 		const tsPath = join(dir, "repl-script.ts");

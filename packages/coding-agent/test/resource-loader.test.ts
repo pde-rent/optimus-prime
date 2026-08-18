@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { ExtensionRunner } from "../src/core/extensions/runner.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
@@ -485,6 +485,47 @@ Content`,
 
 			const { diagnostics } = loader.getSkills();
 			expect(diagnostics.some((d) => d.type === "warning" && d.message.includes("SERPER_API_KEY"))).toBe(false);
+		});
+
+		it("suppresses the unconfigured warning when SearXNG is stored in auth.json", async () => {
+			// A daemon keeps the environment it started with, so an exported
+			// SEARXNG_URL never reaches it. Stored config must satisfy the check.
+			const previous = process.env.SEARXNG_URL;
+			delete process.env.SEARXNG_URL;
+			writeFileSync(
+				join(agentDir, "auth.json"),
+				JSON.stringify({ searxng: { type: "api_key", key: "http://127.0.0.1:8888" } }),
+			);
+			try {
+				const loader = new DefaultResourceLoader({ cwd, agentDir });
+				await loader.reload();
+
+				const { diagnostics } = loader.getSkills();
+				expect(
+					diagnostics.some((d) => d.type === "warning" && d.message.includes("web search is not configured")),
+				).toBe(false);
+			} finally {
+				if (previous === undefined) delete process.env.SEARXNG_URL;
+				else process.env.SEARXNG_URL = previous;
+			}
+		});
+
+		it("warns when neither backend is configured in the environment or auth.json", async () => {
+			const previous = process.env.SEARXNG_URL;
+			delete process.env.SEARXNG_URL;
+			writeFileSync(join(agentDir, "auth.json"), JSON.stringify({}));
+			try {
+				const loader = new DefaultResourceLoader({ cwd, agentDir });
+				await loader.reload();
+
+				const { diagnostics } = loader.getSkills();
+				expect(
+					diagnostics.some((d) => d.type === "warning" && d.message.includes("web search is not configured")),
+				).toBe(true);
+			} finally {
+				if (previous === undefined) delete process.env.SEARXNG_URL;
+				else process.env.SEARXNG_URL = previous;
+			}
 		});
 
 		it("should not load the bundled websearch skill when disabled in settings", async () => {

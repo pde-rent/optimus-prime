@@ -1,11 +1,8 @@
+import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 
-const require = createRequire(import.meta.url);
-const tsxLoader = require.resolve("tsx/esm");
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const aiEntryUrl = new URL("../src/index.ts", import.meta.url).href;
 
@@ -15,19 +12,25 @@ type ProbeResult = {
 	loadedSpecifiers: string[];
 };
 
+/**
+ * Runs `action` in a child Bun process that records every provider SDK module
+ * actually pulled into the module graph. `Bun.plugin`'s `build.module` hook
+ * fires on the exact bare specifier, so a stub is substituted (and recorded)
+ * the first time anything imports it — statically or dynamically.
+ */
 function runProbe(action: string): ProbeResult {
 	const script = `
-		import { registerHooks } from "node:module";
-
-		const targets = new Set(${JSON.stringify(SDK_SPECIFIERS)});
 		const loaded = [];
 
-		registerHooks({
-			resolve(specifier, context, nextResolve) {
-				if (targets.has(specifier)) {
-					loaded.push(specifier);
+		Bun.plugin({
+			name: "sdk-load-spy",
+			setup(build) {
+				for (const specifier of ${JSON.stringify(SDK_SPECIFIERS)}) {
+					build.module(specifier, () => {
+						loaded.push(specifier);
+						return { exports: {}, loader: "object" };
+					});
 				}
-				return nextResolve(specifier, context);
 			},
 		});
 
@@ -36,7 +39,7 @@ function runProbe(action: string): ProbeResult {
 		console.log(JSON.stringify({ loadedSpecifiers: [...new Set(loaded)] }));
 	`;
 
-	const result = spawnSync(process.execPath, ["--import", tsxLoader, "--input-type=module", "--eval", script], {
+	const result = spawnSync("bun", ["-e", script], {
 		cwd: packageRoot,
 		encoding: "utf8",
 	});
@@ -58,6 +61,11 @@ function runProbe(action: string): ProbeResult {
 }
 
 describe("lazy provider module loading", () => {
+	it("detects a provider SDK import (spy self-check)", () => {
+		const result = runProbe(`await import("openai");`);
+		expect(result.loadedSpecifiers).toEqual(["openai"]);
+	});
+
 	it("does not load provider SDKs when importing the root barrel", () => {
 		const result = runProbe("");
 		expect(result.loadedSpecifiers).toEqual([]);

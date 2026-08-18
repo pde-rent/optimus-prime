@@ -1,10 +1,10 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCliSubprocessEnv, createCliSubprocessLaunchSpec } from "../../../src/cli/subprocess-launch.js";
+import { createCliSubprocessLaunchSpec } from "../../../src/cli/subprocess-launch.js";
 import { ENV_AGENT_DIR } from "../../../src/config.js";
 import type { AutonomousRuntimeState } from "../../../src/core/autonomous.js";
 import type { DaemonSocketClient } from "../../../src/modes/daemon/active-session-state.js";
@@ -13,14 +13,13 @@ import { DaemonSupervisor } from "../../../src/modes/daemon/daemon-supervisor.js
 import { waitForHeadlessCompletion } from "../../../src/modes/headless-completion.js";
 import { RpcClient } from "../../../src/modes/rpc/rpc-client.js";
 import { createRpcExtensionUiBridge } from "../../../src/modes/rpc/rpc-extension-ui-context.js";
+import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, getAssistantTexts, getUserTexts, type Harness } from "../harness.js";
 
 const fixturePath = resolve(__dirname, "../../fixtures/rpc-connection-mode-fixture.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const rpcEofFauxExtensionPath = resolve(__dirname, "../../fixtures/rpc-eof-faux-extension.ts");
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
-const tsxPath = resolve(__dirname, "../../../../../node_modules/tsx/dist/cli.mjs");
-const repoTsconfigPath = resolve(__dirname, "../../../../../tsconfig.json");
 const children = new Set<ChildProcess>();
 const harnesses: Harness[] = [];
 const daemonSockets = new Set<string>();
@@ -68,10 +67,9 @@ async function runCli(
 	args: string[],
 	options: { agentDir: string; stdin?: string; environment?: NodeJS.ProcessEnv },
 ): Promise<CliResult> {
-	const child = spawn(process.execPath, [tsxPath, cliPath, ...args], {
+	const child = spawn(BUN_PATH, [cliPath, ...args], {
 		env: {
 			...process.env,
-			TSX_TSCONFIG_PATH: repoTsconfigPath,
 			[ENV_AGENT_DIR]: options.agentDir,
 			PI_SKIP_VERSION_CHECK: "1",
 			PRIME_AGENT_INTERNAL_LEGACY_OWNED_WORKER_FRONTEND: "0",
@@ -114,8 +112,8 @@ async function runRpc(
 	commands: unknown[],
 	options: { trailingNewline?: boolean } = {},
 ): Promise<{ stdout: object[]; stderr: string }> {
-	const child = spawn(process.execPath, [tsxPath, fixturePath], {
-		env: { ...process.env, TSX_TSCONFIG_PATH: repoTsconfigPath },
+	const child = spawn(BUN_PATH, [fixturePath], {
+		env: { ...process.env },
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	children.add(child);
@@ -241,12 +239,9 @@ describe("ENG-4685 daemon-backed client modes", () => {
 	});
 
 	it("resolves source subprocesses independently of a spaced runtime cwd", () => {
-		const entrypoint = resolve(__dirname, "../../../src/cli.ts");
 		const launch = createCliSubprocessLaunchSpec([], process.execPath, [], "packages/coding-agent/src/cli.ts");
-		const environment = createCliSubprocessEnv({}, entrypoint, ["--import", "tsx"]);
 
 		expect(launch.args[0]).toBe(resolve("packages/coding-agent/src/cli.ts"));
-		expect(environment.TSX_TSCONFIG_PATH).toBe(repoTsconfigPath);
 	});
 
 	it("launches real daemon workers for every migrated client surface", async () => {

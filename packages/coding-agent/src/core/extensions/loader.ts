@@ -321,7 +321,7 @@ function createExtensionAPI(
 }
 
 // Replaced with `true` by the esbuild CLI bundle (scripts/bundle.mjs); stays
-// undefined in unbundled dist/ and under tsx.
+// undefined in unbundled dist/ and when running from source.
 declare const __PI_BUNDLED__: boolean | undefined;
 const isBundledCli = typeof __PI_BUNDLED__ !== "undefined" && __PI_BUNDLED__ === true;
 

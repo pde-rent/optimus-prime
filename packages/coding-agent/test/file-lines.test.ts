@@ -1,12 +1,13 @@
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fsMocks = vi.hoisted(() => ({
 	createReadStream: vi.fn(),
 }));
 
-vi.mock("node:fs", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:fs")>();
+const actualNodeFs = await import("node:fs");
+vi.mock("node:fs", () => {
+	const actual = actualNodeFs;
 	return {
 		...actual,
 		createReadStream: fsMocks.createReadStream,

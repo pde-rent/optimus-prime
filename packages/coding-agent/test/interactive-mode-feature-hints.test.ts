@@ -1,6 +1,6 @@
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { type Component, Container, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { FEATURE_HINT_ANIMATION_INTERVAL_MS } from "../src/modes/interactive/components/feature-hint.js";
 import { FEATURE_HINTS, FeatureHintDeck } from "../src/modes/interactive/feature-hints.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
@@ -80,12 +80,12 @@ describe("feature hint deck", () => {
 		expect(hints.find((hint) => hint?.id === "agents-view")?.text).toContain("Meta+Left");
 	});
 
-	it("covers Prime Agent workflows with capability-focused copy", () => {
+	it("covers Optimus Prime workflows with capability-focused copy", () => {
 		const deck = new FeatureHintDeck(() => 0);
 		const hints = FEATURE_HINTS.map(() => deck.next({ getKeybinding: () => "Meta+A", isResidentSession: true }));
 		const textById = new Map(hints.map((hint) => [hint?.id, hint?.text]));
 
-		expect(textById.get("subagents")).toBe("Prime Agent can delegate tasks to subagents and run them in parallel.");
+		expect(textById.get("subagents")).toBe("Optimus Prime can delegate tasks to subagents and run them in parallel.");
 		expect(textById.get("agents-view")).toContain("Session View");
 		expect(textById.get("session-rewind")).toContain("/tree");
 		expect(textById.get("steering")).toContain("steer");

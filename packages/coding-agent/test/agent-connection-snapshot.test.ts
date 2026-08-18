@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { AgentSession } from "../src/core/agent-session.js";
 import { createAgentConnectionResourceSnapshot } from "../src/modes/agent-connection/snapshot.js";
 

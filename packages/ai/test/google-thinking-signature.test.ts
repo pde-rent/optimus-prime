@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { isThinkingPart, retainThoughtSignature } from "../src/providers/google-shared.js";
 
 describe("Google thinking detection (thoughtSignature)", () => {

@@ -1,7 +1,7 @@
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import { getBundledSkillsDir } from "../src/config.js";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import { getJsSkillRuntimeInfo, loadSkillsFromDir } from "../src/core/skills.js";

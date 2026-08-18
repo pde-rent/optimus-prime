@@ -1,5 +1,5 @@
+import { afterEach, describe, expect, it } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getUserTexts, type Harness } from "./harness.js";
 import { withStreaming } from "./scheduling.js";
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { imageBlocksFromAttachments } from "../src/core/bun-repl/tool.js";
 import type { KernelAttachment } from "../src/core/tools/kernel-types.js";
 

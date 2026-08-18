@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.js";
 import { AgentSessionRuntime, type CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
 import type { AgentSessionServices } from "../src/core/agent-session-services.js";

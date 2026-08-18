@@ -1,6 +1,6 @@
+import { beforeEach, describe, expect, test, vi } from "bun:test";
 import type { SpawnSyncReturns } from "child_process";
 import { writeFileSync } from "fs";
-import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
 	return {

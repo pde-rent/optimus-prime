@@ -1,2 +1,7 @@
 [install]
 linker = "hoisted"
+# Supply-chain cooldown: never resolve to package versions published less than
+# 7 days ago. Only affects version resolution (installing/updating to new
+# versions); already-locked versions are unaffected.
+# Urgent security patch override: bun add --minimum-release-age=0 <pkg>
+minimumReleaseAge = 604800

@@ -1,5 +1,5 @@
+import { describe, expect, it, type Mock, vi } from "bun:test";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { describe, expect, it, type Mock, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { ClientPromptStashStore, type PromptStashState } from "../src/modes/interactive/prompt-stash-state.js";

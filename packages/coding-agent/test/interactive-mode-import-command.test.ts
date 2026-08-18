@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { SessionImportFileNotFoundError } from "../src/core/session-import-errors.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 

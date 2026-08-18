@@ -553,6 +553,8 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 	sessionName?: string;
 	/** Exact provider/model selector used by the child. */
 	model?: string;
+	/** Effective reasoning effort for the child run, when the host reports one. */
+	effort?: string;
 	label: string;
 	status: AgentConnectionRlmChildAgentStatus;
 	durationMs?: number;

@@ -1,9 +1,9 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { type ChildProcess, execSync, spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { Type } from "typebox";
 import { fileURLToPath } from "url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getEnvApiKey } from "../src/env-api-keys.js";
 import { getModel, getModels } from "../src/models.js";
 import { complete, stream } from "../src/stream.js";
@@ -133,7 +133,7 @@ async function handleToolCall<TApi extends Api>(model: Model<TApi>, options?: St
 				expect(toolCall.arguments).not.toBeUndefined();
 				expect((toolCall.arguments as any).a).toBe(15);
 				expect((toolCall.arguments as any).b).toBe(27);
-				expect((toolCall.arguments as any).operation).oneOf(["add", "subtract", "multiply", "divide"]);
+				expect((toolCall.arguments as any).operation).toBeOneOf(["add", "subtract", "multiply", "divide"]);
 			}
 		}
 	}

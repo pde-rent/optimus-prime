@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
 import { getEnvApiKey } from "../src/env-api-keys.js";
 import { getModels, getProviders } from "../src/models.js";
 import { complete } from "../src/stream.js";

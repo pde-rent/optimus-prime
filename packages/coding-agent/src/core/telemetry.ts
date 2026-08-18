@@ -126,6 +126,9 @@ interface ActiveRun {
 	retryCount: number;
 	usage: UsageTotals;
 	lastAssistant?: AssistantMessage;
+	thinkingLevelStart: string;
+	thinkingLevelEnd: string;
+	effortChangeCount: number;
 }
 
 interface SessionTotals {
@@ -550,9 +553,12 @@ function assistantMessage(event: AgentSessionEvent): AssistantMessage | undefine
 	return event.message;
 }
 
-function createActiveRun(now: () => number): ActiveRun {
+function createActiveRun(now: () => number, thinkingLevel: string): ActiveRun {
 	return {
 		startedAt: now(),
+		thinkingLevelStart: thinkingLevel,
+		thinkingLevelEnd: thinkingLevel,
+		effortChangeCount: 0,
 		agentEnded: false,
 		modelLatencyMs: 0,
 		maxModelLatencyMs: 0,
@@ -640,6 +646,9 @@ export function installAgentTelemetry(session: AgentSession, options: InstallAge
 			provider_category: telemetryProviderCategory(lastAssistant?.provider),
 			model_category: lastAssistant ? modelCategory(lastAssistant.model) : "unknown",
 			error_category: errorCategory(lastAssistant),
+			thinking_level_start: run.thinkingLevelStart,
+			thinking_level_end: run.thinkingLevelEnd,
+			effort_change_count: run.effortChangeCount,
 		});
 	};
 
@@ -657,8 +666,14 @@ export function installAgentTelemetry(session: AgentSession, options: InstallAge
 				if (activeRun?.agentEnded && !turnActionActive) {
 					finalizeRun();
 				}
-				activeRun ??= createActiveRun(now);
+				activeRun ??= createActiveRun(now, session.thinkingLevel);
 				activeRun.agentEnded = false;
+				break;
+			case "thinking_level_changed":
+				if (activeRun) {
+					activeRun.thinkingLevelEnd = event.level;
+					activeRun.effortChangeCount++;
+				}
 				break;
 			case "message_start":
 				if (event.message.role === "user") {

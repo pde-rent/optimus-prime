@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { type FileEntry, migrateSessionEntries } from "../../src/core/session-manager.js";
 
 describe("migrateSessionEntries", () => {

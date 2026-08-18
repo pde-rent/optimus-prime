@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { RpcClient } from "../src/modes/rpc/rpc-client.js";
 
 type RpcClientPrivate = {

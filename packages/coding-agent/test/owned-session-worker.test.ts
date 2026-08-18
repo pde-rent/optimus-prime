@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { PUBLIC_COMMAND_NAMES } from "../src/cli/command-registry.js";
 import {
 	classifyOwnedSessionWorkerInvocation,
@@ -34,9 +34,11 @@ describe("owned session worker CLI routing", () => {
 	});
 
 	it("preserves the current runtime flags and CLI entrypoint", () => {
-		expect(createOwnedWorkerLaunchSpec(["--mode", "rpc"], "/node", ["--loader", "tsx"], "/cli.ts")).toEqual({
-			command: "/node",
-			args: ["--loader", "tsx", "/cli.ts", "--mode", "rpc"],
+		expect(
+			createOwnedWorkerLaunchSpec(["--mode", "rpc"], "/bun", ["--conditions", "development"], "/cli.ts"),
+		).toEqual({
+			command: "/bun",
+			args: ["--conditions", "development", "/cli.ts", "--mode", "rpc"],
 		});
 	});
 

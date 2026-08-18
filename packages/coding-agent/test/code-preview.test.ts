@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { previewBashCommand, previewIpythonCode, previewJsCode } from "../src/core/tools/code-preview.js";
 
 describe("code preview", () => {

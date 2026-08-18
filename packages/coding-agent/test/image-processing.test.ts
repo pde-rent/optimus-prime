@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { convertToPng } from "../src/utils/image-convert.js";
 import { formatDimensionNote, resizeImage } from "../src/utils/image-resize.js";
 

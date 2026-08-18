@@ -1,5 +1,5 @@
+import { describe, expect, test } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { describe, expect, test } from "vitest";
 import type { AgentStatus } from "../src/core/session-manager.js";
 import {
 	agentStatusChanged,

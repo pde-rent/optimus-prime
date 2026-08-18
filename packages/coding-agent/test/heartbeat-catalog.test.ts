@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import type { DaemonClient, DaemonHello } from "../src/modes/daemon/daemon-client.js";
 import { listDaemonHeartbeats } from "../src/modes/daemon/heartbeat-catalog.js";
 
