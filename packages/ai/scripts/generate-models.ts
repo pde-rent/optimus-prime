@@ -1,4 +1,15 @@
 #!/usr/bin/env tsx
+/**
+ * Regenerates `src/models.generated.ts` from live provider catalogues.
+ *
+ * Deliberately NOT part of `bun run build`. It makes real network calls to every provider, so
+ * wiring it into the build made builds non-reproducible, offline-hostile, and able to rewrite a
+ * committed data file as a side effect of compiling. Run it on purpose:
+ *
+ *   bun run generate-models
+ *
+ * Then review the diff and commit it like any other change to shipped data.
+ */
 
 import { readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
