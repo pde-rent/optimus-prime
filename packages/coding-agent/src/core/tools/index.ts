@@ -1,3 +1,10 @@
+export { BunReplProvisioner } from "../bun-repl/provisioner.js";
+export {
+	type BunReplToolDetails,
+	type BunReplToolOptions,
+	createBunReplTool,
+	createBunReplToolDefinition,
+} from "../bun-repl/tool.js";
 export {
 	type BashOperations,
 	type BashSpawnContext,
@@ -38,8 +45,8 @@ export {
 } from "./truncate.js";
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { type BunReplToolOptions, createBunReplTool, createBunReplToolDefinition } from "../bun-repl/tool.js";
 import type { ToolDefinition } from "../extensions/types.js";
-import { createIpythonTool, createIpythonToolDefinition, type IpythonToolOptions } from "./ipython.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
@@ -47,35 +54,37 @@ export type ToolName = "ipython";
 export const allToolNames: Set<ToolName> = new Set(["ipython"]);
 
 export interface ToolsOptions {
-	ipython?: IpythonToolOptions;
+	ipython?: BunReplToolOptions;
 }
 
-export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
+export function createToolDefinition(toolName: ToolName, _cwd: string, options?: ToolsOptions): ToolDef {
 	switch (toolName) {
 		case "ipython":
-			return createIpythonToolDefinition(cwd, options?.ipython);
+			// The agent's code-execution tool is now the Bun REPL (Bun-only fork). The
+			// Python `createIpythonTool*` factories remain exported as the fallback.
+			return createBunReplToolDefinition(options?.ipython ?? {});
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
 }
 
-export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
+export function createTool(toolName: ToolName, _cwd: string, options?: ToolsOptions): Tool {
 	switch (toolName) {
 		case "ipython":
-			return createIpythonTool(cwd, options?.ipython);
+			return createBunReplTool(options?.ipython ?? {});
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
 }
 
-export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
+export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
-		ipython: createIpythonToolDefinition(cwd, options?.ipython),
+		ipython: createBunReplToolDefinition(options?.ipython ?? {}),
 	};
 }
 
-export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
+export function createAllTools(_cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
-		ipython: createIpythonTool(cwd, options?.ipython),
+		ipython: createBunReplTool(options?.ipython ?? {}),
 	};
 }

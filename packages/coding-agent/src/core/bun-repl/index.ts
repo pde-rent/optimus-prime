@@ -1,7 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { KernelAttachment } from "../tools/kernel-types.js";
 import type {
 	BunReplExecuteRequest,
 	BunReplHostRequest,
@@ -24,9 +26,28 @@ export interface BunReplExecuteResult {
 	stdout: string;
 	stderr: string;
 	result?: string;
+	/** Media emitted via the sandbox `display()` helper, converted for the attachment pipeline. */
+	attachments?: KernelAttachment[];
 	status: "ok" | "error" | "aborted";
 	error?: { ename: string; evalue: string; traceback: string[] };
 	durationMs: number;
+}
+
+/** Convert REPL display data into kernel-shaped attachments (base64-encoded). */
+function displayDataToAttachments(displayData: Array<{ mime: string; data: unknown }> | undefined): KernelAttachment[] {
+	if (!displayData) return [];
+	const attachments: KernelAttachment[] = [];
+	for (const d of displayData) {
+		const data = typeof d.data === "string" ? d.data : d.data instanceof Uint8Array ? toBase64(d.data) : null;
+		if (data) attachments.push({ mimeType: d.mime, data });
+	}
+	return attachments;
+}
+
+function toBase64(bytes: Uint8Array): string {
+	let bin = "";
+	for (const b of bytes) bin += String.fromCharCode(b);
+	return Buffer.from(bin, "binary").toString("base64");
 }
 
 export type BunReplHostRequestHandler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -88,7 +109,11 @@ export class BunReplManager {
 		});
 
 		const bunPath = this._options.bunPath ?? "bun";
-		const scriptPath = join(fileURLToPath(new URL(".", import.meta.url)), "repl-script.js");
+		// Prefer the source `.ts` when running from the tree (vitest/dev), falling back
+		// to the compiled `.js` emitted by tsc into dist/. Bun can run both.
+		const dir = fileURLToPath(new URL(".", import.meta.url));
+		const tsPath = join(dir, "repl-script.ts");
+		const scriptPath = existsSync(tsPath) ? tsPath : join(dir, "repl-script.js");
 
 		const child = spawn(bunPath, ["run", scriptPath], {
 			cwd: this._options.cwd,
@@ -102,7 +127,11 @@ export class BunReplManager {
 			this._resolveExit = resolve;
 		});
 
+		// Guard on child identity: during a deliberate restart (`_restartForRunaway`)
+		// the old child is SIGKILLed and respawned; the old process's async `exit` event
+		// must not clobber the new child's state.
 		child.on("exit", () => {
+			if (this._child !== child) return;
 			this._state = "shutdown";
 			this._child = null;
 			for (const [, pending] of this._pendingRequests) {
@@ -113,6 +142,7 @@ export class BunReplManager {
 		});
 
 		child.on("error", () => {
+			if (this._child !== child) return;
 			this._state = "shutdown";
 			this._child = null;
 			this._resolveExit?.();
@@ -242,11 +272,33 @@ export class BunReplManager {
 				return { stdout: "", stderr: "", status: "aborted" as const, durationMs: 0 };
 			}
 
+			// The child may have been hard-killed by a previous runaway; make sure it is up.
+			if (this._state !== "running") {
+				if (this._state === "starting") {
+					await this._readyPromise;
+				} else {
+					this._state = "idle";
+					this._readyPromise = null;
+					await this.start();
+				}
+			}
+
 			const id = randomUUID();
 			let stdout = "";
 			let stderr = "";
+			let _resolveResult!: (value: BunReplResult) => void;
+			let rejectResult!: (error: Error) => void;
+			let resolveIdle!: () => void;
 
-			const resultPromise = new Promise<BunReplResult>((resolve) => {
+			// idle resolves at construction so the child's `idle` frame is never missed,
+			// even when it lands in the same stdout chunk as `result` (result's await
+			// resumes on a microtask that runs after the whole chunk is dispatched).
+			const idlePromise = new Promise<void>((resolve) => {
+				resolveIdle = resolve;
+			});
+			const resultPromise = new Promise<BunReplResult>((resolve, reject) => {
+				_resolveResult = resolve;
+				rejectResult = reject;
 				this._activeCollector = {
 					_execId: id,
 					stdout: (chunk: string) => {
@@ -256,12 +308,33 @@ export class BunReplManager {
 						stderr += chunk;
 					},
 					result: resolve,
-					idle: () => {},
+					idle: () => resolveIdle(),
 				};
 			});
 
+			const timeoutMs = opts?.timeout ?? 120_000;
+			let runaway = false;
+			let settled = false;
+
+			// Hard-kill + restart on a runaway (sync `while(true)` hangs, or an async
+			// `await` that never resolves and ignores cooperative abort). The child is a
+			// separate OS process, so SIGKILL is guaranteed to free the event loop.
+			const killOnRunaway = async () => {
+				if (settled) return;
+				runaway = true;
+				rejectResult(new Error("Bun REPL execution timed out"));
+				await this._restartForRunaway();
+			};
+			const timer = setTimeout(() => void killOnRunaway(), timeoutMs);
+			if (typeof timer === "object" && "unref" in timer) timer.unref();
+
 			const abortHandler = () => {
-				this._sendToChild({ id: randomUUID(), type: "interrupt" });
+				if (this._child?.pid) {
+					this._sendToChild({ id: randomUUID(), type: "interrupt" });
+				}
+				// Grace for the cooperative interrupt to land a result; otherwise hard-kill.
+				const grace = setTimeout(() => void killOnRunaway(), 1000);
+				if (typeof grace === "object" && "unref" in grace) grace.unref();
 			};
 			opts?.signal?.addEventListener("abort", abortHandler, { once: true });
 
@@ -270,22 +343,18 @@ export class BunReplManager {
 					id,
 					type: "execute",
 					code,
-					timeout: opts?.timeout ?? 120_000,
+					timeout: timeoutMs,
 				};
 				this._sendToChild(req as unknown as Record<string, unknown>);
 
 				const resultMsg = await resultPromise;
+				settled = true;
 
-				// Wait for idle signal
-				await new Promise<void>((resolve) => {
-					if (this._activeCollector) {
-						this._activeCollector.idle = resolve;
-					} else {
-						resolve();
-					}
-				});
+				// Wait until the child signals idle (execution fully settled).
+				await idlePromise;
 
 				this._activeCollector = null;
+				clearTimeout(timer);
 				opts?.signal?.removeEventListener("abort", abortHandler);
 
 				const durationMs = Date.now() - start;
@@ -310,19 +379,27 @@ export class BunReplManager {
 					stdout,
 					stderr,
 					result: resultMsg.value,
+					attachments: displayDataToAttachments(resultMsg.displayData),
 					status: "ok" as const,
 					durationMs,
 				};
 			} catch (err: unknown) {
+				settled = true;
 				this._activeCollector = null;
+				clearTimeout(timer);
 				opts?.signal?.removeEventListener("abort", abortHandler);
+				const aborted = opts?.signal?.aborted || runaway;
 				return {
 					stdout,
 					stderr,
-					status: opts?.signal?.aborted ? ("aborted" as const) : ("error" as const),
+					status: aborted ? ("aborted" as const) : ("error" as const),
 					error: {
-						ename: "Error",
-						evalue: err instanceof Error ? err.message : String(err),
+						ename: runaway ? "TimeoutError" : "Error",
+						evalue: runaway
+							? "Execution timed out and the REPL was restarted; in-memory state was reset."
+							: err instanceof Error
+								? err.message
+								: String(err),
 						traceback: [],
 					},
 					durationMs: Date.now() - start,
@@ -332,6 +409,31 @@ export class BunReplManager {
 
 		this._executionQueue = execPromise.catch(() => {});
 		return execPromise;
+	}
+
+	/**
+	 * Hard-kill the child (a runaway sync loop or an interruptible-forever await can
+	 * only be stopped by terminating the OS process) and respawn a fresh REPL so a
+	 * following execute isn't wedged. In-memory state is lost; on-disk snapshots survive.
+	 */
+	private async _restartForRunaway(): Promise<void> {
+		if (this._state === "shutdown") return;
+		if (this._child?.pid) {
+			try {
+				this._child.kill("SIGKILL");
+			} catch {
+				// already dead
+			}
+		}
+		this._child = null;
+		this._state = "idle";
+		this._readyPromise = null;
+		this._readyResolve = null;
+		try {
+			await this.start();
+		} catch {
+			this._state = "shutdown";
+		}
 	}
 
 	async interrupt(): Promise<void> {

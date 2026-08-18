@@ -104,6 +104,7 @@ import {
 	setAutonomousEnabled,
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
+import { BunReplProvisioner } from "./bun-repl/provisioner.js";
 import {
 	COMPACT_SKILL_NAME,
 	type CompactionResult,
@@ -172,7 +173,6 @@ import {
 	validateGoalObjective,
 } from "./goals.js";
 import type { HostRequestHandlers, KernelSentAgentMessage } from "./kernel/index.js";
-import { type RestoreResult, snapshotPathIn } from "./kernel/state-snapshot.js";
 import type { McpManager } from "./mcp/mcp-manager.js";
 import {
 	type BashExecutionMessage,
@@ -261,7 +261,7 @@ import {
 } from "./session-manager.js";
 import type { SessionStats } from "./session-stats.js";
 import type { SettingsManager } from "./settings-manager.js";
-import { getPythonSkillRuntimeInfo, type Skill } from "./skills.js";
+import type { Skill } from "./skills.js";
 import {
 	parseCompactCommandOptions,
 	parseRefineCommandOptions,
@@ -274,7 +274,6 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
-import { IpythonKernelProvisioner } from "./tools/ipython.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addAssistantUsage, emptyUsage } from "./usage.js";
 import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
@@ -1202,7 +1201,7 @@ export class AgentSession {
 	// re-populate the retained map after it's been cleared.
 	private _disposing = false;
 	private _disposeAsyncPromise?: Promise<void>;
-	private _ipythonKernelProvisioner?: IpythonKernelProvisioner;
+	private _ipythonKernelProvisioner?: BunReplProvisioner;
 	/** Artifact dir backing the current provisioner's kernel snapshot, if any. */
 	private _ipythonKernelSnapshotDir?: string;
 	/** True once the runtime has been built once; later builds are in-process rebuilds (/reload). */
@@ -1544,18 +1543,6 @@ export class AgentSession {
 		for (const sentMessage of this._lateIpythonSentAgentMessages.get(message.toolCallId) ?? []) {
 			appendSentAgentMessageToToolResult(message, message.toolCallId, sentMessage);
 		}
-	}
-
-	private _recordLateIpythonSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): void {
-		const record = () => {
-			if (this._disposed || !this._rememberLateIpythonSentAgentMessage(toolCallId, message)) {
-				return;
-			}
-			this.sessionManager.appendCustomEntry(IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_ENTRY, { toolCallId, message });
-			this._emit({ type: "ipython_sent_agent_message", toolCallId, message });
-		};
-		this._agentEventQueue = this._agentEventQueue.then(record, record);
-		this._agentEventQueue.catch(() => {});
 	}
 
 	private _emitGoalUpdate(): void {
@@ -7053,20 +7040,15 @@ export class AgentSession {
 	 * knows which variables are actually available instead of assuming the kernel is
 	 * the one it left. Delivered as context before the next turn.
 	 */
-	private _onIpythonStateRestored(result: RestoreResult): void {
+	private _onIpythonStateRestored(restoredNames: string[]): void {
 		const lines = ["<ipython_state_restored>"];
-		if (result.restored.length > 0) {
+		if (restoredNames.length > 0) {
 			lines.push(
-				`Your IPython kernel state was revived from your previous session. These names are available again: ${result.restored.join(", ")}.`,
+				`Your kernel state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}.`,
 			);
 		} else {
 			lines.push(
-				"Your previous IPython kernel state could not be revived; the kernel is starting fresh, so re-create any variables, imports, or loaded data you need.",
-			);
-		}
-		if (result.failed.length > 0) {
-			lines.push(
-				`These could not be restored and must be recreated if needed: ${result.failed.map((f) => f.name).join(", ")}.`,
+				"Your previous kernel state could not be revived; the kernel is starting fresh, so re-create any variables, imports, or loaded data you need.",
 			);
 		}
 		lines.push("</ipython_state_restored>");
@@ -7075,7 +7057,7 @@ export class AgentSession {
 				customType: IPYTHON_STATE_RESTORED_CUSTOM_TYPE,
 				content: lines.join("\n"),
 				display: true,
-				details: { restored: result.restored.length > 0 },
+				details: { restored: restoredNames.length > 0 },
 			},
 			{ deliverAs: "nextTurn" },
 		).catch(() => {});
@@ -8676,7 +8658,6 @@ export class AgentSession {
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
 	}): void {
-		const pythonSkills = getPythonSkillRuntimeInfo(this._modelVisibleSkills());
 		let configuredBaseToolDefinitions: Record<string, ToolDefinition>;
 		if (this._baseToolsOverride) {
 			configuredBaseToolDefinitions = Object.fromEntries(
@@ -8696,22 +8677,19 @@ export class AgentSession {
 			// build (a genuine resume). A later rebuild (/reload) restores state silently
 			// for continuity — the conversation is unchanged, so there's nothing to flag.
 			const notifyRestore = !this._ipythonRuntimeBuilt;
-			this._ipythonKernelProvisioner = new IpythonKernelProvisioner(this._cwd, {
+			this._ipythonKernelProvisioner = new BunReplProvisioner({
+				cwd: this._cwd,
 				env: this._rlmKernelEnv(),
-				sessionId: this.sessionId,
 				hostHandlers: this._createKernelHostHandlers(),
-				pythonSkills,
 				snapshotDir: this._ipythonKernelSnapshotDir,
 				readyGate: previousDispose,
-				onRestore: notifyRestore ? (result) => this._onIpythonStateRestored(result) : undefined,
+				onRestore: notifyRestore ? (names) => this._onIpythonStateRestored(names) : undefined,
 			});
 			configuredBaseToolDefinitions = createAllToolDefinitions(this._cwd, {
 				ipython: {
 					provisioner: this._ipythonKernelProvisioner,
-					commandPrefix: this.settingsManager.getShellCommandPrefix(),
-					shellPath: this.settingsManager.getShellPath(),
-					onLateSentAgentMessage: (toolCallId, message) =>
-						this._recordLateIpythonSentAgentMessage(toolCallId, message),
+					cwd: this._cwd,
+					env: this._rlmKernelEnv(),
 				},
 			});
 		}
@@ -8762,7 +8740,7 @@ export class AgentSession {
 		// came back before the first turn, rather than a turn later when the kernel
 		// would otherwise lazily start on first use.
 		const hasSnapshot =
-			!!this._ipythonKernelSnapshotDir && existsSync(snapshotPathIn(this._ipythonKernelSnapshotDir));
+			!!this._ipythonKernelSnapshotDir && existsSync(join(this._ipythonKernelSnapshotDir, "manifest.json"));
 		if ((this._prewarmIpythonKernel || hasSnapshot) && this.getActiveToolNames().includes("ipython")) {
 			this._ipythonKernelProvisioner?.prewarm();
 		}
