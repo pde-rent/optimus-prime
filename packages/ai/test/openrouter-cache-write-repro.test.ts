@@ -16,7 +16,7 @@ describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter cache_write repro E
 		retry: 2,
 		timeout: 90000,
 	}, async () => {
-		const model = getModel("openrouter", "google/gemini-2.5-pro-preview");
+		const model = getModel("openrouter", "google/gemini-2.5-flash");
 		const context = {
 			systemPrompt: createLongSystemPrompt(),
 			messages: [
@@ -69,6 +69,8 @@ describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter cache_write repro E
 		const second = await completeSimple(model, context, options);
 		expect(second.stopReason, second.errorMessage).toBe("stop");
 
+		// Regression expectation: cache_write_tokens from provider usage must be preserved.
+		// With the cache_control marker above, at least one of the two calls should create cache.
 		const hasCacheWrite = first.usage.cacheWrite > 0 || second.usage.cacheWrite > 0;
 		expect(hasCacheWrite).toBe(true);
 	});

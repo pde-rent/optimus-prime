@@ -16,6 +16,9 @@ describe("Prime Inference models", () => {
 	it("registers the Prime Inference catalog", () => {
 		const modelIds = getModels("prime-inference").map((model) => model.id);
 
+		// Lower bound, not an exact count — the catalog grows with each release and an
+		// exact number breaks on every routine addition. The membership checks below
+		// are the meaningful assertions.
 		expect(modelIds.length).toBeGreaterThanOrEqual(90);
 		expect(modelIds).toEqual(
 			expect.arrayContaining([
@@ -77,7 +80,7 @@ describe("Prime Inference models", () => {
 	});
 
 	it("uses reasoning toggles for models without effort selectors", () => {
-		for (const provider of ["prime-inference"] as const) {
+		for (const provider of ["prime-inference", "openrouter"] as const) {
 			const model = getModel(provider, "qwen/qwen3.7-flash");
 
 			expect(model.compat?.supportsReasoningEffort).toBe(false);
@@ -86,8 +89,8 @@ describe("Prime Inference models", () => {
 		}
 	});
 
-	it("registers Kimi K3 on Prime Inference", () => {
-		for (const provider of ["prime-inference"] as const) {
+	it("registers Kimi K3 on Prime Inference and OpenRouter", () => {
+		for (const provider of ["prime-inference", "openrouter"] as const) {
 			const model = getModel(provider, "moonshotai/kimi-k3");
 
 			expect(model.api).toBe("openai-completions");
@@ -108,6 +111,10 @@ describe("Prime Inference models", () => {
 		expect(gemini.input).toEqual(["text", "image"]);
 		expect(gemini.reasoning).toBe(true);
 
+		// Modality and reasoning are read from OpenRouter's published spec for the
+		// same upstream model, but the Prime route enforces a smaller window and
+		// output cap than that spec lists (1M/16k), so the curated override wins
+		// for contextWindow and maxTokens.
 		const nemotronSuper = getModel("prime-inference", "nvidia/nemotron-3-super-120b-a12b");
 		expect(nemotronSuper.reasoning).toBe(true);
 		expect(nemotronSuper.input).toEqual(["text"]);
@@ -207,6 +214,8 @@ describe("Prime Inference models", () => {
 		expect(getModel("prime-inference", "anthropic/claude-sonnet-4.6").contextWindow).toBe(1000000);
 		expect(getModel("prime-inference", "anthropic/claude-sonnet-5").contextWindow).toBe(1000000);
 		expect(getModel("prime-inference", "anthropic/claude-haiku-4.5").contextWindow).toBe(200000);
+		// Confirmed against the live API: this route serves a 200k window, not the
+		// larger one the upstream model's published spec lists.
 		expect(getModel("prime-inference", "anthropic/claude-sonnet-4.5").contextWindow).toBe(200000);
 	});
 

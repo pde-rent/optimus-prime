@@ -31,13 +31,24 @@ export type KnownProvider =
 	| "groq"
 	| "cerebras"
 	| "openrouter"
+	| "vercel-ai-gateway"
 	| "zai"
 	| "mistral"
 	| "minimax"
 	| "minimax-cn"
 	| "moonshotai"
 	| "moonshotai-cn"
-	| "kimi-coding";
+	| "huggingface"
+	| "fireworks"
+	| "opencode"
+	| "opencode-go"
+	| "kimi-coding"
+	| "cloudflare-workers-ai"
+	| "cloudflare-ai-gateway"
+	| "xiaomi"
+	| "xiaomi-token-plan-cn"
+	| "xiaomi-token-plan-ams"
+	| "xiaomi-token-plan-sgp";
 export type Provider = KnownProvider | string;
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

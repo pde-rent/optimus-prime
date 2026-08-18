@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { fileURLToPath } from "url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getEnvApiKey } from "../src/env-api-keys.js";
-import { getModel } from "../src/models.js";
+import { getModel, getModels } from "../src/models.js";
 import { complete, stream } from "../src/stream.js";
 import type { Api, Context, ImageContent, Model, StreamOptions, Tool, ToolResultMessage } from "../src/types.js";
 import { getKimiCodingTestModel } from "./kimi-test-model.js";
@@ -22,6 +22,7 @@ import { resolveApiKey } from "./oauth.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Resolve OAuth tokens at module level (async, runs before tests)
 const oauthTokens = await Promise.all([
 	resolveApiKey("anthropic"),
 	resolveApiKey("github-copilot"),
@@ -30,6 +31,9 @@ const oauthTokens = await Promise.all([
 const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
 const primeInferenceApiKey = getEnvApiKey("prime-inference");
 
+// Calculator tool definition (same as examples)
+// Note: Using StringEnum helper because Google's API doesn't support anyOf/const patterns
+// that Type.Enum generates. Google requires { type: "string", enum: [...] } format.
 const calculatorSchema = Type.Object({
 	a: Type.Number({ description: "First number" }),
 	b: Type.Number({ description: "Second number" }),
@@ -111,8 +115,11 @@ async function handleToolCall<TApi extends Api>(model: Model<TApi>, options?: St
 			if (toolCall.type === "toolCall") {
 				expect(toolCall.name).toBe("math_operation");
 				accumulatedToolArgs += event.delta;
+				// Check that we have a parsed arguments object during streaming
 				expect(toolCall.arguments).toBeDefined();
 				expect(typeof toolCall.arguments).toBe("object");
+				// The arguments should be partially populated as we stream
+				// At minimum it should be an empty object, never undefined
 				expect(toolCall.arguments).not.toBeNull();
 			}
 		}
@@ -216,11 +223,13 @@ async function handleThinking<TApi extends Api>(model: Model<TApi>, options?: St
 }
 
 async function handleImage<TApi extends Api>(model: Model<TApi>, options?: StreamOptionsWithExtras) {
+	// Check if the model supports images
 	if (!model.input.includes("image")) {
 		console.log(`Skipping image test - model ${model.id} doesn't support images`);
 		return;
 	}
 
+	// Read the test image
 	const imagePath = join(__dirname, "data", "red-circle.png");
 	const imageBuffer = readFileSync(imagePath);
 	const base64Image = imageBuffer.toString("base64");
@@ -250,6 +259,7 @@ async function handleImage<TApi extends Api>(model: Model<TApi>, options?: Strea
 
 	const response = await complete(model, context, options);
 
+	// Check the response mentions red and circle
 	expect(response.content.length > 0).toBeTruthy();
 	const textContent = response.content.find((b) => b.type === "text");
 	if (textContent && textContent.type === "text") {
@@ -272,6 +282,7 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 		tools: [calculatorTool],
 	};
 
+	// Collect all text content from all assistant responses
 	let allTextContent = "";
 	let hasSeenThinking = false;
 	let hasSeenToolCalls = false;
@@ -280,8 +291,10 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 	for (let turn = 0; turn < maxTurns; turn++) {
 		const response = await complete(model, context, options);
 
+		// Add the assistant response to context
 		context.messages.push(response);
 
+		// Process content blocks
 		const results: ToolResultMessage[] = [];
 		for (const block of response.content) {
 			if (block.type === "text") {
@@ -291,6 +304,7 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 			} else if (block.type === "toolCall") {
 				hasSeenToolCalls = true;
 
+				// Process the tool call
 				expect(block.name).toBe("math_operation");
 				expect(block.id).toBeTruthy();
 				expect(block.arguments).toBeTruthy();
@@ -308,6 +322,7 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 						result = 0;
 				}
 
+				// Add tool result to context
 				results.push({
 					role: "toolResult",
 					toolCallId: block.id,
@@ -320,14 +335,17 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 		}
 		context.messages.push(...results);
 
+		// If we got a stop response with text content, we're likely done
 		expect(response.stopReason, `Error: ${response.errorMessage}`).not.toBe("error");
 		if (response.stopReason === "stop") {
 			break;
 		}
 	}
 
+	// Verify we got either thinking content or tool calls (or both)
 	expect(hasSeenThinking || hasSeenToolCalls).toBe(true);
 
+	// The accumulated text should reference both calculations
 	expect(allTextContent).toBeTruthy();
 	expect(allTextContent.includes("714")).toBe(true);
 	expect(allTextContent.includes("887")).toBe(true);
@@ -624,7 +642,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareWorkersAICredentials())(
 		"Cloudflare Workers AI Provider (Kimi K2.6 via OpenAI Completions)",
 		() => {
-			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+			const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -651,7 +669,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareAiGatewayCredentials())(
 		"Cloudflare AI Gateway → Workers AI (Kimi K2.6 via /compat)",
 		() => {
-			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+			const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -678,7 +696,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareAiGatewayCredentials() || !process.env.OPENAI_API_KEY)(
 		"Cloudflare AI Gateway → OpenAI BYOK (gpt-5.1 via /openai responses)",
 		() => {
-			const llm = getModel("prime-inference", "openai/gpt-5.1");
+			const llm = getModel("cloudflare-ai-gateway", "gpt-5.1");
 			const options = { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } };
 			const thinkingOptions = {
 				...options,
@@ -709,9 +727,10 @@ describe("Generate E2E Tests", () => {
 	);
 
 	describe.skipIf(!hasCloudflareAiGatewayCredentials() || !process.env.ANTHROPIC_API_KEY)(
-		"Cloudflare AI Gateway → Anthropic BYOK (claude-sonnet-4.5 via /anthropic messages)",
+		"Cloudflare AI Gateway → Anthropic BYOK (Claude Sonnet 4.6 via /anthropic messages)",
 		() => {
-			const llm = getModel("prime-inference", "anthropic/claude-sonnet-4.5");
+			const llm = getModels("cloudflare-ai-gateway").find((model) => model.name === "Claude Sonnet 4.6");
+			if (!llm) throw new Error("Cloudflare AI Gateway is missing Claude Sonnet 4.6");
 			const options = { headers: { Authorization: `Bearer ${process.env.ANTHROPIC_API_KEY}` } };
 			const thinkingOptions = {
 				...options,
@@ -742,7 +761,7 @@ describe("Generate E2E Tests", () => {
 	);
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face Provider (Kimi-K2.5 via OpenAI Completions)", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
 
 		it("should complete basic text generation", { retry: 3 }, async () => {
 			await basicTextGeneration(llm);
@@ -796,7 +815,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (google/gemini-2.5-flash via Anthropic Messages)",
 		() => {
-			const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
+			const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -823,7 +842,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (anthropic/claude-opus-4.5 via Anthropic Messages)",
 		() => {
-			const llm = getModel("openrouter", "anthropic/claude-opus-4");
+			const llm = getModel("vercel-ai-gateway", "anthropic/claude-opus-4.5");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -850,7 +869,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (openai/gpt-5.1-codex-max via Anthropic Messages)",
 		() => {
-			const llm = getModel("openrouter", "openai/gpt-5.1-codex-max");
+			const llm = getModel("vercel-ai-gateway", "openai/gpt-5.1-codex-max");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -999,7 +1018,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_API_KEY)(
 		"Xiaomi MiMo (API billing) Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi", "mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1030,7 +1049,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, CN region)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1061,7 +1080,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, AMS region)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1092,7 +1111,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, SGP region)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1119,6 +1138,11 @@ describe("Generate E2E Tests", () => {
 			});
 		},
 	);
+
+	// =========================================================================
+	// OAuth-based providers (credentials from ~/.pi/agent/oauth.json)
+	// Tokens are resolved at module level (see oauthTokens above)
+	// =========================================================================
 
 	describe("Anthropic OAuth Provider (claude-sonnet-4-6)", () => {
 		const model = getModel("anthropic", "claude-sonnet-4-6");
@@ -1456,6 +1480,7 @@ describe("Generate E2E Tests", () => {
 		});
 	});
 
+	// Check if ollama is installed and local LLM tests are enabled
 	let ollamaInstalled = false;
 	if (!process.env.PI_NO_LOCAL_LLM) {
 		try {
@@ -1471,6 +1496,7 @@ describe("Generate E2E Tests", () => {
 		let ollamaProcess: ChildProcess | null = null;
 
 		beforeAll(async () => {
+			// Check if model is available, if not pull it
 			try {
 				execSync("ollama list | grep -q 'gpt-oss:20b'", { stdio: "ignore" });
 			} catch {
@@ -1483,11 +1509,13 @@ describe("Generate E2E Tests", () => {
 				}
 			}
 
+			// Start ollama server
 			ollamaProcess = spawn("ollama", ["serve"], {
 				detached: false,
 				stdio: "ignore",
 			});
 
+			// Wait for server to be ready
 			await new Promise<void>((resolve) => {
 				const checkServer = async () => {
 					try {
@@ -1524,6 +1552,7 @@ describe("Generate E2E Tests", () => {
 		}, 30000); // 30 second timeout for setup
 
 		afterAll(() => {
+			// Kill ollama server
 			if (ollamaProcess) {
 				ollamaProcess.kill("SIGTERM");
 				ollamaProcess = null;

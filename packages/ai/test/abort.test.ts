@@ -10,6 +10,7 @@ import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-u
 import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
+// Resolve OAuth tokens at module level (async, runs before tests)
 const [openaiCodexToken] = await Promise.all([resolveApiKey("openai-codex")]);
 
 async function testAbortSignal<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
@@ -40,6 +41,7 @@ async function testAbortSignal<TApi extends Api>(llm: Model<TApi>, options: Stre
 	}
 	const msg = await response.result();
 
+	// If we get here without throwing, the abort didn't work
 	expect(msg.stopReason).toBe("aborted");
 	expect(msg.content.length).toBeGreaterThan(0);
 
@@ -69,6 +71,7 @@ async function testImmediateAbort<TApi extends Api>(llm: Model<TApi>, options: S
 }
 
 async function testAbortThenNewMessage<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
+	// First request: abort immediately before any response content arrives
 	const controller = new AbortController();
 	controller.abort();
 
@@ -78,10 +81,13 @@ async function testAbortThenNewMessage<TApi extends Api>(llm: Model<TApi>, optio
 
 	const abortedResponse = await complete(llm, context, { ...options, signal: controller.signal });
 	expect(abortedResponse.stopReason).toBe("aborted");
+	// The aborted message has empty content since we aborted before anything arrived
 	expect(abortedResponse.content.length).toBe(0);
 
+	// Add the aborted assistant message to context (this is what happens in the real coding agent)
 	context.messages.push(abortedResponse);
 
+	// Second request: send a new message - this should work even with the aborted message in context
 	context.messages.push({
 		role: "user",
 		content: "What is 2 + 2?",
@@ -186,7 +192,7 @@ describe("AI Providers Abort Tests", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider Abort", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi", "mimo-v2.5-pro");
 
 		it("should abort mid-stream", { retry: 3 }, async () => {
 			await testAbortSignal(llm);
@@ -198,7 +204,7 @@ describe("AI Providers Abort Tests", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)("Xiaomi MiMo Token Plan (CN) Provider Abort", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
 
 		it("should abort mid-stream", { retry: 3 }, async () => {
 			await testAbortSignal(llm);
@@ -210,7 +216,7 @@ describe("AI Providers Abort Tests", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)("Xiaomi MiMo Token Plan (AMS) Provider Abort", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
 
 		it("should abort mid-stream", { retry: 3 }, async () => {
 			await testAbortSignal(llm);
@@ -222,7 +228,7 @@ describe("AI Providers Abort Tests", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)("Xiaomi MiMo Token Plan (SGP) Provider Abort", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
 
 		it("should abort mid-stream", { retry: 3 }, async () => {
 			await testAbortSignal(llm);
@@ -246,7 +252,7 @@ describe("AI Providers Abort Tests", () => {
 	});
 
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider Abort", () => {
-		const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
+		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
 
 		it("should abort mid-stream", { retry: 3 }, async () => {
 			await testAbortSignal(llm);

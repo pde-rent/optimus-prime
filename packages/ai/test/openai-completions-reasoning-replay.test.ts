@@ -11,6 +11,7 @@ const emptyUsage: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+// requiresThinkingAsText: false -> exercises the native reasoning-field replay path.
 const compat = {
 	supportsStore: true,
 	supportsDeveloperRole: true,
@@ -95,6 +96,8 @@ describe("openai-completions reasoning replay", () => {
 		);
 
 		const assistant = messages[1] as unknown as Record<string, unknown>;
+		// No recorded field and provider doesn't force reasoning_content: prepend as text so the
+		// trace is still sent back without inventing a non-standard field.
 		expect(assistant.reasoning_content).toBeUndefined();
 		expect(assistant.content).toBe("unsigned reasoning\n\nanswer");
 	});
@@ -119,6 +122,8 @@ describe("openai-completions reasoning replay", () => {
 		const reasoningCompat = { ...compat, requiresReasoningContentOnAssistantMessages: true };
 		const messages = convertMessages(
 			buildModel(),
+			// Recorded signature is "reasoning", but a reasoning_content provider must get the
+			// trace in reasoning_content or the reasoning_content="" default would erase it.
 			buildContext([
 				{ type: "thinking", thinking: "step by step", thinkingSignature: "reasoning" },
 				{ type: "text", text: "answer" },
@@ -134,6 +139,7 @@ describe("openai-completions reasoning replay", () => {
 		const reasoningCompat = { ...compat, requiresReasoningContentOnAssistantMessages: true };
 		const messages = convertMessages(
 			buildModel(),
+			// Lone high surrogate (U+D800) would break JSON serialization on the next turn.
 			buildContext([
 				{ type: "thinking", thinking: "before\ud800after" },
 				{ type: "text", text: "answer" },

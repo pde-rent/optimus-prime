@@ -13,6 +13,7 @@ import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-u
 import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
+// Resolve OAuth tokens at module level (async, runs before tests)
 const oauthTokens = await Promise.all([
 	resolveApiKey("anthropic"),
 	resolveApiKey("github-copilot"),
@@ -20,16 +21,26 @@ const oauthTokens = await Promise.all([
 ]);
 const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
 
+/**
+ * Test that tool results containing only images work correctly across all providers.
+ * This verifies that:
+ * 1. Tool results can contain image content blocks
+ * 2. Providers correctly pass images from tool results to the LLM
+ * 3. The LLM can see and describe images returned by tools
+ */
 async function handleToolWithImageResult<TApi extends Api>(model: Model<TApi>, options?: StreamOptionsWithExtras) {
+	// Check if the model supports images
 	if (!model.input.includes("image")) {
 		console.log(`Skipping tool image result test - model ${model.id} doesn't support images`);
 		return;
 	}
 
+	// Read the test image
 	const imagePath = join(__dirname, "data", "red-circle.png");
 	const imageBuffer = readFileSync(imagePath);
 	const base64Image = imageBuffer.toString("base64");
 
+	// Define a tool that returns only an image (no text)
 	const getImageSchema = Type.Object({});
 	const getImageTool: Tool<typeof getImageSchema> = {
 		name: "get_circle",
@@ -49,9 +60,11 @@ async function handleToolWithImageResult<TApi extends Api>(model: Model<TApi>, o
 		tools: [getImageTool],
 	};
 
+	// First request - LLM should call the tool
 	const firstResponse = await complete(model, context, options);
 	expect(firstResponse.stopReason).toBe("toolUse");
 
+	// Find the tool call
 	const toolCall = firstResponse.content.find((b) => b.type === "toolCall");
 	expect(toolCall).toBeTruthy();
 	if (!toolCall || toolCall.type !== "toolCall") {
@@ -59,8 +72,10 @@ async function handleToolWithImageResult<TApi extends Api>(model: Model<TApi>, o
 	}
 	expect(toolCall.name).toBe("get_circle");
 
+	// Add the tool call to context
 	context.messages.push(firstResponse);
 
+	// Create tool result with ONLY an image (no text)
 	const toolResult: ToolResultMessage = {
 		role: "toolResult",
 		toolCallId: toolCall.id,
@@ -78,32 +93,45 @@ async function handleToolWithImageResult<TApi extends Api>(model: Model<TApi>, o
 
 	context.messages.push(toolResult);
 
+	// Second request - LLM should describe the image from the tool result
 	const secondResponse = await complete(model, context, options);
 	expect(secondResponse.stopReason).toBe("stop");
 	expect(secondResponse.errorMessage).toBeFalsy();
 
+	// Verify the LLM can see and describe the image
 	const textContent = secondResponse.content.find((b) => b.type === "text");
 	expect(textContent).toBeTruthy();
 	if (textContent && textContent.type === "text") {
 		const lowerContent = textContent.text.toLowerCase();
+		// Should mention red and circle since that's what the image shows
 		expect(lowerContent).toContain("red");
 		expect(lowerContent).toContain("circle");
 	}
 }
 
+/**
+ * Test that tool results containing both text and images work correctly across all providers.
+ * This verifies that:
+ * 1. Tool results can contain mixed content blocks (text + images)
+ * 2. Providers correctly pass both text and images from tool results to the LLM
+ * 3. The LLM can see both the text and images in tool results
+ */
 async function handleToolWithTextAndImageResult<TApi extends Api>(
 	model: Model<TApi>,
 	options?: StreamOptionsWithExtras,
 ) {
+	// Check if the model supports images
 	if (!model.input.includes("image")) {
 		console.log(`Skipping tool text+image result test - model ${model.id} doesn't support images`);
 		return;
 	}
 
+	// Read the test image
 	const imagePath = join(__dirname, "data", "red-circle.png");
 	const imageBuffer = readFileSync(imagePath);
 	const base64Image = imageBuffer.toString("base64");
 
+	// Define a tool that returns both text and an image
 	const getImageSchema = Type.Object({});
 	const getImageTool: Tool<typeof getImageSchema> = {
 		name: "get_circle_with_description",
@@ -124,9 +152,11 @@ async function handleToolWithTextAndImageResult<TApi extends Api>(
 		tools: [getImageTool],
 	};
 
+	// First request - LLM should call the tool
 	const firstResponse = await complete(model, context, options);
 	expect(firstResponse.stopReason).toBe("toolUse");
 
+	// Find the tool call
 	const toolCall = firstResponse.content.find((b) => b.type === "toolCall");
 	expect(toolCall).toBeTruthy();
 	if (!toolCall || toolCall.type !== "toolCall") {
@@ -134,8 +164,10 @@ async function handleToolWithTextAndImageResult<TApi extends Api>(
 	}
 	expect(toolCall.name).toBe("get_circle_with_description");
 
+	// Add the tool call to context
 	context.messages.push(firstResponse);
 
+	// Create tool result with BOTH text and image
 	const toolResult: ToolResultMessage = {
 		role: "toolResult",
 		toolCallId: toolCall.id,
@@ -157,15 +189,19 @@ async function handleToolWithTextAndImageResult<TApi extends Api>(
 
 	context.messages.push(toolResult);
 
+	// Second request - LLM should describe both the text and image from the tool result
 	const secondResponse = await complete(model, context, options);
 	expect(secondResponse.stopReason).toBe("stop");
 	expect(secondResponse.errorMessage).toBeFalsy();
 
+	// Verify the LLM can see both text and image
 	const textContent = secondResponse.content.find((b) => b.type === "text");
 	expect(textContent).toBeTruthy();
 	if (textContent && textContent.type === "text") {
 		const lowerContent = textContent.text.toLowerCase();
+		// Should mention details from the text (diameter/pixels)
 		expect(lowerContent.match(/diameter|100|pixel/)).toBeTruthy();
+		// Should also mention the visual properties (red and circle)
 		expect(lowerContent).toContain("red");
 		expect(lowerContent).toContain("circle");
 	}
@@ -264,14 +300,19 @@ describe("Tool Results with Images", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider (mimo-v2.5-pro)", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi", "mimo-v2.5-pro");
 
 		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 			await handleToolWithImageResult(llm);
 		});
 
-		// MiMo ignores image content when paired with descriptive text, although its
-		// image-only path is covered above, so this model-quality limitation stays skipped.
+		// FIXME(xiaomi): when a tool_result contains both a descriptive text block
+		// and an image block, MiMo locks onto the text and ignores the image (it
+		// reports the text-derived diameter but never mentions the image's color).
+		// The image-only case above proves the image reaches the model, and the
+		// text-only path obviously works, so this is a multimodal-fusion quality
+		// issue in the model, not a transport bug. Re-enable when upstream model
+		// quality improves.
 		it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
 			await handleToolWithTextAndImageResult(llm);
 		});
@@ -280,13 +321,14 @@ describe("Tool Results with Images", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
 		"Xiaomi MiMo Token Plan (CN) Provider (mimo-v2.5-pro)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
 
 			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithImageResult(llm);
 			});
 
-			// Same MiMo multimodal-fusion limitation as the API-billing route.
+			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
+			// limitation applies to Token Plan endpoints (same model behind both).
 			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithTextAndImageResult(llm);
 			});
@@ -296,13 +338,14 @@ describe("Tool Results with Images", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
 		"Xiaomi MiMo Token Plan (AMS) Provider (mimo-v2.5-pro)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
 
 			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithImageResult(llm);
 			});
 
-			// Same MiMo multimodal-fusion limitation as the API-billing route.
+			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
+			// limitation applies to Token Plan endpoints (same model behind both).
 			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithTextAndImageResult(llm);
 			});
@@ -312,13 +355,14 @@ describe("Tool Results with Images", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
 		"Xiaomi MiMo Token Plan (SGP) Provider (mimo-v2.5-pro)",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
 
 			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithImageResult(llm);
 			});
 
-			// Same MiMo multimodal-fusion limitation as the API-billing route.
+			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
+			// limitation applies to Token Plan endpoints (same model behind both).
 			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
 				await handleToolWithTextAndImageResult(llm);
 			});
@@ -338,7 +382,7 @@ describe("Tool Results with Images", () => {
 	});
 
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider (google/gemini-2.5-flash)", () => {
-		const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
+		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
 
 		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 			await handleToolWithImageResult(llm);
@@ -360,6 +404,10 @@ describe("Tool Results with Images", () => {
 			await handleToolWithTextAndImageResult(llm);
 		});
 	});
+
+	// =========================================================================
+	// OAuth-based providers (credentials from ~/.pi/agent/oauth.json)
+	// =========================================================================
 
 	describe("Anthropic OAuth Provider (claude-sonnet-4-5)", () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5");

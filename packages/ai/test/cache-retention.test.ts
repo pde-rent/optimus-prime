@@ -36,10 +36,13 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					},
 				});
 
+				// Consume the stream to trigger the request
 				for await (const _ of s) {
+					// Just consume
 				}
 
 				expect(capturedPayload).not.toBeNull();
+				// System prompt should have cache_control without ttl
 				expect(capturedPayload.system).toBeDefined();
 				expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral" });
 			},
@@ -56,10 +59,13 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 				},
 			});
 
+			// Consume the stream to trigger the request
 			for await (const _ of s) {
+				// Just consume
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			// System prompt should have cache_control with ttl: "1h"
 			expect(capturedPayload.system).toBeDefined();
 			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 		});
@@ -67,6 +73,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 		it("should add ttl for non-api.anthropic.com baseUrl by default", async () => {
 			process.env.PI_CACHE_RETENTION = "long";
 
+			// Create a model with a different baseUrl (simulating a proxy)
 			const baseModel = getModel("anthropic", "claude-haiku-4-5");
 			const proxyModel = {
 				...baseModel,
@@ -75,6 +82,12 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 
 			let capturedPayload: any = null;
 
+			// We can't actually make the request (no proxy), but we can verify the payload
+			// by using a mock or checking the logic directly
+			// For this test, we'll import the helper directly
+
+			// Since we can't easily test this without mocking, we'll skip the actual API call
+			// and just verify the helper logic works correctly
 			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
@@ -85,11 +98,12 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					},
 				});
 
+				// This will fail since we're using a fake key and fake proxy, but the payload should be captured
 				for await (const event of s) {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -120,7 +134,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -146,7 +160,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -171,7 +185,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -200,7 +214,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -221,7 +235,9 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					},
 				});
 
+				// Consume the stream to trigger the request
 				for await (const _ of s) {
+					// Just consume
 				}
 
 				expect(capturedPayload).not.toBeNull();
@@ -242,7 +258,9 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					},
 				});
 
+				// Consume the stream to trigger the request
 				for await (const _ of s) {
+					// Just consume
 				}
 
 				expect(capturedPayload).not.toBeNull();
@@ -253,6 +271,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 		it("should set prompt_cache_retention for non-api.openai.com baseUrl by default", async () => {
 			process.env.PI_CACHE_RETENTION = "long";
 
+			// Create a model with a different baseUrl (simulating a proxy)
 			const baseModel = getModel("openai", "gpt-4o-mini");
 			const proxyModel = {
 				...baseModel,
@@ -271,11 +290,12 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					},
 				});
 
+				// This will fail since we're using a fake key and fake proxy, but the payload should be captured
 				for await (const event of s) {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -305,7 +325,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -332,7 +352,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -360,7 +380,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -404,7 +424,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();
@@ -430,7 +450,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 					if (event.type === "error") break;
 				}
 			} catch {
-				// The fake proxy request fails after the payload capture used by this assertion.
+				// Expected to fail
 			}
 
 			expect(capturedPayload).not.toBeNull();

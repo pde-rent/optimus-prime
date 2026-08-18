@@ -1,3 +1,7 @@
+/**
+ * Utility functions for Azure OpenAI tests
+ */
+
 function parseDeploymentNameMap(value: string | undefined): Map<string, string> {
 	const map = new Map<string, string>();
 	if (!value) return map;

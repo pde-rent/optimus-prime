@@ -12,6 +12,7 @@ import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
+// Resolve OAuth tokens at module level (async, runs before tests)
 const oauthTokens = await Promise.all([
 	resolveApiKey("anthropic"),
 	resolveApiKey("github-copilot"),
@@ -20,6 +21,7 @@ const oauthTokens = await Promise.all([
 const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
 
 async function testEmptyMessage<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
+	// Test with completely empty content array
 	const emptyMessage: UserMessage = {
 		role: "user",
 		content: [],
@@ -32,8 +34,10 @@ async function testEmptyMessage<TApi extends Api>(llm: Model<TApi>, options: Str
 
 	const response = await complete(llm, context, options);
 
+	// Should either handle gracefully or return an error
 	expect(response).toBeDefined();
 	expect(response.role).toBe("assistant");
+	// Should handle empty string gracefully
 	if (response.stopReason === "error") {
 		expect(response.errorMessage).toBeDefined();
 	} else {
@@ -42,6 +46,7 @@ async function testEmptyMessage<TApi extends Api>(llm: Model<TApi>, options: Str
 }
 
 async function testEmptyStringMessage<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
+	// Test with empty string content
 	const context: Context = {
 		messages: [
 			{
@@ -57,6 +62,7 @@ async function testEmptyStringMessage<TApi extends Api>(llm: Model<TApi>, option
 	expect(response).toBeDefined();
 	expect(response.role).toBe("assistant");
 
+	// Should handle empty string gracefully
 	if (response.stopReason === "error") {
 		expect(response.errorMessage).toBeDefined();
 	} else {
@@ -65,6 +71,7 @@ async function testEmptyStringMessage<TApi extends Api>(llm: Model<TApi>, option
 }
 
 async function testWhitespaceOnlyMessage<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
+	// Test with whitespace-only content
 	const context: Context = {
 		messages: [
 			{
@@ -80,6 +87,7 @@ async function testWhitespaceOnlyMessage<TApi extends Api>(llm: Model<TApi>, opt
 	expect(response).toBeDefined();
 	expect(response.role).toBe("assistant");
 
+	// Should handle whitespace-only gracefully
 	if (response.stopReason === "error") {
 		expect(response.errorMessage).toBeDefined();
 	} else {
@@ -88,6 +96,8 @@ async function testWhitespaceOnlyMessage<TApi extends Api>(llm: Model<TApi>, opt
 }
 
 async function testEmptyAssistantMessage<TApi extends Api>(llm: Model<TApi>, options: StreamOptionsWithExtras = {}) {
+	// Test with empty assistant message in conversation flow
+	// User -> Empty Assistant -> User
 	const emptyAssistant: AssistantMessage = {
 		role: "assistant",
 		content: [],
@@ -127,6 +137,7 @@ async function testEmptyAssistantMessage<TApi extends Api>(llm: Model<TApi>, opt
 	expect(response).toBeDefined();
 	expect(response.role).toBe("assistant");
 
+	// Should handle empty assistant message in context gracefully
 	if (response.stopReason === "error") {
 		expect(response.errorMessage).toBeDefined();
 	} else {
@@ -299,7 +310,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	describe.skipIf(!hasCloudflareWorkersAICredentials())("Cloudflare Workers AI Provider Empty Messages", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
 
 		it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 			await testEmptyMessage(llm);
@@ -319,7 +330,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	describe.skipIf(!hasCloudflareAiGatewayCredentials())("Cloudflare AI Gateway Provider Empty Messages", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
 
 		it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 			await testEmptyMessage(llm);
@@ -339,7 +350,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face Provider Empty Messages", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
 
 		it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 			await testEmptyMessage(llm);
@@ -419,7 +430,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider Empty Messages", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi", "mimo-v2.5-pro");
 
 		it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 			await testEmptyMessage(llm);
@@ -441,7 +452,7 @@ describe("AI Providers Empty Message Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
 		"Xiaomi MiMo Token Plan (CN) Provider Empty Messages",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
 
 			it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 				await testEmptyMessage(llm);
@@ -464,7 +475,7 @@ describe("AI Providers Empty Message Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
 		"Xiaomi MiMo Token Plan (AMS) Provider Empty Messages",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
 
 			it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 				await testEmptyMessage(llm);
@@ -487,7 +498,7 @@ describe("AI Providers Empty Message Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
 		"Xiaomi MiMo Token Plan (SGP) Provider Empty Messages",
 		() => {
-			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
 
 			it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 				await testEmptyMessage(llm);
@@ -528,7 +539,7 @@ describe("AI Providers Empty Message Tests", () => {
 	});
 
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider Empty Messages", () => {
-		const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
+		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
 
 		it("should handle empty content array", { retry: 3, timeout: 30000 }, async () => {
 			await testEmptyMessage(llm);
@@ -566,6 +577,10 @@ describe("AI Providers Empty Message Tests", () => {
 			await testEmptyAssistantMessage(llm);
 		});
 	});
+
+	// =========================================================================
+	// OAuth-based providers (credentials from ~/.pi/agent/oauth.json)
+	// =========================================================================
 
 	describe("Anthropic OAuth Provider Empty Messages", () => {
 		const llm = getModel("anthropic", "claude-haiku-4-5");

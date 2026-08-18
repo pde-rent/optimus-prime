@@ -12,6 +12,7 @@ import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
+// Resolve OAuth tokens at module level (async, runs before tests)
 const oauthTokens = await Promise.all([
 	resolveApiKey("anthropic"),
 	resolveApiKey("github-copilot"),
@@ -50,6 +51,9 @@ async function testTokensOnAbort<TApi extends Api>(llm: Model<TApi>, options: St
 
 	expect(msg.stopReason).toBe("aborted");
 
+	// OpenAI providers, OpenAI Codex, zai, and Amazon Bedrock only send usage in the final chunk,
+	// so when aborted they have no token stats. Anthropic and Google send usage information early in the stream.
+	// MiniMax and Kimi report input tokens but not output tokens differently on aborted requests.
 	if (
 		llm.api === "openai-completions" ||
 		llm.api === "mistral-conversations" ||
@@ -63,15 +67,18 @@ async function testTokensOnAbort<TApi extends Api>(llm: Model<TApi>, options: St
 		expect(msg.usage.input).toBe(0);
 		expect(msg.usage.output).toBe(0);
 	} else if (llm.provider === "minimax") {
+		// MiniMax M2.7 does not report token usage for aborted requests.
 		expect(msg.usage.input).toBe(0);
 		expect(msg.usage.output).toBe(0);
 	} else if (llm.provider === "kimi-coding") {
+		// Kimi reports input tokens early but output tokens only in the final chunk.
 		expect(msg.usage.input).toBeGreaterThan(0);
 		expect(msg.usage.output).toBe(0);
 	} else {
 		expect(msg.usage.input).toBeGreaterThan(0);
 		expect(msg.usage.output).toBeGreaterThan(0);
 
+		// Some providers (Copilot) have zero cost rates
 		if (llm.cost.input > 0) {
 			expect(msg.usage.cost.input).toBeGreaterThan(0);
 			expect(msg.usage.cost.total).toBeGreaterThan(0);
@@ -152,7 +159,7 @@ describe("Token Statistics on Abort", () => {
 	});
 
 	describe.skipIf(!hasCloudflareWorkersAICredentials())("Cloudflare Workers AI Provider", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
 
 		it("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
@@ -160,7 +167,7 @@ describe("Token Statistics on Abort", () => {
 	});
 
 	describe.skipIf(!hasCloudflareAiGatewayCredentials())("Cloudflare AI Gateway Provider", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
 
 		it("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
@@ -168,7 +175,7 @@ describe("Token Statistics on Abort", () => {
 	});
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face Provider", () => {
-		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
+		const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
 
 		it("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
@@ -208,7 +215,7 @@ describe("Token Statistics on Abort", () => {
 	});
 
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider", () => {
-		const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
+		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
 
 		it("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
@@ -216,37 +223,51 @@ describe("Token Statistics on Abort", () => {
 	});
 
 	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi", "mimo-v2.5-pro");
 
-		// Xiaomi only reports this streaming usage at message_stop, after an abort.
+		// FIXME(xiaomi): Xiaomi's Anthropic-compatible stream does not populate
+		// usage in the message_start event the way Anthropic does — usage only
+		// arrives at message_stop. Aborting mid-stream therefore loses input/output
+		// token counts. Non-streaming usage works (see total-tokens.test.ts).
+		// Re-enable once upstream sends usage in message_start.
 		it.skip("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
 		});
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)("Xiaomi MiMo Token Plan (CN) Provider", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
 
+		// FIXME(xiaomi): see the API-billing block above — same upstream streaming
+		// usage limitation applies to Token Plan endpoints.
 		it.skip("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
 		});
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)("Xiaomi MiMo Token Plan (AMS) Provider", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
 
+		// FIXME(xiaomi): see the API-billing block above — same upstream streaming
+		// usage limitation applies to Token Plan endpoints.
 		it.skip("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
 		});
 	});
 
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)("Xiaomi MiMo Token Plan (SGP) Provider", () => {
-		const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
+		const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
 
+		// FIXME(xiaomi): see the API-billing block above — same upstream streaming
+		// usage limitation applies to Token Plan endpoints.
 		it.skip("should include token stats when aborted mid-stream", { retry: 3, timeout: 30000 }, async () => {
 			await testTokensOnAbort(llm);
 		});
 	});
+
+	// =========================================================================
+	// OAuth-based providers (credentials from ~/.pi/agent/oauth.json)
+	// =========================================================================
 
 	describe("Anthropic OAuth Provider", () => {
 		const llm = getModel("anthropic", "claude-sonnet-4-6");

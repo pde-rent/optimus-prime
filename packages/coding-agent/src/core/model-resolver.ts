@@ -29,6 +29,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"google-vertex": "gemini-3.1-pro-preview",
 	"github-copilot": "gpt-5.4",
 	openrouter: "moonshotai/kimi-k2.6",
+	"vercel-ai-gateway": "zai/glm-5.1",
 	xai: "grok-4.20-0309-reasoning",
 	groq: "openai/gpt-oss-120b",
 	cerebras: "gpt-oss-120b",
@@ -38,7 +39,17 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"minimax-cn": "MiniMax-M2.7",
 	moonshotai: "kimi-k2.6",
 	"moonshotai-cn": "kimi-k2.6",
+	huggingface: "moonshotai/Kimi-K2.6",
+	fireworks: "accounts/fireworks/models/kimi-k2p6",
+	opencode: "kimi-k2.6",
+	"opencode-go": "kimi-k2.6",
 	"kimi-coding": "kimi-for-coding",
+	"cloudflare-workers-ai": "@cf/moonshotai/kimi-k2.6",
+	"cloudflare-ai-gateway": "workers-ai/@cf/moonshotai/kimi-k2.6",
+	xiaomi: "mimo-v2.5-pro",
+	"xiaomi-token-plan-cn": "mimo-v2.5-pro",
+	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
+	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
 
 export interface ScopedModel {
