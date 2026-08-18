@@ -1,10 +1,3 @@
-import type {
-	Content,
-	GenerateContentConfig,
-	GenerateContentParameters,
-	GenerateContentResponse,
-	ThinkingConfig,
-} from "@google/genai";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
 import type {
@@ -21,6 +14,13 @@ import type {
 	ToolCall,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import type {
+	GoogleContent as Content,
+	GoogleGenerateContentConfig as GenerateContentConfig,
+	GoogleGenerateContentParameters as GenerateContentParameters,
+	GoogleGenerateContentResponse as GenerateContentResponse,
+	GoogleThinkingConfig as ThinkingConfig,
+} from "../utils/google-api-types.js";
 import { iterateSseJson, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import {
@@ -91,7 +91,7 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			const blocks = output.content;
 			const blockIndex = () => blocks.length - 1;
 			for await (const chunk of googleStream) {
-				// @google/genai documents GenerateContentResponse.responseId as an output-only field
+				// The API documents GenerateContentResponse.responseId as an output-only field
 				// used to identify each response. Keep the first non-empty one from the stream.
 				output.responseId ||= chunk.responseId;
 				const candidate = chunk.candidates?.[0];

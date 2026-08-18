@@ -1,7 +1,12 @@
 /** Shared utilities for the Google Generative AI provider. */
 
-import type { Content, FinishReason, FunctionCallingConfigMode, Part } from "@google/genai";
 import type { Context, ImageContent, Model, StopReason, TextContent, ThinkingBudgets, Tool } from "../types.js";
+import type {
+	GoogleContent as Content,
+	GoogleFinishReason as FinishReason,
+	GoogleFunctionCallingConfigMode as FunctionCallingConfigMode,
+	GooglePart as Part,
+} from "../utils/google-api-types.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -295,11 +300,7 @@ export function convertTools(
 	];
 }
 
-/**
- * Runtime mirrors of the `@google/genai` string enums. The SDK is a
- * devDependency (types only), so its enum *values* cannot be imported; these
- * carry the identical wire strings.
- */
+/** The wire strings of the API's `FunctionCallingConfigMode` enum. */
 const FUNCTION_CALLING_CONFIG_MODES = {
 	MODE_UNSPECIFIED: "MODE_UNSPECIFIED",
 	AUTO: "AUTO",
@@ -320,7 +321,7 @@ export function mapToolChoice(choice: string): FunctionCallingConfigMode {
 	}
 }
 
-/** `FinishReason` values (see the enum in `@google/genai`) mapped to the shared protocol. */
+/** `FinishReason` values mapped to the shared protocol. */
 const STOP_REASON_BY_FINISH_REASON: Record<string, StopReason> = {
 	STOP: "stop",
 	MAX_TOKENS: "length",
