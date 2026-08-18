@@ -1,5 +1,4 @@
-import OpenAI from "openai";
-import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
+import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "openai/resources/responses/responses.js";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { clampThinkingLevel } from "../models.js";
 import type {
@@ -9,6 +8,7 @@ import type {
 	Context,
 	Model,
 	OpenAIResponsesCompat,
+	ServiceTier,
 	SimpleStreamOptions,
 	StreamFunction,
 	StreamOptions,
@@ -16,6 +16,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
+import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import {
 	formatStreamFailureMessage,
 	recordStreamFailure,
@@ -23,7 +24,13 @@ import {
 } from "../utils/stream-failure.js";
 import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
+import {
+	convertResponsesMessages,
+	convertResponsesTools,
+	iterateOpenAIStream,
+	openaiDefaultHeaders,
+	processResponsesStream,
+} from "./openai-responses-shared.js";
 import { buildBaseOptions } from "./simple-options.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
@@ -59,7 +66,7 @@ function getPromptCacheRetention(
 export interface OpenAIResponsesOptions extends StreamOptions {
 	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	reasoningSummary?: "auto" | "detailed" | "concise" | null;
-	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
+	serviceTier?: ServiceTier;
 }
 
 export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIResponsesOptions> = (
@@ -92,18 +99,21 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId);
+			const { url, headers } = createClient(model, context, apiKey, options?.headers, cacheSessionId);
 			let params = buildParams(model, context, options);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as ResponseCreateParamsStreaming;
 			}
-			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-				...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-			};
-			const { data: openaiStream, response } = await client.responses.create(params, requestOptions).withResponse();
+			const response = await requestWithRetry({
+				url,
+				headers,
+				body: JSON.stringify(params),
+				signal: options?.signal,
+				timeoutMs: options?.timeoutMs,
+				maxRetries: options?.maxRetries,
+			});
+			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			const requestId = response.headers.get("x-request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
@@ -207,12 +217,15 @@ function createClient(
 				}
 			: headers;
 
-	return new OpenAI({
-		apiKey,
-		baseURL: isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl,
-		dangerouslyAllowBrowser: true,
-		defaultHeaders,
-	});
+	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
+
+	// Header precedence mirrors `buildHeaders` in `openai/client.mjs`: SDK
+	// defaults, then auth, then the client's `defaultHeaders` — which is how the
+	// Cloudflare AI Gateway path deletes `Authorization` by setting it to null.
+	return {
+		url: joinUrl(baseUrl, "/responses"),
+		headers: mergeHeaders(openaiDefaultHeaders("OpenAI"), { Authorization: `Bearer ${apiKey}` }, defaultHeaders),
+	};
 }
 
 function buildParams(model: Model<"openai-responses">, context: Context, options?: OpenAIResponsesOptions) {
@@ -267,7 +280,7 @@ function buildParams(model: Model<"openai-responses">, context: Context, options
 
 function getServiceTierCostMultiplier(
 	model: Pick<Model<"openai-responses">, "id">,
-	serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
+	serviceTier: ServiceTier | undefined,
 ): number {
 	switch (serviceTier) {
 		case "flex":
@@ -281,7 +294,7 @@ function getServiceTierCostMultiplier(
 
 function applyServiceTierPricing(
 	usage: Usage,
-	serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
+	serviceTier: ServiceTier | undefined,
 	model: Pick<Model<"openai-responses">, "id">,
 ) {
 	const multiplier = getServiceTierCostMultiplier(model, serviceTier);

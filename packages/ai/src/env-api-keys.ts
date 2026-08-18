@@ -61,34 +61,6 @@ function getProcEnv(key: string): string | undefined {
 	return _procEnvCache.get(key);
 }
 
-let cachedVertexAdcCredentialsExists: boolean | null = null;
-
-function hasVertexAdcCredentials(): boolean {
-	if (cachedVertexAdcCredentialsExists === null) {
-		// If node modules haven't loaded yet (async import race at startup),
-		// return false WITHOUT caching so the next call retries once they're ready.
-		// Only cache false permanently in a browser environment where fs is never available.
-		if (!_existsSync || !_homedir || !_join) {
-			const isNode = typeof process !== "undefined" && (process.versions?.node || process.versions?.bun);
-			if (!isNode) {
-				// Definitively in a browser — safe to cache false permanently
-				cachedVertexAdcCredentialsExists = false;
-			}
-			return false;
-		}
-
-		const gacPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || getProcEnv("GOOGLE_APPLICATION_CREDENTIALS");
-		if (gacPath) {
-			cachedVertexAdcCredentialsExists = _existsSync(gacPath);
-		} else {
-			cachedVertexAdcCredentialsExists = _existsSync(
-				_join(_homedir(), ".config", "gcloud", "application_default_credentials.json"),
-			);
-		}
-	}
-	return cachedVertexAdcCredentialsExists;
-}
-
 function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 	if (provider === "github-copilot") {
 		return ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"];
@@ -105,7 +77,6 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		"prime-inference": "PRIME_API_KEY",
 		deepseek: "DEEPSEEK_API_KEY",
 		google: "GEMINI_API_KEY",
-		"google-vertex": "GOOGLE_CLOUD_API_KEY",
 		groq: "GROQ_API_KEY",
 		cerebras: "CEREBRAS_API_KEY",
 		xai: "XAI_API_KEY",
@@ -138,8 +109,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
  * Find configured environment variables that can provide an API key for a provider.
  *
  * This only reports actual API key variables. It intentionally excludes ambient
- * credential sources such as AWS profiles, AWS IAM credentials, and Google
- * Application Default Credentials.
+ * credential sources.
  */
 export function findEnvKeys(provider: KnownProvider): string[] | undefined;
 export function findEnvKeys(provider: string): string[] | undefined;
@@ -162,40 +132,6 @@ export function getEnvApiKey(provider: string): string | undefined {
 	const envKeys = findEnvKeys(provider);
 	if (envKeys?.[0]) {
 		return process.env[envKeys[0]] || getProcEnv(envKeys[0]);
-	}
-
-	if (provider === "google-vertex") {
-		const hasCredentials = hasVertexAdcCredentials();
-		const hasProject = !!(
-			process.env.GOOGLE_CLOUD_PROJECT ||
-			process.env.GCLOUD_PROJECT ||
-			getProcEnv("GOOGLE_CLOUD_PROJECT") ||
-			getProcEnv("GCLOUD_PROJECT")
-		);
-		const hasLocation = !!(process.env.GOOGLE_CLOUD_LOCATION || getProcEnv("GOOGLE_CLOUD_LOCATION"));
-
-		if (hasCredentials && hasProject && hasLocation) {
-			return "<authenticated>";
-		}
-	}
-
-	if (provider === "amazon-bedrock") {
-		if (
-			process.env.AWS_PROFILE ||
-			(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
-			process.env.AWS_BEARER_TOKEN_BEDROCK ||
-			process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ||
-			process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI ||
-			process.env.AWS_WEB_IDENTITY_TOKEN_FILE ||
-			getProcEnv("AWS_PROFILE") ||
-			(getProcEnv("AWS_ACCESS_KEY_ID") && getProcEnv("AWS_SECRET_ACCESS_KEY")) ||
-			getProcEnv("AWS_BEARER_TOKEN_BEDROCK") ||
-			getProcEnv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") ||
-			getProcEnv("AWS_CONTAINER_CREDENTIALS_FULL_URI") ||
-			getProcEnv("AWS_WEB_IDENTITY_TOKEN_FILE")
-		) {
-			return "<authenticated>";
-		}
 	}
 
 	return undefined;

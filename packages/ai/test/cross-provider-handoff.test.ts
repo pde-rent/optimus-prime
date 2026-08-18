@@ -76,12 +76,6 @@ const PROVIDER_MODEL_PAIRS: ProviderModelPair[] = [
 	{ provider: "github-copilot", model: "gpt-5.2-codex", label: "copilot-gpt-5.2-codex" },
 	{ provider: "github-copilot", model: "gemini-3.5-flash", label: "copilot-gemini-3.5-flash" },
 	{ provider: "github-copilot", model: "grok-4.5", label: "copilot-grok-4.5" },
-	// Amazon Bedrock
-	{
-		provider: "amazon-bedrock",
-		model: "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-		label: "bedrock-claude-sonnet-4-5",
-	},
 	// xAI
 	{ provider: "xai", model: "grok-code-fast-1", label: "xai-grok-code-fast-1" },
 	// Cerebras

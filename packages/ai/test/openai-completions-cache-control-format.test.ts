@@ -1,8 +1,9 @@
 import { Type } from "typebox";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamOpenAICompletions } from "../src/providers/openai-completions.js";
 import type { AssistantMessage, Model } from "../src/types.js";
+import { mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
 interface CacheControl {
 	type: "ephemeral";
@@ -28,52 +29,7 @@ interface CapturedParams {
 	tools?: ToolWithCacheControl[];
 }
 
-const mockState = vi.hoisted(() => ({
-	lastParams: undefined as CapturedParams | undefined,
-}));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		chat = {
-			completions: {
-				create: (params: CapturedParams) => {
-					mockState.lastParams = params;
-					const hasCacheControl = JSON.stringify(params).includes("cache_control");
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								id: "chatcmpl-test",
-								choices: [{ delta: {}, finish_reason: "stop" }],
-								usage: {
-									prompt_tokens: 100,
-									completion_tokens: 10,
-									prompt_tokens_details: {
-										cached_tokens: hasCacheControl ? 80 : 0,
-										cache_write_tokens: hasCacheControl ? 80 : 0,
-									},
-									completion_tokens_details: { reasoning_tokens: 0 },
-								},
-							};
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse: () => Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-	}
-
-	return { default: FakeOpenAI };
-});
+let fetchMock: OpenAIFetchMock;
 
 async function runCompletion(
 	model: Model<"openai-completions">,
@@ -99,11 +55,7 @@ async function runCompletion(
 		{ apiKey: "test-key", ...options },
 	).result();
 
-	if (!mockState.lastParams) {
-		throw new Error("Expected payload to be captured");
-	}
-
-	return { params: mockState.lastParams, result };
+	return { params: fetchMock.lastRequest().body as CapturedParams, result };
 }
 
 async function capturePayload(
@@ -144,7 +96,29 @@ function expectNoAnthropicCacheMarkers(params: CapturedParams): void {
 
 describe("openai-completions cacheControlFormat", () => {
 	beforeEach(() => {
-		mockState.lastParams = undefined;
+		// Usage reports cache hits only when the request actually carried cache markers.
+		fetchMock = mockOpenAIFetch((request) => {
+			const hasCacheControl = JSON.stringify(request.body).includes("cache_control");
+			return [
+				{
+					id: "chatcmpl-test",
+					choices: [{ delta: {}, finish_reason: "stop" }],
+					usage: {
+						prompt_tokens: 100,
+						completion_tokens: 10,
+						prompt_tokens_details: {
+							cached_tokens: hasCacheControl ? 80 : 0,
+							cache_write_tokens: hasCacheControl ? 80 : 0,
+						},
+						completion_tokens_details: { reasoning_tokens: 0 },
+					},
+				},
+			];
+		});
+	});
+
+	afterEach(() => {
+		fetchMock.restore();
 	});
 
 	it("applies Anthropic-style cache markers when model compat enables them", async () => {

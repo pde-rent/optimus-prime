@@ -121,29 +121,6 @@ describe.skipIf(!process.env.GEMINI_API_KEY)("Google thinking disable E2E", () =
 	});
 });
 
-describe("Google Vertex thinking disable E2E", () => {
-	const vertexProject = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-	const vertexLocation = process.env.GOOGLE_CLOUD_LOCATION;
-	const vertexApiKey = process.env.GOOGLE_CLOUD_API_KEY;
-	const vertexOptions = vertexApiKey
-		? ({ apiKey: vertexApiKey } satisfies SimpleOptionsWithExtras)
-		: vertexProject && vertexLocation
-			? ({ project: vertexProject, location: vertexLocation } satisfies SimpleOptionsWithExtras)
-			: undefined;
-
-	it.skipIf(!vertexOptions)("disables thinking for Gemini 2.5", { retry: 2, timeout: 30000 }, async () => {
-		await expectThinkingDisabledE2E(getModel("google-vertex", "gemini-2.5-flash"), {
-			requestOptions: vertexOptions,
-		});
-	});
-
-	it.skipIf(!vertexOptions)("disables thinking for Gemini 3.x", { retry: 2, timeout: 30000 }, async () => {
-		await expectThinkingDisabledE2E(getModel("google-vertex", "gemini-3-flash-preview"), {
-			requestOptions: vertexOptions,
-		});
-	});
-});
-
 describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI thinking disable E2E", () => {
 	it("disables thinking for Responses reasoning models", { retry: 2, timeout: 30000 }, async () => {
 		await expectThinkingDisabledE2E(getModel("openai", "gpt-5.4-mini"), {

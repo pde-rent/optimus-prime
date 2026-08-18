@@ -15,7 +15,6 @@ type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
 
 import { StringEnum } from "../src/utils/typebox-helpers.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
-import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
@@ -377,51 +376,6 @@ describe("Generate E2E Tests", () => {
 
 		it("should handle image input", { retry: 3 }, async () => {
 			await handleImage(llm);
-		});
-	});
-
-	describe("Google Vertex Provider (gemini-3-flash-preview)", () => {
-		const vertexProject = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-		const vertexLocation = process.env.GOOGLE_CLOUD_LOCATION;
-		const vertexApiKey = process.env.GOOGLE_CLOUD_API_KEY;
-		const isVertexConfigured = Boolean(vertexProject && vertexLocation);
-		const vertexOptions = { project: vertexProject, location: vertexLocation } as const;
-		const llm = getModel("google-vertex", "gemini-3-flash-preview");
-
-		it.skipIf(!isVertexConfigured)("should complete basic text generation", { retry: 3 }, async () => {
-			await basicTextGeneration(llm, vertexOptions);
-		});
-
-		it.skipIf(!vertexApiKey)("should complete basic text generation with Vertex API key", { retry: 3 }, async () => {
-			await basicTextGeneration(llm, { apiKey: vertexApiKey! });
-		});
-
-		it.skipIf(!isVertexConfigured)("should handle tool calling", { retry: 3 }, async () => {
-			await handleToolCall(llm, vertexOptions);
-		});
-
-		it.skipIf(!isVertexConfigured)("should handle thinking", { retry: 3 }, async () => {
-			const { ThinkingLevel } = await import("@google/genai");
-			await handleThinking(llm, {
-				...vertexOptions,
-				thinking: { enabled: true, budgetTokens: 1024, level: ThinkingLevel.LOW },
-			});
-		});
-
-		it.skipIf(!isVertexConfigured)("should handle streaming", { retry: 3 }, async () => {
-			await handleStreaming(llm, vertexOptions);
-		});
-
-		it.skipIf(!isVertexConfigured)("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
-			const { ThinkingLevel } = await import("@google/genai");
-			await multiTurn(llm, {
-				...vertexOptions,
-				thinking: { enabled: true, budgetTokens: 1024, level: ThinkingLevel.MEDIUM },
-			});
-		});
-
-		it.skipIf(!isVertexConfigured)("should handle image input", { retry: 3 }, async () => {
-			await handleImage(llm, vertexOptions);
 		});
 	});
 
@@ -1348,135 +1302,6 @@ describe("Generate E2E Tests", () => {
 
 		it.skipIf(!openaiCodexToken)("should handle image input", { retry: 3 }, async () => {
 			await handleImage(llm, wsOptions);
-		});
-	});
-
-	describe.skipIf(!hasBedrockCredentials())("Amazon Bedrock Provider (claude-sonnet-4-5)", () => {
-		const llm = getModel("amazon-bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-
-		it("should complete basic text generation", { retry: 3 }, async () => {
-			await basicTextGeneration(llm);
-		});
-
-		it("should handle tool calling", { retry: 3 }, async () => {
-			await handleToolCall(llm);
-		});
-
-		it("should handle streaming", { retry: 3 }, async () => {
-			await handleStreaming(llm);
-		});
-
-		it("should handle thinking", { retry: 3 }, async () => {
-			await handleThinking(llm, { reasoning: "medium" });
-		});
-
-		it("should handle multi-turn with thinking and tools", { retry: 3 }, async () => {
-			await multiTurn(llm, { reasoning: "high" });
-		});
-
-		it("should handle image input", { retry: 3 }, async () => {
-			await handleImage(llm);
-		});
-	});
-
-	describe.skipIf(!hasBedrockCredentials())("Amazon Bedrock Provider (claude-opus-4-6 interleaved thinking)", () => {
-		const llm = getModel("amazon-bedrock", "global.anthropic.claude-opus-4-6-v1");
-
-		it("should use adaptive thinking without anthropic_beta", { retry: 3 }, async () => {
-			let capturedPayload: unknown;
-			const response = await complete(
-				llm,
-				{
-					systemPrompt: "You are a helpful assistant that uses tools when asked.",
-					messages: [
-						{
-							role: "user",
-							content: "Think first, then calculate 15 + 27 using the math_operation tool.",
-							timestamp: Date.now(),
-						},
-					],
-					tools: [calculatorTool],
-				},
-				{
-					reasoning: "xhigh",
-					interleavedThinking: true,
-					onPayload: (payload) => {
-						capturedPayload = payload;
-					},
-				},
-			);
-
-			expect(response.stopReason, `Error: ${response.errorMessage}`).not.toBe("error");
-			expect(capturedPayload).toBeTruthy();
-
-			const payload = capturedPayload as {
-				additionalModelRequestFields?: {
-					thinking?: { type?: string; display?: string };
-					output_config?: { effort?: string };
-					anthropic_beta?: string[];
-				};
-			};
-
-			expect(payload.additionalModelRequestFields?.thinking).toEqual({
-				type: "adaptive",
-				display: "summarized",
-			});
-			expect(payload.additionalModelRequestFields?.output_config).toEqual({ effort: "max" });
-			expect(payload.additionalModelRequestFields?.anthropic_beta).toBeUndefined();
-		});
-
-		it("should pass requestMetadata to the SDK payload", { retry: 3 }, async () => {
-			const llmSonnet = getModel("amazon-bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-			let capturedPayload: unknown;
-			const metadata = { app: "pi-test", env: "ci" };
-			const response = await complete(
-				llmSonnet,
-				{
-					messages: [
-						{
-							role: "user",
-							content: "Say hi.",
-							timestamp: Date.now(),
-						},
-					],
-				},
-				{
-					requestMetadata: metadata,
-					onPayload: (payload) => {
-						capturedPayload = payload;
-					},
-				},
-			);
-
-			expect(response.stopReason, `Error: ${response.errorMessage}`).not.toBe("error");
-			expect(capturedPayload).toBeTruthy();
-			expect((capturedPayload as { requestMetadata?: unknown }).requestMetadata).toEqual(metadata);
-		});
-
-		it("should omit requestMetadata from payload when not provided", { retry: 3 }, async () => {
-			const llmSonnet = getModel("amazon-bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-			let capturedPayload: unknown;
-			const response = await complete(
-				llmSonnet,
-				{
-					messages: [
-						{
-							role: "user",
-							content: "Say hi.",
-							timestamp: Date.now(),
-						},
-					],
-				},
-				{
-					onPayload: (payload) => {
-						capturedPayload = payload;
-					},
-				},
-			);
-
-			expect(response.stopReason, `Error: ${response.errorMessage}`).not.toBe("error");
-			expect(capturedPayload).toBeTruthy();
-			expect("requestMetadata" in (capturedPayload as object)).toBe(false);
 		});
 	});
 

@@ -1,77 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamOpenAICompletions } from "../src/providers/openai-completions.js";
 import type { Model } from "../src/types.js";
-
-interface FakeOpenAIClientOptions {
-	apiKey: string;
-	baseURL: string;
-	dangerouslyAllowBrowser: boolean;
-	defaultHeaders?: Record<string, string>;
-}
+import { completionsStopChunk, mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
 interface CapturedCompletionsPayload {
 	prompt_cache_key?: string;
 	prompt_cache_retention?: "24h" | "in-memory" | null;
 }
 
-const mockState = vi.hoisted(() => ({
-	lastParams: undefined as CapturedCompletionsPayload | undefined,
-	lastClientOptions: undefined as FakeOpenAIClientOptions | undefined,
-}));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		chat = {
-			completions: {
-				create: (params: CapturedCompletionsPayload) => {
-					mockState.lastParams = params;
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								choices: [{ delta: {}, finish_reason: "stop" }],
-								usage: {
-									prompt_tokens: 1,
-									completion_tokens: 1,
-									prompt_tokens_details: { cached_tokens: 0 },
-									completion_tokens_details: { reasoning_tokens: 0 },
-								},
-							};
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse: () => Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-
-		constructor(options: FakeOpenAIClientOptions) {
-			mockState.lastClientOptions = options;
-		}
-	}
-
-	return { default: FakeOpenAI };
-});
-
 describe("openai-completions prompt caching", () => {
 	const originalEnv = process.env.PI_CACHE_RETENTION;
+	let fetchMock: OpenAIFetchMock;
 
 	beforeEach(() => {
-		mockState.lastParams = undefined;
-		mockState.lastClientOptions = undefined;
+		fetchMock = mockOpenAIFetch([completionsStopChunk()]);
 		delete process.env.PI_CACHE_RETENTION;
 	});
 
 	afterEach(() => {
+		fetchMock.restore();
 		if (originalEnv === undefined) {
 			delete process.env.PI_CACHE_RETENTION;
 		} else {
@@ -105,9 +53,10 @@ describe("openai-completions prompt caching", () => {
 			{ apiKey: "test-key", ...options },
 		).result();
 
+		const request = fetchMock.lastRequest();
 		return {
-			payload: mockState.lastParams,
-			headers: mockState.lastClientOptions?.defaultHeaders ?? {},
+			payload: request.body as CapturedCompletionsPayload,
+			headers: request.headers,
 		};
 	}
 

@@ -33,13 +33,13 @@ describe("OAuthSelectorComponent", () => {
 
 	it("keeps built-in API key providers separate from OAuth-only providers", () => {
 		const oauthProviderIds = new Set(["anthropic", "github-copilot", "custom-oauth"]);
-		const builtInProviderIds = new Set(["anthropic", "github-copilot", "amazon-bedrock", "openai"]);
+		const builtInProviderIds = new Set(["anthropic", "github-copilot", "mistral", "openai"]);
 
 		expect(isApiKeyLoginProvider("anthropic", oauthProviderIds, builtInProviderIds)).toBe(true);
 		expect(BUILT_IN_PROVIDER_DISPLAY_NAMES.anthropic).toBe("Anthropic");
 		expect(isApiKeyLoginProvider("openai", oauthProviderIds, builtInProviderIds)).toBe(true);
 		expect(isApiKeyLoginProvider("github-copilot", oauthProviderIds, builtInProviderIds)).toBe(false);
-		expect(isApiKeyLoginProvider("amazon-bedrock", oauthProviderIds, builtInProviderIds)).toBe(true);
+		expect(isApiKeyLoginProvider("mistral", oauthProviderIds, builtInProviderIds)).toBe(true);
 		expect(isApiKeyLoginProvider("custom-oauth", oauthProviderIds, builtInProviderIds)).toBe(false);
 		expect(isApiKeyLoginProvider("custom-api", oauthProviderIds, builtInProviderIds)).toBe(true);
 	});
@@ -247,7 +247,7 @@ describe("OAuthSelectorComponent", () => {
 			authStorage,
 			[
 				{ id: "github-copilot", name: "GitHub Copilot", authType: "oauth" },
-				{ id: "amazon-bedrock", name: "Amazon Bedrock", authType: "api_key" },
+				{ id: "custom-api", name: "Custom API", authType: "api_key" },
 				{ id: "prime-inference", name: "Prime Inference", authType: "api_key" },
 				{ id: "openai", name: "OpenAI", authType: "api_key" },
 			],
@@ -259,7 +259,7 @@ describe("OAuthSelectorComponent", () => {
 
 		expect(output.indexOf("OpenAI")).toBeLessThan(output.indexOf("Prime Inference"));
 		expect(output.indexOf("Prime Inference")).toBeLessThan(output.indexOf("GitHub Copilot"));
-		expect(output.indexOf("Prime Inference")).toBeLessThan(output.indexOf("Amazon Bedrock"));
+		expect(output.indexOf("Prime Inference")).toBeLessThan(output.indexOf("Custom API"));
 		expect(output).toContain("expired");
 	});
 

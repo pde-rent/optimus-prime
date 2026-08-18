@@ -292,10 +292,10 @@ Use `modelOverrides` to customize specific built-in models without replacing the
     "openrouter": {
       "modelOverrides": {
         "anthropic/claude-sonnet-4": {
-          "name": "Claude Sonnet 4 (Bedrock Route)",
+          "name": "Claude Sonnet 4 (DeepInfra Route)",
           "compat": {
             "openRouterRouting": {
-              "only": ["amazon-bedrock"]
+              "only": ["deepinfra"]
             }
           }
         }
@@ -412,8 +412,8 @@ Example:
               "data_collection": "deny",
               "zdr": true,
               "enforce_distillable_text": false,
-              "order": ["anthropic", "amazon-bedrock", "google-vertex"],
-              "only": ["anthropic", "amazon-bedrock"],
+              "order": ["anthropic", "deepinfra", "together"],
+              "only": ["anthropic", "deepinfra"],
               "ignore": ["gmicloud", "friendli"],
               "quantizations": ["fp16", "bf16"],
               "sort": {

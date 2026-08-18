@@ -18,7 +18,6 @@ export const PRIME_INFERENCE_DEFAULT_MODEL_ID = "z-ai/glm-5.2";
 
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
-	"amazon-bedrock": "us.anthropic.claude-opus-4-6-v1",
 	anthropic: "claude-opus-4-7",
 	openai: "gpt-5.4",
 	"azure-openai-responses": "gpt-5.4",
@@ -26,7 +25,6 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"prime-inference": PRIME_INFERENCE_DEFAULT_MODEL_ID,
 	deepseek: "deepseek-v4-pro",
 	google: "gemini-3.1-pro-preview",
-	"google-vertex": "gemini-3.1-pro-preview",
 	"github-copilot": "gpt-5.4",
 	openrouter: "moonshotai/kimi-k2.6",
 	"vercel-ai-gateway": "zai/glm-5.1",

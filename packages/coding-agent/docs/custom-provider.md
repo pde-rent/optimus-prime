@@ -198,8 +198,6 @@ The `api` field determines which streaming implementation is used:
 | `openai-codex-responses` | OpenAI Codex Responses API |
 | `mistral-conversations` | Mistral SDK Conversations/Chat streaming |
 | `google-generative-ai` | Google Generative AI API |
-| `google-vertex` | Google Vertex AI API |
-| `bedrock-converse-stream` | Amazon Bedrock Converse API |
 
 Most OpenAI-compatible providers work with `openai-completions`. Use model-level `thinkingLevelMap` for model-specific thinking levels, and `compat` for provider quirks:
 
@@ -350,7 +348,6 @@ For providers with non-standard APIs, implement `streamSimple`. Study the existi
 - [openai-completions.ts](../../ai/src/providers/openai-completions.ts) - OpenAI Chat Completions
 - [openai-responses.ts](../../ai/src/providers/openai-responses.ts) - OpenAI Responses API
 - [google.ts](../../ai/src/providers/google.ts) - Google Generative AI
-- [amazon-bedrock.ts](../../ai/src/providers/amazon-bedrock.ts) - AWS Bedrock
 
 ### Stream Pattern
 

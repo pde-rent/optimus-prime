@@ -7,7 +7,6 @@ import { getKimiCodingTestModel } from "./kimi-test-model.js";
 type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
 
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
-import { hasBedrockCredentials } from "./bedrock-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
 // Resolve OAuth tokens at module level (async, runs before tests)
@@ -165,6 +164,11 @@ describe("AI Providers Abort Tests", () => {
 		it("should handle immediate abort", { retry: 3 }, async () => {
 			await testImmediateAbort(llm, { thinkingEnabled: true, thinkingBudgetTokens: 2048 });
 		});
+
+		// Previously exercised via Bedrock; re-pointed at Anthropic when that provider was dropped.
+		it("should recover on a new message after an abort", { retry: 3 }, async () => {
+			await testAbortThenNewMessage(llm, { thinkingEnabled: true, thinkingBudgetTokens: 2048 });
+		});
 	});
 
 	describe.skipIf(!process.env.MISTRAL_API_KEY)("Mistral Provider Abort", () => {
@@ -272,22 +276,6 @@ describe("AI Providers Abort Tests", () => {
 		it.skipIf(!openaiCodexToken)("should handle immediate abort", { retry: 3 }, async () => {
 			const llm = getModel("openai-codex", "gpt-5.2-codex");
 			await testImmediateAbort(llm, { apiKey: openaiCodexToken });
-		});
-	});
-
-	describe.skipIf(!hasBedrockCredentials())("Amazon Bedrock Provider Abort", () => {
-		const llm = getModel("amazon-bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm, { reasoning: "medium" });
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-
-		it("should handle abort then new message", { retry: 3 }, async () => {
-			await testAbortThenNewMessage(llm);
 		});
 	});
 });

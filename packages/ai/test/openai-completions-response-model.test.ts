@@ -1,42 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { complete } from "../src/stream.js";
 import type { Model } from "../src/types.js";
+import { mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
 // Router/virtual ids (e.g. OpenRouter `auto`) keep `model` pinned to the
 // requested id and surface the routed concrete id on `responseModel`.
-
-const mockState = vi.hoisted(() => ({
-	chunks: [] as unknown[],
-}));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		chat = {
-			completions: {
-				create: () => {
-					const chunks = mockState.chunks;
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							for (const chunk of chunks) yield chunk;
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse: () => Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-	}
-	return { default: FakeOpenAI };
-});
 
 function openRouterAuto(): Model<"openai-completions"> {
 	return {
@@ -54,12 +22,18 @@ function openRouterAuto(): Model<"openai-completions"> {
 }
 
 describe("openai-completions responseModel", () => {
+	let fetchMock: OpenAIFetchMock;
+
 	beforeEach(() => {
-		mockState.chunks = [];
+		fetchMock = mockOpenAIFetch([]);
+	});
+
+	afterEach(() => {
+		fetchMock.restore();
 	});
 
 	it("surfaces routed chunk.model on responseModel without changing model", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{ id: "chatcmpl-1", model: "anthropic/claude-opus-4.7", choices: [{ index: 0, delta: { content: "hi" } }] },
 			{
 				id: "chatcmpl-1",
@@ -87,7 +61,7 @@ describe("openai-completions responseModel", () => {
 	});
 
 	it("leaves responseModel undefined when chunks echo the requested id", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{ id: "chatcmpl-2", model: "openrouter/auto", choices: [{ index: 0, delta: { content: "hi" } }] },
 			{
 				id: "chatcmpl-2",
@@ -113,7 +87,7 @@ describe("openai-completions responseModel", () => {
 	});
 
 	it("ignores empty or missing chunk.model", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{ id: "chatcmpl-3", choices: [{ index: 0, delta: { content: "hi" } }] },
 			{ id: "chatcmpl-3", model: "", choices: [{ index: 0, delta: { content: "!" } }] },
 			{

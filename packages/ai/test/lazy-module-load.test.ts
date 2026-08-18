@@ -9,13 +9,7 @@ const tsxLoader = require.resolve("tsx/esm");
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const aiEntryUrl = new URL("../src/index.ts", import.meta.url).href;
 
-const SDK_SPECIFIERS = [
-	"@anthropic-ai/sdk",
-	"openai",
-	"@google/genai",
-	"@mistralai/mistralai",
-	"@aws-sdk/client-bedrock-runtime",
-] as const;
+const SDK_SPECIFIERS = ["@anthropic-ai/sdk", "openai", "@google/genai", "@mistralai/mistralai"] as const;
 
 type ProbeResult = {
 	loadedSpecifiers: string[];
@@ -69,7 +63,7 @@ describe("lazy provider module loading", () => {
 		expect(result.loadedSpecifiers).toEqual([]);
 	});
 
-	it("loads only the Anthropic SDK when calling the root lazy wrapper", () => {
+	it("loads no provider SDK when calling the root lazy wrapper", () => {
 		const result = runProbe(`
 			const model = {
 				id: "claude-sonnet-4-6",
@@ -87,16 +81,18 @@ describe("lazy provider module loading", () => {
 			await mod.streamSimpleAnthropic(model, context).result();
 		`);
 
-		expect(result.loadedSpecifiers).toEqual(["@anthropic-ai/sdk"]);
+		// The Anthropic provider now talks to /v1/messages over fetch; the SDK is types-only.
+		expect(result.loadedSpecifiers).toEqual([]);
 	});
 
-	it("loads only the Anthropic SDK when dispatching through streamSimple", () => {
+	it("loads no provider SDK when dispatching through streamSimple", () => {
 		const result = runProbe(`
 			const model = mod.getModel("anthropic", "claude-sonnet-4-6");
 			const context = { messages: [{ role: "user", content: "hi" }] };
 			await mod.streamSimple(model, context).result();
 		`);
 
-		expect(result.loadedSpecifiers).toEqual(["@anthropic-ai/sdk"]);
+		// The Anthropic provider now talks to /v1/messages over fetch; the SDK is types-only.
+		expect(result.loadedSpecifiers).toEqual([]);
 	});
 });

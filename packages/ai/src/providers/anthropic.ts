@@ -1,5 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type {
+	StopReason as AnthropicStopReason,
+	Tool as AnthropicTool,
 	CacheControlEphemeral,
 	ContentBlockParam,
 	MessageCreateParamsStreaming,
@@ -30,6 +31,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
+import { iterateSse, joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import {
@@ -78,6 +80,13 @@ function getCacheControl(
 
 // Stealth mode: Mimic Claude Code's tool naming exactly
 const claudeCodeVersion = "2.1.75";
+
+/**
+ * Version reported in `User-Agent`, matching what `@anthropic-ai/sdk`'s
+ * `getUserAgent()` sent (`Anthropic/JS <version>`). Kept as a literal because
+ * the SDK is now a types-only devDependency with no runtime import.
+ */
+const ANTHROPIC_SDK_VERSION = "0.91.1";
 
 // Claude Code 2.x tool names (canonical casing)
 // Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
@@ -219,29 +228,22 @@ export interface AnthropicOptions extends StreamOptions {
 	 * construction entirely. Use this to inject alternative SDK clients such as
 	 * `AnthropicVertex` that shares the same messaging API.
 	 */
-	client?: Anthropic;
+	client?: AnthropicMessagesClient;
 }
 
-function mergeHeaders(...headerSources: (Record<string, string | null> | undefined)[]): Record<string, string | null> {
-	const merged: Record<string, string | null> = {};
-	for (const headers of headerSources) {
-		if (headers) {
-			Object.assign(merged, headers);
-		}
-	}
-	return merged;
-}
-
-interface ServerSentEvent {
-	event: string | null;
-	data: string;
-	raw: string[];
-}
-
-interface SseDecoderState {
-	event: string | null;
-	data: string[];
-	raw: string[];
+/**
+ * Structural subset of the `@anthropic-ai/sdk` client surface this provider uses.
+ *
+ * The SDK is a devDependency (types only) — we speak to `/v1/messages` over
+ * `fetch` directly — but `AnthropicOptions.client` is public API for injecting
+ * `AnthropicVertex` / `AnthropicBedrock`. Those instances still satisfy this
+ * interface structurally, so injection keeps working unchanged.
+ */
+export interface AnthropicMessagesClient {
+	messages: {
+		/** `any` mirrors the SDK's overloaded `create` so an SDK instance still satisfies this. */
+		create(body: any, options?: any): { asResponse(): Promise<Response> };
+	};
 }
 
 const ANTHROPIC_MESSAGE_EVENTS: ReadonlySet<string> = new Set([
@@ -252,136 +254,6 @@ const ANTHROPIC_MESSAGE_EVENTS: ReadonlySet<string> = new Set([
 	"content_block_delta",
 	"content_block_stop",
 ]);
-
-function flushSseEvent(state: SseDecoderState): ServerSentEvent | null {
-	if (!state.event && state.data.length === 0) {
-		return null;
-	}
-
-	const event: ServerSentEvent = {
-		event: state.event,
-		data: state.data.join("\n"),
-		raw: [...state.raw],
-	};
-	state.event = null;
-	state.data = [];
-	state.raw = [];
-	return event;
-}
-
-function decodeSseLine(line: string, state: SseDecoderState): ServerSentEvent | null {
-	if (line === "") {
-		return flushSseEvent(state);
-	}
-
-	state.raw.push(line);
-	if (line.startsWith(":")) {
-		return null;
-	}
-
-	const delimiterIndex = line.indexOf(":");
-	const fieldName = delimiterIndex === -1 ? line : line.slice(0, delimiterIndex);
-	let value = delimiterIndex === -1 ? "" : line.slice(delimiterIndex + 1);
-	if (value.startsWith(" ")) {
-		value = value.slice(1);
-	}
-
-	if (fieldName === "event") {
-		state.event = value;
-	} else if (fieldName === "data") {
-		state.data.push(value);
-	}
-
-	return null;
-}
-
-function nextLineBreakIndex(text: string): number {
-	const carriageReturnIndex = text.indexOf("\r");
-	const newlineIndex = text.indexOf("\n");
-	if (carriageReturnIndex === -1) {
-		return newlineIndex;
-	}
-	if (newlineIndex === -1) {
-		return carriageReturnIndex;
-	}
-	return Math.min(carriageReturnIndex, newlineIndex);
-}
-
-function consumeLine(text: string): { line: string; rest: string } | null {
-	const lineBreakIndex = nextLineBreakIndex(text);
-	if (lineBreakIndex === -1) {
-		return null;
-	}
-
-	let nextIndex = lineBreakIndex + 1;
-	if (text[lineBreakIndex] === "\r" && text[nextIndex] === "\n") {
-		nextIndex += 1;
-	}
-
-	return {
-		line: text.slice(0, lineBreakIndex),
-		rest: text.slice(nextIndex),
-	};
-}
-
-async function* iterateSseMessages(
-	body: ReadableStream<Uint8Array>,
-	signal?: AbortSignal,
-): AsyncGenerator<ServerSentEvent> {
-	const reader = body.getReader();
-	const decoder = new TextDecoder();
-	const state: SseDecoderState = { event: null, data: [], raw: [] };
-	let buffer = "";
-
-	try {
-		while (true) {
-			if (signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			const { value, done } = await reader.read();
-			if (done) {
-				break;
-			}
-
-			buffer += decoder.decode(value, { stream: true });
-			let consumed = consumeLine(buffer);
-			while (consumed) {
-				buffer = consumed.rest;
-				const event = decodeSseLine(consumed.line, state);
-				if (event) {
-					yield event;
-				}
-				consumed = consumeLine(buffer);
-			}
-		}
-
-		buffer += decoder.decode();
-		let consumed = consumeLine(buffer);
-		while (consumed) {
-			buffer = consumed.rest;
-			const event = decodeSseLine(consumed.line, state);
-			if (event) {
-				yield event;
-			}
-			consumed = consumeLine(buffer);
-		}
-
-		if (buffer.length > 0) {
-			const event = decodeSseLine(buffer, state);
-			if (event) {
-				yield event;
-			}
-		}
-
-		const trailingEvent = flushSseEvent(state);
-		if (trailingEvent) {
-			yield trailingEvent;
-		}
-	} finally {
-		reader.releaseLock();
-	}
-}
 
 /** Turn an in-stream `error` SSE event (how Anthropic delivers overloads etc.) into a classified failure. */
 function anthropicSseError(data: string, requestId?: string): StreamFailureError {
@@ -417,7 +289,7 @@ async function* iterateAnthropicEvents(
 	let sawMessageStart = false;
 	let sawMessageEnd = false;
 
-	for await (const sse of iterateSseMessages(response.body, signal)) {
+	for await (const sse of iterateSse(response.body, signal)) {
 		if (sse.event === "error") {
 			throw anthropicSseError(sse.data, requestId);
 		}
@@ -478,11 +350,12 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 		};
 
 		try {
-			let client: Anthropic;
+			let injectedClient: AnthropicMessagesClient | undefined;
+			let endpoint: AnthropicEndpoint | undefined;
 			let isOAuth: boolean;
 
 			if (options?.client) {
-				client = options.client;
+				injectedClient = options.client;
 				isOAuth = false;
 			} else {
 				const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? "";
@@ -496,7 +369,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					});
 				}
 
-				const created = createClient(
+				endpoint = createClient(
 					model,
 					apiKey,
 					options?.interleavedThinking ?? true,
@@ -504,8 +377,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					options?.headers,
 					copilotDynamicHeaders,
 				);
-				client = created.client;
-				isOAuth = created.isOAuthToken;
+				isOAuth = endpoint.isOAuthToken;
 			}
 			const { cacheControl } = getCacheControl(model, options?.cacheRetention);
 			const usesAnthropicCachePricing = hasStandardAnthropicCachePricing(model);
@@ -523,7 +395,17 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
 				...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
 			};
-			const response = await client.messages.create({ ...params, stream: true }, requestOptions).asResponse();
+			const response = injectedClient
+				? await injectedClient.messages.create({ ...params, stream: true }, requestOptions).asResponse()
+				: await requestWithRetry({
+						url: joinUrl(endpoint?.baseUrl ?? DEFAULT_ANTHROPIC_BASE_URL, "/v1/messages"),
+						method: "POST",
+						headers: endpoint?.headers ?? {},
+						body: JSON.stringify({ ...params, stream: true }),
+						...(options?.signal ? { signal: options.signal } : {}),
+						...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+						...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+					});
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			const requestId = response.headers.get("request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
@@ -840,6 +722,37 @@ function isOAuthToken(apiKey: string): boolean {
 	return apiKey.includes("sk-ant-oat");
 }
 
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+
+/**
+ * Headers the `@anthropic-ai/sdk` client prepended to every request. Kept here
+ * so the wire format is unchanged now that we call `/v1/messages` directly.
+ * The Stainless `x-stainless-*` platform headers are deliberately dropped;
+ * `x-stainless-retry-count` is still sent by `requestWithRetry`.
+ */
+const SDK_DEFAULT_HEADERS: Record<string, string> = {
+	Accept: "application/json",
+	"User-Agent": `Anthropic/JS ${ANTHROPIC_SDK_VERSION}`,
+	// `dangerouslyAllowBrowser` was set on every client we constructed.
+	"anthropic-dangerous-direct-browser-access": "true",
+	"anthropic-version": "2023-06-01",
+};
+
+interface AnthropicEndpoint {
+	baseUrl: string;
+	headers: Record<string, string>;
+	isOAuthToken: boolean;
+}
+
+/**
+ * Resolve the endpoint + headers for a request.
+ *
+ * Header precedence mirrors the SDK's `buildHeaders`: SDK defaults, then the
+ * auth header the constructor would have derived from `apiKey`/`authToken`,
+ * then the per-branch `defaultHeaders` (which may contain `null` to *delete* an
+ * earlier header — the Cloudflare gateway relies on this to strip `x-api-key`
+ * and `Authorization`), then the body's content type.
+ */
 function createClient(
 	model: Model<"anthropic-messages">,
 	apiKey: string,
@@ -847,7 +760,7 @@ function createClient(
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
 	dynamicHeaders?: Record<string, string>,
-): { client: Anthropic; isOAuthToken: boolean } {
+): AnthropicEndpoint {
 	// Adaptive thinking models (Opus 4.6, Sonnet 4.6) have interleaved thinking built-in.
 	// The beta header is deprecated on Opus 4.6 and redundant on Sonnet 4.6, so skip it.
 	const needsInterleavedBeta = interleavedThinking && !supportsAdaptiveThinking(model.id);
@@ -859,13 +772,15 @@ function createClient(
 		betaFeatures.push(INTERLEAVED_THINKING_BETA);
 	}
 
+	const bodyHeaders = { "content-type": "application/json" };
+
 	if (model.provider === "cloudflare-ai-gateway") {
-		const client = new Anthropic({
-			apiKey: null,
-			authToken: null,
-			baseURL: resolveCloudflareBaseUrl(model),
-			dangerouslyAllowBrowser: true,
-			defaultHeaders: mergeHeaders(
+		return {
+			baseUrl: resolveCloudflareBaseUrl(model) || DEFAULT_ANTHROPIC_BASE_URL,
+			// No `apiKey`/`authToken`: the gateway authenticates via `cf-aig-authorization`,
+			// and the `null`s below delete any auth header an earlier source set.
+			headers: mergeHeaders(
+				SDK_DEFAULT_HEADERS,
 				{
 					accept: "application/json",
 					"anthropic-dangerous-direct-browser-access": "true",
@@ -876,19 +791,18 @@ function createClient(
 				},
 				model.headers,
 				optionsHeaders,
+				bodyHeaders,
 			),
-		});
-
-		return { client, isOAuthToken: false };
+			isOAuthToken: false,
+		};
 	}
 
 	if (model.provider === "github-copilot") {
-		const client = new Anthropic({
-			apiKey: null,
-			authToken: apiKey,
-			baseURL: model.baseUrl,
-			dangerouslyAllowBrowser: true,
-			defaultHeaders: mergeHeaders(
+		return {
+			baseUrl: model.baseUrl || DEFAULT_ANTHROPIC_BASE_URL,
+			headers: mergeHeaders(
+				SDK_DEFAULT_HEADERS,
+				{ Authorization: `Bearer ${apiKey}` },
 				{
 					accept: "application/json",
 					"anthropic-dangerous-direct-browser-access": "true",
@@ -897,19 +811,18 @@ function createClient(
 				model.headers,
 				dynamicHeaders,
 				optionsHeaders,
+				bodyHeaders,
 			),
-		});
-
-		return { client, isOAuthToken: false };
+			isOAuthToken: false,
+		};
 	}
 
 	if (isOAuthToken(apiKey)) {
-		const client = new Anthropic({
-			apiKey: null,
-			authToken: apiKey,
-			baseURL: model.baseUrl,
-			dangerouslyAllowBrowser: true,
-			defaultHeaders: mergeHeaders(
+		return {
+			baseUrl: model.baseUrl || DEFAULT_ANTHROPIC_BASE_URL,
+			headers: mergeHeaders(
+				SDK_DEFAULT_HEADERS,
+				{ Authorization: `Bearer ${apiKey}` },
 				{
 					accept: "application/json",
 					"anthropic-dangerous-direct-browser-access": "true",
@@ -919,17 +832,17 @@ function createClient(
 				},
 				model.headers,
 				optionsHeaders,
+				bodyHeaders,
 			),
-		});
-
-		return { client, isOAuthToken: true };
+			isOAuthToken: true,
+		};
 	}
 
-	const client = new Anthropic({
-		apiKey,
-		baseURL: model.baseUrl,
-		dangerouslyAllowBrowser: true,
-		defaultHeaders: mergeHeaders(
+	return {
+		baseUrl: model.baseUrl || DEFAULT_ANTHROPIC_BASE_URL,
+		headers: mergeHeaders(
+			SDK_DEFAULT_HEADERS,
+			{ "X-Api-Key": apiKey },
 			{
 				accept: "application/json",
 				"anthropic-dangerous-direct-browser-access": "true",
@@ -937,10 +850,10 @@ function createClient(
 			},
 			model.headers,
 			optionsHeaders,
+			bodyHeaders,
 		),
-	});
-
-	return { client, isOAuthToken: false };
+		isOAuthToken: false,
+	};
 }
 
 function buildParams(
@@ -1221,7 +1134,7 @@ function convertTools(
 	isOAuthToken: boolean,
 	supportsEagerToolInputStreaming: boolean,
 	cacheControl?: CacheControlEphemeral,
-): Anthropic.Messages.Tool[] {
+): AnthropicTool[] {
 	if (!tools) return [];
 
 	return tools.map((tool, index) => {
@@ -1241,7 +1154,7 @@ function convertTools(
 	});
 }
 
-function mapStopReason(reason: Anthropic.Messages.StopReason | string): StopReason {
+function mapStopReason(reason: AnthropicStopReason | string): StopReason {
 	switch (reason) {
 		case "end_turn":
 			return "stop";

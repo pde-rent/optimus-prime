@@ -31,7 +31,6 @@ import type { AssistantMessage } from "../types.js";
 const OVERFLOW_PATTERNS = [
 	/prompt is too long/i, // Anthropic token overflow
 	/request_too_large/i, // Anthropic request byte-size overflow (HTTP 413)
-	/input is too long for requested model/i, // Amazon Bedrock
 	/exceeds the context window/i, // OpenAI (Completions & Responses API)
 	/input token count.*exceeds the maximum/i, // Google (Gemini)
 	/maximum prompt length is \d+/i, // xAI (Grok)
@@ -56,12 +55,10 @@ const OVERFLOW_PATTERNS = [
  * Error messages matching any of these are excluded from overflow detection
  * even if they also match an OVERFLOW_PATTERN.
  *
- * Example: Bedrock formats throttling errors as "ThrottlingException: Too many tokens,
- * please wait before trying again." which would match the /too many tokens/i overflow
- * pattern without this exclusion.
+ * Example: a throttling error phrased as "Too many tokens, please wait before trying
+ * again." would match the /too many tokens/i overflow pattern without this exclusion.
  */
 const NON_OVERFLOW_PATTERNS = [
-	/^(Throttling error|Service unavailable):/i, // AWS Bedrock non-overflow errors (human-readable prefixes from formatBedrockError)
 	/rate limit/i, // Generic rate limiting
 	/too many requests/i, // Generic HTTP 429 style
 ];

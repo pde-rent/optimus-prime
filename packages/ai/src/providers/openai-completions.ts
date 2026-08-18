@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import type {
 	ChatCompletionAssistantMessageParam,
 	ChatCompletionChunk,
@@ -33,10 +33,12 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
+import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
+import { iterateOpenAIStream, openaiDefaultHeaders } from "./openai-responses-shared.js";
 import { buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -147,20 +149,21 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 					? getAnthropicCacheWriteCost(model.cost.input, cacheControl.ttl === "1h" ? "1h" : "5m")
 					: undefined;
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
+			const { url, headers } = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
 			let params = buildParams(model, context, options, compat, cacheRetention, cacheControl);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 			}
-			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-				...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-			};
-			const { data: openaiStream, response } = await client.chat.completions
-				.create(params, requestOptions)
-				.withResponse();
+			const response = await requestWithRetry({
+				url,
+				headers,
+				body: JSON.stringify(params),
+				signal: options?.signal,
+				timeoutMs: options?.timeoutMs,
+				maxRetries: options?.maxRetries,
+			});
+			const openaiStream = iterateOpenAIStream<ChatCompletionChunk>(response, options?.signal);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
@@ -497,12 +500,15 @@ function createClient(
 				}
 			: headers;
 
-	return new OpenAI({
-		apiKey,
-		baseURL: isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl,
-		dangerouslyAllowBrowser: true,
-		defaultHeaders,
-	});
+	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
+
+	// Header precedence mirrors `buildHeaders` in `openai/client.mjs`: SDK
+	// defaults, then auth, then the client's `defaultHeaders` — which is how the
+	// Cloudflare AI Gateway path deletes `Authorization` by setting it to null.
+	return {
+		url: joinUrl(baseUrl, "/chat/completions"),
+		headers: mergeHeaders(openaiDefaultHeaders("OpenAI"), { Authorization: `Bearer ${apiKey}` }, defaultHeaders),
+	};
 }
 
 function buildParams(

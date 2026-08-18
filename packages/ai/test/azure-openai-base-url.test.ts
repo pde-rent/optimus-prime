@@ -1,35 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamAzureOpenAIResponses } from "../src/providers/azure-openai-responses.js";
 import type { Context } from "../src/types.js";
+import { mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
-interface CapturedAzureClientOptions {
-	apiKey: string;
-	apiVersion: string;
-	dangerouslyAllowBrowser: boolean;
-	defaultHeaders?: Record<string, string>;
-	baseURL: string;
-}
-
-const azureMock = vi.hoisted(() => ({
-	constructorCalls: [] as CapturedAzureClientOptions[],
-}));
-
-vi.mock("openai", () => {
-	class AzureOpenAI {
-		responses = {
-			create: () => {
-				throw new Error("mock create");
-			},
-		};
-
-		constructor(config: CapturedAzureClientOptions) {
-			azureMock.constructorCalls.push(config);
-		}
-	}
-
-	return { AzureOpenAI };
-});
+let fetchMock: OpenAIFetchMock;
 
 const context: Context = {
 	messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
@@ -41,7 +16,7 @@ const originalAzureOpenAIApiVersion = process.env.AZURE_OPENAI_API_VERSION;
 const originalAzureOpenAIApiKey = process.env.AZURE_OPENAI_API_KEY;
 
 beforeEach(() => {
-	azureMock.constructorCalls.length = 0;
+	fetchMock = mockOpenAIFetch([]);
 	delete process.env.AZURE_OPENAI_BASE_URL;
 	delete process.env.AZURE_OPENAI_RESOURCE_NAME;
 	delete process.env.AZURE_OPENAI_API_VERSION;
@@ -49,6 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	fetchMock.restore();
 	if (originalAzureOpenAIBaseUrl === undefined) {
 		delete process.env.AZURE_OPENAI_BASE_URL;
 	} else {
@@ -74,48 +50,56 @@ afterEach(() => {
 	}
 });
 
-async function captureClientBaseUrl(baseUrl: string): Promise<string> {
+/** The URL the provider actually requested: normalized base URL + `/responses` + `api-version`. */
+async function captureRequestUrl(baseUrl: string): Promise<string> {
 	process.env.AZURE_OPENAI_BASE_URL = baseUrl;
 	const model = getModel("azure-openai-responses", "gpt-4o-mini");
-	await streamAzureOpenAIResponses(model, context, { apiKey: "test-api-key" }).result();
-	expect(azureMock.constructorCalls).toHaveLength(1);
-	return azureMock.constructorCalls[0].baseURL;
+	const result = await streamAzureOpenAIResponses(model, context, { apiKey: "test-api-key" }).result();
+	expect(result.stopReason).not.toBe("error");
+	expect(fetchMock.requests).toHaveLength(1);
+	// `/responses` is not a deployments endpoint, so no `/deployments/<model>` segment.
+	expect(fetchMock.lastRequest().url).not.toContain("/deployments/");
+	expect(fetchMock.lastRequest().headers["api-key"]).toBe("test-api-key");
+	return fetchMock.lastRequest().url;
 }
 
 describe("azure-openai-responses base URL normalization", () => {
 	it("normalizes Cognitive Services root endpoints to /openai/v1", async () => {
-		const baseURL = await captureClientBaseUrl("https://marc-quicktests-resource.cognitiveservices.azure.com");
-		expect(baseURL).toBe("https://marc-quicktests-resource.cognitiveservices.azure.com/openai/v1");
+		const url = await captureRequestUrl("https://marc-quicktests-resource.cognitiveservices.azure.com");
+		expect(url).toBe(
+			"https://marc-quicktests-resource.cognitiveservices.azure.com/openai/v1/responses?api-version=v1",
+		);
 	});
 
 	it("normalizes Azure OpenAI root endpoints to /openai/v1", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-resource.openai.azure.com");
-		expect(baseURL).toBe("https://my-resource.openai.azure.com/openai/v1");
+		const url = await captureRequestUrl("https://my-resource.openai.azure.com");
+		expect(url).toBe("https://my-resource.openai.azure.com/openai/v1/responses?api-version=v1");
 	});
 
 	it("normalizes /openai to /openai/v1", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-resource.cognitiveservices.azure.com/openai");
-		expect(baseURL).toBe("https://my-resource.cognitiveservices.azure.com/openai/v1");
+		const url = await captureRequestUrl("https://my-resource.cognitiveservices.azure.com/openai");
+		expect(url).toBe("https://my-resource.cognitiveservices.azure.com/openai/v1/responses?api-version=v1");
 	});
 
 	it("preserves /openai/v1 endpoints", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-resource.cognitiveservices.azure.com/openai/v1");
-		expect(baseURL).toBe("https://my-resource.cognitiveservices.azure.com/openai/v1");
+		const url = await captureRequestUrl("https://my-resource.cognitiveservices.azure.com/openai/v1");
+		expect(url).toBe("https://my-resource.cognitiveservices.azure.com/openai/v1/responses?api-version=v1");
 	});
 
 	it("preserves explicit non-Azure proxy paths", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-proxy.example.com/v1");
-		expect(baseURL).toBe("https://my-proxy.example.com/v1");
+		const url = await captureRequestUrl("https://my-proxy.example.com/v1");
+		expect(url).toBe("https://my-proxy.example.com/v1/responses?api-version=v1");
 	});
 
 	it("strips query params when normalizing Azure host URLs", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-resource.openai.azure.com/openai?api-version=2024-12-01");
-		expect(baseURL).toBe("https://my-resource.openai.azure.com/openai/v1");
+		const url = await captureRequestUrl("https://my-resource.openai.azure.com/openai?api-version=2024-12-01");
+		expect(url).toBe("https://my-resource.openai.azure.com/openai/v1/responses?api-version=v1");
 	});
 
 	it("preserves query params on non-Azure proxy URLs", async () => {
-		const baseURL = await captureClientBaseUrl("https://my-proxy.example.com/v1?custom=true");
-		expect(baseURL).toBe("https://my-proxy.example.com/v1?custom=true");
+		const url = await captureRequestUrl("https://my-proxy.example.com/v1?custom=true");
+		// The SDK appended the path to a query-bearing base URL the same way.
+		expect(url).toBe("https://my-proxy.example.com/v1?custom=true%2Fresponses&api-version=v1");
 	});
 
 	it("throws on invalid URLs", async () => {
@@ -130,7 +114,9 @@ describe("azure-openai-responses base URL normalization", () => {
 		process.env.AZURE_OPENAI_RESOURCE_NAME = "my-resource";
 		const model = getModel("azure-openai-responses", "gpt-4o-mini");
 		await streamAzureOpenAIResponses(model, context, { apiKey: "test-api-key" }).result();
-		expect(azureMock.constructorCalls).toHaveLength(1);
-		expect(azureMock.constructorCalls[0].baseURL).toBe("https://my-resource.openai.azure.com/openai/v1");
+		expect(fetchMock.requests).toHaveLength(1);
+		expect(fetchMock.lastRequest().url).toBe(
+			"https://my-resource.openai.azure.com/openai/v1/responses?api-version=v1",
+		);
 	});
 });

@@ -272,7 +272,7 @@ function supportsOpenAiXhigh(modelId: string): boolean {
 }
 
 function isGoogleThinkingApi(model: Model<any>): boolean {
-	return model.api === "google-generative-ai" || model.api === "google-vertex";
+	return model.api === "google-generative-ai";
 }
 
 function isGemini3ProModel(modelId: string): boolean {
@@ -365,13 +365,6 @@ function getAnthropicMessagesCompat(provider: string, modelId: string): Anthropi
 	return EAGER_TOOL_INPUT_STREAMING_UNSUPPORTED_ANTHROPIC_MODELS.has(`${provider}:${modelId}`)
 		? { supportsEagerToolInputStreaming: false }
 		: undefined;
-}
-
-function getBedrockBaseUrl(modelId: string): string {
-	if (modelId.startsWith("eu.")) return "https://bedrock-runtime.eu-central-1.amazonaws.com";
-	if (modelId.startsWith("au.")) return "https://bedrock-runtime.ap-southeast-2.amazonaws.com";
-	if (modelId.startsWith("jp.")) return "https://bedrock-runtime.ap-northeast-1.amazonaws.com";
-	return "https://bedrock-runtime.us-east-1.amazonaws.com";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -886,44 +879,6 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 		const data = await response.json();
 
 		const models: Model<any>[] = [];
-
-		// Process Amazon Bedrock models
-		if (data["amazon-bedrock"]?.models) {
-			for (const [modelId, model] of Object.entries(data["amazon-bedrock"].models)) {
-				const m = model as ModelsDevModel;
-				if (m.tool_call !== true) continue;
-
-				let id = modelId;
-
-				if (id.startsWith("ai21.jamba")) {
-					// These models doesn't support tool use in streaming mode
-					continue;
-				}
-
-				if (id.startsWith("mistral.mistral-7b-instruct-v0")) {
-					// These models doesn't support system messages
-					continue;
-				}
-
-				models.push({
-					id,
-					name: m.name || id,
-					api: "bedrock-converse-stream" as const,
-					provider: "amazon-bedrock" as const,
-					baseUrl: getBedrockBaseUrl(id),
-					reasoning: m.reasoning === true,
-					input: (m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"]) as ("text" | "image")[],
-					cost: {
-						input: m.cost?.input || 0,
-						output: m.cost?.output || 0,
-						cacheRead: m.cost?.cache_read || 0,
-						cacheWrite: m.cost?.cache_write || 0,
-					},
-					contextWindow: m.limit?.context || 4096,
-					maxTokens: m.limit?.output || 4096,
-				});
-			}
-		}
 
 		// Process Anthropic models
 		if (data.anthropic?.models) {
@@ -1607,10 +1562,6 @@ async function generateModels() {
 
 	// Temporary overrides until upstream model metadata is corrected.
 	for (const candidate of allModels) {
-		if (candidate.provider === "amazon-bedrock" && candidate.id.includes("anthropic.claude-opus-4-6-v1")) {
-			candidate.cost.cacheRead = 0.5;
-			candidate.cost.cacheWrite = 6.25;
-		}
 		if (
 			(candidate.provider === "anthropic" ||
 				candidate.provider === "opencode" ||
@@ -1657,27 +1608,6 @@ async function generateModels() {
 
 	}
 
-
-	// Add missing EU Opus 4.6 profile
-	if (!allModels.some((m) => m.provider === "amazon-bedrock" && m.id === "eu.anthropic.claude-opus-4-6-v1")) {
-		allModels.push({
-			id: "eu.anthropic.claude-opus-4-6-v1",
-			name: "Claude Opus 4.6 (EU)",
-			api: "bedrock-converse-stream",
-			provider: "amazon-bedrock",
-			baseUrl: getBedrockBaseUrl("eu.anthropic.claude-opus-4-6-v1"),
-			reasoning: true,
-			input: ["text", "image"],
-			cost: {
-				input: 5,
-				output: 25,
-				cacheRead: 0.5,
-				cacheWrite: 6.25,
-			},
-			contextWindow: 200000,
-			maxTokens: 128000,
-		});
-	}
 
 	// Add missing Claude Opus 4.6
 	if (!allModels.some(m => m.provider === "anthropic" && m.id === "claude-opus-4-6")) {
@@ -2186,167 +2116,6 @@ async function generateModels() {
 			maxTokens: 30000,
 		});
 	}
-
-	const VERTEX_BASE_URL = "https://{location}-aiplatform.googleapis.com";
-	const vertexModels: Model<"google-vertex">[] = [
-		{
-			id: "gemini-3-pro-preview",
-			name: "Gemini 3 Pro Preview (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
-			contextWindow: 1000000,
-			maxTokens: 64000,
-		},
-		{
-			id: "gemini-3.1-pro-preview",
-			name: "Gemini 3.1 Pro Preview (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-3.1-pro-preview-customtools",
-			name: "Gemini 3.1 Pro Preview Custom Tools (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-3-flash-preview",
-			name: "Gemini 3 Flash Preview (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-2.0-flash",
-			name: "Gemini 2.0 Flash (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 0.15, output: 0.6, cacheRead: 0.0375, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 8192,
-		},
-		{
-			id: "gemini-2.0-flash-lite",
-			name: "Gemini 2.0 Flash Lite (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.075, output: 0.3, cacheRead: 0.01875, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-2.5-pro",
-			name: "Gemini 2.5 Pro (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-2.5-flash",
-			name: "Gemini 2.5 Flash (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-2.5-flash-lite-preview-09-2025",
-			name: "Gemini 2.5 Flash Lite Preview 09-25 (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-2.5-flash-lite",
-			name: "Gemini 2.5 Flash Lite (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: true,
-			input: ["text", "image"],
-			cost: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0 },
-			contextWindow: 1048576,
-			maxTokens: 65536,
-		},
-		{
-			id: "gemini-1.5-pro",
-			name: "Gemini 1.5 Pro (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 1.25, output: 5, cacheRead: 0.3125, cacheWrite: 0 },
-			contextWindow: 1000000,
-			maxTokens: 8192,
-		},
-		{
-			id: "gemini-1.5-flash",
-			name: "Gemini 1.5 Flash (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 0.075, output: 0.3, cacheRead: 0.01875, cacheWrite: 0 },
-			contextWindow: 1000000,
-			maxTokens: 8192,
-		},
-		{
-			id: "gemini-1.5-flash-8b",
-			name: "Gemini 1.5 Flash-8B (Vertex)",
-			api: "google-vertex",
-			provider: "google-vertex",
-			baseUrl: VERTEX_BASE_URL,
-			reasoning: false,
-			input: ["text", "image"],
-			cost: { input: 0.0375, output: 0.15, cacheRead: 0.01, cacheWrite: 0 },
-			contextWindow: 1000000,
-			maxTokens: 8192,
-		},
-	];
-	allModels.push(...vertexModels);
 
 	const primeInferenceModels = await fetchPrimeInferenceModels();
 	allModels.push(...primeInferenceModels);

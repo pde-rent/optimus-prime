@@ -52,7 +52,6 @@ Unified LLM API with automatic model discovery, provider configuration, token an
   - [Environment Variables](#environment-variables-nodejs-only)
   - [Checking Environment Variables](#checking-environment-variables)
 - [OAuth Providers](#oauth-providers)
-  - [Vertex AI](#vertex-ai)
   - [CLI Login](#cli-login)
   - [Programmatic OAuth](#programmatic-oauth)
   - [Login Flow Example](#login-flow-example)
@@ -69,7 +68,6 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - **DeepSeek**
 - **Anthropic**
 - **Google**
-- **Vertex AI** (Gemini via Vertex AI)
 - **Mistral**
 - **Groq**
 - **Cerebras**
@@ -80,7 +78,6 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - **Vercel AI Gateway**
 - **MiniMax**
 - **GitHub Copilot** (requires OAuth, see below)
-- **Amazon Bedrock**
 - **OpenCode Zen**
 - **OpenCode Go**
 - **Fireworks** (uses Anthropic-compatible API)
@@ -648,13 +645,11 @@ The library uses a registry of API implementations. Built-in APIs include:
 
 - **`anthropic-messages`**: Anthropic Messages API (`streamAnthropic`, `AnthropicOptions`)
 - **`google-generative-ai`**: Google Generative AI API (`streamGoogle`, `GoogleOptions`)
-- **`google-vertex`**: Google Vertex AI API (`streamGoogleVertex`, `GoogleVertexOptions`)
 - **`mistral-conversations`**: Mistral Conversations API (`streamMistral`, `MistralOptions`)
 - **`openai-completions`**: OpenAI Chat Completions API (`streamOpenAICompletions`, `OpenAICompletionsOptions`)
 - **`openai-responses`**: OpenAI Responses API (`streamOpenAIResponses`, `OpenAIResponsesOptions`)
 - **`openai-codex-responses`**: OpenAI Codex Responses API (`streamOpenAICodexResponses`, `OpenAICodexResponsesOptions`)
 - **`azure-openai-responses`**: Azure OpenAI Responses API (`streamAzureOpenAIResponses`, `AzureOpenAIResponsesOptions`)
-- **`bedrock-converse-stream`**: Amazon Bedrock Converse API (`streamBedrock`, `BedrockOptions`)
 
 ### Faux provider for tests
 
@@ -1035,10 +1030,8 @@ const response = await complete(model, {
 
 ### Browser Compatibility Notes
 
-- Amazon Bedrock (`bedrock-converse-stream`) is not supported in browser environments.
 - OAuth login flows are not supported in browser environments. Use the `prime-agent-ai/oauth` entry point in Node.js.
-- In browser builds, Bedrock can still appear in model lists. Calls to Bedrock models fail at runtime.
-- Use a server-side proxy or backend service if you need Bedrock or OAuth-based auth from a web app.
+- Use a server-side proxy or backend service if you need OAuth-based auth from a web app.
 
 ### Environment Variables (Node.js only)
 
@@ -1052,7 +1045,6 @@ In Node.js environments, you can set environment variables to avoid passing API 
 | Anthropic | `ANTHROPIC_API_KEY` or `ANTHROPIC_OAUTH_TOKEN` |
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Google | `GEMINI_API_KEY` |
-| Vertex AI | `GOOGLE_CLOUD_API_KEY` or `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) + `GOOGLE_CLOUD_LOCATION` + ADC |
 | Mistral | `MISTRAL_API_KEY` |
 | Groq | `GROQ_API_KEY` |
 | Cerebras | `CEREBRAS_API_KEY` |
@@ -1103,47 +1095,6 @@ Several providers require OAuth authentication instead of static API keys:
 - **GitHub Copilot** (Copilot subscription)
 
 For paid Cloud Code Assist subscriptions, set `GOOGLE_CLOUD_PROJECT` or `GOOGLE_CLOUD_PROJECT_ID` to your project ID.
-
-### Vertex AI
-
-Vertex AI models support either a Google Cloud API key or Application Default Credentials (ADC):
-
-- **API key**: Set `GOOGLE_CLOUD_API_KEY` or pass `apiKey` in the call options.
-- **Local development (ADC)**: Run `gcloud auth application-default login`
-- **CI/Production (ADC)**: Set `GOOGLE_APPLICATION_CREDENTIALS` to point to a service account JSON key file
-
-When using ADC, also set `GOOGLE_CLOUD_PROJECT` (or `GCLOUD_PROJECT`) and `GOOGLE_CLOUD_LOCATION`. You can also pass `project`/`location` in the call options. When using `GOOGLE_CLOUD_API_KEY`, `project` and `location` are not required.
-
-Example:
-
-```bash
-# Local (uses your user credentials)
-gcloud auth application-default login
-export GOOGLE_CLOUD_PROJECT="my-project"
-export GOOGLE_CLOUD_LOCATION="us-central1"
-
-# CI/Production (service account key file)
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
-```
-
-```typescript
-import { getModel, complete } from 'prime-agent-ai';
-
-(async () => {
-  const model = getModel('google-vertex', 'gemini-2.5-flash');
-  const response = await complete(model, {
-    messages: [{ role: 'user', content: 'Hello from Vertex AI' }]
-  }, {
-    apiKey: process.env.GOOGLE_CLOUD_API_KEY,
-  });
-
-  for (const block of response.content) {
-    if (block.type === 'text') console.log(block.text);
-  }
-})().catch(console.error);
-```
-
-Official docs: [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
 
 ### CLI Login
 
@@ -1246,13 +1197,13 @@ Adding a new LLM provider requires changes across multiple files. This checklist
 
 #### 1. Core Types (`src/types.ts`)
 
-- Add the API identifier to `KnownApi` (for example `"bedrock-converse-stream"`)
-- Create an options interface extending `StreamOptions` (for example `BedrockOptions`)
-- Add the provider name to `KnownProvider` (for example `"amazon-bedrock"`)
+- Add the API identifier to `KnownApi` (for example `"openai-responses"`)
+- Create an options interface extending `StreamOptions` (for example `OpenAIResponsesOptions`)
+- Add the provider name to `KnownProvider` (for example `"openai"`)
 
 #### 2. Provider Implementation (`src/providers/`)
 
-Create a new provider file (for example `amazon-bedrock.ts`) that exports:
+Create a new provider file (for example `openai-responses.ts`) that exports:
 
 - `stream<Provider>()` function returning `AssistantMessageEventStream`
 - `streamSimple<Provider>()` for `SimpleStreamOptions` mapping
@@ -1294,7 +1245,7 @@ Create or update test files to cover the new provider:
 
 For `cross-provider-handoff.test.ts`, add at least one provider/model pair. If the provider exposes multiple model families (for example GPT and Claude), add at least one pair per family.
 
-For providers with non-standard auth (AWS, Google Vertex), create a utility like `bedrock-utils.ts` with credential detection helpers.
+For providers with non-standard auth, create a utility module with credential detection helpers.
 
 #### 6. Coding Agent Integration (`../coding-agent/`)
 

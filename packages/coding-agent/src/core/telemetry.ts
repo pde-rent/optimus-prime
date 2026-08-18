@@ -422,18 +422,7 @@ export function telemetryProviderCategory(provider: string | undefined): string 
 		return "unknown";
 	}
 	const normalized = provider.toLowerCase();
-	const categories = [
-		"anthropic",
-		"openai",
-		"google",
-		"prime",
-		"openrouter",
-		"bedrock",
-		"vertex",
-		"mistral",
-		"groq",
-		"xai",
-	];
+	const categories = ["anthropic", "openai", "google", "prime", "openrouter", "mistral", "groq", "xai"];
 	return categories.find((category) => normalized.includes(category)) ?? "custom";
 }
 

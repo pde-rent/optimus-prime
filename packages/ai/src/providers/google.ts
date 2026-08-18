@@ -1,8 +1,9 @@
-import {
-	type GenerateContentConfig,
-	type GenerateContentParameters,
-	GoogleGenAI,
-	type ThinkingConfig,
+import type {
+	Content,
+	GenerateContentConfig,
+	GenerateContentParameters,
+	GenerateContentResponse,
+	ThinkingConfig,
 } from "@google/genai";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
@@ -20,6 +21,7 @@ import type {
 	ToolCall,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { iterateSseJson, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import {
 	formatStreamFailureMessage,
@@ -77,13 +79,12 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const client = createClient(model, apiKey, options?.headers);
 			let params = buildParams(model, context, options);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as GenerateContentParameters;
 			}
-			const googleStream = await client.models.generateContentStream(params);
+			const googleStream = await generateContentStream(model, apiKey, options?.headers, params);
 
 			stream.push({ type: "start", partial: output });
 			let currentBlock: TextContent | ThinkingContent | null = null;
@@ -320,24 +321,100 @@ export const streamSimpleGoogle: StreamFunction<"google-generative-ai", SimpleSt
 	} satisfies GoogleOptions);
 };
 
-function createClient(
-	model: Model<"google-generative-ai">,
-	apiKey?: string,
-	optionsHeaders?: Record<string, string>,
-): GoogleGenAI {
-	const httpOptions: { baseUrl?: string; apiVersion?: string; headers?: Record<string, string> } = {};
-	if (model.baseUrl) {
-		httpOptions.baseUrl = model.baseUrl;
-		httpOptions.apiVersion = ""; // baseUrl already includes version path, don't append
-	}
-	if (model.headers || optionsHeaders) {
-		httpOptions.headers = { ...model.headers, ...optionsHeaders };
-	}
+/** Gemini API defaults, mirroring `@google/genai`'s `ApiClient`. */
+const GOOGLE_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/";
+const GOOGLE_DEFAULT_API_VERSION = "v1beta";
 
-	return new GoogleGenAI({
-		apiKey,
-		httpOptions: Object.keys(httpOptions).length > 0 ? httpOptions : undefined,
+/**
+ * `config` keys the SDK lifts out of `generationConfig` onto the request root,
+ * plus the ones it consumes client-side and never sends.
+ */
+const TOP_LEVEL_CONFIG_KEYS = new Set(["systemInstruction", "tools", "toolConfig", "safetySettings", "cachedContent"]);
+const CLIENT_ONLY_CONFIG_KEYS = new Set(["abortSignal", "httpOptions"]);
+
+/**
+ * POST `models/<id>:streamGenerateContent?alt=sse` and decode the SSE body.
+ *
+ * The request is issued eagerly (before the first `next()`) so a non-2xx status
+ * surfaces exactly where the SDK's awaited `generateContentStream` raised it.
+ * `@google/genai` performs no retries unless `httpOptions.retryOptions` is set,
+ * which we never set, hence `maxRetries: 0`.
+ */
+async function generateContentStream(
+	model: Model<"google-generative-ai">,
+	apiKey: string,
+	optionsHeaders: Record<string, string> | undefined,
+	params: GenerateContentParameters,
+): Promise<AsyncGenerator<GenerateContentResponse>> {
+	const signal = params.config?.abortSignal;
+	const response = await requestWithRetry({
+		url: buildStreamUrl(model, params.model),
+		method: "POST",
+		headers: buildRequestHeaders(apiKey, model, optionsHeaders),
+		body: JSON.stringify(buildRequestBody(params)),
+		...(signal ? { signal } : {}),
+		maxRetries: 0,
 	});
+	return iterateSseJson<GenerateContentResponse>(response, { signal });
+}
+
+function buildRequestHeaders(
+	apiKey: string,
+	model: Model<"google-generative-ai">,
+	optionsHeaders: Record<string, string> | undefined,
+): Record<string, string> {
+	const headers = mergeHeaders({ "Content-Type": "application/json" }, model.headers, optionsHeaders);
+	// The SDK appends the key header only when the caller has not set one.
+	if (!Object.keys(headers).some((name) => name.toLowerCase() === "x-goog-api-key")) {
+		headers["x-goog-api-key"] = apiKey;
+	}
+	return headers;
+}
+
+function buildStreamUrl(model: Model<"google-generative-ai">, modelId: string): string {
+	// `tModel` rejects ids that could escape the resource path.
+	if (modelId.includes("..") || modelId.includes("?") || modelId.includes("&")) {
+		throw new Error("invalid model parameter");
+	}
+	const baseUrl = model.baseUrl || GOOGLE_DEFAULT_BASE_URL;
+	// A custom baseUrl already carries the version path, so no version segment is appended.
+	const apiVersion = model.baseUrl ? "" : GOOGLE_DEFAULT_API_VERSION;
+	const resource = modelId.startsWith("models/") || modelId.startsWith("tunedModels/") ? modelId : `models/${modelId}`;
+	const segments = [baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl];
+	if (apiVersion) segments.push(apiVersion);
+	segments.push(`${resource}:streamGenerateContent?alt=sse`);
+	return new URL(segments.join("/")).toString();
+}
+
+/**
+ * Build the `generateContent` request body the way the SDK's
+ * `generateContentParametersToMldev` does: `model` moves into the URL and
+ * `config` is split between the request root and `generationConfig`.
+ */
+function buildRequestBody(params: GenerateContentParameters): Record<string, unknown> {
+	const body: Record<string, unknown> = { contents: params.contents };
+	if (params.config == null) return body;
+
+	const generationConfig: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(params.config)) {
+		if (value == null || CLIENT_ONLY_CONFIG_KEYS.has(key)) continue;
+		if (key === "systemInstruction") {
+			body.systemInstruction = toContent(value as GenerateContentConfig["systemInstruction"]);
+		} else if (TOP_LEVEL_CONFIG_KEYS.has(key)) {
+			body[key] = value;
+		} else {
+			generationConfig[key] = value;
+		}
+	}
+	body.generationConfig = generationConfig;
+	return body;
+}
+
+/** `tContent`: a bare string becomes a user-role content with one text part. */
+function toContent(value: GenerateContentConfig["systemInstruction"]): unknown {
+	if (typeof value === "string") return { role: "user", parts: [{ text: value }] };
+	if (value && typeof value === "object" && Array.isArray((value as Content).parts)) return value;
+	return { role: "user", parts: Array.isArray(value) ? value : [value] };
 }
 
 function buildParams(

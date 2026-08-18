@@ -10,17 +10,13 @@ export type KnownApi =
 	| "azure-openai-responses"
 	| "openai-codex-responses"
 	| "anthropic-messages"
-	| "bedrock-converse-stream"
-	| "google-generative-ai"
-	| "google-vertex";
+	| "google-generative-ai";
 
 export type Api = KnownApi | (string & {});
 
 export type KnownProvider =
-	| "amazon-bedrock"
 	| "anthropic"
 	| "google"
-	| "google-vertex"
 	| "openai"
 	| "azure-openai-responses"
 	| "openai-codex"
@@ -110,7 +106,7 @@ export interface StreamOptions {
 	/**
 	 * Optional custom HTTP headers to include in API requests.
 	 * Merged with provider defaults; can override default headers.
-	 * Not supported by all providers (e.g., AWS Bedrock uses SDK auth).
+	 * Not supported by all providers.
 	 */
 	headers?: Record<string, string>;
 	/**

@@ -1,11 +1,11 @@
-/** Shared utilities for Google Generative AI and Vertex providers. */
+/** Shared utilities for the Google Generative AI provider. */
 
-import { type Content, FinishReason, FunctionCallingConfigMode, type Part } from "@google/genai";
+import type { Content, FinishReason, FunctionCallingConfigMode, Part } from "@google/genai";
 import type { Context, ImageContent, Model, StopReason, TextContent, ThinkingBudgets, Tool } from "../types.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { transformMessages } from "./transform-messages.js";
 
-type GoogleApiType = "google-generative-ai" | "google-vertex";
+type GoogleApiType = "google-generative-ai";
 
 /** Thinking level values accepted by Gemini 3 models. */
 export type GoogleThinkingLevel = "THINKING_LEVEL_UNSPECIFIED" | "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
@@ -39,7 +39,7 @@ export function getGoogleThinkingBudget(
 /**
  * Determines whether a streamed Gemini `Part` should be treated as "thinking".
  *
- * Protocol note (Gemini / Vertex AI thought signatures):
+ * Protocol note (Gemini thought signatures):
  * - `thought: true` is the definitive marker for thinking content (thought summaries).
  * - `thoughtSignature` is an encrypted representation of the model's internal thought process
  *   used to preserve reasoning context across multi-turn interactions.
@@ -295,46 +295,58 @@ export function convertTools(
 	];
 }
 
+/**
+ * Runtime mirrors of the `@google/genai` string enums. The SDK is a
+ * devDependency (types only), so its enum *values* cannot be imported; these
+ * carry the identical wire strings.
+ */
+const FUNCTION_CALLING_CONFIG_MODES = {
+	MODE_UNSPECIFIED: "MODE_UNSPECIFIED",
+	AUTO: "AUTO",
+	ANY: "ANY",
+	NONE: "NONE",
+	VALIDATED: "VALIDATED",
+} as Record<"MODE_UNSPECIFIED" | "AUTO" | "ANY" | "NONE" | "VALIDATED", FunctionCallingConfigMode>;
+
 /** Converts the generic tool-choice mode to Google's function-calling mode. */
 export function mapToolChoice(choice: string): FunctionCallingConfigMode {
 	switch (choice) {
-		case "auto":
-			return FunctionCallingConfigMode.AUTO;
 		case "none":
-			return FunctionCallingConfigMode.NONE;
+			return FUNCTION_CALLING_CONFIG_MODES.NONE;
 		case "any":
-			return FunctionCallingConfigMode.ANY;
+			return FUNCTION_CALLING_CONFIG_MODES.ANY;
 		default:
-			return FunctionCallingConfigMode.AUTO;
+			return FUNCTION_CALLING_CONFIG_MODES.AUTO;
 	}
 }
 
-/** Converts Google finish reasons to the shared stop-reason protocol. */
-export function mapStopReason(reason: FinishReason): StopReason {
-	switch (reason) {
-		case FinishReason.STOP:
-			return "stop";
-		case FinishReason.MAX_TOKENS:
-			return "length";
-		case FinishReason.BLOCKLIST:
-		case FinishReason.PROHIBITED_CONTENT:
-		case FinishReason.SPII:
-		case FinishReason.SAFETY:
-		case FinishReason.IMAGE_SAFETY:
-		case FinishReason.IMAGE_PROHIBITED_CONTENT:
-		case FinishReason.IMAGE_RECITATION:
-		case FinishReason.IMAGE_OTHER:
-		case FinishReason.RECITATION:
-		case FinishReason.FINISH_REASON_UNSPECIFIED:
-		case FinishReason.OTHER:
-		case FinishReason.LANGUAGE:
-		case FinishReason.MALFORMED_FUNCTION_CALL:
-		case FinishReason.UNEXPECTED_TOOL_CALL:
-		case FinishReason.NO_IMAGE:
-			return "error";
-		default: {
-			const _exhaustive: never = reason;
-			throw new Error(`Unhandled stop reason: ${_exhaustive}`);
-		}
-	}
+/** `FinishReason` values (see the enum in `@google/genai`) mapped to the shared protocol. */
+const STOP_REASON_BY_FINISH_REASON: Record<string, StopReason> = {
+	STOP: "stop",
+	MAX_TOKENS: "length",
+	FINISH_REASON_UNSPECIFIED: "error",
+	SAFETY: "error",
+	RECITATION: "error",
+	LANGUAGE: "error",
+	OTHER: "error",
+	BLOCKLIST: "error",
+	PROHIBITED_CONTENT: "error",
+	SPII: "error",
+	MALFORMED_FUNCTION_CALL: "error",
+	IMAGE_SAFETY: "error",
+	UNEXPECTED_TOOL_CALL: "error",
+	IMAGE_PROHIBITED_CONTENT: "error",
+	NO_IMAGE: "error",
+	IMAGE_RECITATION: "error",
+	IMAGE_OTHER: "error",
+};
+
+/**
+ * Converts Google finish reasons to the shared stop-reason protocol.
+ *
+ * Unknown reasons (new enum members the map predates) fall back to "stop"
+ * rather than throwing, so a protocol addition can never kill a live stream.
+ */
+export function mapStopReason(reason: FinishReason | string): StopReason {
+	return STOP_REASON_BY_FINISH_REASON[reason] ?? "stop";
 }

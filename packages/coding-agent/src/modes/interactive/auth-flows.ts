@@ -1,7 +1,6 @@
-import * as path from "node:path";
 import { getProviders, type OAuthProviderId, type OAuthSelectPrompt } from "@earendil-works/pi-ai";
 import type { OverlayHandle, TUI } from "@earendil-works/pi-tui";
-import { getAuthPath, getDocsPath } from "../../config.js";
+import { getAuthPath } from "../../config.js";
 import type { ModelRegistry } from "../../core/model-registry.js";
 import {
 	checkPrimeAgentTracesAccess,
@@ -29,7 +28,6 @@ import {
 	OAuthSelectorComponent,
 } from "./components/oauth-selector.js";
 import { PrimeTeamSelectorComponent } from "./components/prime-team-selector.js";
-import { theme } from "./theme/theme.js";
 
 export type AuthenticationResult =
 	| {
@@ -42,8 +40,6 @@ export type AuthenticationResult =
 	  }
 	| { status: "cancelled" }
 	| { status: "failed" };
-
-export const BEDROCK_PROVIDER_ID = "amazon-bedrock";
 
 export const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party harness usage draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
@@ -177,9 +173,6 @@ export class ProviderAuthFlows {
 		}
 		if (providerOption.id === PRIME_INFERENCE_PROVIDER_ID) {
 			return this.runPrimeInferenceLogin();
-		}
-		if (providerOption.id === BEDROCK_PROVIDER_ID) {
-			return this.showBedrockSetupDialog(providerOption.id, providerOption.name);
 		}
 		return this.showApiKeyLoginDialog(providerOption.id, providerOption.name, kind);
 	}
@@ -330,58 +323,6 @@ export class ProviderAuthFlows {
 			authType,
 			kind,
 		};
-	}
-
-	private async completeExternalProviderSetup(
-		providerId: string,
-		providerName: string,
-	): Promise<AuthenticationResult> {
-		this.host.modelRegistry.refresh();
-		await this.host.onAuthChanged?.();
-		this.host.showStatus(`${providerName} uses external credentials. Select a model after configuring them.`);
-		return {
-			status: "success",
-			providerId,
-			providerName,
-			authType: "api_key",
-		};
-	}
-
-	private async hasAvailableProviderModels(providerId: string): Promise<boolean> {
-		const models = await this.host.getAvailableModels();
-		return models.some((model) => model.provider === providerId);
-	}
-
-	private async showBedrockSetupDialog(providerId: string, providerName: string): Promise<AuthenticationResult> {
-		const dialog = new LoginDialogComponent(this.host.ui, providerId, () => {}, providerName, "Amazon Bedrock setup");
-		const handle = showFullPaneOverlay(this.host.ui, dialog, 88);
-		const closeDialog = () => {
-			handle.hide();
-			this.host.ui.requestRender();
-		};
-
-		try {
-			await dialog.showContinueInfo([
-				theme.fg("text", "Amazon Bedrock uses AWS credentials instead of a single API key."),
-				theme.fg("text", "Configure an AWS profile, IAM keys, bearer token, or role-based credentials."),
-				theme.fg("muted", "See:"),
-				theme.fg("accent", `  ${path.join(getDocsPath(), "providers.md")}`),
-			]);
-			closeDialog();
-			if (!(await this.hasAvailableProviderModels(providerId))) {
-				this.host.showStatus(`${providerName} credentials were not detected. Configure them, then reopen /model.`);
-				return { status: "cancelled" };
-			}
-			return await this.completeExternalProviderSetup(providerId, providerName);
-		} catch (error: unknown) {
-			closeDialog();
-			const errorMsg = error instanceof Error ? error.message : String(error);
-			if (errorMsg !== "Login cancelled") {
-				this.host.showError(`Failed to set up ${providerName}: ${errorMsg}`);
-				return { status: "failed" };
-			}
-			return { status: "cancelled" };
-		}
 	}
 
 	private showPrimeTeamSelector(

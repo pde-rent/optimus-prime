@@ -1,64 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamSimple } from "../src/stream.js";
 import type { Model } from "../src/types.js";
+import { completionsStopChunk, mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
 // Empty tools arrays must NOT be serialized as `tools: []` — some OpenAI-compatible
 // backends (e.g. DashScope / Aliyun Qwen via compatible-mode) reject the request with
 // `"[] is too short - 'tools'"` (HTTP 400) when `--no-tools` produces an empty array.
 // Regression for https://github.com/earendil-works/pi-mono/issues/<issue-number>
 
-const mockState = vi.hoisted(() => ({
-	lastParams: undefined as unknown,
-	lastClientOptions: undefined as unknown,
-}));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		constructor(options: unknown) {
-			mockState.lastClientOptions = options;
-		}
-
-		chat = {
-			completions: {
-				create: (params: unknown) => {
-					mockState.lastParams = params;
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								choices: [{ delta: {}, finish_reason: "stop" }],
-								usage: {
-									prompt_tokens: 1,
-									completion_tokens: 1,
-									prompt_tokens_details: { cached_tokens: 0 },
-									completion_tokens_details: { reasoning_tokens: 0 },
-								},
-							};
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse: () => Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-	}
-
-	return { default: FakeOpenAI };
-});
-
 describe("openai-completions empty tools handling", () => {
+	let fetchMock: OpenAIFetchMock;
+
 	beforeEach(() => {
-		mockState.lastParams = undefined;
-		mockState.lastClientOptions = undefined;
+		fetchMock = mockOpenAIFetch([completionsStopChunk()]);
+	});
+
+	afterEach(() => {
+		fetchMock.restore();
 	});
 
 	it("omits tools field when context.tools is an empty array", async () => {
@@ -74,7 +33,7 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test" },
 		).result();
 
-		const params = mockState.lastParams as { tools?: unknown };
+		const params = fetchMock.lastRequest().body as { tools?: unknown };
 		expect("tools" in (params as object)).toBe(false);
 	});
 
@@ -90,7 +49,7 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test" },
 		).result();
 
-		const params = mockState.lastParams as { tools?: unknown };
+		const params = fetchMock.lastRequest().body as { tools?: unknown };
 		expect("tools" in (params as object)).toBe(false);
 	});
 
@@ -108,7 +67,7 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test", reasoning: "high" },
 		).result();
 
-		const params = mockState.lastParams as {
+		const params = fetchMock.lastRequest().body as {
 			messages: Array<{ role: string }>;
 			max_tokens?: number;
 			max_completion_tokens?: number;
@@ -121,13 +80,11 @@ describe("openai-completions empty tools handling", () => {
 		expect(params.reasoning_effort).toBeUndefined();
 		expect(params.store).toBeUndefined();
 
-		const clientOptions = mockState.lastClientOptions as {
-			baseURL?: string;
-			defaultHeaders?: Record<string, unknown>;
-		};
-		expect(clientOptions.baseURL).toBe("https://gateway.ai.cloudflare.com/v1/account-id/gateway-id/compat");
-		expect(clientOptions.defaultHeaders?.Authorization).toBeNull();
-		expect(clientOptions.defaultHeaders?.["cf-aig-authorization"]).toBe("Bearer test");
+		const request = fetchMock.lastRequest();
+		expect(request.url).toBe("https://gateway.ai.cloudflare.com/v1/account-id/gateway-id/compat/chat/completions");
+		// `Authorization: null` in the gateway defaults deletes the bearer header.
+		expect(request.headers.Authorization).toBeUndefined();
+		expect(request.headers["cf-aig-authorization"]).toBe("Bearer test");
 	});
 
 	it("uses OpenAI reasoning fields for an explicitly configured private Prime Inference route", async () => {
@@ -156,7 +113,7 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test", reasoning: "medium" },
 		).result();
 
-		const params = mockState.lastParams as { reasoning_effort?: string; enable_thinking?: boolean };
+		const params = fetchMock.lastRequest().body as { reasoning_effort?: string; enable_thinking?: boolean };
 		expect(params.reasoning_effort).toBe("medium");
 		expect(params.enable_thinking).toBeUndefined();
 	});
@@ -174,9 +131,9 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "cf-token", headers: { Authorization: "Bearer upstream-token" } },
 		).result();
 
-		const clientOptions = mockState.lastClientOptions as { defaultHeaders?: Record<string, unknown> };
-		expect(clientOptions.defaultHeaders?.Authorization).toBe("Bearer upstream-token");
-		expect(clientOptions.defaultHeaders?.["cf-aig-authorization"]).toBe("Bearer cf-token");
+		const { headers } = fetchMock.lastRequest();
+		expect(headers.Authorization).toBe("Bearer upstream-token");
+		expect(headers["cf-aig-authorization"]).toBe("Bearer cf-token");
 	});
 
 	it("sends session affinity headers for Workers AI through Cloudflare AI Gateway", async () => {
@@ -192,10 +149,10 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test", sessionId: "session-1" },
 		).result();
 
-		const clientOptions = mockState.lastClientOptions as { defaultHeaders?: Record<string, string> };
-		expect(clientOptions.defaultHeaders?.session_id).toBe("session-1");
-		expect(clientOptions.defaultHeaders?.["x-client-request-id"]).toBe("session-1");
-		expect(clientOptions.defaultHeaders?.["x-session-affinity"]).toBe("session-1");
+		const { headers } = fetchMock.lastRequest();
+		expect(headers.session_id).toBe("session-1");
+		expect(headers["x-client-request-id"]).toBe("session-1");
+		expect(headers["x-session-affinity"]).toBe("session-1");
 	});
 
 	it("still emits tools: [] for Anthropic/LiteLLM proxy when conversation has tool history", async () => {
@@ -245,7 +202,7 @@ describe("openai-completions empty tools handling", () => {
 			{ apiKey: "test" },
 		).result();
 
-		const params = mockState.lastParams as { tools?: unknown[] };
+		const params = fetchMock.lastRequest().body as { tools?: unknown[] };
 		expect(Array.isArray(params.tools)).toBe(true);
 		expect(params.tools).toEqual([]);
 	});

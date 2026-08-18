@@ -1,73 +1,20 @@
 import { Type } from "typebox";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
 import { streamSimple } from "../src/stream.js";
 import type { Tool } from "../src/types.js";
+import { completionsStopChunk, mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 import { getZaiTestModel } from "./zai-test-model.js";
 
-const mockState = vi.hoisted(() => ({
-	lastParams: undefined as unknown,
-	chunks: undefined as
-		| Array<null | {
-				id?: string;
-				choices?: Array<{ delta: Record<string, unknown>; finish_reason: string | null; usage?: unknown }>;
-				usage?: {
-					prompt_tokens: number;
-					completion_tokens: number;
-					prompt_tokens_details: { cached_tokens: number; cache_write_tokens?: number };
-					completion_tokens_details: { reasoning_tokens: number };
-				};
-		  }>
-		| undefined,
-}));
-
-vi.mock("openai", () => {
-	class FakeOpenAI {
-		chat = {
-			completions: {
-				create: (params: unknown) => {
-					mockState.lastParams = params;
-					const stream = {
-						async *[Symbol.asyncIterator]() {
-							const chunks = mockState.chunks ?? [
-								{
-									choices: [{ delta: {}, finish_reason: "stop" }],
-									usage: {
-										prompt_tokens: 1,
-										completion_tokens: 1,
-										prompt_tokens_details: { cached_tokens: 0 },
-										completion_tokens_details: { reasoning_tokens: 0 },
-									},
-								},
-							];
-							for (const chunk of chunks) {
-								yield chunk;
-							}
-						},
-					};
-					const promise = Promise.resolve(stream) as Promise<typeof stream> & {
-						withResponse: () => Promise<{
-							data: typeof stream;
-							response: { status: number; headers: Headers };
-						}>;
-					};
-					promise.withResponse = async () => ({
-						data: stream,
-						response: { status: 200, headers: new Headers() },
-					});
-					return promise;
-				},
-			},
-		};
-	}
-
-	return { default: FakeOpenAI };
-});
-
 describe("openai-completions tool_choice", () => {
+	let fetchMock: OpenAIFetchMock;
+
 	beforeEach(() => {
-		mockState.lastParams = undefined;
-		mockState.chunks = undefined;
+		fetchMock = mockOpenAIFetch([completionsStopChunk()]);
+	});
+
+	afterEach(() => {
+		fetchMock.restore();
 	});
 
 	it("forwards toolChoice from simple options to payload", async () => {
@@ -105,7 +52,7 @@ describe("openai-completions tool_choice", () => {
 			} as unknown as Parameters<typeof streamSimple>[2],
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tool_choice?: string; tools?: unknown[] };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_choice?: string; tools?: unknown[] };
 		expect(params.tool_choice).toBe("required");
 		expect(Array.isArray(params.tools)).toBe(true);
 		expect(params.tools?.length ?? 0).toBeGreaterThan(0);
@@ -149,7 +96,9 @@ describe("openai-completions tool_choice", () => {
 			} as unknown as Parameters<typeof streamSimple>[2],
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tools?: Array<{ function?: Record<string, unknown> }> };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as {
+			tools?: Array<{ function?: Record<string, unknown> }>;
+		};
 		const tool = params.tools?.[0]?.function;
 		expect(tool).toBeTruthy();
 		expect(tool?.strict).toBeUndefined();
@@ -180,7 +129,7 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { reasoning_effort?: string };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { reasoning_effort?: string };
 		expect(params.reasoning_effort).toBe("medium");
 	});
 
@@ -217,7 +166,7 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tool_stream?: boolean };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_stream?: boolean };
 		expect(params.tool_stream).toBe(true);
 	});
 
@@ -265,7 +214,7 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tool_stream?: boolean };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_stream?: boolean };
 		expect(params.tool_stream).toBeUndefined();
 	});
 
@@ -309,7 +258,7 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tool_stream?: boolean };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_stream?: boolean };
 		expect(params.tool_stream).toBe(true);
 	});
 
@@ -336,12 +285,12 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as { tool_stream?: boolean };
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_stream?: boolean };
 		expect(params.tool_stream).toBeUndefined();
 	});
 
 	it("maps non-standard provider finish_reason values to stopReason error", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				choices: [{ delta: { content: "partial" }, finish_reason: null }],
 			},
@@ -376,7 +325,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("ignores null stream chunks from openai-compatible providers", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			null,
 			{
 				id: "chatcmpl-test",
@@ -418,7 +367,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("coalesces tool call deltas by stable index when provider mutates ids mid-stream", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				id: "chatcmpl-kimi-bad-stream",
 				choices: [
@@ -529,7 +478,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("accumulates mixed content, reasoning, and parallel tool call deltas independently", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				id: "chatcmpl-mixed-deltas",
 				choices: [
@@ -761,7 +710,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("does not double-count reasoning tokens in completion usage", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				id: "chatcmpl-reasoning-usage",
 				choices: [{ delta: {}, finish_reason: "stop" }],
@@ -796,7 +745,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("preserves prompt_tokens_details.cache_write_tokens from chunk usage", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				id: "chatcmpl-cache-write",
 				choices: [{ delta: { content: "OK" }, finish_reason: null }],
@@ -836,7 +785,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("preserves prompt_tokens_details.cache_write_tokens from choice usage fallback", async () => {
-		mockState.chunks = [
+		fetchMock.events = [
 			{
 				id: "chatcmpl-cache-write-choice",
 				choices: [{ delta: { content: "OK" }, finish_reason: null }],
@@ -905,7 +854,7 @@ describe("openai-completions tool_choice", () => {
 			},
 		).result();
 
-		const params = (payload ?? mockState.lastParams) as {
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as {
 			reasoning?: { effort?: string };
 			reasoning_effort?: string;
 		};

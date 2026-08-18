@@ -140,49 +140,6 @@ export AZURE_OPENAI_API_VERSION=2024-02-01
 export AZURE_OPENAI_DEPLOYMENT_NAME_MAP=gpt-4=my-gpt4,gpt-4o=my-gpt4o
 ```
 
-### Amazon Bedrock
-
-```bash
-# Option 1: AWS Profile
-export AWS_PROFILE=your-profile
-
-# Option 2: IAM Keys
-export AWS_ACCESS_KEY_ID=AKIA...
-export AWS_SECRET_ACCESS_KEY=...
-
-# Option 3: Bearer Token
-export AWS_BEARER_TOKEN_BEDROCK=...
-
-# Optional region (defaults to us-east-1)
-export AWS_REGION=us-west-2
-```
-
-Also supports ECS task roles (`AWS_CONTAINER_CREDENTIALS_*`) and IRSA (`AWS_WEB_IDENTITY_TOKEN_FILE`).
-
-```bash
-prime-agent --provider amazon-bedrock --model us.anthropic.claude-sonnet-4-20250514-v1:0
-```
-
-Prompt caching is enabled automatically for Claude models whose ID contains a recognizable model name (base models and system-defined inference profiles). For application inference profiles (whose ARNs don't contain the model name), set `AWS_BEDROCK_FORCE_CACHE=1` to enable cache points:
-
-```bash
-export AWS_BEDROCK_FORCE_CACHE=1
-prime-agent --provider amazon-bedrock --model arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123
-```
-
-If you are connecting to a Bedrock API proxy, the following environment variables can be used:
-
-```bash
-# Set the URL for the Bedrock proxy (standard AWS SDK env var)
-export AWS_ENDPOINT_URL_BEDROCK_RUNTIME=https://my.corp.proxy/bedrock
-
-# Set if your proxy does not require authentication
-export AWS_BEDROCK_SKIP_AUTH=1
-
-# Set if your proxy only supports HTTP/1.1
-export AWS_BEDROCK_FORCE_HTTP1=1
-```
-
 ### Cloudflare AI Gateway
 
 `CLOUDFLARE_API_KEY` can be set via `/login`. The account ID and gateway slug must be set as environment variables.
@@ -218,18 +175,6 @@ prime-agent --provider cloudflare-workers-ai --model "@cf/moonshotai/kimi-k2.6"
 ```
 
 Prime Agent automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
-
-### Google Vertex AI
-
-Uses Application Default Credentials:
-
-```bash
-gcloud auth application-default login
-export GOOGLE_CLOUD_PROJECT=your-project
-export GOOGLE_CLOUD_LOCATION=us-central1
-```
-
-Or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
 
 ## Custom Providers
 

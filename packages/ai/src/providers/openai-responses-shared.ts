@@ -1,7 +1,6 @@
 import type OpenAI from "openai";
 import type {
 	Tool as OpenAITool,
-	ResponseCreateParamsStreaming,
 	ResponseFunctionCallOutputItemList,
 	ResponseFunctionToolCall,
 	ResponseInput,
@@ -19,6 +18,7 @@ import type {
 	Context,
 	ImageContent,
 	Model,
+	ServiceTier,
 	StopReason,
 	TextContent,
 	TextSignatureV1,
@@ -29,10 +29,90 @@ import type {
 } from "../types.js";
 import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
+import { iterateSse } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { classifyStreamFailure, StreamFailureError } from "../utils/stream-failure.js";
 import { transformMessages } from "./transform-messages.js";
+
+/**
+ * Version the `openai` SDK reported in its `User-Agent`. Kept as a constant so
+ * the requests we build stay byte-identical to the ones the SDK sent.
+ */
+const OPENAI_SDK_VERSION = "6.47.0";
+
+/**
+ * The headers the `openai` SDK put on every request before auth, the client's
+ * `defaultHeaders` and the per-request headers are layered on top
+ * (see `buildHeaders` in `openai/client.mjs`). `clientName` mirrors
+ * `getUserAgent()`, which interpolates the client class name.
+ */
+export function openaiDefaultHeaders(clientName: "OpenAI" | "AzureOpenAI"): Record<string, string> {
+	return {
+		Accept: "application/json",
+		"User-Agent": `${clientName}/JS ${OPENAI_SDK_VERSION}`,
+		"Content-Type": "application/json",
+	};
+}
+
+/**
+ * Error for an error payload embedded in an otherwise successful (200) OpenAI
+ * SSE stream.
+ *
+ * Mirrors the `openai` SDK's `APIError` shape — `error`, `headers`,
+ * `requestID`, `code`/`type` and no HTTP `status` — so `utils/stream-failure.ts`
+ * classifies it exactly as it classified the SDK's error.
+ */
+export class OpenAIStreamError extends Error {
+	readonly error: unknown;
+	readonly headers?: Headers;
+	readonly requestID?: string;
+	readonly code?: string;
+	readonly type?: string;
+	readonly param?: string;
+
+	constructor(error: unknown, message?: string, headers?: Headers) {
+		super(makeStreamErrorMessage(error, message));
+		const data = error as Record<string, unknown> | undefined;
+		this.error = error;
+		this.headers = headers;
+		this.requestID = headers?.get("x-request-id") ?? undefined;
+		this.code = data?.code as string | undefined;
+		this.param = data?.param as string | undefined;
+		this.type = data?.type as string | undefined;
+	}
+}
+
+/** `APIError.makeMessage` with an always-absent status. */
+function makeStreamErrorMessage(error: unknown, message?: string): string {
+	const errorMessage = (error as { message?: unknown } | undefined)?.message;
+	const text = errorMessage
+		? typeof errorMessage === "string"
+			? errorMessage
+			: JSON.stringify(errorMessage)
+		: error
+			? JSON.stringify(error)
+			: message;
+	return text || "(no status code or body)";
+}
+
+/**
+ * Decode an OpenAI SSE response into parsed events, replicating
+ * `Stream.fromSSEResponse` in `openai/core/streaming.mjs`: stop at the `[DONE]`
+ * sentinel, rethrow JSON parse failures verbatim, and throw for an `error`
+ * event or an `error` field in the payload.
+ */
+export async function* iterateOpenAIStream<T>(response: Response, signal?: AbortSignal): AsyncGenerator<T> {
+	if (!response.body) return;
+	for await (const sse of iterateSse(response.body, signal)) {
+		if (sse.data.startsWith("[DONE]")) return;
+		const data = JSON.parse(sse.data) as { error?: unknown; message?: string } | null;
+		if (sse.event === "error" || data?.error) {
+			throw new OpenAIStreamError(data?.error, data?.message, response.headers);
+		}
+		yield data as T;
+	}
+}
 
 function encodeTextSignatureV1(id: string, phase?: TextSignatureV1["phase"]): string {
 	const payload: TextSignatureV1 = { v: 1, id };
@@ -61,15 +141,12 @@ function parseTextSignature(
 }
 
 export interface OpenAIResponsesStreamOptions {
-	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
+	serviceTier?: ServiceTier;
 	resolveServiceTier?: (
-		responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-		requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-	) => ResponseCreateParamsStreaming["service_tier"] | undefined;
-	applyServiceTierPricing?: (
-		usage: Usage,
-		serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-	) => void;
+		responseServiceTier: ServiceTier | undefined,
+		requestServiceTier: ServiceTier | undefined,
+	) => ServiceTier | undefined;
+	applyServiceTierPricing?: (usage: Usage, serviceTier: ServiceTier | undefined) => void;
 }
 
 export interface ConvertResponsesMessagesOptions {

@@ -88,8 +88,6 @@ For each built-in provider, Prime Agent maintains a list of tool-capable models,
 - Azure OpenAI
 - DeepSeek
 - Google Gemini
-- Google Vertex
-- Amazon Bedrock
 - Mistral
 - Groq
 - Cerebras

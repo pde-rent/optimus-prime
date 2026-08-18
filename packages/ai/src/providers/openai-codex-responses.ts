@@ -1,10 +1,5 @@
 import type * as NodeOs from "node:os";
-import type {
-	Tool as OpenAITool,
-	ResponseCreateParamsStreaming,
-	ResponseInput,
-	ResponseStreamEvent,
-} from "openai/resources/responses/responses.js";
+import type { Tool as OpenAITool, ResponseInput, ResponseStreamEvent } from "openai/resources/responses/responses.js";
 
 // NEVER convert to top-level runtime imports - breaks browser/Vite builds
 let _os: typeof NodeOs | null = null;
@@ -28,6 +23,7 @@ import type {
 	AssistantMessage,
 	Context,
 	Model,
+	ServiceTier,
 	SimpleStreamOptions,
 	StreamFunction,
 	StreamOptions,
@@ -62,7 +58,7 @@ const CODEX_RESPONSE_STATUSES = new Set<CodexResponseStatus>([
 export interface OpenAICodexResponsesOptions extends StreamOptions {
 	reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 	reasoningSummary?: "auto" | "concise" | "detailed" | "off" | "on" | null;
-	serviceTier?: ResponseCreateParamsStreaming["service_tier"];
+	serviceTier?: ServiceTier;
 	textVerbosity?: "low" | "medium" | "high";
 }
 
@@ -80,7 +76,7 @@ interface RequestBody {
 	parallel_tool_calls?: boolean;
 	temperature?: number;
 	reasoning?: { effort?: string; summary?: string };
-	service_tier?: ResponseCreateParamsStreaming["service_tier"];
+	service_tier?: ServiceTier;
 	text?: { verbosity?: string };
 	include?: string[];
 	prompt_cache_key?: string;
@@ -368,7 +364,7 @@ function buildRequestBody(
 
 function getServiceTierCostMultiplier(
 	model: Pick<Model<"openai-codex-responses">, "id">,
-	serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
+	serviceTier: ServiceTier | undefined,
 ): number {
 	switch (serviceTier) {
 		case "flex":
@@ -382,7 +378,7 @@ function getServiceTierCostMultiplier(
 
 function applyServiceTierPricing(
 	usage: Usage,
-	serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
+	serviceTier: ServiceTier | undefined,
 	model: Pick<Model<"openai-codex-responses">, "id">,
 ) {
 	const multiplier = getServiceTierCostMultiplier(model, serviceTier);
@@ -396,9 +392,9 @@ function applyServiceTierPricing(
 }
 
 function resolveCodexServiceTier(
-	responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-	requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-): ResponseCreateParamsStreaming["service_tier"] | undefined {
+	responseServiceTier: ServiceTier | undefined,
+	requestServiceTier: ServiceTier | undefined,
+): ServiceTier | undefined {
 	if (responseServiceTier === "default" && (requestServiceTier === "flex" || requestServiceTier === "priority")) {
 		return requestServiceTier;
 	}

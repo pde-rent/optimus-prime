@@ -1,5 +1,4 @@
-import { AzureOpenAI } from "openai";
-import type { ResponseCreateParamsStreaming } from "openai/resources/responses/responses.js";
+import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "openai/resources/responses/responses.js";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { clampThinkingLevel } from "../models.js";
 import type {
@@ -13,12 +12,19 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
+import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import {
 	formatStreamFailureMessage,
 	recordStreamFailure,
 	streamFailureFromStopReason,
 } from "../utils/stream-failure.js";
-import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
+import {
+	convertResponsesMessages,
+	convertResponsesTools,
+	iterateOpenAIStream,
+	openaiDefaultHeaders,
+	processResponsesStream,
+} from "./openai-responses-shared.js";
 import { buildBaseOptions } from "./simple-options.js";
 
 const DEFAULT_AZURE_API_VERSION = "v1";
@@ -84,18 +90,21 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			const client = createClient(model, apiKey, options);
+			const { url, headers } = createClient(model, apiKey, options);
 			let params = buildParams(model, context, options, deploymentName);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as ResponseCreateParamsStreaming;
 			}
-			const requestOptions = {
-				...(options?.signal ? { signal: options.signal } : {}),
-				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
-				...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-			};
-			const { data: openaiStream, response } = await client.responses.create(params, requestOptions).withResponse();
+			const response = await requestWithRetry({
+				url,
+				headers,
+				body: JSON.stringify(params),
+				signal: options?.signal,
+				timeoutMs: options?.timeoutMs,
+				maxRetries: options?.maxRetries,
+			});
+			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			const requestId = response.headers.get("x-request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
@@ -225,13 +234,14 @@ function createClient(model: Model<"azure-openai-responses">, apiKey: string, op
 
 	const { baseUrl, apiVersion } = resolveAzureConfig(model, options);
 
-	return new AzureOpenAI({
-		apiKey,
-		apiVersion,
-		dangerouslyAllowBrowser: true,
-		defaultHeaders: headers,
-		baseURL: baseUrl,
-	});
+	// `/responses` is not in the AzureOpenAI SDK's `_deployments_endpoints`, so
+	// unlike `/chat/completions` it gets no `/deployments/<model>` path segment;
+	// the deployment travels in the body's `model` field instead. `api-version`
+	// is the SDK's `defaultQuery`, and `api-key` its Azure auth header.
+	return {
+		url: joinUrl(baseUrl, "/responses", { "api-version": apiVersion }),
+		headers: mergeHeaders(openaiDefaultHeaders("AzureOpenAI"), { "api-key": apiKey }, headers),
+	};
 }
 
 function buildParams(

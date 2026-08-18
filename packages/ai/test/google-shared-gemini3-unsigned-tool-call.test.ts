@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { convertMessages } from "../src/providers/google-shared.js";
 import type { Context, Model } from "../src/types.js";
 
-function makeGemini3Model<TApi extends "google-generative-ai" | "google-vertex">(
+function makeGemini3Model<TApi extends "google-generative-ai">(
 	api: TApi,
 	provider: Model<TApi>["provider"],
 	id = "gemini-3-pro-preview",
@@ -78,18 +78,6 @@ describe("google-shared convertMessages — Gemini 3 unsigned tool calls", () =>
 		const textParts = modelTurn?.parts?.filter((p) => p.text !== undefined) ?? [];
 		const historicalText = textParts.filter((p) => p.text?.includes("Historical context"));
 		expect(historicalText).toHaveLength(0);
-	});
-
-	it("does not add skip_thought_signature_validator for unsigned Vertex tool calls", () => {
-		const model = makeGemini3Model("google-vertex", "google-vertex");
-		const contents = convertMessages(model, makeContext(model));
-		const modelTurn = contents.find((c) => c.role === "model");
-		const functionCallParts = modelTurn?.parts?.filter((p) => p.functionCall !== undefined) ?? [];
-
-		expect(functionCallParts).toHaveLength(2);
-		expect(functionCallParts[0]?.thoughtSignature).toBeUndefined();
-		expect(functionCallParts[1]?.thoughtSignature).toBeUndefined();
-		expect(JSON.stringify(modelTurn)).not.toContain("skip_thought_signature_validator");
 	});
 
 	it("preserves valid thoughtSignature when present for the same provider and model", () => {

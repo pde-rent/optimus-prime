@@ -1,4 +1,3 @@
-import { Mistral } from "@mistralai/mistralai";
 import type {
 	ChatCompletionStreamRequest,
 	ChatCompletionStreamRequestMessage,
@@ -24,12 +23,15 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
+import { iterateSseJson, joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { recordStreamFailure, streamFailureFromStopReason } from "../utils/stream-failure.js";
 import { buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
+/** SDK default `serverURL`; the `/v1` version prefix lives in the request path. */
+const MISTRAL_DEFAULT_BASE_URL = "https://api.mistral.ai";
 const MISTRAL_TOOL_CALL_ID_LENGTH = 9;
 const MAX_MISTRAL_ERROR_BODY_CHARS = 4000;
 
@@ -60,12 +62,6 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 				throw new Error(`No API key for provider: ${model.provider}`);
 			}
 
-			// Intentionally per-request: avoids shared SDK mutable state across concurrent consumers.
-			const mistral = new Mistral({
-				apiKey,
-				serverURL: model.baseUrl,
-			});
-
 			const normalizeMistralToolCallId = createMistralToolCallIdNormalizer();
 			const transformedMessages = transformMessages(context.messages, model, (id) => normalizeMistralToolCallId(id));
 
@@ -74,9 +70,17 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 			if (nextPayload !== undefined) {
 				payload = nextPayload as ChatCompletionStreamRequest;
 			}
-			const mistralStream = await mistral.chat.stream(payload, buildRequestOptions(model, options));
+			const response = await requestWithRetry({
+				url: joinUrl(model.baseUrl || MISTRAL_DEFAULT_BASE_URL, "/v1/chat/completions"),
+				method: "POST",
+				headers: buildRequestHeaders(apiKey, model, options),
+				body: JSON.stringify(encodeChatRequest(payload)),
+				...(options?.signal ? { signal: options.signal } : {}),
+				// The SDK client was built with `retries: { strategy: "none" }`; keep zero retries.
+				maxRetries: 0,
+			});
 			stream.push({ type: "start", partial: output });
-			await consumeChatStream(model, output, stream, mistralStream);
+			await consumeChatStream(model, output, stream, iterateCompletionEvents(response, options?.signal));
 
 			if (options?.signal?.aborted) {
 				throw new Error("Request was aborted");
@@ -208,16 +212,11 @@ function safeJsonStringify(value: unknown): string {
 	}
 }
 
-function buildRequestOptions(model: Model<"mistral-conversations">, options?: MistralOptions) {
-	const requestOptions: {
-		signal?: AbortSignal;
-		retries: { strategy: "none" };
-		headers?: Record<string, string>;
-	} = {
-		retries: { strategy: "none" },
-	};
-	if (options?.signal) requestOptions.signal = options.signal;
-
+function buildRequestHeaders(
+	apiKey: string,
+	model: Model<"mistral-conversations">,
+	options?: MistralOptions,
+): Record<string, string> {
 	const headers: Record<string, string> = {};
 	if (model.headers) Object.assign(headers, model.headers);
 	if (options?.headers) Object.assign(headers, options.headers);
@@ -228,11 +227,123 @@ function buildRequestOptions(model: Model<"mistral-conversations">, options?: Mi
 		headers["x-affinity"] = options.sessionId;
 	}
 
-	if (Object.keys(headers).length > 0) {
-		requestOptions.headers = headers;
+	return mergeHeaders(
+		{
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+			Accept: "text/event-stream",
+		},
+		headers,
+	);
+}
+
+/**
+ * `ChatCompletionStreamRequest` field renames applied by the SDK's outbound
+ * schema (`@mistralai/mistralai/models/components/chatcompletionstreamrequest`).
+ * Everything not listed is sent verbatim.
+ */
+const REQUEST_FIELD_RENAMES: Record<string, string> = {
+	topP: "top_p",
+	maxTokens: "max_tokens",
+	randomSeed: "random_seed",
+	responseFormat: "response_format",
+	toolChoice: "tool_choice",
+	presencePenalty: "presence_penalty",
+	frequencyPenalty: "frequency_penalty",
+	parallelToolCalls: "parallel_tool_calls",
+	reasoningEffort: "reasoning_effort",
+	promptMode: "prompt_mode",
+	safePrompt: "safe_prompt",
+};
+
+/**
+ * Serialize the camelCase request to Mistral's snake_case wire format.
+ *
+ * The rename is structural rather than a deep key walk so that user-controlled
+ * blobs (tool JSON Schemas, tool-call arguments) are never rewritten.
+ */
+function encodeChatRequest(payload: ChatCompletionStreamRequest): Record<string, unknown> {
+	const body: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(payload)) {
+		if (value === undefined || key === "messages") continue;
+		body[REQUEST_FIELD_RENAMES[key] ?? key] = value;
+	}
+	body.messages = payload.messages.map(encodeMessage);
+	return body;
+}
+
+function encodeMessage(message: ChatCompletionStreamRequestMessage): Record<string, unknown> {
+	const encoded: Record<string, unknown> = { ...message };
+	if (Array.isArray(encoded.content)) {
+		encoded.content = (encoded.content as ContentChunk[]).map(encodeContentChunk);
 	}
 
-	return requestOptions;
+	if (message.role === "assistant") {
+		delete encoded.toolCalls;
+		if (message.toolCalls) {
+			encoded.tool_calls = message.toolCalls.map((toolCall) => ({
+				id: toolCall.id ?? "null",
+				...(toolCall.type !== undefined && { type: toolCall.type }),
+				function: toolCall.function,
+				index: toolCall.index ?? 0,
+			}));
+		}
+		// The SDK's outbound schema defaults `prefix` to false.
+		encoded.prefix = message.prefix ?? false;
+	}
+
+	if (message.role === "tool") {
+		delete encoded.toolCallId;
+		if (message.toolCallId !== undefined) encoded.tool_call_id = message.toolCallId;
+	}
+
+	return encoded;
+}
+
+function encodeContentChunk(chunk: ContentChunk): unknown {
+	if (chunk.type !== "image_url") return chunk;
+	const { imageUrl, ...rest } = chunk;
+	return { ...rest, image_url: imageUrl };
+}
+
+/**
+ * Decode the `text/event-stream` body into the `CompletionEvent` shape the SDK
+ * produced, undoing Mistral's snake_case wire naming for the fields
+ * {@link consumeChatStream} reads.
+ */
+async function* iterateCompletionEvents(response: Response, signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
+	for await (const chunk of iterateSseJson<Record<string, any>>(response, { signal })) {
+		yield { data: decodeCompletionChunk(chunk) } as CompletionEvent;
+	}
+}
+
+function decodeCompletionChunk(chunk: Record<string, any>): CompletionEvent["data"] {
+	const usage = chunk.usage as Record<string, any> | undefined;
+	return {
+		...chunk,
+		...(usage && {
+			usage: {
+				...usage,
+				promptTokens: usage.prompt_tokens ?? 0,
+				completionTokens: usage.completion_tokens ?? 0,
+				totalTokens: usage.total_tokens ?? 0,
+			},
+		}),
+		choices: ((chunk.choices as Record<string, any>[] | undefined) ?? []).map((choice) => ({
+			...choice,
+			finishReason: choice.finish_reason ?? null,
+			delta: decodeDelta((choice.delta as Record<string, any> | undefined) ?? {}),
+		})),
+	} as CompletionEvent["data"];
+}
+
+function decodeDelta(delta: Record<string, any>): CompletionEvent["data"]["choices"][number]["delta"] {
+	const toolCalls = delta.tool_calls as Record<string, any>[] | undefined;
+	return {
+		...delta,
+		...(toolCalls && { toolCalls }),
+		...(delta.tool_call_id !== undefined && { toolCallId: delta.tool_call_id }),
+	} as CompletionEvent["data"]["choices"][number]["delta"];
 }
 
 function buildChatPayload(

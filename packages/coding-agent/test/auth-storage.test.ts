@@ -134,48 +134,48 @@ describe("AuthStorage", () => {
 			}
 		});
 
-		test("ambient environment credentials count as available auth", async () => {
-			const originalAwsProfile = process.env.AWS_PROFILE;
-			process.env.AWS_PROFILE = "pi-test-profile";
+		test("environment credentials count as available auth", async () => {
+			const originalOpenAiKey = process.env.OPENAI_API_KEY;
+			process.env.OPENAI_API_KEY = "env-openai-key";
 
 			try {
 				authStorage = AuthStorage.inMemory();
 
-				expect(authStorage.hasAuth("amazon-bedrock")).toBe(true);
-				await expect(authStorage.getApiKey("amazon-bedrock")).resolves.toBe("<authenticated>");
-				expect(authStorage.getAuthStatus("amazon-bedrock")).toEqual({
+				expect(authStorage.hasAuth("openai")).toBe(true);
+				await expect(authStorage.getApiKey("openai")).resolves.toBe("env-openai-key");
+				expect(authStorage.getAuthStatus("openai")).toEqual({
 					configured: false,
 					source: "environment",
-					label: "ambient credentials",
+					label: "OPENAI_API_KEY",
 				});
 			} finally {
-				if (originalAwsProfile === undefined) {
-					delete process.env.AWS_PROFILE;
+				if (originalOpenAiKey === undefined) {
+					delete process.env.OPENAI_API_KEY;
 				} else {
-					process.env.AWS_PROFILE = originalAwsProfile;
+					process.env.OPENAI_API_KEY = originalOpenAiKey;
 				}
 			}
 		});
 
-		test("changed ambient environment credential no longer matches stale auth marker", async () => {
-			const originalAwsProfile = process.env.AWS_PROFILE;
-			process.env.AWS_PROFILE = "stale-profile";
+		test("changed environment credential no longer matches stale auth marker", async () => {
+			const originalOpenAiKey = process.env.OPENAI_API_KEY;
+			process.env.OPENAI_API_KEY = "stale-openai-key";
 
 			try {
 				authStorage = AuthStorage.inMemory();
-				expect(authStorage.markAuthStale("amazon-bedrock")).toBe(true);
-				expect(authStorage.hasAuth("amazon-bedrock")).toBe(false);
-				await expect(authStorage.getApiKey("amazon-bedrock")).resolves.toBeUndefined();
+				expect(authStorage.markAuthStale("openai")).toBe(true);
+				expect(authStorage.hasAuth("openai")).toBe(false);
+				await expect(authStorage.getApiKey("openai")).resolves.toBeUndefined();
 
-				process.env.AWS_PROFILE = "fresh-profile";
+				process.env.OPENAI_API_KEY = "fresh-openai-key";
 
-				expect(authStorage.hasAuth("amazon-bedrock")).toBe(true);
-				await expect(authStorage.getApiKey("amazon-bedrock")).resolves.toBe("<authenticated>");
+				expect(authStorage.hasAuth("openai")).toBe(true);
+				await expect(authStorage.getApiKey("openai")).resolves.toBe("fresh-openai-key");
 			} finally {
-				if (originalAwsProfile === undefined) {
-					delete process.env.AWS_PROFILE;
+				if (originalOpenAiKey === undefined) {
+					delete process.env.OPENAI_API_KEY;
 				} else {
-					process.env.AWS_PROFILE = originalAwsProfile;
+					process.env.OPENAI_API_KEY = originalOpenAiKey;
 				}
 			}
 		});
