@@ -60,14 +60,14 @@ Three themes: **no Python**, **no runtime dependencies we can write ourselves**,
 ### Runtime dependencies
 
 Vendored in place of a package wherever the package was doing something small: ANSI styling,
-East Asian width, fuzzy matching, partial-JSON parsing, Markdown parsing, UUIDv7, Google wire
-types. Provider SDKs are replaced by plain `fetch`.
+East Asian width, fuzzy matching, partial-JSON parsing, Markdown parsing, UUIDv7, image sniffing,
+Google wire types. Provider SDKs are replaced by plain `fetch`.
 
 | Package | prime-agent | Optimus Prime | Dropped |
 |---|---|---|---|
 | `tui` | 5 | **0** | `chalk`, `marked`, `get-east-asian-width`, `mime-types`, `@types/mime-types` |
 | `ai` | 11 | **1** | `@anthropic-ai/sdk`, `@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@mistralai/mistralai`, `openai`, `chalk`, `partial-json`, `proxy-agent`, `undici`, `zod-to-json-schema` |
-| `coding-agent` | 23 | **17** | `chalk`, `strip-ansi`, `marked`, `undici`, `uuid`, `zeromq` |
+| `coding-agent` | 23 | **16** | `chalk`, `strip-ansi`, `marked`, `undici`, `uuid`, `zeromq`, `file-type` |
 | `agent` | 2 | 2 | — |
 
 ### TUI
