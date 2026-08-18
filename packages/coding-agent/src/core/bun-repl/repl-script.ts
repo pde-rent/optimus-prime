@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { inspect } from "node:util";
 import { createContext, runInContext } from "node:vm";
 import {
 	AGENT_MESSAGE_DISPLAY_MIME,
@@ -45,21 +46,24 @@ function serializeValue(value: unknown): string {
 	if (typeof value === "bigint") return `${value}n`;
 	if (typeof value === "symbol") return value.toString();
 	if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
+	// `inspect` is the JS analogue of Python's `repr` the old kernel returned: it renders
+	// Map/Set/Error/class instances faithfully, where JSON.stringify flattens them to `{}`.
 	try {
-		const seen = new WeakSet();
-		return JSON.stringify(value, (_key, val) => {
-			if (typeof val === "object" && val !== null) {
-				if (seen.has(val)) return "[Circular]";
-				seen.add(val);
-			}
-			if (typeof val === "function") return undefined;
-			if (typeof val === "bigint") return `${val.toString()}n`;
-			return val;
-		});
+		return inspect(value, INSPECT_OPTIONS);
 	} catch {
 		return String(value);
 	}
 }
+
+/** Shared `util.inspect` settings: deep enough to be useful, bounded so one cell cannot flood. */
+const INSPECT_OPTIONS = {
+	depth: 4,
+	maxArrayLength: 200,
+	maxStringLength: 10_000,
+	breakLength: 120,
+	colors: false,
+	getters: false,
+} as const;
 
 function jsonSafe(value: unknown): unknown {
 	if (value === undefined) return null;
@@ -227,7 +231,10 @@ function sendStderr(chunk: string): void {
 	if (_execId !== null) send({ id: _execId, type: "stderr", chunk });
 }
 
-const util = { inspect: (v: unknown) => serializeValue(v) };
+const util = {
+	inspect: (v: unknown) => serializeValue(v),
+	format: (...args: unknown[]) => args.map(serializeValue).join(" "),
+};
 
 /**
  * Working-directory and environment control for the sandbox. The REPL is a
@@ -245,8 +252,11 @@ function pwd(): string {
 }
 
 function sandboxConsole() {
-	const format = (...args: unknown[]): string =>
-		args.map((a) => (typeof a === "string" ? a : (JSON.stringify(a) ?? String(a)))).join(" ");
+	// Strings print bare and everything else through `inspect`, matching what a normal
+	// console does. The previous version passed the whole argument list as one value, so
+	// `console.log("a", "b")` printed `["a","b"]` instead of `a b`, and an Error printed `{}`.
+	const format = (args: unknown[]): string =>
+		args.map((a) => (typeof a === "string" ? a : inspect(a, INSPECT_OPTIONS))).join(" ");
 	return {
 		log: (...args: unknown[]): void => sendStdout(`${format(args)}\n`),
 		info: (...args: unknown[]): void => sendStdout(`${format(args)}\n`),
@@ -391,24 +401,70 @@ async function runBash(req: BunReplExecuteRequest, body: string): Promise<void> 
 // JS cells: transform top-level declarations, wrap in an IIFE for await, run in
 // the persistent vm context.
 // ---------------------------------------------------------------------------
-async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
+/** Wrap a cell body into the async IIFE the vm evaluates. */
+function wrapCell(body: string): string {
 	const { code, lastExpression } = transformTopLevel(body);
 	const tail = lastExpression ? `return (${lastExpression});` : "";
-	const wrappedCode = `
+	return `
 (async () => {
   ${code}
   ${tail}
 })()
 `;
+}
 
+/**
+ * Strip TypeScript syntax from a cell body.
+ *
+ * The tool advertises TypeScript, but `node:vm` only evaluates JavaScript, so a cell
+ * containing an annotation used to come back as a bare `SyntaxError`. Bun's transpiler
+ * does the stripping. It is applied *only* after plain JS evaluation has failed to
+ * compile: the transpiler also drops statements it considers dead (a bare `({a:1})`
+ * expression, for one), which would silently change the result of valid JS.
+ */
+/** Cross-realm-safe check for a parse failure (the vm's `SyntaxError` is not ours). */
+function isSyntaxError(err: unknown): boolean {
+	return typeof err === "object" && err !== null && (err as { name?: unknown }).name === "SyntaxError";
+}
+
+function stripTypes(body: string): string | null {
+	const transpiler = (
+		globalThis as { Bun?: { Transpiler: new (o: { loader: string }) => { transformSync(s: string): string } } }
+	).Bun;
+	if (!transpiler) return null;
+	try {
+		return new transpiler.Transpiler({ loader: "ts" }).transformSync(body);
+	} catch {
+		return null;
+	}
+}
+
+async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 	// vm `timeout` bounds synchronous execution; a runaway async `await` cannot be
 	// aborted in-process, so the host hard-kills this child process instead.
 	// `importModuleDynamically` lets cells use `await import('...')` for real module
 	// loading; cast keeps it green across the local node:vm typings which omit the hook.
-	const value = await runInContext(wrappedCode, vmContext, {
-		timeout: req.timeout,
-		importModuleDynamically: (specifier: string) => import(specifier),
-	} as Parameters<typeof runInContext>[2]);
+	const evaluate = (source: string): Promise<unknown> =>
+		runInContext(source, vmContext, {
+			timeout: req.timeout,
+			importModuleDynamically: (specifier: string) => import(specifier),
+		} as Parameters<typeof runInContext>[2]);
+
+	let value: unknown;
+	try {
+		value = await evaluate(wrapCell(body));
+	} catch (err: unknown) {
+		// A parse failure may just be TypeScript syntax. Retrying is safe because a cell
+		// that failed to compile ran none of its statements. If the retry also fails to
+		// compile it was a genuine JS mistake, so the original error is what surfaces.
+		const stripped = isSyntaxError(err) ? stripTypes(body) : null;
+		if (stripped === null) throw err;
+		try {
+			value = await evaluate(wrapCell(stripped));
+		} catch (retryErr: unknown) {
+			throw isSyntaxError(retryErr) ? err : retryErr;
+		}
+	}
 	const resultStr = value !== undefined ? serializeValue(value) : undefined;
 	send({
 		id: req.id,
@@ -419,6 +475,38 @@ async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 		diffs: _diffs.length > 0 ? _diffs : undefined,
 		sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 	});
+}
+
+const TRACEBACK_MAX_LINES = 32;
+
+/**
+ * Describe a thrown value as `{name, message, traceback}`.
+ *
+ * Cell code runs in a separate vm realm, so its `Error` is not the host's `Error` and
+ * `instanceof` is always false here — the shape has to be read structurally instead.
+ * Frames belonging to this script or to the vm wrapper are dropped: they are the REPL's
+ * own plumbing, not the agent's code, and only mislead whoever reads the trace.
+ */
+function describeError(err: unknown): { name: string; message: string; traceback: string[] } {
+	if (typeof err !== "object" || err === null) {
+		return { name: "Error", message: String(err), traceback: [] };
+	}
+	const e = err as { name?: unknown; message?: unknown; stack?: unknown };
+	const name = typeof e.name === "string" && e.name ? e.name : "Error";
+	const message = typeof e.message === "string" ? e.message : String(err);
+	return { name, message, traceback: typeof e.stack === "string" ? cellFrames(e.stack) : [] };
+}
+
+/**
+ * Keep the error header and the frames that belong to the cell, dropping the REPL's own
+ * plumbing below them (the vm entry point, the stdin pump, node internals) — everything
+ * after the last `evalmachine` frame is this script, not the agent's code.
+ */
+function cellFrames(stack: string): string[] {
+	const lines = stack.split("\n");
+	const lastCellFrame = lines.reduce((last, line, i) => (line.includes("evalmachine") ? i : last), -1);
+	const kept = lastCellFrame >= 0 ? lines.slice(0, lastCellFrame + 1) : lines;
+	return kept.slice(0, TRACEBACK_MAX_LINES);
 }
 
 async function executeCode(req: BunReplExecuteRequest): Promise<void> {
@@ -443,12 +531,14 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 			await runJs(req, cell.body);
 		}
 	} catch (err: unknown) {
-		const errorMsg = err instanceof Error ? err.message : String(err);
+		const { name, message, traceback } = describeError(err);
 		send({
 			id: req.id,
 			type: "result",
 			status: "error",
-			error: errorMsg,
+			error: message ? `${name}: ${message}` : name,
+			errorName: name,
+			traceback,
 			displayData: _displayData.length > 0 ? _displayData : undefined,
 			diffs: _diffs.length > 0 ? _diffs : undefined,
 			sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
@@ -463,27 +553,67 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 	}
 }
 
-function snapshotState(): Record<string, unknown> {
-	const result: Record<string, unknown> = {};
+/**
+ * Capture the namespace as JSON.
+ *
+ * JSON cannot carry functions, classes, or symbols, so those names are recorded in
+ * `dropped` rather than quietly vanishing: the agent that defined them needs to be told
+ * on the next restore that they are gone and have to be redefined.
+ */
+/** Ceiling on the whole snapshot, mirroring the old kernel's DEFAULT_SNAPSHOT_MAX_BYTES. */
+const SNAPSHOT_MAX_CHARS = 256 * 1024 * 1024;
+
+function snapshotState(): { data: Record<string, unknown>; dropped: string[] } {
+	const data: Record<string, unknown> = {};
+	const dropped: string[] = [];
+	let total = 0;
 	for (const [key, value] of Object.entries(context)) {
 		if (key.startsWith("__")) continue;
 		if (INJECTED.has(key)) continue;
-		if (typeof value === "function") continue;
-		if (typeof value === "symbol") continue;
+		if (typeof value === "function" || typeof value === "symbol") {
+			dropped.push(key);
+			continue;
+		}
 		if (typeof value === "undefined") continue;
-		result[key] = jsonSafe(value);
+		const safe = jsonSafe(value);
+		// `jsonSafe` falls back to `String(value)` when a value cannot be serialized; a
+		// non-string original that came back as a string did not survive intact.
+		if (typeof safe === "string" && typeof value !== "string") {
+			dropped.push(key);
+			continue;
+		}
+		// One runaway variable must not make the whole snapshot unwritable, so the cap is
+		// charged per name and the offender is reported rather than the save failing.
+		const size = JSON.stringify(safe)?.length ?? 0;
+		if (total + size > SNAPSHOT_MAX_CHARS) {
+			dropped.push(key);
+			continue;
+		}
+		total += size;
+		data[key] = safe;
 	}
-	return result;
+	return { data, dropped };
 }
 
-function restoreState(data: Record<string, unknown>): string[] {
+function restoreState(data: Record<string, unknown>): { restored: string[]; failed: string[] } {
 	const restored: string[] = [];
+	const failed: string[] = [];
 	for (const [key, value] of Object.entries(data)) {
-		if (INJECTED.has(key)) continue;
-		context[key] = value;
-		restored.push(key);
+		// An injected name is host-owned; overwriting it would replace a live helper
+		// (`display`, `rlm`, …) with dead snapshot data.
+		if (INJECTED.has(key)) {
+			failed.push(key);
+			continue;
+		}
+		try {
+			context[key] = value;
+			restored.push(key);
+		} catch {
+			// A frozen/getter-only global on the context can reject assignment.
+			failed.push(key);
+		}
 	}
-	return restored;
+	return { restored, failed };
 }
 
 function listNames(): string[] {
@@ -541,8 +671,8 @@ process.stdin.on("data", (chunk: string) => {
 				break;
 			case "snapshot": {
 				try {
-					const data = snapshotState();
-					send({ id: msg.id, type: "snapshotResult", status: "ok", data });
+					const { data, dropped } = snapshotState();
+					send({ id: msg.id, type: "snapshotResult", status: "ok", data, dropped });
 				} catch (err: unknown) {
 					send({
 						id: msg.id,
@@ -555,8 +685,8 @@ process.stdin.on("data", (chunk: string) => {
 			}
 			case "restore": {
 				try {
-					const names = restoreState(msg.data);
-					send({ id: msg.id, type: "restoreResult", status: "ok", restoredNames: names });
+					const { restored, failed } = restoreState(msg.data);
+					send({ id: msg.id, type: "restoreResult", status: "ok", restoredNames: restored, failed });
 				} catch (err: unknown) {
 					send({
 						id: msg.id,

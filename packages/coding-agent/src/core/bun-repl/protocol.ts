@@ -65,6 +65,10 @@ export interface BunReplResult {
 	status: "ok" | "error";
 	value?: string;
 	error?: string;
+	/** Constructor name of a thrown error (`TypeError`, …), for the tool's error summary. */
+	errorName?: string;
+	/** Stack lines of a thrown error, as the traceback shown to the model. */
+	traceback?: string[];
 	displayData?: Array<{ mime: string; data: unknown }>;
 	/** File edits emitted via `display()`, in order, for inline diff rendering. */
 	diffs?: KernelDiffDisplay[];
@@ -82,6 +86,12 @@ export interface BunReplSnapshotResult {
 	type: "snapshotResult";
 	status: "ok" | "error";
 	data?: Record<string, unknown>;
+	/**
+	 * Names present in the namespace that the snapshot could not carry: functions,
+	 * classes, symbols, and values JSON cannot represent. Recorded here so a later
+	 * restore can tell the model exactly what it lost rather than silently omitting it.
+	 */
+	dropped?: string[];
 	error?: string;
 }
 
@@ -90,6 +100,8 @@ export interface BunReplRestoreResult {
 	type: "restoreResult";
 	status: "ok" | "error";
 	restoredNames?: string[];
+	/** Names the previous session held that did not come back. */
+	failed?: string[];
 	error?: string;
 }
 

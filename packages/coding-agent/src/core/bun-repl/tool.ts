@@ -14,9 +14,23 @@ const bunReplSchema = Type.Object({
 	}),
 });
 
+/**
+ * Told to the model when the REPL child was replaced mid-session. The old kernel used the
+ * same tag; keeping the wording means a resumed transcript reads consistently.
+ */
+const REPL_RESTART_NOTICE = [
+	"<ipython_kernel_reset>",
+	"The REPL was restarted after a cell could not be stopped any other way. Variables, imports, async tasks, and open resources from before the restart are no longer available; recreate them before using them.",
+	"</ipython_kernel_reset>",
+].join("\n");
+
 export interface BunReplToolDetails {
 	durationMs?: number;
 	status?: "ok" | "error" | "aborted" | "starting";
+	/** Error constructor name, read by the TUI for the collapsed error summary. */
+	errorEname?: string;
+	/** True when this result came after the REPL child was hard-killed and respawned. */
+	kernelRestarted?: boolean;
 	stdout?: string;
 	stderr?: string;
 	result?: string;
@@ -75,18 +89,31 @@ export function createBunReplToolDefinition(
 			"ipython - persistent agent REPL for JavaScript/TypeScript scratchpad code and %%bash orchestration",
 		executionMode: "sequential",
 		parameters: bunReplSchema,
-		execute: async (toolCallId, params, signal, _onUpdate, _ctx) => {
+		execute: async (toolCallId, params, signal, onUpdate, _ctx) => {
 			try {
 				const manager = await provisioner.ensure(signal);
 
 				const code = params.code;
-				const result = await manager.execute(code, { signal, correlationId: toolCallId });
+				const result = await manager.execute(code, {
+					signal,
+					correlationId: toolCallId,
+					// Stream output as it arrives so a long cell is not a blank wait.
+					onStream: (chunk) => onUpdate?.({ content: [{ type: "text", text: chunk }], details: { status: "ok" } }),
+				});
 
 				let text = result.stdout;
 				if (result.stderr) text += (text ? "\n" : "") + result.stderr;
 				if (result.result) text += (text ? "\n" : "") + result.result;
 				if (result.status === "error" && result.error) {
-					text += (text ? "\n" : "") + result.error.traceback.join("\n");
+					// The traceback repeats the message on its first line, so fall back to the
+					// message only when there is no stack to show.
+					const trace =
+						result.error.traceback.length > 0 ? result.error.traceback.join("\n") : result.error.evalue;
+					text += (text ? "\n" : "") + trace;
+				}
+				// Prepended, so the model reads that its state is gone before reading the output.
+				if (result.kernelRestarted) {
+					text = text ? `${REPL_RESTART_NOTICE}\n\n${text}` : REPL_RESTART_NOTICE;
 				}
 
 				const imageBlocks = imageBlocksFromAttachments(result.attachments);
@@ -97,6 +124,8 @@ export function createBunReplToolDefinition(
 					details: {
 						durationMs: result.durationMs,
 						status: result.status,
+						errorEname: result.error?.ename,
+						kernelRestarted: result.kernelRestarted,
 						stdout: result.stdout,
 						stderr: result.stderr,
 						result: result.result,

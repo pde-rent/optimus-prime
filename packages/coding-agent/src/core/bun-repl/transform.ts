@@ -404,7 +404,10 @@ function transformSegment(seg: Seg): Seg {
 	seg.isDecl = isDecl;
 	if (isDecl) {
 		const { out } = rewriteDeclaration(seg.src);
-		seg.out = out;
+		// A declaration the rewriter could not read produces nothing. Emitting that would
+		// delete the statement and report the cell as a success, so keep the original
+		// source and let the engine raise the syntax error the author actually wrote.
+		seg.out = out.trim() ? out : seg.src;
 		seg.isExpression = false;
 	} else {
 		seg.out = seg.src;

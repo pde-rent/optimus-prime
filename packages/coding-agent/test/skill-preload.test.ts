@@ -30,6 +30,17 @@ function replSkillsEnv(): string {
 	return JSON.stringify(specs);
 }
 
+/**
+ * Read a cell's result as data.
+ *
+ * Result values are rendered with `util.inspect` (the JS analogue of the old kernel's
+ * Python `repr`), so they are for reading, not parsing. Cells that need to hand data back
+ * to the test stringify it themselves; the outer parse unwraps the quoted string literal.
+ */
+function jsonResult(result: string | undefined): unknown {
+	return JSON.parse(JSON.parse(result ?? '"null"') as string);
+}
+
 describe("bundled skills preload into the REPL", () => {
 	it("binds every JS skill and routes its calls through the host bridge", async () => {
 		const cwd = makeTempDir();
@@ -47,14 +58,14 @@ describe("bundled skills preload into the REPL", () => {
 			await manager.start();
 
 			const bindings = await manager.execute(
-				`[typeof edit, typeof compact.status, typeof goal.get, typeof agent_message.send, typeof websearch.run]`,
+				`JSON.stringify([typeof edit, typeof compact.status, typeof goal.get, typeof agent_message.send, typeof websearch.run])`,
 			);
 			expect(bindings.status).toBe("ok");
-			expect(bindings.result).toBe(JSON.stringify(["function", "function", "function", "function", "function"]));
+			expect(jsonResult(bindings.result)).toEqual(["function", "function", "function", "function", "function"]);
 
-			const status = await manager.execute(`await compact.status()`);
+			const status = await manager.execute(`JSON.stringify(await compact.status())`);
 			expect(status.status).toBe("ok");
-			expect(JSON.parse(status.result ?? "null")).toEqual(compactStatus);
+			expect(jsonResult(status.result)).toEqual(compactStatus);
 		} finally {
 			await manager.dispose();
 		}
@@ -179,13 +190,13 @@ describe("sandbox rlm bridge", () => {
 			await manager.start();
 
 			const shape = await manager.execute(
-				`[typeof rlm, typeof rlm.run, typeof rlm.list_subagents, typeof rlm.harness.create_memory]`,
+				`JSON.stringify([typeof rlm, typeof rlm.run, typeof rlm.list_subagents, typeof rlm.harness.create_memory])`,
 			);
-			expect(shape.result).toBe(JSON.stringify(["function", "function", "function", "function"]));
+			expect(jsonResult(shape.result)).toEqual(["function", "function", "function", "function"]);
 
-			const spawned = await manager.execute(`await rlm("sub-task", { name: "api-reviewer" })`);
+			const spawned = await manager.execute(`JSON.stringify(await rlm("sub-task", { name: "api-reviewer" }))`);
 			expect(spawned.status).toBe("ok");
-			expect(JSON.parse(spawned.result ?? "null")).toEqual({ rlm_child_id: "child-1", name: "api-reviewer" });
+			expect(jsonResult(spawned.result)).toEqual({ rlm_child_id: "child-1", name: "api-reviewer" });
 			expect(prompts).toEqual(["sub-task"]);
 		} finally {
 			await manager.dispose();
@@ -214,7 +225,10 @@ describe("sandbox rlm bridge", () => {
 			const result = await manager.execute(`await rlm.delete_subagent("api-reviewer")`);
 
 			expect(result.status).toBe("ok");
-			expect(payloads).toEqual([{ target: "api-reviewer" }]);
+			// Host requests also carry the source of the cell that issued them.
+			expect(payloads).toEqual([
+				{ target: "api-reviewer", cellSourceCode: `await rlm.delete_subagent("api-reviewer")` },
+			]);
 		} finally {
 			await manager.dispose();
 		}

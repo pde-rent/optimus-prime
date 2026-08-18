@@ -5,6 +5,18 @@ export interface SnapshotManifest {
 	version: number;
 	createdAt: string;
 	names: string[];
+	/**
+	 * Names the namespace held that the snapshot could not carry (functions, classes,
+	 * symbols, values JSON cannot represent). Optional so snapshots written before this
+	 * field existed still load — an older snapshot simply reports nothing lost.
+	 */
+	droppedNames?: string[];
+}
+
+/** A snapshot as read back from disk: the revivable data plus the names that were never captured. */
+export interface LoadedSnapshot {
+	data: Record<string, unknown>;
+	droppedNames: string[];
 }
 
 const SNAPSHOT_VERSION = 1;
@@ -28,7 +40,11 @@ async function writeSnapshotFile(dir: string, name: string, payload: string): Pr
 	await rename(tempPath, finalPath);
 }
 
-export async function saveSnapshot(dir: string, data: Record<string, unknown>): Promise<string[]> {
+export async function saveSnapshot(
+	dir: string,
+	data: Record<string, unknown>,
+	droppedNames: string[] = [],
+): Promise<string[]> {
 	// 0700: the directory listing alone leaks which variables the agent held.
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	const names = Object.keys(data);
@@ -36,6 +52,7 @@ export async function saveSnapshot(dir: string, data: Record<string, unknown>): 
 		version: SNAPSHOT_VERSION,
 		createdAt: new Date().toISOString(),
 		names,
+		droppedNames,
 	};
 	// Data first: a manifest without its data reads as a corrupt snapshot and is discarded,
 	// whereas data without a manifest is simply ignored. Fail in the recoverable direction.
@@ -44,13 +61,18 @@ export async function saveSnapshot(dir: string, data: Record<string, unknown>): 
 	return names;
 }
 
-export async function loadSnapshot(dir: string): Promise<Record<string, unknown> | null> {
+export async function loadSnapshot(dir: string): Promise<LoadedSnapshot | null> {
 	try {
 		const manifestRaw = await readFile(join(dir, MANIFEST_FILE), "utf-8");
 		const manifest: SnapshotManifest = JSON.parse(manifestRaw);
 		if (manifest.version !== SNAPSHOT_VERSION) return null;
 		const dataRaw = await readFile(join(dir, DATA_FILE), "utf-8");
-		return JSON.parse(dataRaw);
+		return {
+			data: JSON.parse(dataRaw),
+			droppedNames: Array.isArray(manifest.droppedNames)
+				? manifest.droppedNames.filter((n): n is string => typeof n === "string")
+				: [],
+		};
 	} catch {
 		return null;
 	}

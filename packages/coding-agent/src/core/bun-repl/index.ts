@@ -18,6 +18,24 @@ import type {
 } from "./protocol.js";
 import { loadSnapshot, saveSnapshot } from "./state-snapshot.js";
 
+/** Rolling tail kept from the child's stderr, matching the old kernel's diagnostic tail. */
+const CHILD_STDERR_TAIL_CHARS = 4096;
+
+/** Cap on the final snapshot taken during dispose. */
+const SNAPSHOT_DISPOSE_TIMEOUT_MS = 5000;
+
+/** Per-stream capture cap, matching the old kernel's DEFAULT_MAX_OUTPUT_CHARS. */
+export const DEFAULT_MAX_OUTPUT_CHARS = 65536;
+
+/**
+ * Ceiling on a single `display()` attachment's base64 payload.
+ *
+ * The `attach-image` skill compresses well below this, but any cell can call `display()`
+ * directly; without a boundary cap one call can push tens of megabytes through the tool
+ * result and into the transcript.
+ */
+export const MAX_ATTACHMENT_DATA_CHARS = 10_000_000;
+
 export interface BunReplExecuteOptions {
 	signal?: AbortSignal;
 	timeout?: number;
@@ -27,6 +45,12 @@ export interface BunReplExecuteOptions {
 	 * attributed to the right tool result via `onLateSentAgentMessage`.
 	 */
 	correlationId?: string;
+	/** Live output callback, fired per chunk as the cell runs (never truncated). */
+	onStream?: (chunk: string, name: "stdout" | "stderr") => void;
+	/** Per-stream capture cap; the returned buffers are truncated to this. */
+	maxOutputChars?: number;
+	/** Marks a host-issued cell (snapshot/restore/listNames) so it is not attributed to the agent. */
+	internal?: boolean;
 }
 
 export interface BunReplExecuteResult {
@@ -40,6 +64,8 @@ export interface BunReplExecuteResult {
 	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
 	sentAgentMessages?: KernelSentAgentMessage[];
 	status: "ok" | "error" | "aborted";
+	/** True when this result came after the REPL child was hard-killed and respawned. */
+	kernelRestarted?: boolean;
 	error?: { ename: string; evalue: string; traceback: string[] };
 	durationMs: number;
 }
@@ -61,6 +87,22 @@ function toBase64(bytes: Uint8Array): string {
 	return Buffer.from(bin, "binary").toString("base64");
 }
 
+/** The old kernel's truncation marker, kept verbatim so the model reads a familiar signal. */
+function truncationMarker(maxChars: number): string {
+	return `\n[... output truncated at ${maxChars} chars ...]`;
+}
+
+function truncateResult(value: string | undefined, maxChars: number): string | undefined {
+	if (value === undefined || value.length <= maxChars) return value;
+	return value.slice(0, maxChars) + truncationMarker(maxChars);
+}
+
+/** Drop attachments whose base64 payload exceeds the ceiling, reporting that it happened. */
+function capAttachments(attachments: KernelAttachment[]): { attachments: KernelAttachment[]; oversized: boolean } {
+	const kept = attachments.filter((a) => a.data.length <= MAX_ATTACHMENT_DATA_CHARS);
+	return { attachments: kept, oversized: kept.length !== attachments.length };
+}
+
 export type BunReplHostRequestHandler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 export interface BunReplManagerOptions {
@@ -78,6 +120,27 @@ export interface BunReplManagerOptions {
 }
 
 type ReplState = "idle" | "starting" | "running" | "shutdown";
+
+/**
+ * Every live REPL, so a process exit cannot strand its children.
+ *
+ * The REPL runs in a separate `bun` process that does not die with its parent. Without
+ * this, any exit path that skips `dispose()` — a crash, an uncaught error — leaves a bun
+ * process holding the session's namespace open indefinitely. Only the synchronous `exit`
+ * hook is installed: intercepting SIGINT/SIGTERM here would change how the whole app
+ * shuts down, which is not this module's call to make.
+ */
+const liveManagers = new Set<BunReplManager>();
+let exitHookInstalled = false;
+
+function trackLiveManager(manager: BunReplManager): void {
+	liveManagers.add(manager);
+	if (exitHookInstalled) return;
+	exitHookInstalled = true;
+	process.on("exit", () => {
+		for (const m of liveManagers) m.disposeSync();
+	});
+}
 
 interface PendingRequest {
 	resolve: (value: BunReplReplToHost) => void;
@@ -106,6 +169,12 @@ export class BunReplManager {
 	private _readyPromise: Promise<void> | null = null;
 	/** exec id -> caller correlation id, bounded so a long session cannot grow it without limit. */
 	private _execCorrelationIds = new Map<string, string>();
+	/** Source of the most recent agent cell, for attributing host requests it detached. */
+	private _lastCellCode = "";
+	/** Set when the child was replaced mid-session; consumed by the next result. */
+	private _pendingRestartNotice = false;
+	/** Rolling tail of the child's stderr, for diagnosing a REPL that will not start. */
+	private _childStderr = "";
 
 	constructor(options: BunReplManagerOptions = {}) {
 		this._options = options;
@@ -136,9 +205,13 @@ export class BunReplManager {
 
 		const child = spawn(bunPath, ["run", scriptPath], {
 			cwd: this._options.cwd,
-			env: { ...process.env, ...this._options.env },
+			// NO_COLOR keeps ANSI escapes out of `%%bash` output and out of anything the cell
+			// shells out to; the model reads that output as text. An explicit caller env wins.
+			env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", ...this._options.env },
 			stdio: ["pipe", "pipe", "pipe"],
 		});
+
+		trackLiveManager(this);
 
 		this._child = child;
 
@@ -184,7 +257,13 @@ export class BunReplManager {
 			}
 		});
 
+		// The child's stderr must be consumed: it carries skill-load and crash diagnostics, and
+		// an unread pipe fills its OS buffer and blocks the child once it writes ~64KB.
 		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => {
+			if (this._child !== child) return;
+			this._childStderr = (this._childStderr + chunk).slice(-CHILD_STDERR_TAIL_CHARS);
+		});
 
 		if (signal?.aborted) {
 			this.kill();
@@ -253,7 +332,9 @@ export class BunReplManager {
 			};
 		} else {
 			try {
-				const result = await handler(msg.payload);
+				// Mirrors the old kernel: handlers receive the payload plus the source of the
+				// cell that issued the request, which `rlm.run` renders as the spawning cell.
+				const result = await handler({ cellSourceCode: this._lastCellCode, ...msg.payload });
 				response = {
 					id: randomUUID(),
 					type: "hostResponse",
@@ -310,6 +391,9 @@ export class BunReplManager {
 			}
 
 			const id = randomUUID();
+			// Host requests issued from this cell (and from tasks it detaches) are attributed
+			// to it, so `rlm.run` can show the model which cell spawned a child agent.
+			if (!opts?.internal) this._lastCellCode = code;
 			if (opts?.correlationId) {
 				// Bounded FIFO: only recent cells can still produce a late message.
 				if (this._execCorrelationIds.size >= 64) {
@@ -318,8 +402,13 @@ export class BunReplManager {
 				}
 				this._execCorrelationIds.set(id, opts.correlationId);
 			}
+			// Captured output is capped per stream; the live `onStream` callback is not, so
+			// the UI still shows everything a long-running cell prints.
+			const maxChars = opts?.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
 			let stdout = "";
 			let stderr = "";
+			let stdoutTruncated = false;
+			let stderrTruncated = false;
 			let _resolveResult!: (value: BunReplResult) => void;
 			let rejectResult!: (error: Error) => void;
 			let resolveIdle!: () => void;
@@ -336,10 +425,22 @@ export class BunReplManager {
 				this._activeCollector = {
 					_execId: id,
 					stdout: (chunk: string) => {
+						opts?.onStream?.(chunk, "stdout");
+						if (stdoutTruncated) return;
 						stdout += chunk;
+						if (stdout.length > maxChars) {
+							stdout = stdout.slice(0, maxChars);
+							stdoutTruncated = true;
+						}
 					},
 					stderr: (chunk: string) => {
+						opts?.onStream?.(chunk, "stderr");
+						if (stderrTruncated) return;
 						stderr += chunk;
+						if (stderr.length > maxChars) {
+							stderr = stderr.slice(0, maxChars);
+							stderrTruncated = true;
+						}
 					},
 					result: resolve,
 					idle: () => resolveIdle(),
@@ -394,19 +495,31 @@ export class BunReplManager {
 				opts?.signal?.removeEventListener("abort", abortHandler);
 
 				const durationMs = Date.now() - start;
+				if (stdoutTruncated) stdout += truncationMarker(maxChars);
+				if (stderrTruncated) stderr += truncationMarker(maxChars);
 
-				if (resultMsg.status === "error") {
+				// An oversized attachment is a loud failure, not a silent drop: the cell believes
+				// it put an image in front of the model, and must be told that it did not.
+				const { attachments, oversized } = capAttachments(displayDataToAttachments(resultMsg.displayData));
+				if (oversized) {
+					stderr += `${stderr ? "\n" : ""}attachment dropped: exceeds ${MAX_ATTACHMENT_DATA_CHARS} base64 chars`;
+				}
+
+				const restarted = this._consumeRestartNotice();
+
+				if (resultMsg.status === "error" || oversized) {
 					return {
 						stdout,
 						stderr,
-						attachments: displayDataToAttachments(resultMsg.displayData),
+						attachments,
 						diffs: resultMsg.diffs,
 						sentAgentMessages: resultMsg.sentAgentMessages,
 						status: "error" as const,
+						kernelRestarted: restarted,
 						error: {
-							ename: "Error",
+							ename: resultMsg.errorName ?? "Error",
 							evalue: resultMsg.error ?? "Unknown error",
-							traceback: [],
+							traceback: resultMsg.traceback ?? [],
 						},
 						durationMs,
 					};
@@ -417,11 +530,12 @@ export class BunReplManager {
 				return {
 					stdout,
 					stderr,
-					result: resultMsg.value,
-					attachments: displayDataToAttachments(resultMsg.displayData),
+					result: truncateResult(resultMsg.value, maxChars),
+					attachments,
 					diffs: resultMsg.diffs,
 					sentAgentMessages: resultMsg.sentAgentMessages,
 					status: "ok" as const,
+					kernelRestarted: restarted,
 					durationMs,
 				};
 			} catch (err: unknown) {
@@ -430,6 +544,11 @@ export class BunReplManager {
 				clearTimeout(timer);
 				opts?.signal?.removeEventListener("abort", abortHandler);
 				const aborted = opts?.signal?.aborted || runaway;
+				if (stdoutTruncated) stdout += truncationMarker(maxChars);
+				if (stderrTruncated) stderr += truncationMarker(maxChars);
+				// The notice is deliberately not consumed here: this result already explains
+				// itself, and it is the *next* cell that would otherwise never learn its
+				// namespace is gone.
 				return {
 					stdout,
 					stderr,
@@ -478,6 +597,8 @@ export class BunReplManager {
 		this._state = "idle";
 		this._readyPromise = null;
 		this._readyResolve = null;
+		// The namespace died with the old process; the next result has to say so.
+		this._pendingRestartNotice = true;
 		try {
 			await this.start();
 		} catch {
@@ -494,7 +615,15 @@ export class BunReplManager {
 		if (this._state === "shutdown") return;
 
 		if (opts?.snapshot) {
-			await this.snapshotState().catch(() => {});
+			// A wedged child must not hold shutdown open forever; losing the final snapshot is
+			// recoverable (the debounced one on disk is recent), a hung dispose is not.
+			await Promise.race([
+				this.snapshotState().catch(() => {}),
+				new Promise<void>((resolve) => {
+					const t = setTimeout(resolve, SNAPSHOT_DISPOSE_TIMEOUT_MS);
+					if (typeof t === "object" && "unref" in t) t.unref();
+				}),
+			]);
 		}
 
 		if (this._child?.pid) {
@@ -506,6 +635,7 @@ export class BunReplManager {
 		}
 
 		this._state = "shutdown";
+		liveManagers.delete(this);
 	}
 
 	async restart(): Promise<void> {
@@ -520,6 +650,7 @@ export class BunReplManager {
 			this._child.kill("SIGKILL");
 		}
 		this._state = "shutdown";
+		liveManagers.delete(this);
 	}
 
 	async snapshotState(): Promise<{ names: string[] } | null> {
@@ -534,24 +665,36 @@ export class BunReplManager {
 			return null;
 		}
 
-		const names = await saveSnapshot(this._options.snapshotDir, result.data);
+		const names = await saveSnapshot(this._options.snapshotDir, result.data, result.dropped ?? []);
 		return { names };
 	}
 
-	async restoreState(): Promise<{ restoredNames: string[] } | null> {
+	/**
+	 * Revive the last snapshot into the live namespace.
+	 *
+	 * `failed` is the other half of the answer and matters as much as `restoredNames`: the
+	 * snapshot is JSON, so every function, class and closure the agent built is gone. Reporting
+	 * only what came back leaves the model assuming the rest is still there.
+	 */
+	async restoreState(): Promise<{ restoredNames: string[]; failed: string[] } | null> {
 		if (!this.isRunning || !this._options.snapshotDir) return null;
 
-		const data = await loadSnapshot(this._options.snapshotDir);
-		if (!data) return null;
+		const snapshot = await loadSnapshot(this._options.snapshotDir);
+		if (!snapshot) return null;
 
 		const result = await this._sendAndWait<BunReplRestoreResult>({
 			id: randomUUID(),
 			type: "restore",
-			data,
+			data: snapshot.data,
 		});
 
 		if (result.status === "error") return null;
-		return { restoredNames: (result as BunReplRestoreResult & { restoredNames?: string[] }).restoredNames ?? [] };
+		const restoredNames = result.restoredNames ?? [];
+		// Names the snapshot never captured, plus any the child could not assign back.
+		const failed = [...new Set([...snapshot.droppedNames, ...(result.failed ?? [])])].filter(
+			(name) => !restoredNames.includes(name),
+		);
+		return { restoredNames, failed };
 	}
 
 	async listNamespaceNames(): Promise<string[] | null> {
@@ -577,6 +720,19 @@ export class BunReplManager {
 			this._child.kill("SIGKILL");
 		}
 		this._state = "shutdown";
+		liveManagers.delete(this);
+	}
+
+	/** Read and clear the pending "the REPL was replaced" flag. */
+	private _consumeRestartNotice(): boolean {
+		const restarted = this._pendingRestartNotice;
+		this._pendingRestartNotice = false;
+		return restarted;
+	}
+
+	/** Tail of the child's stderr, for surfacing why a REPL failed to start. */
+	get childStderr(): string {
+		return this._childStderr;
 	}
 
 	private _scheduleAutoSnapshot(): void {

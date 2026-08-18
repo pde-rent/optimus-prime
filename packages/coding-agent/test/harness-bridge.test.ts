@@ -11,6 +11,17 @@ import {
 	loadHarnessState,
 } from "../src/core/refinement/index.js";
 
+/**
+ * Read a cell's result as data.
+ *
+ * Result values are rendered with `util.inspect` (the JS analogue of the old kernel's
+ * Python `repr`), so they are for reading, not parsing. Cells that need to hand data back
+ * to the test stringify it themselves; the outer parse unwraps the quoted string literal.
+ */
+function jsonResult(result: string | undefined): unknown {
+	return JSON.parse(JSON.parse(result ?? '"null"') as string);
+}
+
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
@@ -62,43 +73,48 @@ describe("rlm.harness sandbox surface", () => {
 			await manager.start();
 
 			const methods = await manager.execute(
-				`[
+				`JSON.stringify([
 					"create_memory","update_memory","delete_memory",
 					"create_skill","update_skill","delete_skill",
 					"create_subagent","update_subagent","delete_subagent",
 					"create_prompt_note","update_prompt_note","delete_prompt_note",
 					"record_refinement","overview",
-				].map((name) => typeof rlm.harness[name]).concat(typeof rlm.get_harness_state, typeof rlm.delete_subagent)`,
+				].map((name) => typeof rlm.harness[name]).concat(typeof rlm.get_harness_state, typeof rlm.delete_subagent))`,
 			);
 			expect(methods.status).toBe("ok");
-			expect(JSON.parse(methods.result ?? "null")).toEqual(new Array(16).fill("function"));
+			expect(jsonResult(methods.result)).toEqual(new Array(16).fill("function"));
 
 			const created = await manager.execute(
-				`await rlm.harness.create_memory({ title: "Build cmd", content: "Use bun, never npm." })`,
+				`JSON.stringify(await rlm.harness.create_memory({ title: "Build cmd", content: "Use bun, never npm." }))`,
 			);
 			expect(created.status).toBe("ok");
-			const createdPayload = JSON.parse(created.result ?? "null");
+			const createdPayload = jsonResult(created.result) as Record<string, unknown>;
 			expect(createdPayload.id).toBe("build_cmd");
 			expect(createdPayload.scope).toBe("local");
 
-			const readBack = await manager.execute(`(await rlm.get_harness_state()).entries.memory.build_cmd.content`);
-			expect(JSON.parse(readBack.result ?? "null")).toBe("Use bun, never npm.");
+			const readBack = await manager.execute(
+				`JSON.stringify((await rlm.get_harness_state()).entries.memory.build_cmd.content)`,
+			);
+			expect(jsonResult(readBack.result)).toBe("Use bun, never npm.");
 
 			const updated = await manager.execute(
-				`await rlm.harness.update_memory({ id: "build_cmd", content: "Use bun/bunx only." })`,
+				`JSON.stringify(await rlm.harness.update_memory({ id: "build_cmd", content: "Use bun/bunx only." }))`,
 			);
-			expect(JSON.parse(updated.result ?? "null").entry.version).toBe(2);
+			const updatedPayload = jsonResult(updated.result) as { entry: { version: number; title: string } };
+			expect(updatedPayload.entry.version).toBe(2);
 			// Unspecified fields are preserved on a partial update.
-			expect(JSON.parse(updated.result ?? "null").entry.title).toBe("Build cmd");
+			expect(updatedPayload.entry.title).toBe("Build cmd");
 
-			const overview = await manager.execute(`await rlm.harness.overview()`);
-			expect(JSON.parse(overview.result ?? "null").counts.memory).toBe(1);
+			const overview = await manager.execute(`JSON.stringify(await rlm.harness.overview())`);
+			expect((jsonResult(overview.result) as { counts: { memory: number } }).counts.memory).toBe(1);
 
-			const deleted = await manager.execute(`await rlm.harness.delete_memory({ id: "build_cmd" })`);
-			expect(JSON.parse(deleted.result ?? "null").action).toBe("delete");
+			const deleted = await manager.execute(`JSON.stringify(await rlm.harness.delete_memory({ id: "build_cmd" }))`);
+			expect((jsonResult(deleted.result) as { action: string }).action).toBe("delete");
 
-			const after = await manager.execute(`Object.keys((await rlm.get_harness_state()).entries.memory)`);
-			expect(JSON.parse(after.result ?? "null")).toEqual([]);
+			const after = await manager.execute(
+				`JSON.stringify(Object.keys((await rlm.get_harness_state()).entries.memory))`,
+			);
+			expect(jsonResult(after.result)).toEqual([]);
 
 			// Errors surface as sandbox exceptions, not silent nulls.
 			const invalid = await manager.execute(`await rlm.harness.create_skill({ title: "x", content: "y" })`);

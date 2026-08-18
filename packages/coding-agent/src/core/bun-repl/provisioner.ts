@@ -12,7 +12,7 @@ export interface BunReplProvisionerOptions {
 	/** Command prefix prepended to every %%bash cell. */
 	commandPrefix?: string;
 	readyGate?: Promise<void>;
-	onRestore?: (restoredNames: string[]) => void;
+	onRestore?: (restore: { restoredNames: string[]; failed: string[] }) => void;
 	/** Called when a cell's agent message arrives after that cell's result. */
 	onLateSentAgentMessage?: BunReplManagerOptions["onLateSentAgentMessage"];
 }
@@ -20,7 +20,7 @@ export interface BunReplProvisionerOptions {
 export class BunReplProvisioner {
 	private managerPromise?: Promise<BunReplManager>;
 	private startedManager?: BunReplManager;
-	private _lastRestore?: { restoredNames: string[] };
+	private _lastRestore?: { restoredNames: string[]; failed: string[] };
 	private readonly disposeController = new AbortController();
 
 	constructor(private readonly options: BunReplProvisionerOptions) {}
@@ -29,7 +29,7 @@ export class BunReplProvisioner {
 		return this.startedManager;
 	}
 
-	get lastRestore(): { restoredNames: string[] } | undefined {
+	get lastRestore(): { restoredNames: string[]; failed: string[] } | undefined {
 		return this._lastRestore;
 	}
 
@@ -125,7 +125,7 @@ export class BunReplProvisioner {
 					const restore = await manager.restoreState();
 					if (restore) {
 						this._lastRestore = restore;
-						this.options.onRestore?.(restore.restoredNames);
+						this.options.onRestore?.(restore);
 					}
 				}
 			}

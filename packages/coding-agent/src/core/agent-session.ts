@@ -6888,16 +6888,27 @@ export class AgentSession {
 	 * variables are actually available instead of assuming the REPL is the one it left.
 	 * Delivered as context before the next turn.
 	 */
-	private _onIpythonStateRestored(restoredNames: string[]): void {
+	private _onIpythonStateRestored(restore: { restoredNames: string[]; failed: string[] }): void {
+		const { restoredNames, failed } = restore;
 		const lines = ["<ipython_state_restored>"];
 		if (restoredNames.length > 0) {
 			lines.push(
-				`Your REPL state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}. Functions and closures are not revived — redefine any you need.`,
+				`Your REPL state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}.`,
 			);
 		} else {
 			lines.push(
 				"Your previous REPL state could not be revived; the REPL is starting fresh, so re-create any variables, imports, or loaded data you need.",
 			);
+		}
+		// Naming what did *not* come back is the load-bearing half: the snapshot is JSON, so
+		// every function and closure is gone, and a model told only what was restored will
+		// happily call something that no longer exists.
+		if (failed.length > 0) {
+			lines.push(
+				`These did NOT survive and are gone: ${failed.join(", ")}. Functions, classes and closures are never revived — redefine any you still need before using them.`,
+			);
+		} else if (restoredNames.length > 0) {
+			lines.push("Functions and closures are not revived — redefine any you need.");
 		}
 		lines.push("</ipython_state_restored>");
 		void this.sendCustomMessage(
@@ -6905,7 +6916,7 @@ export class AgentSession {
 				customType: IPYTHON_STATE_RESTORED_CUSTOM_TYPE,
 				content: lines.join("\n"),
 				display: true,
-				details: { restored: restoredNames.length > 0 },
+				details: { restored: restoredNames.length > 0, failed: failed.length },
 			},
 			{ deliverAs: "nextTurn" },
 		).catch(() => {});
@@ -8505,7 +8516,7 @@ export class AgentSession {
 				shellPath: this.settingsManager.getShellPath(),
 				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				readyGate: previousDispose,
-				onRestore: notifyRestore ? (names) => this._onIpythonStateRestored(names) : undefined,
+				onRestore: notifyRestore ? (restored) => this._onIpythonStateRestored(restored) : undefined,
 				onLateSentAgentMessage: (toolCallId, message) =>
 					this._recordLateIpythonSentAgentMessage(toolCallId, message),
 			});
