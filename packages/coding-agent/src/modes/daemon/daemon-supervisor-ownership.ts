@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { getProcessStartId } from "../../core/session-lease.js";
+import { readJsonFile } from "../../utils/shared.js";
 import { defaultDaemonSocketDir } from "./daemon-socket.js";
 
 const DAEMON_SUPERVISOR_REGISTRY_DIR_ENV = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
@@ -786,15 +787,11 @@ function isDaemonSupervisorOwnerRecord(value: unknown): value is DaemonSuperviso
 }
 
 function readOwnerScope(directory: string): DaemonSupervisorOwnerScope | undefined {
-	try {
-		const value = JSON.parse(readFileSync(resolve(directory, "scope.json"), "utf8")) as unknown;
-		if (!isDaemonSupervisorOwnerScope(value)) {
-			return undefined;
-		}
-		return ownerDirectoryPath(dirname(directory), value.generation) === directory ? value : undefined;
-	} catch {
+	const value = readJsonFile(resolve(directory, "scope.json"));
+	if (!isDaemonSupervisorOwnerScope(value)) {
 		return undefined;
 	}
+	return ownerDirectoryPath(dirname(directory), value.generation) === directory ? value : undefined;
 }
 
 function isDaemonSupervisorOwnerScope(value: unknown): value is DaemonSupervisorOwnerScope {

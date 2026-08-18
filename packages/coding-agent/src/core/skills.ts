@@ -77,12 +77,15 @@ export interface SkillFrontmatter {
 	[key: string]: unknown;
 }
 
-export type SkillKind = "markdown" | "python";
+export type SkillKind = "markdown" | "js";
 
-export interface SkillPythonMetadata {
+export interface SkillJsMetadata {
+	/** Global the skill is bound to inside the REPL sandbox (name with `-` -> `_`). */
 	importName: string;
+	/** Skill root directory. */
 	packagePath: string;
-	pyprojectPath: string;
+	/** ESM module the REPL imports to build the skill API. */
+	entryPath: string;
 }
 
 interface BaseSkill {
@@ -96,17 +99,17 @@ interface BaseSkill {
 
 export interface MarkdownSkill extends BaseSkill {
 	kind: "markdown";
-	python?: undefined;
+	js?: undefined;
 }
 
-export interface PythonSkill extends BaseSkill {
-	kind: "python";
-	python: SkillPythonMetadata;
+export interface JsSkill extends BaseSkill {
+	kind: "js";
+	js: SkillJsMetadata;
 }
 
-export type Skill = MarkdownSkill | PythonSkill;
+export type Skill = MarkdownSkill | JsSkill;
 
-export interface PythonSkillRuntimeInfo extends SkillPythonMetadata {
+export interface JsSkillRuntimeInfo extends SkillJsMetadata {
 	name: string;
 }
 
@@ -191,57 +194,40 @@ function createSkillSourceInfo(filePath: string, baseDir: string, source: string
 	}
 }
 
-function pythonImportNameForSkill(name: string): string {
+function jsImportNameForSkill(name: string): string {
 	return name.replaceAll("-", "_");
 }
 
-function isValidPythonImportName(name: string): boolean {
-	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+function isValidJsImportName(name: string): boolean {
+	return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name);
 }
 
-function detectPythonSkill(
-	skillDir: string,
-	name: string,
-	diagnostics: ResourceDiagnostic[],
-): SkillPythonMetadata | null {
-	const pyprojectPath = join(skillDir, "pyproject.toml");
-	if (!existsSync(pyprojectPath)) {
-		return null;
-	}
+/** Entry-point candidates for a JS skill, in resolution order. */
+const JS_SKILL_ENTRY_FILES = ["skill.js", "skill.mjs", "skill.ts"];
 
-	try {
-		if (!statSync(pyprojectPath).isFile()) {
-			return null;
+function detectJsSkill(skillDir: string, name: string, diagnostics: ResourceDiagnostic[]): SkillJsMetadata | null {
+	let entryPath: string | null = null;
+	for (const candidate of JS_SKILL_ENTRY_FILES) {
+		const fullPath = join(skillDir, candidate);
+		try {
+			if (statSync(fullPath).isFile()) {
+				entryPath = fullPath;
+				break;
+			}
+		} catch {
+			// candidate absent: try the next one
 		}
-	} catch {
+	}
+	if (!entryPath) {
 		return null;
 	}
 
-	const importName = pythonImportNameForSkill(name);
-	if (!isValidPythonImportName(importName)) {
+	const importName = jsImportNameForSkill(name);
+	if (!isValidJsImportName(importName)) {
 		diagnostics.push({
 			type: "warning",
-			message: `python skill import name "${importName}" is invalid`,
-			path: pyprojectPath,
-		});
-		return null;
-	}
-
-	const packageInitPath = join(skillDir, "src", importName, "__init__.py");
-	try {
-		if (!statSync(packageInitPath).isFile()) {
-			diagnostics.push({
-				type: "warning",
-				message: `python skill package src/${importName}/__init__.py not found`,
-				path: pyprojectPath,
-			});
-			return null;
-		}
-	} catch {
-		diagnostics.push({
-			type: "warning",
-			message: `python skill package src/${importName}/__init__.py not found`,
-			path: pyprojectPath,
+			message: `js skill binding name "${importName}" is invalid`,
+			path: entryPath,
 		});
 		return null;
 	}
@@ -249,18 +235,18 @@ function detectPythonSkill(
 	return {
 		importName,
 		packagePath: skillDir,
-		pyprojectPath,
+		entryPath,
 	};
 }
 
-export function getPythonSkillRuntimeInfo(skills: readonly Skill[]): PythonSkillRuntimeInfo[] {
+export function getJsSkillRuntimeInfo(skills: readonly Skill[]): JsSkillRuntimeInfo[] {
 	return skills
-		.filter((skill): skill is PythonSkill => skill.kind === "python")
+		.filter((skill): skill is JsSkill => skill.kind === "js")
 		.map((skill) => ({
 			name: skill.name,
-			importName: skill.python.importName,
-			packagePath: skill.python.packagePath,
-			pyprojectPath: skill.python.pyprojectPath,
+			importName: skill.js.importName,
+			packagePath: skill.js.packagePath,
+			entryPath: skill.js.entryPath,
 		}));
 }
 
@@ -411,7 +397,7 @@ function loadSkillFromFile(
 			return { skill: null, diagnostics };
 		}
 
-		const python = basename(filePath) === "SKILL.md" ? detectPythonSkill(skillDir, name, diagnostics) : null;
+		const js = basename(filePath) === "SKILL.md" ? detectJsSkill(skillDir, name, diagnostics) : null;
 		const baseSkill: BaseSkill = {
 			name,
 			description: frontmatter.description,
@@ -422,7 +408,7 @@ function loadSkillFromFile(
 		};
 
 		return {
-			skill: python ? { ...baseSkill, kind: "python", python } : { ...baseSkill, kind: "markdown" },
+			skill: js ? { ...baseSkill, kind: "js", js } : { ...baseSkill, kind: "markdown" },
 			diagnostics,
 		};
 	} catch (error) {
@@ -449,8 +435,8 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 	const lines = [
 		"\n\nThe following skills provide specialized instructions for specific tasks.",
-		"Use ipython to inspect a skill's file when the task matches its description.",
-		"Skills with a python_import are prepared in the persistent IPython kernel when available and can be called directly by that import name.",
+		"Use the ipython tool (a JavaScript REPL) to inspect a skill's file when the task matches its description.",
+		"Skills with a js_binding are preloaded into the persistent JavaScript REPL and can be called directly by that binding name.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",
@@ -460,8 +446,8 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <type>${skill.kind}</type>`);
-		if (skill.kind === "python") {
-			lines.push(`    <python_import>${escapeXml(skill.python.importName)}</python_import>`);
+		if (skill.kind === "js") {
+			lines.push(`    <js_binding>${escapeXml(skill.js.importName)}</js_binding>`);
 		}
 		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
 		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
@@ -517,10 +503,10 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 
 	const skillMap = new Map<string, Skill>();
 	const realPathSet = new Set<string>();
-	const pythonImportMap = new Map<string, Skill>();
+	const jsBindingMap = new Map<string, Skill>();
 	const allDiagnostics: ResourceDiagnostic[] = [];
 	const collisionDiagnostics: ResourceDiagnostic[] = [];
-	const pythonImportDiagnostics: ResourceDiagnostic[] = [];
+	const jsBindingDiagnostics: ResourceDiagnostic[] = [];
 
 	function addSkills(result: LoadSkillsResult) {
 		allDiagnostics.push(...result.diagnostics);
@@ -547,16 +533,16 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 			} else {
 				skillMap.set(skill.name, skill);
 				realPathSet.add(realPath);
-				if (skill.kind === "python") {
-					const existingPythonSkill = pythonImportMap.get(skill.python.importName);
-					if (existingPythonSkill) {
-						pythonImportDiagnostics.push({
+				if (skill.kind === "js") {
+					const existingJsSkill = jsBindingMap.get(skill.js.importName);
+					if (existingJsSkill) {
+						jsBindingDiagnostics.push({
 							type: "warning",
-							message: `python import name "${skill.python.importName}" is shared by skills "${existingPythonSkill.name}" and "${skill.name}"`,
+							message: `js binding name "${skill.js.importName}" is shared by skills "${existingJsSkill.name}" and "${skill.name}"`,
 							path: skill.filePath,
 						});
 					} else {
-						pythonImportMap.set(skill.python.importName, skill);
+						jsBindingMap.set(skill.js.importName, skill);
 					}
 				}
 			}
@@ -618,6 +604,6 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 
 	return {
 		skills: Array.from(skillMap.values()),
-		diagnostics: [...allDiagnostics, ...collisionDiagnostics, ...pythonImportDiagnostics],
+		diagnostics: [...allDiagnostics, ...collisionDiagnostics, ...jsBindingDiagnostics],
 	};
 }

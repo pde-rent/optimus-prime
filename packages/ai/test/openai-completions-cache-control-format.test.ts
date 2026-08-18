@@ -170,7 +170,7 @@ describe("openai-completions cacheControlFormat", () => {
 	});
 
 	it("preserves Anthropic-style cache markers for OpenRouter Anthropic models", async () => {
-		const model = getModel("openrouter", "anthropic/claude-sonnet-4");
+		const model = getModel("openrouter", "anthropic/claude-opus-4");
 		const params = await capturePayload(model);
 		expectAnthropicCacheMarkers(params);
 	});
@@ -197,7 +197,7 @@ describe("openai-completions cacheControlFormat", () => {
 	});
 
 	it("prices one-hour OpenRouter Anthropic cache writes at twice the input rate", async () => {
-		const model = getModel("openrouter", "anthropic/claude-sonnet-4");
+		const model = getModel("openrouter", "anthropic/claude-opus-4");
 		const { params, result } = await runCompletion(model, { cacheRetention: "long" });
 		expectAnthropicCacheMarkers(params, { type: "ephemeral", ttl: "1h" });
 		expect(result.usage.cost.cacheWrite).toBeCloseTo((80 * model.cost.input * 2) / 1_000_000);

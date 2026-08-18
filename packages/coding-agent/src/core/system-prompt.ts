@@ -4,7 +4,7 @@
 
 import { buildChildAgentDoctrine, buildRlmPrompt, buildSubagentGuidance } from "./prompts/index.js";
 import { formatHarnessStateForPrompt, type HarnessState, REFINE_SKILL_NAME } from "./refinement/index.js";
-import { formatSkillsForPrompt, getPythonSkillRuntimeInfo, type Skill } from "./skills.js";
+import { formatSkillsForPrompt, getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
@@ -66,7 +66,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const hasIpython = tools.includes("ipython");
 	const hasBash = tools.includes("bash");
 	const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
-	const visiblePythonSkillImportNames = getPythonSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName);
+	const visibleJsSkillBindings = getJsSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName);
 	const hasRefineSkill = visibleSkills.some((skill) => skill.name === REFINE_SKILL_NAME);
 
 	if (customPrompt) {
@@ -95,7 +95,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		const childDoctrine = buildChildAgentDoctrine({
 			depth: options.rlmDepth,
 			parentAgent: options.rlmParentAgent,
-			installedSkills: visiblePythonSkillImportNames,
+			installedSkills: visibleJsSkillBindings,
 			activeTools: tools,
 		});
 		if (childDoctrine) {
@@ -116,7 +116,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	let prompt = buildRlmPrompt({
 		cwd: promptCwd,
 		messagesPath: promptMessagesPath,
-		installedSkills: visiblePythonSkillImportNames,
+		installedSkills: visibleJsSkillBindings,
 		activeTools: tools.filter((name) => name === "ipython" || name === "bash" || name === "edit"),
 		allowRecursion,
 		depth: options.rlmDepth,
@@ -127,13 +127,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	// menu, so the model reads when/why to delegate and then sees the concrete subagent
 	// specs it can match against — the same ordering as Claude Code's Agent tool.
 	if ((allowRecursion ?? true) && hasIpython) {
-		const visiblePythonSkillNames = new Set(
-			getPythonSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName),
-		);
+		const visibleJsSkillNames = new Set(getJsSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName));
 		prompt += `\n\n${buildSubagentGuidance({
 			includeRefineExamples: hasRefineSkill,
-			hasAgentMessage: visiblePythonSkillNames.has("agent_message"),
-			hasAgentObserve: visiblePythonSkillNames.has("agent_observe"),
+			hasAgentMessage: visibleJsSkillNames.has("agent_message"),
+			hasAgentObserve: visibleJsSkillNames.has("agent_observe"),
 		})}`;
 	}
 

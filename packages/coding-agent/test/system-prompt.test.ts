@@ -3,7 +3,6 @@ import { buildRlmPrompt } from "../src/core/prompts/index.js";
 import type { HarnessState } from "../src/core/refinement/index.js";
 import type { Skill } from "../src/core/skills.js";
 import { buildSystemPrompt } from "../src/core/system-prompt.js";
-import { createIpythonToolDefinition } from "../src/core/tools/ipython.js";
 
 function skill(name: string): Skill {
 	return {
@@ -22,20 +21,81 @@ function skill(name: string): Skill {
 	};
 }
 
-function pythonSkill(name: string, importName = name.replaceAll("-", "_")): Skill {
+function jsSkill(name: string, importName = name.replaceAll("-", "_")): Skill {
 	const base = skill(name);
 	return {
 		...base,
-		kind: "python",
-		python: {
+		kind: "js",
+		js: {
 			importName,
 			packagePath: `/skills/${name}`,
-			pyprojectPath: `/skills/${name}/pyproject.toml`,
+			entryPath: `/skills/${name}/skill.js`,
 		},
 	};
 }
 
 describe("buildRlmPrompt", () => {
+	test("builds the rlm prompt without recursion", () => {
+		const prompt = buildRlmPrompt({
+			cwd: "/repo",
+			messagesPath: "/repo/.pi/sessions/session.jsonl",
+			installedSkills: ["websearch", "refine"],
+			activeTools: ["ipython"],
+			allowRecursion: false,
+		});
+
+		expect(prompt).toBe(
+			[
+				"You are a general purpose agent that uses code to solve tasks.",
+				"You solve tasks by breaking down problems into sub-tasks, writing and executing code, observing results, and iterating one step at a time.",
+				"When you are done, stop calling tools and state your final answer.",
+				"",
+				"For slow or independently completing work, use a nonblocking control loop: start the work, record its handle or output location, then end your turn. Read the result on a later turn or when a reply arrives.",
+				"When delegation is available and useful, assign independent substantive tasks to separate workers. Start independent workers without waiting for each one sequentially, and let them run in parallel.",
+				"Do not keep the turn open by polling with `Bun.sleep()`, `setTimeout`, or shell `sleep`, and do not replace polling with a long blocking `await`. Await only the short operation needed to start work or inspect a result that is already available; otherwise end the turn.",
+				"",
+				"As the user-facing root agent, when work follows a plan, uses many subagents, or spans multiple turns, proactively give regular concise progress updates so the user does not have to ask. State the current plan, what has completed, any blockers, the proposed fixes, and the next actions. Lead with user-visible outcomes rather than internal process or gate names. Mention internal details only when they explain a blocker or decision. Send an update at meaningful milestones and before ending a turn while work is still running. Do not repeat unchanged status or interrupt short work with unnecessary updates.",
+				"",
+				"Use simplified technical English by default for user-facing prose.",
+				"Prefer short sentences, common words, and concrete verbs. State one main action or fact per sentence when practical. Use lists for steps or conditions.",
+				"Keep necessary technical terms, names, commands, code, paths, and exact quoted text unchanged. State uncertainty directly.",
+				"Treat this as clarity guidance, not a claim of formal ASD-STE100 compliance. Preserve a user-requested format, tone, terminology, and necessary precision.",
+				"",
+				"Working directory: /repo",
+				"Conversation log: /repo/.pi/sessions/session.jsonl",
+				"Recursive agent depth: 0",
+				"REPL runtime: Bun (Bun.file, Bun.write, Bun.Glob, Bun.spawn), native fetch, Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, URL/URLSearchParams.",
+				"",
+				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
+				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
+				"",
+				"The `ipython` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
+				"",
+				"Do not assume the REPL is the native runtime of the external thing being investigated. A repository, package, service, dataset, paper, website, benchmark, or API may have its own environment and normal interface. Evaluate external systems through their own interface, then use the REPL to coordinate the process and analyze what comes back.",
+				"",
+				"When running shell commands, use `%%bash` cells. If you use `%%bash`, it must be the first line of the code cell: no comments, spaces, blank lines, or statements before it. Cell bodies are otherwise plain JavaScript/TypeScript; top-level `await` is supported and the last expression is echoed as the cell result.",
+				"",
+				"Important: do not install dependencies into the REPL just to make an external project import or run there. If a project import, test, script, CLI, or dependency check is needed, run it through that project's own environment and normal command interface (its documented commands, `bun run ...`, `uv run ...`, the project's own interpreter, from the repo root). Treat failures from that native environment as the relevant result.",
+				"",
+				"Use JavaScript for reading, searching, and editing files — it gives you reusable variables you can slice, filter, and act on without re-reading. Always assign read/search results to named variables so you can revisit them later.",
+				"",
+				"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
+				"",
+				"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
+				"",
+				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
+				"",
+				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+				"",
+				"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
+				"",
+				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
+				"",
+				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable facts/preferences into memories, and narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
+			].join("\n"),
+		);
+	});
+
 	test("defaults omitted activeTools to ipython guidance", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
@@ -43,9 +103,9 @@ describe("buildRlmPrompt", () => {
 			installedSkills: ["websearch"],
 		});
 
-		expect(prompt).toContain("Installed Python skill modules (pre-imported): `websearch`.");
+		expect(prompt).toContain("Installed skills (preloaded REPL bindings): `websearch`.");
 		expect(prompt).toContain("A callable `rlm` is already in your global namespace");
-		expect(prompt).toContain("IPython is the agent's long-lived notebook");
+		expect(prompt).toContain("persistent JavaScript/TypeScript REPL (Bun)");
 		expect(prompt).toContain("Each `%%bash` cell runs in a throw-away subshell");
 	});
 
@@ -74,7 +134,7 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).not.toContain("IPython is the agent's long-lived notebook");
 	});
 
-	test("keeps shell skill command guidance when ipython is inactive", () => {
+	test("falls back to plain skill listing when ipython is inactive", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -83,10 +143,8 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(prompt).toContain("Installed skills available as shell commands: `websearch`.");
-		expect(prompt).toContain("Each skill is also available as a shell command");
-		expect(prompt).toContain("`<skill> --help`");
-		expect(prompt).not.toContain("Installed Python skill modules (pre-imported)");
+		expect(prompt).toContain("Installed skills: `websearch`. Read their SKILL.md files for usage.");
+		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).not.toContain("Read each skill's SKILL.md for its API");
 	});
 
@@ -170,7 +228,7 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).toContain("it must be the first line of the code cell");
 	});
 
-	test("documents preferring Python for reading and searching files when ipython is active", () => {
+	test("documents preferring JavaScript for reading and searching files when ipython is active", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -178,7 +236,7 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(prompt).toContain("Use Python for reading, searching, and editing files");
+		expect(prompt).toContain("Use JavaScript for reading, searching, and editing files");
 		expect(prompt).toContain("Always assign read/search results to named variables");
 	});
 
@@ -191,8 +249,8 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(withEdit).toContain('await edit(path="pkg/file.py", old_str=old, new_str=new)');
-		expect(withEdit).toContain("triple double quotes");
+		expect(withEdit).toContain('await edit("pkg/file.ts", oldText, newText)');
+		expect(withEdit).toContain("built from inspected file slices");
 
 		const withoutEdit = buildRlmPrompt({
 			cwd: "/repo",
@@ -202,7 +260,7 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(withoutEdit).not.toContain("await edit(path=");
+		expect(withoutEdit).not.toContain("await edit(");
 	});
 });
 
@@ -251,10 +309,10 @@ describe("buildSystemPrompt", () => {
 						content: "Check requested edit coverage, rollback safety, and validation commands.",
 						path: "quality",
 						reference: {
-							type: "python",
-							import: "agent_skills.review_refinement",
-							callable: "review_refinement",
-							call_pattern: "await review_refinement(task=...)",
+							type: "js",
+							binding: "review_refinement",
+							callable: "run",
+							call_pattern: "await review_refinement.run({ task })",
 						},
 						arguments: {
 							task: { type: "string", required: true, description: "Review task to perform." },
@@ -298,7 +356,7 @@ describe("buildSystemPrompt", () => {
 		const prompt = buildSystemPrompt({
 			selectedTools: ["ipython"],
 			contextFiles: [],
-			skills: [pythonSkill("refine"), pythonSkill("agent-message"), pythonSkill("agent-observe")],
+			skills: [jsSkill("refine"), jsSkill("agent-message"), jsSkill("agent-observe")],
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			harnessState,
@@ -309,15 +367,15 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("The continual harness entries below are compact summaries, not full descriptions");
 		expect(prompt).toContain("Use global continual harness refinement only for stable cross-session lessons");
 		expect(prompt).toContain("When to call `await refine.run()`");
-		expect(prompt).toContain("Call contract: read each installed Python skill's SKILL.md");
-		expect(prompt).toContain("Continual harness skill entries are Python REPL skills");
+		expect(prompt).toContain("Call contract: read each installed JS skill's SKILL.md");
+		expect(prompt).toContain("Continual harness skill entries are JS REPL skills");
 		expect(prompt).toContain("Spawn a continual harness subagent spec by composing a concise task prompt");
 		expect(prompt).toContain("handle = await rlm('sub-task')");
 		expect(prompt).toContain("admission returns immediately");
 		expect(prompt).toContain("never the child's answer");
-		expect(prompt).toContain("receiver_role='parent'");
+		expect(prompt).toContain("receiver_role: 'parent'");
 		expect(prompt).toContain("await rlm.list_subagents()");
-		expect(prompt).toContain("receiver_role='child'");
+		expect(prompt).toContain("receiver_role: 'child'");
 		expect(prompt).not.toContain("asyncio.create_task(rlm('sub-task'))");
 		expect(prompt).not.toContain("asyncio.gather(rlm('task1'), rlm('task2'))");
 		expect(prompt).toContain("after a repeated failure");
@@ -384,7 +442,7 @@ describe("buildSystemPrompt", () => {
 		const prompt = buildSystemPrompt({
 			selectedTools: ["ipython"],
 			contextFiles: [],
-			skills: [pythonSkill("refine"), pythonSkill("agent-message"), pythonSkill("agent-observe")],
+			skills: [jsSkill("refine"), jsSkill("agent-message"), jsSkill("agent-observe")],
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 		});
@@ -443,7 +501,8 @@ describe("buildSystemPrompt", () => {
 
 		expect(prompt).toContain("You are a general purpose agent that uses code to solve tasks.");
 		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("Call contract: use installed skills as shell commands");
+		expect(prompt).toContain("Installed skills ship no CLI entry points, so never invoke them as shell commands");
+		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).toContain("subagent: 1");
 		expect(prompt).not.toContain("IPython is the agent's long-lived notebook");
 		expect(prompt).not.toContain("Default to non-blocking subagents");
@@ -489,7 +548,7 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("without IPython or shell access");
+		expect(prompt).toContain("without the `ipython` tool or shell access");
 		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).not.toContain("<skill_import> ...");
 		expect(prompt).not.toContain("asyncio.create_task");
@@ -551,14 +610,14 @@ describe("buildSystemPrompt", () => {
 			customPrompt: "custom body",
 			selectedTools: ["ipython"],
 			contextFiles: [],
-			skills: [pythonSkill("agent-message")],
+			skills: [jsSkill("agent-message")],
 			cwd: "/repo",
 			rlmDepth: 1,
 			rlmParentAgent: "orchestrator",
 		});
 
 		expect(prompt).toContain("You are a child agent spawned by orchestrator");
-		expect(prompt).toContain('await agent_message.send(message, receiver_role="parent")');
+		expect(prompt).toContain('await agent_message.send(message, { receiver_role: "parent" })');
 		expect(prompt).not.toContain("You are a general purpose agent that uses code to solve tasks.");
 	});
 
@@ -575,7 +634,7 @@ describe("buildSystemPrompt", () => {
 
 		expect(build(["ipython"], [])).toContain("You are a child agent spawned by your parent agent");
 		expect(build(["ipython"], [])).not.toContain("agent_message.send");
-		expect(build(["bash"], [pythonSkill("agent-message")])).not.toContain("agent_message.send");
+		expect(build(["bash"], [jsSkill("agent-message")])).not.toContain("agent_message.send");
 	});
 
 	test("append system prompt content is included after the rlm harness prompt", () => {
@@ -620,18 +679,18 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("<location>/skills/websearch/SKILL.md</location>");
 	});
 
-	test("Python skills are configured for IPython and included in skill metadata", () => {
+	test("JS skills are preloaded into the REPL and included in skill metadata", () => {
 		const prompt = buildSystemPrompt({
 			selectedTools: ["ipython"],
 			contextFiles: [],
-			skills: [pythonSkill("web-search")],
+			skills: [jsSkill("web-search")],
 			cwd: "/repo",
 		});
 
-		expect(prompt).toContain("Installed Python skill modules (pre-imported): `web_search`.");
+		expect(prompt).toContain("Installed skills (preloaded REPL bindings): `web_search`.");
 		expect(prompt).toContain("<name>web-search</name>");
-		expect(prompt).toContain("<type>python</type>");
-		expect(prompt).toContain("<python_import>web_search</python_import>");
+		expect(prompt).toContain("<type>js</type>");
+		expect(prompt).toContain("<js_binding>web_search</js_binding>");
 	});
 
 	test("prompt guidelines are appended and deduplicated", () => {
@@ -645,19 +704,5 @@ describe("buildSystemPrompt", () => {
 
 		expect(prompt).toContain("# Additional Guidance");
 		expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
-	});
-});
-
-describe("createIpythonToolDefinition", () => {
-	test("describes project checks as target-environment work", () => {
-		const tool = createIpythonToolDefinition("/repo");
-
-		expect(tool.description).toContain("Python scratchpad code");
-		expect(tool.description).toContain("target project's own environment");
-		expect(tool.promptSnippet).toContain("%%bash orchestration");
-		const codeSchema = tool.parameters.properties.code;
-		const codeDescription =
-			"description" in codeSchema && typeof codeSchema.description === "string" ? codeSchema.description : "";
-		expect(codeDescription).toContain("target project's own environment");
 	});
 });

@@ -43,6 +43,7 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { isTruthyEnvVar } from "../utils/shared.js";
 import { recordStreamFailure, streamFailureFromStopReason } from "../utils/stream-failure.js";
 import { adjustMaxTokensForThinking, buildBaseOptions, clampReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
@@ -131,7 +132,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 		}
 
 		const bearerToken = options.bearerToken || process.env.AWS_BEARER_TOKEN_BEDROCK || undefined;
-		const useBearerToken = bearerToken !== undefined && process.env.AWS_BEDROCK_SKIP_AUTH !== "1";
+		const useBearerToken = bearerToken !== undefined && !isTruthyEnvVar(process.env.AWS_BEDROCK_SKIP_AUTH);
 
 		if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
 			// Region resolution: explicit option > env vars > SDK default chain.
@@ -145,7 +146,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 				config.region = "us-east-1";
 			}
 
-			if (process.env.AWS_BEDROCK_SKIP_AUTH === "1") {
+			if (isTruthyEnvVar(process.env.AWS_BEDROCK_SKIP_AUTH)) {
 				config.credentials = {
 					accessKeyId: "dummy-access-key",
 					secretAccessKey: "dummy-secret-key",
@@ -172,7 +173,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 					httpAgent: agent,
 					httpsAgent: agent,
 				});
-			} else if (process.env.AWS_BEDROCK_FORCE_HTTP1 === "1") {
+			} else if (isTruthyEnvVar(process.env.AWS_BEDROCK_FORCE_HTTP1)) {
 				const nodeHttpHandler = await import("@smithy/node-http-handler");
 				config.requestHandler = new nodeHttpHandler.NodeHttpHandler();
 			}
@@ -592,7 +593,7 @@ function supportsPromptCaching(model: Model<"bedrock-converse-stream">): boolean
 	if (!hasClaudeRef) {
 		// Application inference profiles don't contain the model name in the ARN.
 		// Allow users to force cache points via environment variable.
-		if (typeof process !== "undefined" && process.env.AWS_BEDROCK_FORCE_CACHE === "1") return true;
+		if (typeof process !== "undefined" && isTruthyEnvVar(process.env.AWS_BEDROCK_FORCE_CACHE)) return true;
 		return false;
 	}
 	if (candidates.some((s) => s.includes("-4-"))) return true;

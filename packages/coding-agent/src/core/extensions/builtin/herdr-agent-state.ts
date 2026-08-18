@@ -18,6 +18,7 @@
 
 import { createConnection } from "node:net";
 import { basename } from "node:path";
+import { isTruthyEnvVar } from "../../../utils/shared.js";
 import type { ExtensionAPI, ExtensionFactory } from "../types.js";
 
 type AgentState = "working" | "blocked" | "idle";
@@ -127,7 +128,7 @@ function herdrAgentStateExtensionImpl(pi: ExtensionAPI, getLoadedExtensionPaths:
 	// session's own Herdr pane rather than the daemon's startup environment.
 	const socketPath = process.env.HERDR_SOCKET_PATH;
 	const paneId = process.env.HERDR_PANE_ID;
-	const enabled = process.env.HERDR_ENV === "1" && !!socketPath && !!paneId;
+	const enabled = isTruthyEnvVar(process.env.HERDR_ENV) && !!socketPath && !!paneId;
 	if (!enabled || hasFileBasedHerdrIntegration(getLoadedExtensionPaths())) {
 		return;
 	}

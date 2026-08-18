@@ -9,9 +9,9 @@ flowchart TD
     clients["Interactive · print · JSON · RPC clients"]
     supervisor["Detached supervisor"]
     catalog["Catalog subprocess<br/>saved-session scans"]
-    residentA["Resident worker<br/>root A · RLM descendants · kernels"]
-    residentB["Resident worker<br/>root B · RLM descendants · kernels"]
-    owned["Client-owned worker<br/>hidden root · RLM descendants · kernels"]
+    residentA["Resident worker<br/>root A · RLM descendants · REPLs"]
+    residentB["Resident worker<br/>root B · RLM descendants · REPLs"]
+    owned["Client-owned worker<br/>hidden root · RLM descendants · REPLs"]
 
     clients <-->|"public local protocol"| supervisor
     supervisor --> catalog
@@ -20,11 +20,11 @@ flowchart TD
     supervisor --> owned
 ```
 
-The supervisor owns public sockets, client attachments, routing, global agent-message delivery, worker health, command journals, and coordinated updates. It does not execute providers, tools, compaction, bash, kernels, schedules, or transcript scans.
+The supervisor owns public sockets, client attachments, routing, global agent-message delivery, worker health, command journals, and coordinated updates. It does not execute providers, tools, compaction, bash, REPL children, schedules, or transcript scans.
 
 The catalog subprocess owns saved-session scans and inactive-session file operations. A catalog failure can fail a catalog request without interrupting active workers.
 
-Each worker owns one root `AgentSessionRuntime`, its root `AgentSession`, scheduler, kernels, and every RLM descendant below that root. New, switch, fork, and import operations replace the root runtime inside the worker while preserving the public active-session ID.
+Each worker owns one root `AgentSessionRuntime`, its root `AgentSession`, scheduler, Bun REPL children, and every RLM descendant below that root. New, switch, fork, and import operations replace the root runtime inside the worker while preserving the public active-session ID.
 
 ## Resident Workers
 
@@ -156,11 +156,11 @@ If preparation or manifest validation fails, prepared workers are released and a
 From `packages/coding-agent`:
 
 ```sh
-npx tsx test/daemon-multiclient-bench.ts
-npx tsx test/daemon-multiclient-bench.ts --generated-session-mib 100
-npx tsx test/daemon-multiclient-bench.ts --generated-session-mib 500
-npx tsx test/daemon-multiclient-bench.ts --session-file /path/to/session.jsonl
-PRIME_AGENT_STRESS_WORKERS=50 npx tsx ../../node_modules/vitest/dist/cli.js --run test/daemon-supervisor-process.test.ts -t "hosts resident roots"
+bun test/daemon-multiclient-bench.ts
+bun test/daemon-multiclient-bench.ts --generated-session-mib 100
+bun test/daemon-multiclient-bench.ts --generated-session-mib 500
+bun test/daemon-multiclient-bench.ts --session-file /path/to/session.jsonl
+PRIME_AGENT_STRESS_WORKERS=50 bunx vitest --run test/daemon-supervisor-process.test.ts -t "hosts resident roots"
 ```
 
 The benchmark compares fanout and attach paths, including serialization count, throughput, elapsed time, and sampled RSS. The stress case starts many resident roots and verifies that their schedules advance independently while sessions are busy.

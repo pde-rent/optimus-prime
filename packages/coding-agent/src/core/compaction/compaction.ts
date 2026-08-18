@@ -448,7 +448,7 @@ Use this EXACT format:
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
 const KERNEL_PERSIST_SUMMARY_NOTE =
-	"Note: the IPython kernel keeps running after this summary — every Python variable, import, and helper you defined stays available. The cells that defined them won't appear above, so record in the summary any names worth remembering so you reuse them instead of redefining them.";
+	"Note: the REPL keeps running after this summary — every variable, import, and helper you defined stays available. The cells that defined them won't appear above, so record in the summary any names worth remembering so you reuse them instead of redefining them.";
 
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
@@ -579,8 +579,9 @@ export interface CompactionPreparation {
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
+	force = false,
 ): CompactionPreparation | undefined {
-	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
+	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction" && !force) {
 		return undefined;
 	}
 
@@ -609,7 +610,7 @@ export function prepareCompaction(
 	if (!firstKeptEntry?.id) {
 		return undefined; // Session needs migration
 	}
-	const firstKeptEntryId = firstKeptEntry.id;
+	let firstKeptEntryId = firstKeptEntry.id;
 
 	const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptEntryIndex;
 	const messagesToSummarize: AgentMessage[] = [];
@@ -627,7 +628,20 @@ export function prepareCompaction(
 
 	// Avoid a compaction that would summarize no history.
 	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0 && !previousSummary) {
-		return undefined;
+		if (!force) {
+			return undefined;
+		}
+		// Force compaction of a short session: summarize the full available window
+		// and keep only the newest entry so the summary replaces the history.
+		for (let i = boundaryStart; i < boundaryEnd; i++) {
+			const msg = getMessageFromEntryForCompaction(pathEntries[i]);
+			if (msg) messagesToSummarize.push(msg);
+		}
+		const lastEntry = pathEntries[boundaryEnd - 1];
+		if (messagesToSummarize.length === 0 || !lastEntry?.id) {
+			return undefined;
+		}
+		firstKeptEntryId = lastEntry.id;
 	}
 	const fileOps = extractFileOperations(messagesToSummarize, pathEntries, prevCompactionIndex);
 	// Split turns retain their suffix, but their prefix file operations still belong in the summary.

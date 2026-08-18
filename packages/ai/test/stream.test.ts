@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { fileURLToPath } from "url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getEnvApiKey } from "../src/env-api-keys.js";
-import { getModel, getModels } from "../src/models.js";
+import { getModel } from "../src/models.js";
 import { complete, stream } from "../src/stream.js";
 import type { Api, Context, ImageContent, Model, StreamOptions, Tool, ToolResultMessage } from "../src/types.js";
 import { getKimiCodingTestModel } from "./kimi-test-model.js";
@@ -624,7 +624,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareWorkersAICredentials())(
 		"Cloudflare Workers AI Provider (Kimi K2.6 via OpenAI Completions)",
 		() => {
-			const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
+			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -651,7 +651,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareAiGatewayCredentials())(
 		"Cloudflare AI Gateway → Workers AI (Kimi K2.6 via /compat)",
 		() => {
-			const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
+			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -678,7 +678,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!hasCloudflareAiGatewayCredentials() || !process.env.OPENAI_API_KEY)(
 		"Cloudflare AI Gateway → OpenAI BYOK (gpt-5.1 via /openai responses)",
 		() => {
-			const llm = getModel("cloudflare-ai-gateway", "gpt-5.1");
+			const llm = getModel("prime-inference", "openai/gpt-5.1");
 			const options = { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } };
 			const thinkingOptions = {
 				...options,
@@ -709,10 +709,9 @@ describe("Generate E2E Tests", () => {
 	);
 
 	describe.skipIf(!hasCloudflareAiGatewayCredentials() || !process.env.ANTHROPIC_API_KEY)(
-		"Cloudflare AI Gateway → Anthropic BYOK (Claude Sonnet 4.6 via /anthropic messages)",
+		"Cloudflare AI Gateway → Anthropic BYOK (claude-sonnet-4.5 via /anthropic messages)",
 		() => {
-			const llm = getModels("cloudflare-ai-gateway").find((model) => model.name === "Claude Sonnet 4.6");
-			if (!llm) throw new Error("Cloudflare AI Gateway is missing Claude Sonnet 4.6");
+			const llm = getModel("prime-inference", "anthropic/claude-sonnet-4.5");
 			const options = { headers: { Authorization: `Bearer ${process.env.ANTHROPIC_API_KEY}` } };
 			const thinkingOptions = {
 				...options,
@@ -743,7 +742,7 @@ describe("Generate E2E Tests", () => {
 	);
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face Provider (Kimi-K2.5 via OpenAI Completions)", () => {
-		const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
+		const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 		it("should complete basic text generation", { retry: 3 }, async () => {
 			await basicTextGeneration(llm);
@@ -797,7 +796,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (google/gemini-2.5-flash via Anthropic Messages)",
 		() => {
-			const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
+			const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -824,7 +823,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (anthropic/claude-opus-4.5 via Anthropic Messages)",
 		() => {
-			const llm = getModel("vercel-ai-gateway", "anthropic/claude-opus-4.5");
+			const llm = getModel("openrouter", "anthropic/claude-opus-4");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -851,7 +850,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)(
 		"Vercel AI Gateway Provider (openai/gpt-5.1-codex-max via Anthropic Messages)",
 		() => {
-			const llm = getModel("vercel-ai-gateway", "openai/gpt-5.1-codex-max");
+			const llm = getModel("openrouter", "openai/gpt-5.1-codex-max");
 
 			it("should complete basic text generation", { retry: 3 }, async () => {
 				await basicTextGeneration(llm);
@@ -1000,7 +999,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_API_KEY)(
 		"Xiaomi MiMo (API billing) Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages)",
 		() => {
-			const llm = getModel("xiaomi", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1031,7 +1030,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, CN region)",
 		() => {
-			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1062,7 +1061,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, AMS region)",
 		() => {
-			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",
@@ -1093,7 +1092,7 @@ describe("Generate E2E Tests", () => {
 	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
 		"Xiaomi MiMo Token Plan Provider (Xiaomi MiMo-V2.5-Pro via Anthropic Messages, SGP region)",
 		() => {
-			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 			const thinkingOptions = {
 				thinkingEnabled: true,
 				reasoningEffort: "high",

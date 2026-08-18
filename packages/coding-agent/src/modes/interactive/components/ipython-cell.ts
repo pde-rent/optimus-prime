@@ -6,9 +6,8 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { formatAgentMessageParticipant } from "../../../core/agent-messages.js";
-import { previewIpythonCode } from "../../../core/tools/code-preview.js";
+import { parseIpythonBashCell, previewIpythonCode } from "../../../core/tools/code-preview.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
-import { parseIpythonBashCell } from "../../../core/tools/ipython-cell-code.js";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../theme/working-icon.js";
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";

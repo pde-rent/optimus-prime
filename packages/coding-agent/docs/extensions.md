@@ -144,9 +144,9 @@ To share extensions via npm or git as Prime Agent packages, see [packages.md](pa
 | `@earendil-works/pi-ai` | AI utilities (`StringEnum` for Google-compatible enums) |
 | `@earendil-works/pi-tui` | TUI components for custom rendering |
 
-npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `npm install`, and imports from `node_modules/` are resolved automatically.
+npm dependencies work too. Add a `package.json` next to your extension (or in a parent directory), run `bun install`, and imports from `node_modules/` are resolved automatically.
 
-For distributed Prime Agent packages installed with `prime-agent package install` (npm or git), runtime dependencies must be in `dependencies`. Package installation uses production installs (`npm install --omit=dev`) by default, so `devDependencies` are not available at runtime; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers.
+For distributed Prime Agent packages installed with `prime-agent package install` (npm or git), runtime dependencies must be in `dependencies`. Package installation uses production installs (`bun install --production` by default, or the equivalent flag for whichever package manager `npmCommand` names), so `devDependencies` are not available at runtime.
 
 Node.js built-ins (`node:fs`, `node:path`, etc.) are also available.
 
@@ -241,8 +241,8 @@ This pattern makes the fetched models available during normal startup and to `pr
 ~/.prime/agent/extensions/
 └── my-extension/
     ├── package.json    # Declares dependencies and entry points
-    ├── package-lock.json
-    ├── node_modules/   # After npm install
+    ├── bun.lock        # Lockfile written by bun install
+    ├── node_modules/   # After bun install
     └── src/
         └── index.ts
 ```
@@ -261,7 +261,7 @@ This pattern makes the fetched models available during normal startup and to `pr
 }
 ```
 
-Run `npm install` in the extension directory, then imports from `node_modules/` work automatically.
+Run `bun install` in the extension directory, then imports from `node_modules/` work automatically.
 
 ## Events
 
@@ -706,8 +706,8 @@ pi.on("tool_call", async (event, ctx) => {
   }
 
   if (isToolCallEventType("ipython", event)) {
-    // event.input is { code: string }
-    console.log(`Python code: ${event.input.code}`);
+    // event.input is { code: string } - a JS/TS cell, or a %%bash cell
+    console.log(`REPL cell: ${event.input.code}`);
   }
 });
 ```
@@ -1490,7 +1490,7 @@ const active = pi.getActiveTools();
 const all = pi.getAllTools();
 // [{
 //   name: "ipython",
-//   description: "Execute Python code in a persistent IPython kernel...",
+//   description: "Execute JavaScript/TypeScript code in a persistent Bun REPL...",
 //   parameters: ..., 
 //   sourceInfo: { path: "<builtin:ipython>", source: "builtin", scope: "temporary", origin: "top-level" }
 // }, ...]
@@ -1824,7 +1824,7 @@ pi.registerTool({
 
 ### Overriding Built-in Tools
 
-Extensions can override built-in tools (`ipython`, `bash`, `edit`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+Extensions can override built-in tools (`ipython` — the persistent Bun REPL, kept under its historical name — plus `bash` and `edit`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
 
 ```bash
 # Extension's ipython tool replaces built-in ipython
@@ -1846,7 +1846,7 @@ See [examples/extensions/tool-override.ts](../examples/extensions/tool-override.
 **Your implementation must match the exact result shape**, including the `details` type. The UI and session logic depend on these shapes for rendering and state tracking.
 
 Built-in tool implementations:
-- [ipython.ts](https://github.com/PrimeIntellect-ai/prime-agent/blob/main/packages/coding-agent/src/core/tools/ipython.ts) - `IpythonToolDetails`
+- [bun-repl/tool.ts](../src/core/bun-repl/tool.ts) - the `ipython` tool (persistent Bun REPL), `BunReplToolDetails`
 - [bash.ts](../src/core/tools/bash.ts) - `BashToolDetails`
 - [edit.ts](../src/core/tools/edit.ts)
 

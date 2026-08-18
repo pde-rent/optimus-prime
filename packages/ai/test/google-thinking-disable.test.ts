@@ -154,7 +154,10 @@ describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI thinking disable E2E", () =
 
 describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter thinking disable E2E", () => {
 	it("disables thinking for Qwen 3.5 reasoning models", { retry: 2, timeout: 30000 }, async () => {
+		// OpenRouter honours an omitted `reasoning` as "use the model default" (see
+		// SimpleStreamOptions.reasoning), so the disable path must be requested explicitly.
 		await expectThinkingDisabledE2E(getModel("openrouter", "qwen/qwen3.5-plus-02-15"), {
+			requestOptions: { reasoning: "off" },
 			maxOutputTokens: 100,
 		});
 	});

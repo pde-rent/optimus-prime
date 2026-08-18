@@ -34,7 +34,7 @@ The connection exposes client operations for:
 - serializable extension UI requests; and
 - RLM child snapshots, agent messaging, schedules, and heartbeats.
 
-The execution owner remains responsible for provider calls, tools, kernels, queues, compaction, scheduling, persistence, and RLM descendants.
+The execution owner remains responsible for provider calls, tools, REPL children, queues, compaction, scheduling, persistence, and RLM descendants.
 
 ## Implementations
 

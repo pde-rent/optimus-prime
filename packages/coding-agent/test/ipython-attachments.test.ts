@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { KernelAttachment } from "../src/core/kernel/index.js";
-import { imageBlocksFromAttachments } from "../src/core/tools/ipython.js";
+import { imageBlocksFromAttachments } from "../src/core/bun-repl/tool.js";
+import type { KernelAttachment } from "../src/core/tools/kernel-types.js";
 
 describe("imageBlocksFromAttachments", () => {
 	it("returns no blocks when there are no attachments", () => {

@@ -174,7 +174,6 @@ export {
 	createBashTool,
 	// Tool factories (for custom cwd)
 	createEditTool,
-	createIpythonTool,
 	type PromptTemplate,
 	type RlmSubagentRuntime,
 	type SubagentRuntimeHost,
@@ -219,18 +218,18 @@ export { type ParsedSkillBlock, parseSkillBlock } from "./core/skill-blocks.js";
 // Skills
 export {
 	formatSkillsForPrompt,
-	getPythonSkillRuntimeInfo,
+	getJsSkillRuntimeInfo,
+	type JsSkill,
+	type JsSkillRuntimeInfo,
 	type LoadSkillsFromDirOptions,
 	type LoadSkillsResult,
 	loadSkills,
 	loadSkillsFromDir,
 	type MarkdownSkill,
-	type PythonSkill,
-	type PythonSkillRuntimeInfo,
 	type Skill,
 	type SkillFrontmatter,
+	type SkillJsMetadata,
 	type SkillKind,
-	type SkillPythonMetadata,
 } from "./core/skills.js";
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
@@ -243,7 +242,6 @@ export {
 	type BashToolOptions,
 	createBashToolDefinition,
 	createEditToolDefinition,
-	createIpythonToolDefinition,
 	createLocalBashOperations,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -252,10 +250,8 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 	formatSize,
-	IpythonKernelProvisioner,
 	type IpythonToolDetails,
 	type IpythonToolInput,
-	type IpythonToolOptions,
 	type ToolsOptions,
 	type TruncationOptions,
 	type TruncationResult,

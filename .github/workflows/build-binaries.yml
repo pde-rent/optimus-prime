@@ -133,20 +133,20 @@ jobs:
           ref: ${{ env.BUILD_REF }}
           persist-credentials: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup Bun
+        # TODO: pin to a verified commit SHA like the other actions here.
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Build
-        run: npm run build
+        run: bun run build
 
       - name: Check
-        run: npm run check
+        run: bun run check
 
       - name: Pack production release
         if: env.PUBLISH_PRODUCTION == 'true'
@@ -154,7 +154,7 @@ jobs:
           PRIME_AGENT_DOWNLOAD_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
         run: |
           test -n "$PRIME_AGENT_DOWNLOAD_BASE_URL"
-          npm run release:pack -- \
+          bun run release:pack -- \
             --channel stable \
             --version "$PRODUCTION_VERSION" \
             --base-url "$PRIME_AGENT_DOWNLOAD_BASE_URL" \
@@ -166,7 +166,7 @@ jobs:
           PRIME_AGENT_DOWNLOAD_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
         run: |
           test -n "$PRIME_AGENT_DOWNLOAD_BASE_URL"
-          npm run release:pack -- \
+          bun run release:pack -- \
             --channel beta \
             --version "$BETA_VERSION" \
             --base-url "$PRIME_AGENT_DOWNLOAD_BASE_URL" \

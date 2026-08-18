@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Measures attach payload bytes for legacy vs slim_attach clients against a
  * daemon session loaded from a given session file. Uses an isolated agent dir

@@ -21,6 +21,7 @@ import { v7 as uuidv7 } from "uuid";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
 import { readFirstLineSync, readLinesAsBuffers } from "../utils/file-lines.js";
 import { captureGitContext, type GitContext, gitContextsEqual } from "../utils/git.js";
+import { ensureDir } from "../utils/shared.js";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -531,9 +532,7 @@ export function buildSessionContext(
 
 export function getDefaultSessionDir(_cwd: string, agentDir: string = getDefaultAgentDir()): string {
 	const sessionDir = getSessionsDir(agentDir);
-	if (!existsSync(sessionDir)) {
-		mkdirSync(sessionDir, { recursive: true });
-	}
+	ensureDir(sessionDir);
 	return sessionDir;
 }
 
@@ -1319,9 +1318,7 @@ export class SessionManager {
 			return this.sessionFile;
 		}
 		const dir = sessionDir ?? (this.sessionDir || getDefaultSessionDir(this.cwd));
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
+		ensureDir(dir);
 		const previousHeader = this.getHeader();
 		const target = createUniqueSessionFileTarget(dir);
 		this.sessionDir = dir;
@@ -2020,9 +2017,7 @@ export class SessionManager {
 		migrateToCurrentVersion(sourceEntries);
 
 		const dir = sessionDir ?? getDefaultSessionDir(targetCwd);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
+		ensureDir(dir);
 
 		const target = createUniqueSessionFileTarget(dir);
 		const newSessionId = target.sessionId;

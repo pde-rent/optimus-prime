@@ -99,6 +99,56 @@ export interface Harness {
 	cleanup: () => void;
 }
 
+// Harness sessions must only ever see the faux provider. Ambient provider
+// credentials in a developer shell (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, …)
+// otherwise authenticate built-in catalog providers and leak their models into
+// model listing/cycling/subagent-discovery assertions. Cleared once per test
+// worker process at import time; each test file runs in its own worker.
+for (const envVar of [
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_OAUTH_TOKEN",
+	"AI_GATEWAY_API_KEY",
+	"AWS_ACCESS_KEY_ID",
+	"AWS_BEARER_TOKEN_BEDROCK",
+	"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+	"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+	"AWS_PROFILE",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_SESSION_TOKEN",
+	"AWS_WEB_IDENTITY_TOKEN_FILE",
+	"AZURE_OPENAI_API_KEY",
+	"CEREBRAS_API_KEY",
+	"CLOUDFLARE_API_KEY",
+	"COPILOT_GITHUB_TOKEN",
+	"DEEPSEEK_API_KEY",
+	"FIREWORKS_API_KEY",
+	"GEMINI_API_KEY",
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+	"GOOGLE_CLOUD_API_KEY",
+	"GOOGLE_CLOUD_PROJECT",
+	"GROQ_API_KEY",
+	"HF_TOKEN",
+	"KIMI_API_KEY",
+	"MINIMAX_API_KEY",
+	"MINIMAX_CN_API_KEY",
+	"MISTRAL_API_KEY",
+	"MOONSHOT_API_KEY",
+	"OPENAI_API_KEY",
+	"OPENCODE_API_KEY",
+	"OPENROUTER_API_KEY",
+	"PRIME_API_KEY",
+	"XAI_API_KEY",
+	"XIAOMI_API_KEY",
+	"XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+	"XIAOMI_TOKEN_PLAN_CN_API_KEY",
+	"XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+	"ZAI_API_KEY",
+]) {
+	delete process.env[envVar];
+}
+
 function createTempDir(): string {
 	const tempDir = join(tmpdir(), `pi-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(tempDir, { recursive: true });

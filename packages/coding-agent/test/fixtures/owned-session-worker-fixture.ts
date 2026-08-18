@@ -5,15 +5,16 @@ import {
 	maybeRunOwnedSessionWorkerFrontend,
 } from "../../src/cli/owned-session-worker.js";
 import { attachJsonlLineReader, serializeJsonLine } from "../../src/modes/rpc/jsonl.js";
+import { isTruthyEnvVar } from "../../src/utils/shared.js";
 
 const args = process.argv.slice(2);
 if (process.env.PRIME_AGENT_TEST_STDIN_TTY) {
-	Object.defineProperty(process.stdin, "isTTY", { value: process.env.PRIME_AGENT_TEST_STDIN_TTY === "1" });
+	Object.defineProperty(process.stdin, "isTTY", { value: isTruthyEnvVar(process.env.PRIME_AGENT_TEST_STDIN_TTY) });
 }
 const pidPath = process.env.PRIME_AGENT_TEST_OWNED_PID_PATH;
 installOwnedSessionWorkerOwnerWatch();
 
-if (process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER === "1") {
+if (isTruthyEnvVar(process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER)) {
 	if (pidPath) {
 		writeFileSync(`${pidPath}.ppid`, `${process.ppid}\n`);
 		writeFileSync(`${pidPath}.profile`, `${process.env.PRIME_AGENT_INTERNAL_OWNED_PROFILE ?? ""}\n`);
@@ -23,7 +24,7 @@ if (process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER === "1") {
 			process.exit(0);
 		});
 	}
-	if (process.env.PRIME_AGENT_TEST_KEEP_ALIVE === "1") {
+	if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_KEEP_ALIVE)) {
 		setInterval(() => {}, 1000);
 	}
 	if (args.includes("--mode") && args.includes("rpc")) {
@@ -48,7 +49,11 @@ if (process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER === "1") {
 				process.exit(1);
 			}
 			if (command.type === "ack_result") {
-				if (process.env.PRIME_AGENT_TEST_CRASH_ON_ACK === "1" && pidPath && !existsSync(`${pidPath}.crashed`)) {
+				if (
+					isTruthyEnvVar(process.env.PRIME_AGENT_TEST_CRASH_ON_ACK) &&
+					pidPath &&
+					!existsSync(`${pidPath}.crashed`)
+				) {
 					writeFileSync(`${pidPath}.crashed`, "crashed\n");
 					const recoveryPath = process.env.PRIME_AGENT_INTERNAL_OWNED_RECOVERY_DESCRIPTOR;
 					if (recoveryPath) {
@@ -68,11 +73,11 @@ if (process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER === "1") {
 				}
 				return;
 			}
-			if (process.env.PRIME_AGENT_TEST_INVALID_RPC_OUTPUT === "1") {
+			if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_INVALID_RPC_OUTPUT)) {
 				process.stdout.write("truncated-json\n");
 				process.stdout.write("null\n");
 			}
-			if (process.env.PRIME_AGENT_TEST_REVERSE_RPC_RESPONSES === "1") {
+			if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_REVERSE_RPC_RESPONSES)) {
 				reversedCommands.push(command);
 				if (reversedCommands.length === 2) {
 					for (const pending of reversedCommands.reverse()) {
@@ -87,7 +92,7 @@ if (process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER === "1") {
 		process.stdin.resume();
 	} else {
 		process.stdin.pipe(process.stdout);
-		if (process.env.PRIME_AGENT_TEST_KEEP_ALIVE !== "1") {
+		if (!isTruthyEnvVar(process.env.PRIME_AGENT_TEST_KEEP_ALIVE)) {
 			process.stdin.once("end", closeOwnedSessionWorkerOwnerWatch);
 		}
 	}

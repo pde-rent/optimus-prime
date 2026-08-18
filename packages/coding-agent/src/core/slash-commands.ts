@@ -10,7 +10,7 @@ export interface SlashCommandInfo {
 	sourceInfo: SourceInfo;
 }
 
-export const SESSION_SLASH_COMMAND_NAMES = ["compact", "refine", "goal", "autonomous"] as const;
+export const SESSION_SLASH_COMMAND_NAMES = ["compact", "refine", "goal", "autonomous", "summarize"] as const;
 
 export type SessionSlashCommandName = (typeof SESSION_SLASH_COMMAND_NAMES)[number];
 
@@ -30,6 +30,29 @@ export interface RefineCommandOptions {
 	instructions?: string;
 	rollbackId?: string;
 	global?: boolean;
+}
+
+export interface CompactCommandOptions {
+	instructions?: string;
+	force: boolean;
+}
+
+/**
+ * Parse /compact arguments: an optional leading `--force` / `force` flag forces
+ * compaction past the automatic "already compacted" / "too short to compact"
+ * skip, and the remainder is treated as focus instructions for the summary.
+ */
+export function parseCompactCommandOptions(args: string): CompactCommandOptions {
+	let rest = args.trim();
+	let force = false;
+	if (rest === "--force" || rest === "force") {
+		force = true;
+		rest = "";
+	} else if (rest.startsWith("--force ") || rest.startsWith("force ")) {
+		force = true;
+		rest = rest.slice(rest.indexOf(" ") + 1).trim();
+	}
+	return { instructions: rest || undefined, force };
 }
 
 export function parseRefineCommandOptions(args: string): RefineCommandOptions {
@@ -172,6 +195,11 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		takesArgument: true,
 	},
 	{
+		name: "summarize",
+		description: "Produce a one-shot summary of the session context without compacting it",
+		argumentHint: "[instructions]",
+	},
+	{
 		name: "rlm-max-depth",
 		description:
 			"Set/view the per-chat persistent RLM max depth immediately; never interrupts or queues the running turn",
@@ -193,6 +221,10 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		takesArgument: true,
 	},
 	{ name: "reload", description: "Reload keybindings, extensions, skills, prompts, and themes" },
+	{
+		name: "reload:harness",
+		description: "Hot-reload the fork's harness modules (coordinator/recursion) from source, mid-session",
+	},
 	{
 		name: "fullscreen",
 		description: "Toggle fullscreen (alternate screen) rendering with scrollable transcript",

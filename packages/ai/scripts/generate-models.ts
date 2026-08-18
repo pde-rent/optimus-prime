@@ -2354,6 +2354,35 @@ async function generateModels() {
 		applyThinkingLevelMetadata(model);
 	}
 
+	// Filter out low-value aggregator providers that duplicate direct providers.
+	const DIRECT_PROVIDERS = new Set([
+		"anthropic", "openai", "google", "deepseek", "xai", "mistral", "groq",
+		"cerebras", "moonshotai", "moonshotai-cn", "minimax", "minimax-cn", "kimi-coding", "zai",
+	]);
+	const INFRA_PROVIDERS = new Set([
+		"amazon-bedrock", "prime-inference", "openai-codex", "google-vertex",
+		"azure-openai-responses", "github-copilot",
+	]);
+	const KEEP_PROVIDERS = new Set([...DIRECT_PROVIDERS, ...INFRA_PROVIDERS]);
+
+	const directModelNames = new Set<string>();
+	for (const m of allModels) {
+		if (KEEP_PROVIDERS.has(m.provider)) {
+			directModelNames.add(m.name.toLowerCase());
+		}
+	}
+
+	const filtered = allModels.filter((m) => {
+		if (KEEP_PROVIDERS.has(m.provider)) return true;
+		if (m.provider === "openrouter") {
+			const suffix = m.name.includes(": ") ? m.name.split(": ").slice(1).join(": ") : m.name;
+			return !directModelNames.has(suffix.toLowerCase());
+		}
+		return false;
+	});
+	allModels.length = 0;
+	allModels.push(...filtered);
+
 	// Group by provider and deduplicate by model ID
 	const providers: Record<string, Record<string, Model<any>>> = {};
 	for (const model of allModels) {

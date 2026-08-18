@@ -18,25 +18,25 @@ actually look at it.
 ## When NOT to use this
 
 For *programmatic* work on an image — measuring pixels, cropping, resizing,
-computing a hash, comparing files byte-by-byte — open it in the kernel with a
-library instead:
+computing a hash, comparing files byte-by-byte — open it in the REPL with an
+image library instead:
 
-```python
-from PIL import Image
-img = Image.open("diagram.png")
-print(img.size)
+```js
+const photon = await import("@silvia-odwyer/photon-node");
+const img = photon.PhotonImage.new_from_byteslice(await Bun.file("diagram.png").bytes());
+console.log(img.get_width(), img.get_height());
 ```
 
 That path does not put the image in the model's context; it only lets you
-compute over it. Use `attach_image` when you need to *see* the image.
+compute over it. Use `attach_image.run` when you need to *see* the image.
 
 ## Usage
 
-Call the prepared `attach_image` import directly in the IPython kernel:
+Call the prepared `attach_image` skill directly in the REPL:
 
-```python
-print(await attach_image("diagram.png"))
-print(await attach_image("a.png", "b.jpg"))
+```js
+console.log(await attach_image.run("diagram.png"));
+console.log(await attach_image.run("a.png", "b.jpg"));
 ```
 
 The skill automatically resizes and compresses large images before loading them

@@ -2,12 +2,12 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
-	linkSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createConnection, type Socket } from "node:net";
@@ -126,7 +126,11 @@ async function createPaths(): Promise<TestPaths> {
 	const harness = await createHarness();
 	harnesses.push(harness);
 	const executablePath = join(harness.tempDir, APP_NAME);
-	linkSync(process.execPath, executablePath);
+	// Symlink, not a hard link: relocatable-unsafe node builds (e.g. Homebrew) load
+	// libnode through an @loader_path rpath, so a copy/hard link outside the install
+	// prefix fails with a dyld error. A symlink keeps the APP_NAME launcher path while
+	// dyld still resolves the real binary.
+	symlinkSync(process.execPath, executablePath);
 	const socketTmpDir = `/tmp/eng-4603-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 	mkdirSync(socketTmpDir, { recursive: true, mode: 0o700 });
 	socketTempDirs.add(socketTmpDir);

@@ -530,6 +530,225 @@ Content`,
 		});
 	});
 
+	describe("package manager argument mapping", () => {
+		interface ManagerCase {
+			label: string;
+			npmCommand?: string[];
+			command: string;
+			prefixArgs: string[];
+			installGlobal: string[];
+			installInto: (dir: string) => string[];
+			uninstallGlobal: string[];
+			uninstallFrom: (dir: string) => string[];
+			productionDeps: string[];
+			latestVersion: string[];
+			latestVersionStdout: string;
+			globalRootArgs: string[];
+			globalRootStdout: (base: string) => string;
+			globalRoot: (base: string) => string;
+		}
+
+		const managerCases: ManagerCase[] = [
+			{
+				label: "bun (default)",
+				npmCommand: undefined,
+				command: "bun",
+				prefixArgs: [],
+				installGlobal: ["add", "-g", "@scope/pkg"],
+				installInto: (dir) => ["add", "@scope/pkg", "--cwd", dir],
+				uninstallGlobal: ["remove", "-g", "@scope/pkg"],
+				uninstallFrom: (dir) => ["remove", "@scope/pkg", "--cwd", dir],
+				productionDeps: ["install", "--production"],
+				latestVersion: ["pm", "view", "@scope/pkg", "version"],
+				latestVersionStdout: "1.2.3\n",
+				globalRootArgs: ["pm", "bin", "-g"],
+				globalRootStdout: (base) => `${join(base, "bin")}\n`,
+				globalRoot: (base) => join(base, "install", "global", "node_modules"),
+			},
+			{
+				label: "npm",
+				npmCommand: ["npm"],
+				command: "npm",
+				prefixArgs: [],
+				installGlobal: ["install", "-g", "@scope/pkg"],
+				installInto: (dir) => ["install", "@scope/pkg", "--prefix", dir],
+				uninstallGlobal: ["uninstall", "-g", "@scope/pkg"],
+				uninstallFrom: (dir) => ["uninstall", "@scope/pkg", "--prefix", dir],
+				productionDeps: ["install", "--omit=dev"],
+				latestVersion: ["view", "@scope/pkg", "version", "--json"],
+				latestVersionStdout: '"1.2.3"',
+				globalRootArgs: ["root", "-g"],
+				globalRootStdout: (base) => `${join(base, "lib", "node_modules")}\n`,
+				globalRoot: (base) => join(base, "lib", "node_modules"),
+			},
+			{
+				label: "pnpm",
+				npmCommand: ["pnpm"],
+				command: "pnpm",
+				prefixArgs: [],
+				installGlobal: ["add", "-g", "@scope/pkg"],
+				installInto: (dir) => ["add", "@scope/pkg", "--dir", dir],
+				uninstallGlobal: ["remove", "-g", "@scope/pkg"],
+				uninstallFrom: (dir) => ["remove", "@scope/pkg", "--dir", dir],
+				productionDeps: ["install", "--prod"],
+				latestVersion: ["view", "@scope/pkg", "version", "--json"],
+				latestVersionStdout: '"1.2.3"',
+				globalRootArgs: ["root", "-g"],
+				globalRootStdout: (base) => `${join(base, "global", "node_modules")}\n`,
+				globalRoot: (base) => join(base, "global", "node_modules"),
+			},
+			{
+				label: "yarn",
+				npmCommand: ["yarn"],
+				command: "yarn",
+				prefixArgs: [],
+				installGlobal: ["global", "add", "@scope/pkg"],
+				installInto: (dir) => ["--cwd", dir, "add", "@scope/pkg"],
+				uninstallGlobal: ["global", "remove", "@scope/pkg"],
+				uninstallFrom: (dir) => ["--cwd", dir, "remove", "@scope/pkg"],
+				productionDeps: ["install", "--production"],
+				latestVersion: ["info", "@scope/pkg", "version", "--json"],
+				latestVersionStdout: '{"type":"inspect","data":"1.2.3"}\n',
+				globalRootArgs: ["global", "dir"],
+				globalRootStdout: (base) => `${join(base, "global")}\n`,
+				globalRoot: (base) => join(base, "global", "node_modules"),
+			},
+			{
+				label: "unrecognized wrapper",
+				npmCommand: ["my-wrapper", "--run"],
+				command: "my-wrapper",
+				prefixArgs: ["--run"],
+				installGlobal: ["install", "-g", "@scope/pkg"],
+				installInto: (dir) => ["install", "@scope/pkg", "--prefix", dir],
+				uninstallGlobal: ["uninstall", "-g", "@scope/pkg"],
+				uninstallFrom: (dir) => ["uninstall", "@scope/pkg", "--prefix", dir],
+				productionDeps: ["install"],
+				latestVersion: ["view", "@scope/pkg", "version", "--json"],
+				latestVersionStdout: '"1.2.3"',
+				globalRootArgs: ["root", "-g"],
+				globalRootStdout: (base) => `${join(base, "lib", "node_modules")}\n`,
+				globalRoot: (base) => join(base, "lib", "node_modules"),
+			},
+		];
+
+		function makeManager(npmCommand?: string[]): DefaultPackageManager {
+			settingsManager = SettingsManager.inMemory(npmCommand ? { npmCommand } : {});
+			return new DefaultPackageManager({ cwd: tempDir, agentDir, settingsManager, bundledSkillsDir: null });
+		}
+
+		for (const managerCase of managerCases) {
+			describe(managerCase.label, () => {
+				const projectRoot = () => join(tempDir, ".prime", "agent", "npm");
+
+				it("maps global installs and uninstalls", async () => {
+					const manager = makeManager(managerCase.npmCommand);
+					const runCommandSpy = vi.spyOn(manager as any, "runCommand").mockResolvedValue(undefined);
+
+					await manager.install("npm:@scope/pkg");
+					expect(runCommandSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.installGlobal],
+						undefined,
+					);
+
+					runCommandSpy.mockClear();
+					await manager.remove("npm:@scope/pkg");
+					expect(runCommandSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.uninstallGlobal],
+						undefined,
+					);
+				});
+
+				it("maps project-local installs and uninstalls", async () => {
+					const manager = makeManager(managerCase.npmCommand);
+					const runCommandSpy = vi.spyOn(manager as any, "runCommand").mockResolvedValue(undefined);
+
+					await manager.install("npm:@scope/pkg", { local: true });
+					expect(runCommandSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.installInto(projectRoot())],
+						undefined,
+					);
+
+					runCommandSpy.mockClear();
+					await manager.remove("npm:@scope/pkg", { local: true });
+					expect(runCommandSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.uninstallFrom(projectRoot())],
+						undefined,
+					);
+				});
+
+				it("maps git dependency installs without dev dependencies", async () => {
+					const manager = makeManager(managerCase.npmCommand);
+					const targetDir = join(agentDir, "git", "github.com", "user", "repo");
+					const runCommandSpy = vi
+						.spyOn(manager as any, "runCommand")
+						.mockImplementation(async (...callArgs: unknown[]) => {
+							const [command, args] = callArgs as [string, string[]];
+							if (command === "git" && args[0] === "clone") {
+								mkdirSync(targetDir, { recursive: true });
+								writeFileSync(
+									join(targetDir, "package.json"),
+									JSON.stringify({ name: "repo", version: "1.0.0" }),
+								);
+							}
+						});
+
+					await manager.install("git:github.com/user/repo");
+
+					expect(runCommandSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.productionDeps],
+						{ cwd: targetDir },
+					);
+				});
+
+				it("maps latest version lookups and parses their output", async () => {
+					const manager = makeManager(managerCase.npmCommand);
+					const runCommandCaptureSpy = vi
+						.spyOn(manager as any, "runCommandCapture")
+						.mockResolvedValue(managerCase.latestVersionStdout);
+
+					await expect((manager as any).getLatestNpmVersion("@scope/pkg")).resolves.toBe("1.2.3");
+					expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+						managerCase.command,
+						[...managerCase.prefixArgs, ...managerCase.latestVersion],
+						expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
+					);
+				});
+
+				it("maps global module root lookups", () => {
+					const manager = makeManager(managerCase.npmCommand);
+					const base = join(tempDir, "global-base");
+					const runCommandSyncSpy = vi
+						.spyOn(manager as any, "runCommandSync")
+						.mockReturnValue(managerCase.globalRootStdout(base));
+
+					expect((manager as any).getGlobalNpmRoot()).toBe(managerCase.globalRoot(base));
+					expect(runCommandSyncSpy).toHaveBeenCalledWith(managerCase.command, [
+						...managerCase.prefixArgs,
+						...managerCase.globalRootArgs,
+					]);
+				});
+			});
+		}
+
+		it("detects the package manager behind a wrapper prefix", async () => {
+			const manager = makeManager(["mise", "exec", "node@20", "--", "pnpm"]);
+			const runCommandSpy = vi.spyOn(manager as any, "runCommand").mockResolvedValue(undefined);
+
+			await manager.install("npm:@scope/pkg");
+
+			expect(runCommandSpy).toHaveBeenCalledWith(
+				"mise",
+				["exec", "node@20", "--", "pnpm", "add", "-g", "@scope/pkg"],
+				undefined,
+			);
+		});
+	});
+
 	describe("npmCommand", () => {
 		it("should use npmCommand argv for npm installs", async () => {
 			settingsManager = SettingsManager.inMemory({
@@ -552,7 +771,7 @@ Content`,
 			);
 		});
 
-		it("should install git package dependencies with --omit=dev", async () => {
+		it("should install git package dependencies without dev dependencies", async () => {
 			const source = "git:github.com/user/repo";
 			const targetDir = join(agentDir, "git", "github.com", "user", "repo");
 			const runCommandSpy = vi
@@ -567,10 +786,10 @@ Content`,
 
 			await packageManager.install(source);
 
-			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
+			expect(runCommandSpy).toHaveBeenCalledWith("bun", ["install", "--production"], { cwd: targetDir });
 		});
 
-		it("should use plain install for git package dependencies when npmCommand is configured", async () => {
+		it("should map git package dependency installs onto the configured package manager", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["pnpm"],
 			});
@@ -594,10 +813,10 @@ Content`,
 
 			await packageManager.install(source);
 
-			expect(runCommandSpy).toHaveBeenCalledWith("pnpm", ["install"], { cwd: targetDir });
+			expect(runCommandSpy).toHaveBeenCalledWith("pnpm", ["install", "--prod"], { cwd: targetDir });
 		});
 
-		it("should update git package dependencies with --omit=dev", async () => {
+		it("should update git package dependencies without dev dependencies", async () => {
 			const source = "git:github.com/user/repo";
 			const targetDir = join(tempDir, ".prime", "agent", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
@@ -621,10 +840,10 @@ Content`,
 
 			await packageManager.update(source);
 
-			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
+			expect(runCommandSpy).toHaveBeenCalledWith("bun", ["install", "--production"], { cwd: targetDir });
 		});
 
-		it("should use plain install through npmCommand argv when updating git package dependencies", async () => {
+		it("should map npmCommand argv onto the configured manager when updating git package dependencies", async () => {
 			settingsManager = SettingsManager.inMemory({
 				npmCommand: ["mise", "exec", "node@20", "--", "pnpm"],
 			});
@@ -657,7 +876,7 @@ Content`,
 
 			await packageManager.update(source);
 
-			expect(runCommandSpy).toHaveBeenCalledWith("mise", ["exec", "node@20", "--", "pnpm", "install"], {
+			expect(runCommandSpy).toHaveBeenCalledWith("mise", ["exec", "node@20", "--", "pnpm", "install", "--prod"], {
 				cwd: targetDir,
 			});
 		});
@@ -1546,19 +1765,19 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
 
-			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue("1.2.3\n");
 			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
 
 			await packageManager.update("npm:example");
 
 			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
-				"npm",
-				["view", "example", "version", "--json"],
+				"bun",
+				["pm", "view", "example", "version"],
 				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
 			);
 			expect(runCommandSpy).toHaveBeenCalledWith(
-				"npm",
-				["install", "example@latest", "--prefix", join(tempDir, ".prime", "agent", "npm")],
+				"bun",
+				["add", "example@latest", "--cwd", join(tempDir, ".prime", "agent", "npm")],
 				undefined,
 			);
 		});
@@ -1569,14 +1788,14 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.2.3" }));
 			settingsManager.setProjectPackages(["npm:example"]);
 
-			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue("1.2.3\n");
 			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
 
 			await packageManager.update("npm:example");
 
 			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
-				"npm",
-				["view", "example", "version", "--json"],
+				"bun",
+				["pm", "view", "example", "version"],
 				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
 			);
 			expect(runCommandSpy).not.toHaveBeenCalled();
@@ -1629,20 +1848,20 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 				.spyOn(packageManager as any, "runCommandCapture")
 				.mockImplementation(async (...callArgs: unknown[]) => {
 					const [_command, args] = callArgs as [string, string[]];
-					if (args[0] !== "view") {
+					if (args[0] !== "pm" || args[1] !== "view") {
 						throw new Error(`Unexpected runCommandCapture args: ${args.join(" ")}`);
 					}
-					switch (args[1]) {
+					switch (args[2]) {
 						case "user-old":
 						case "project-old":
-							return '"2.0.0"';
+							return "2.0.0";
 						case "user-current":
 						case "project-current":
-							return '"1.0.0"';
+							return "1.0.0";
 						case "user-unknown":
 							throw new Error("registry unavailable");
 						default:
-							throw new Error(`Unexpected package lookup: ${args[1]}`);
+							throw new Error(`Unexpected package lookup: ${args[2]}`);
 					}
 				});
 
@@ -1652,7 +1871,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 				.spyOn(packageManager as any, "runCommand")
 				.mockImplementation(async (...callArgs: unknown[]) => {
 					const [command, args] = callArgs as [string, string[]];
-					if (command !== "npm") {
+					if (command !== "bun") {
 						throw new Error(`Unexpected runCommand call: ${command} ${args.join(" ")}`);
 					}
 					activeNpmUpdates += 1;
@@ -1676,20 +1895,14 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(runCommandSpy).toHaveBeenCalledTimes(2);
 			expect(runCommandSpy).toHaveBeenNthCalledWith(
 				1,
-				"npm",
-				["install", "-g", "user-old@latest", "user-unknown@latest"],
+				"bun",
+				["add", "-g", "user-old@latest", "user-unknown@latest"],
 				undefined,
 			);
 			expect(runCommandSpy).toHaveBeenNthCalledWith(
 				2,
-				"npm",
-				[
-					"install",
-					"project-old@latest",
-					"project-missing@latest",
-					"--prefix",
-					join(tempDir, ".prime", "agent", "npm"),
-				],
+				"bun",
+				["add", "project-old@latest", "project-missing@latest", "--cwd", join(tempDir, ".prime", "agent", "npm")],
 				undefined,
 			);
 			expect(updateGitSpy).toHaveBeenCalledTimes(3);
@@ -1816,15 +2029,15 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(gitUpdateSpy).not.toHaveBeenCalled();
 		});
 
-		it("should use npm view to fetch latest version", async () => {
-			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.2.3"');
+		it("should use bun pm view to fetch latest version", async () => {
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue("1.2.3\n");
 
 			const latest = await (packageManager as any).getLatestNpmVersion("example");
 			expect(latest).toBe("1.2.3");
 			expect(runCommandCaptureSpy).toHaveBeenCalledTimes(1);
 			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
-				"npm",
-				["view", "example", "version", "--json"],
+				"bun",
+				["pm", "view", "example", "version"],
 				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
 			);
 		});

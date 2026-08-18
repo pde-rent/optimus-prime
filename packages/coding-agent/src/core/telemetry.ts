@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { detectInstallMethod, VERSION } from "../config.js";
+import { isTruthyEnvVar, writeJsonAtomically } from "../utils/shared.js";
 import type { AgentSession, AgentSessionEvent } from "./agent-session.js";
 import type { AgentExecutionMode } from "./agent-session-config.js";
 import type { AuthCredential, AuthStatus } from "./auth-storage.js";
@@ -187,30 +188,15 @@ function mergeUsage(target: UsageTotals, usage: UsageTotals): void {
 	target.modelCallCount += usage.modelCallCount;
 }
 
-function parseBooleanOverride(value: string | undefined): boolean | undefined {
-	if (value === undefined) {
-		return undefined;
-	}
-	const normalized = value.trim().toLowerCase();
-	if (["1", "true", "yes", "on"].includes(normalized)) {
-		return true;
-	}
-	if (["0", "false", "no", "off"].includes(normalized)) {
-		return false;
-	}
-	return undefined;
-}
-
 export function isTelemetryEnabled(settingsManager: SettingsManager): boolean {
-	if (parseBooleanOverride(process.env.PI_OFFLINE) === true) {
+	if (isTruthyEnvVar(process.env.PI_OFFLINE)) {
 		return false;
 	}
-	if (parseBooleanOverride(process.env.DO_NOT_TRACK) === true) {
+	if (isTruthyEnvVar(process.env.DO_NOT_TRACK)) {
 		return false;
 	}
-	const override = parseBooleanOverride(process.env.PRIME_AGENT_TELEMETRY);
-	if (override !== undefined) {
-		return override;
+	if (process.env.PRIME_AGENT_TELEMETRY !== undefined) {
+		return isTruthyEnvVar(process.env.PRIME_AGENT_TELEMETRY);
 	}
 	if (process.env.NODE_ENV === "test") {
 		return false;
@@ -237,21 +223,7 @@ function readInstallationId(path: string): string | undefined {
 }
 
 function writeTelemetryStateAtomically(path: string, state: TelemetryState): void {
-	const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temporaryPath, JSON.stringify(state, null, 2), {
-			encoding: "utf8",
-			flag: "wx",
-			mode: 0o600,
-		});
-		renameSync(temporaryPath, path);
-	} finally {
-		try {
-			unlinkSync(temporaryPath);
-		} catch {
-			// The rename succeeded or the temporary file was never created.
-		}
-	}
+	writeJsonAtomically(path, state);
 }
 
 export function getOrCreateTelemetryInstallationId(agentDir: string, randomId: () => string = randomUUID): string {

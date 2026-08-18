@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { previewBashCommand, previewIpythonCode, previewPythonCode } from "../src/core/tools/code-preview.js";
+import { previewBashCommand, previewIpythonCode, previewJsCode } from "../src/core/tools/code-preview.js";
 
 describe("code preview", () => {
 	it("skips bash setup and previews the real command", () => {
@@ -15,35 +15,46 @@ describe("code preview", () => {
 		});
 	});
 
-	it("unwraps python heredocs in bash", () => {
+	it("still previews python project commands in bash cells", () => {
+		expect(previewBashCommand("set -e\nuv run pytest tests/test_thing.py")).toEqual({
+			language: "bash",
+			text: "pytest tests/test_thing.py",
+		});
+		expect(previewIpythonCode("%%bash\npython3 -m pytest tests")).toEqual({
+			language: "bash",
+			text: "pytest tests",
+		});
+	});
+
+	it("unwraps js heredocs in bash", () => {
 		const command = `set -e
-python3 - <<'PY'
-from pathlib import Path
-path = Path("package.json")
-text = path.read_text()
-path.write_text(text)
-PY`;
-		expect(previewBashCommand(command)).toEqual({ language: "python", text: "path.write_text(text)" });
+bun run /dev/stdin <<'JS'
+const p = "package.json";
+const text = await Bun.file(p).text();
+await Bun.write(p, text);
+JS`;
+		// `p` holds no slash, so it is not treated as a path variable (parity with the
+		// old python analyzer); the write statement itself is still the preview.
+		expect(previewBashCommand(command)).toEqual({ language: "js", text: "await Bun.write(p, text)" });
 	});
 
 	it("unwraps bash cells in ipython", () => {
 		const code = `%%bash
 set -e
-python3 - <<'PY'
-import json
-data = json.loads("{}")
-print(data.keys())
-PY`;
-		expect(previewIpythonCode(code)).toEqual({ language: "python", text: "data.keys()" });
+node --input-type=module <<'JS'
+const data = new Map(Object.entries({}));
+console.log(data.keys());
+JS`;
+		expect(previewIpythonCode(code)).toEqual({ language: "js", text: "data.keys()" });
 	});
 
-	it("prefers meaningful python effects over setup assignments", () => {
-		const code = `from pathlib import Path
-p = Path("packages/coding-agent/src/modes/interactive/components/ipython-cell.ts")
-txt = p.read_text()
-p.write_text(txt.replace("old", "new"))`;
-		expect(previewPythonCode(code)).toEqual({
-			language: "python",
+	it("prefers meaningful js effects over setup assignments", () => {
+		const code = `import { readFileSync } from "node:fs";
+const p = "packages/coding-agent/src/modes/interactive/components/ipython-cell.ts";
+const txt = await Bun.file(p).text();
+await Bun.write(p, txt.replace("old", "new"));`;
+		expect(previewJsCode(code)).toEqual({
+			language: "js",
 			text: "write packages/coding-agent/src/modes/interactive/components/ip…",
 		});
 	});
@@ -63,59 +74,115 @@ p.write_text(txt.replace("old", "new"))`;
 		});
 	});
 
-	it("extracts python subprocesses and control-block effects", () => {
-		const subprocessCode = `import subprocess
-subprocess.run(["npm", "run", "check"])
+	it("extracts js subprocesses and control-block effects", () => {
+		const subprocessCode = `const proc = Bun.spawn(["npm", "run", "check"]);
 `;
-		expect(previewPythonCode(subprocessCode)).toEqual({ language: "python", text: "npm check" });
+		expect(previewJsCode(subprocessCode)).toEqual({ language: "js", text: "npm check" });
 
-		const controlCode = `from pathlib import Path
-p = Path("packages/foo.ts")
-if p.exists():
-    p.unlink()
+		const controlCode = `import { unlink } from "node:fs/promises";
+const p = "packages/foo.ts";
+if (await Bun.file(p).exists()) {
+	await unlink(p);
+}
 `;
-		expect(previewPythonCode(controlCode)).toEqual({ language: "python", text: "delete packages/foo.ts" });
+		expect(previewJsCode(controlCode)).toEqual({ language: "js", text: "delete packages/foo.ts" });
+	});
+
+	it("summarises bun shell and child_process commands", () => {
+		expect(previewJsCode("await Bun.$`npm run check`;")).toEqual({ language: "js", text: "npm check" });
+		expect(previewJsCode('const out = execSync("git add packages/foo.ts");')).toEqual({
+			language: "js",
+			text: "git add packages/foo.ts",
+		});
+		expect(previewJsCode('Bun.spawnSync({ cmd: ["git", "commit", "-m", "wip"] });')).toEqual({
+			language: "js",
+			text: "git commit -m wip",
+		});
+	});
+
+	it("summarises node fs helpers and dynamic imports", () => {
+		expect(previewJsCode('const text = readFileSync("packages/foo.ts", "utf8");')).toEqual({
+			language: "js",
+			text: "read packages/foo.ts",
+		});
+		expect(previewJsCode('writeFileSync("packages/foo.ts", body);')).toEqual({
+			language: "js",
+			text: "write packages/foo.ts",
+		});
+		expect(previewJsCode('await writeFile("packages/foo.ts", body);')).toEqual({
+			language: "js",
+			text: "write packages/foo.ts",
+		});
+		expect(previewJsCode('const mod = await import("./src/core/tools/code-preview.js");')).toEqual({
+			language: "js",
+			text: "import src/core/tools/code-preview.js",
+		});
+	});
+
+	it("resolves simple path variables", () => {
+		const code = `const target = "packages/coding-agent/src/foo.ts";
+const before = await Bun.file(target).text();
+await Bun.write(target, before.toUpperCase());`;
+		expect(previewJsCode(code)).toEqual({
+			language: "js",
+			text: "write packages/coding-agent/src/foo.ts",
+		});
+	});
+
+	it("surfaces the inner call of a console.log", () => {
+		expect(previewJsCode("console.log(collectDiagnostics());")).toEqual({
+			language: "js",
+			text: "collectDiagnostics()",
+		});
+	});
+
+	it("skips imports, comments and literal setup lines", () => {
+		const code = `import { readFileSync } from "node:fs";
+// rebuild the index
+const limit = 10;
+
+runCheck();`;
+		expect(previewJsCode(code)).toEqual({ language: "js", text: "runCheck()" });
 	});
 
 	it("prefers executable calls over helper definitions", () => {
-		const code = `def helper():
-    return 1
-run_check()
+		const code = `function helper() {
+	return 1;
+}
+runCheck();
 `;
-		expect(previewPythonCode(code)).toEqual({ language: "python", text: "run_check()" });
+		expect(previewJsCode(code)).toEqual({ language: "js", text: "runCheck()" });
 	});
 
-	it("redacts sensitive python preview values", () => {
-		expect(previewPythonCode('password = "supersecretvalue"')).toEqual({
-			language: "python",
-			text: "password=<redacted>",
+	it("redacts sensitive js preview values", () => {
+		expect(previewJsCode('const password = "supersecretvalue";')).toEqual({
+			language: "js",
+			text: "const password=<redacted>",
 		});
-		expect(previewPythonCode('client = OpenAI(api_key="sk-testsecretvalue")')).toEqual({
-			language: "python",
-			text: "client = OpenAI(api_key=<redacted>)",
+		expect(previewJsCode('const client = new OpenAI({ apiKey: "sk-testsecretvalue" });')).toEqual({
+			language: "js",
+			text: 'const client = new OpenAI({ apiKey: "<redacted>" })',
 		});
 	});
 
 	it("falls back when heredoc has no useful preview", () => {
 		const command = `npm run check
-python3 - <<'PY'
-import json
-from pathlib import Path
-PY`;
+node --input-type=module <<'JS'
+import { readFileSync } from "node:fs";
+import path from "node:path";
+JS`;
 		expect(previewBashCommand(command)).toEqual({ language: "bash", text: "npm check" });
 	});
 
-	it("continues past empty python heredocs", () => {
-		const command = `python3 - <<'PY'
-import json
-from pathlib import Path
-PY
-python3 - <<'PY'
-from pathlib import Path
-p = Path("packages/foo.ts")
-p.write_text("hello")
-PY`;
-		expect(previewBashCommand(command)).toEqual({ language: "python", text: "write packages/foo.ts" });
+	it("continues past empty js heredocs", () => {
+		const command = `node --input-type=module <<'JS'
+import { readFileSync } from "node:fs";
+import path from "node:path";
+JS
+bun run /dev/stdin <<'JS'
+await Bun.write("packages/foo.ts", "hello");
+JS`;
+		expect(previewBashCommand(command)).toEqual({ language: "js", text: "write packages/foo.ts" });
 	});
 
 	it("does not treat a .sh script path as an inline bash heredoc", () => {
@@ -129,11 +196,9 @@ EOF`;
 		const command = `cat <<'CFG'
 key=value
 CFG
-python3 - <<'PY'
-from pathlib import Path
-p = Path("packages/foo.ts")
-p.write_text("hello")
-PY`;
-		expect(previewBashCommand(command)).toEqual({ language: "python", text: "write packages/foo.ts" });
+bun run /dev/stdin <<'JS'
+await Bun.write("packages/foo.ts", "hello");
+JS`;
+		expect(previewBashCommand(command)).toEqual({ language: "js", text: "write packages/foo.ts" });
 	});
 });

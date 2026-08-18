@@ -19,6 +19,7 @@ import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir, getSessionsDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
 import { readFirstLineSync } from "./utils/file-lines.js";
+import { ensureDir } from "./utils/shared.js";
 
 const MIGRATION_GUIDE_URL =
 	"https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md#extensions-migration";
@@ -120,9 +121,7 @@ export function migrateSessionsFromAgentRoot(): void {
 			const correctDir = getSessionsDir(agentDir);
 
 			// Create directory if needed
-			if (!existsSync(correctDir)) {
-				mkdirSync(correctDir, { recursive: true });
-			}
+			ensureDir(correctDir);
 
 			// Move the file
 			const newPath = join(correctDir, basename(file));
@@ -296,9 +295,7 @@ function migrateToolsToBin(): void {
 		const newPath = join(binDir, bin);
 
 		if (existsSync(oldPath)) {
-			if (!existsSync(binDir)) {
-				mkdirSync(binDir, { recursive: true });
-			}
+			ensureDir(binDir);
 			if (!existsSync(newPath)) {
 				try {
 					renameSync(oldPath, newPath);

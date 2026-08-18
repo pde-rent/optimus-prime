@@ -1,5 +1,6 @@
-// Host side of MCP integrations. The protocol itself runs Python-side in the kernel; the host
-// only registers OAuth providers, gates integration skills by auth, and serves mcp.* host-requests.
+// Host side of MCP integrations. The protocol itself runs in the REPL (see the bundled
+// linear/notion skills' mcp-client.js); the host only registers OAuth providers, gates
+// integration skills by auth, and serves mcp.* host-requests.
 
 import {
 	BUILTIN_MCP_CATALOG,
@@ -70,7 +71,7 @@ export class McpManager {
 			});
 		}
 		for (const [server, config] of Object.entries(this.getUserServers() ?? {})) {
-			if (config.type !== "http") continue; // stdio servers self-manage in Python
+			if (config.type !== "http") continue; // stdio servers self-manage in the skill
 			integrations.set(server, {
 				server,
 				label: server,
@@ -158,7 +159,7 @@ export class McpManager {
 			"mcp.refresh": async (payload) => {
 				const server = String(payload.server ?? "");
 				if (!server) throw new Error("mcp.refresh requires a server");
-				// getApiKey refreshes + rewrites auth.json under lock; Python re-reads.
+				// getApiKey refreshes + rewrites auth.json under lock; the skill re-reads.
 				// Surface failure (throw) instead of a false success so the kernel can
 				// report a refresh error rather than a misleading "not enabled".
 				const key = await this.authStorage.getApiKey(this.providerId(server));

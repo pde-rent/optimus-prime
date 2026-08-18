@@ -2,7 +2,7 @@
 
 This page collects day-to-day usage details that do not fit on the quickstart page.
 
-Prime Agent is built around one model-facing tool: a persistent IPython kernel. The kernel retains Python state across turns and acts as a control environment for file operations, project commands, installed Python skills, MCP-backed skills, and recursive subagents. The TypeScript host remains responsible for provider calls, session state, tool execution, scheduling, and child-agent lifecycles.
+Prime Agent is built around one model-facing tool: a persistent Bun JavaScript/TypeScript REPL. The tool is still named `ipython` for compatibility, but it executes JS/TS, not Python. The REPL retains JavaScript state across turns and acts as a control environment for file operations, project commands, installed JavaScript skills, MCP-backed skills, and recursive subagents. The TypeScript host remains responsible for provider calls, session state, tool execution, scheduling, and child-agent lifecycles.
 
 ## Interactive Mode
 
@@ -104,30 +104,30 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 Normal interactive sessions are persistent agents backed by isolated worker processes. Closing the TUI detaches the client; use `prime-agent agents`, `prime-agent list`, or `prime-agent attach <agent>` to find and reattach to running work. `prime-agent stop <agent>` stops one root agent, while `prime-agent shutdown` stops all workers and the local supervisor.
 
-Within a session, the model can delegate through the `rlm` callable already available in IPython:
+Within a session, the model can delegate through the `rlm` callable already available in the REPL:
 
-```python
-# Spawn independent children. Each call returns at admission with a child handle,
-# never the child's answer.
-review = await rlm(
-    "Review authentication and reply to the parent with findings.",
-    name="auth-reviewer",
-)
-tests = await rlm("Find missing regression tests and reply to the parent.", name="test-reviewer")
-docs = await rlm("Find stale public documentation and reply to the parent.", name="docs-reviewer")
+```js
+// Spawn independent children. Each call returns at admission with a child handle,
+// never the child's answer.
+const review = await rlm("Review authentication and reply to the parent with findings.", {
+  name: "auth-reviewer",
+});
+const tests = await rlm("Find missing regression tests and reply to the parent.", { name: "test-reviewer" });
+const docs = await rlm("Find stale public documentation and reply to the parent.", { name: "docs-reviewer" });
 
-# Children reply from their own sessions with:
-# await agent_message.send(message, receiver_role="parent")
-# Their replies arrive here as ordinary agent messages.
+// Children reply from their own sessions with:
+// await agent_message.send(message, { receiver_role: "parent" });
+// Their replies arrive here as ordinary agent messages.
 
-# Recover handles and follow up with a retained child.
-children = await rlm.list_subagents()
-await agent_message.send(
-    "Also check authorization boundaries.",
-    receiver_role="child",
-    receiver_name=review.name,
-)
+// Recover handles and follow up with a retained child.
+const { subagents } = await rlm.list_subagents();
+await agent_message.send("Also check authorization boundaries.", {
+  receiver_role: "child",
+  receiver_name: review.name,
+});
 ```
+
+Each handle carries the snake_case fields `rlm_child_id`, `name`, `session_dir`, and `model`.
 
 Children inherit the parent model unless the user requests another model. They run as TypeScript `AgentSession` instances under the same root worker and can use the same provider, tools, skills, session storage, and scheduling system. See [RLM Runtime Architecture](rlm-runtime.md).
 
@@ -233,7 +233,7 @@ Use `prime-agent session export <file> [output]` to export a session to HTML.
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `ipython`.
+Built-in tools: `ipython` (the persistent Bun JS/TS REPL; the tool name is kept for compatibility).
 
 ### Resource Options
 
@@ -279,7 +279,7 @@ For example, this noninteractive run uses a locally available model configuratio
 ```bash
 prime-agent -p \
   --autonomous \
-  --autonomous-gate "npm run check" \
+  --autonomous-gate "bun run check" \
   --autonomous-gate-retries 2 \
   --autonomous-gate-timeout-ms 300000 \
   --autonomous-max-continuations 3 \
@@ -343,7 +343,7 @@ prime-agent --model sonnet:high "Solve this complex problem"
 # Limit model cycling
 prime-agent --models "claude-*,gpt-4o"
 
-# Restrict to the built-in IPython tool
+# Restrict to the built-in REPL tool
 prime-agent --tools ipython -p "Review the code"
 ```
 
@@ -362,16 +362,16 @@ prime-agent --tools ipython -p "Review the code"
 | `PRIME_API_KEY` | Prime Inference API key; also used for trace sharing when it has `agent_traces` scope |
 | `PRIME_AGENT_TRACES_API_KEY` | Prime API key used only for opt-in trace sharing |
 | `PRIME_AGENT_TRACES_BASE_URL` | Override the Prime Agent trace upload API base URL |
-| `PRIME_AGENT_KERNEL_PYTHON` | Use an existing Python environment with `ipykernel` instead of bootstrapping `~/.prime/agent/kernel-venv` |
+| `PRIME_AGENT_REPL_SKILLS` | Host-set, not user-set: the agent session passes the JSON array of JavaScript-backed skills (`{name, global, entry}`) to preload into the REPL child. Setting it yourself has no effect on skill discovery |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 
 The remaining `PI_*` variables are compatibility names still read by the current runtime. They do not change the application name, command, or default `~/.prime/agent` configuration path.
 
 ## Design Principles
 
-Prime Agent keeps the model-facing tool surface small while making the IPython runtime powerful and composable. The built-in `ipython` tool provides durable state, project command execution, Python skills, MCP-backed integrations, and the native `rlm` delegation API without presenting each capability as a separate model tool.
+Prime Agent keeps the model-facing tool surface small while making the Bun REPL runtime powerful and composable. The built-in `ipython` tool provides durable state, project command execution, JavaScript skills, MCP-backed integrations, and the native `rlm` delegation API without presenting each capability as a separate model tool.
 
-Recursive subagents are a core capability, not an optional extension. The TypeScript host owns every parent and child agent loop so recursion uses the same provider, session, tool, skill, scheduling, usage-accounting, and recovery infrastructure. The Python `rlm` package is a thin host bridge rather than a separate agent implementation.
+Recursive subagents are a core capability, not an optional extension. The TypeScript host owns every parent and child agent loop so recursion uses the same provider, session, tool, skill, scheduling, usage-accounting, and recovery infrastructure. The REPL's `rlm` object is a thin host bridge rather than a separate agent implementation.
 
 Extensions, skills, prompt templates, themes, and Prime Agent packages remain the primary customization surfaces. They can add project-specific workflows, custom tools and UI, permission policies, provider integrations, and orchestration patterns around the built-in runtime.
 

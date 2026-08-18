@@ -45,6 +45,7 @@ import { canonicalSessionPath, getProcessStartId, SessionAlreadyActiveError } fr
 import { getSessionArtifactPathForFile, readSessionInfo, type SessionInfo } from "../../core/session-manager.js";
 import { SettingsManager } from "../../core/settings-manager.js";
 import { isProcessAlive, processIdExists, signalProcessGroupOrProcess } from "../../utils/child-process.js";
+import { writeJsonAtomically } from "../../utils/shared.js";
 import type { AgentConnectionHeartbeat } from "../agent-connection/types.js";
 import { attachJsonlLineReader, serializeJsonLine } from "../rpc/jsonl.js";
 import type { PrivateFrame } from "../session-worker/private-framing.js";
@@ -980,10 +981,7 @@ export class DaemonSupervisor {
 			socketPath: this.socketPath,
 			defaultSessionConfig: this.defaultSessionConfig,
 		};
-		const tempPath = `${this.supervisorConfigPath}.${process.pid}.tmp`;
-		writeFileSync(tempPath, `${JSON.stringify(persisted, null, 2)}\n`, { mode: 0o600 });
-		chmodSync(tempPath, 0o600);
-		renameSync(tempPath, this.supervisorConfigPath);
+		writeJsonAtomically(this.supervisorConfigPath, persisted);
 	}
 
 	private hasPersistedWorkerDescriptors(): boolean {
@@ -994,10 +992,7 @@ export class DaemonSupervisor {
 
 	private persistWorker(worker: ResidentWorker): void {
 		worker.descriptor.updatedAt = new Date().toISOString();
-		const tempPath = `${worker.descriptorPath}.${process.pid}.tmp`;
-		writeFileSync(tempPath, `${JSON.stringify(worker.descriptor, null, 2)}\n`, { mode: 0o600 });
-		chmodSync(tempPath, 0o600);
-		renameSync(tempPath, worker.descriptorPath);
+		writeJsonAtomically(worker.descriptorPath, worker.descriptor);
 	}
 
 	private deleteWorkerDescriptor(worker: ResidentWorker): void {

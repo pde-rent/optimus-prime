@@ -181,16 +181,16 @@ describe("buildSummarizationPrompt", () => {
 		expect(prompt).not.toContain("<user-instructions>");
 		expect(prompt).toContain("## Goal");
 		// The kernel keeps running across compaction — the note must not claim a wipe.
-		expect(prompt).toContain("IPython kernel keeps running");
+		expect(prompt).toContain("the REPL keeps running");
 		expect(prompt).not.toMatch(/wiped|restarted/);
 	});
 
-	it("includes user instructions in a delimited block before the kernel note", () => {
+	it("includes user instructions in a delimited block before the REPL note", () => {
 		const prompt = buildSummarizationPrompt("focus on the auth refactor, remember the migration command");
 		expect(prompt).toContain("<user-instructions>");
 		expect(prompt).toContain("focus on the auth refactor, remember the migration command");
 		expect(prompt).toContain("</user-instructions>");
-		expect(prompt.indexOf("</user-instructions>")).toBeLessThan(prompt.indexOf("IPython kernel"));
+		expect(prompt.indexOf("</user-instructions>")).toBeLessThan(prompt.indexOf("the REPL keeps running"));
 	});
 
 	it("uses the update template when a previous summary exists", () => {

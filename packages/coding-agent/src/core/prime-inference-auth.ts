@@ -1,19 +1,10 @@
 import { Buffer } from "node:buffer";
 import { constants, generateKeyPairSync, privateDecrypt } from "node:crypto";
-import {
-	chmodSync,
-	closeSync,
-	existsSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { OAuthAuthInfo } from "@earendil-works/pi-ai";
+import { readJsonFile, writeJsonAtomically } from "../utils/shared.js";
 
 export const PRIME_INFERENCE_PROVIDER_ID = "prime-inference";
 export const PRIME_INFERENCE_PROVIDER_NAME = "Prime Inference";
@@ -122,18 +113,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readPrimeCliConfigData(configPath: string): Record<string, unknown> {
-	let data: Record<string, unknown> = {};
-	if (existsSync(configPath)) {
-		try {
-			const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as unknown;
-			if (isRecord(parsed)) {
-				data = parsed;
-			}
-		} catch {
-			data = {};
-		}
-	}
-	return data;
+	const parsed = readJsonFile(configPath);
+	return isRecord(parsed) ? parsed : {};
 }
 
 function writePrimeCliConfigData(configPath: string, data: Record<string, unknown>): void {
@@ -141,26 +122,7 @@ function writePrimeCliConfigData(configPath: string, data: Record<string, unknow
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
 	}
-	const tempPath = join(
-		dir,
-		`.${basename(configPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
-	);
-	let fd: number | undefined = openSync(tempPath, "wx", 0o600);
-	try {
-		writeFileSync(fd, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
-		closeSync(fd);
-		fd = undefined;
-		chmodSync(tempPath, 0o600);
-		renameSync(tempPath, configPath);
-		chmodSync(configPath, 0o600);
-	} finally {
-		if (fd !== undefined) {
-			closeSync(fd);
-		}
-		if (existsSync(tempPath)) {
-			rmSync(tempPath, { force: true });
-		}
-	}
+	writeJsonAtomically(configPath, data);
 }
 
 function clearPrimeTeamFields(data: Record<string, unknown>): void {

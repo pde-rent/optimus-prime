@@ -33,7 +33,7 @@ This matters for clients:
 - Accept optional `\r\n` input by stripping a trailing `\r`
 - Do not use generic line readers that treat Unicode separators as newlines
 
-In particular, Node `readline` is not protocol-compliant for RPC mode because it also splits on `U+2028` and `U+2029`, which are valid inside JSON strings.
+In particular, most stock line readers (for example Node's `readline`, which Bun also provides through `node:readline`) are not protocol-compliant for RPC mode because they also split on `U+2028` and `U+2029`, which are valid inside JSON strings. Split the raw stream on `\n` yourself, as the Bun example below does.
 
 ## Commands
 
@@ -1361,40 +1361,53 @@ Created by the `bash` RPC command (not by LLM tool calls):
 }
 ```
 
-## Example: Basic Client (Python)
+## Example: Basic Client (Bun)
 
-```python
-import subprocess
-import json
+Save as `rpc-client.ts` and run with `bun rpc-client.ts`:
 
-proc = subprocess.Popen(
-    ["prime-agent", "--mode", "rpc", "--no-session"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    text=True
-)
+```typescript
+const proc = Bun.spawn(["prime-agent", "--mode", "rpc", "--no-session"], {
+  stdin: "pipe",
+  stdout: "pipe",
+});
 
-def send(cmd):
-    proc.stdin.write(json.dumps(cmd) + "\n")
-    proc.stdin.flush()
+function send(cmd: Record<string, unknown>): void {
+  proc.stdin.write(`${JSON.stringify(cmd)}\n`);
+  proc.stdin.flush();
+}
 
-def read_events():
-    for line in proc.stdout:
-        yield json.loads(line)
+// LF-only framing: never hand the stream to a generic line reader.
+async function* readEvents(): AsyncGenerator<Record<string, any>> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of proc.stdout) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let index = buffer.indexOf("\n");
+    while (index !== -1) {
+      let line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.length > 0) yield JSON.parse(line);
+      index = buffer.indexOf("\n");
+    }
+  }
+}
 
-# Send prompt
-send({"type": "prompt", "message": "Hello!"})
+// Send prompt
+send({ type: "prompt", message: "Hello!" });
 
-# Process events
-for event in read_events():
-    if event.get("type") == "message_update":
-        delta = event.get("assistantMessageEvent", {})
-        if delta.get("type") == "text_delta":
-            print(delta["delta"], end="", flush=True)
-    
-    if event.get("type") == "agent_end":
-        print()
-        break
+// Process events
+for await (const event of readEvents()) {
+  if (event.type === "message_update") {
+    const delta = event.assistantMessageEvent ?? {};
+    if (delta.type === "text_delta") process.stdout.write(delta.delta);
+  }
+
+  if (event.type === "agent_end") {
+    process.stdout.write("\n");
+    break;
+  }
+}
 ```
 
 ## Example: Interactive Client (Node.js)

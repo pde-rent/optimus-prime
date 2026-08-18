@@ -35,6 +35,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
+import { ensureDir } from "../utils/shared.js";
 import { sleep } from "../utils/sleep.js";
 import {
 	AGENT_MESSAGE_CUSTOM_TYPE,
@@ -88,6 +89,7 @@ import {
 	setAutonomousEnabled,
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
+import { BunReplProvisioner } from "./bun-repl/provisioner.js";
 import {
 	COMPACT_SKILL_NAME,
 	type CompactionResult,
@@ -96,6 +98,7 @@ import {
 	compact,
 	estimateContextTokens,
 	generateBranchSummary,
+	generateSummary,
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.js";
@@ -154,8 +157,6 @@ import {
 	validateGoalBudget,
 	validateGoalObjective,
 } from "./goals.js";
-import type { HostRequestHandlers, KernelSentAgentMessage } from "./kernel/index.js";
-import { type RestoreResult, snapshotPathIn } from "./kernel/state-snapshot.js";
 import type { McpManager } from "./mcp/mcp-manager.js";
 import {
 	type BashExecutionMessage,
@@ -180,10 +181,12 @@ import {
 	type AutoRefineReason,
 	type AutoRefineReview,
 	appendGlobalRefinement,
+	handleHarnessHostRequest as applyHarnessHostRequest,
 	applyRefinementProposal,
 	getGlobalHarnessStateDir,
 	getLocalHarnessStateDir,
 	getRefinementHistory,
+	HARNESS_HOST_REQUEST_TYPES,
 	type HarnessState,
 	inferRefinementResultScope,
 	loadGlobalRefinementHistory,
@@ -244,8 +247,9 @@ import {
 } from "./session-manager.js";
 import type { SessionStats } from "./session-stats.js";
 import type { SettingsManager } from "./settings-manager.js";
-import { getPythonSkillRuntimeInfo, type Skill } from "./skills.js";
+import { getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 import {
+	parseCompactCommandOptions,
 	parseRefineCommandOptions,
 	parseSessionSlashCommand,
 	parseSlashCommand,
@@ -256,7 +260,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
-import { IpythonKernelProvisioner } from "./tools/ipython.js";
+import type { HostRequestHandlers, KernelSentAgentMessage } from "./tools/kernel-types.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addAssistantUsage, emptyUsage } from "./usage.js";
 import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
@@ -1093,7 +1097,7 @@ export class AgentSession {
 	// re-populate the retained map after it's been cleared.
 	private _disposing = false;
 	private _disposeAsyncPromise?: Promise<void>;
-	private _ipythonKernelProvisioner?: IpythonKernelProvisioner;
+	private _ipythonKernelProvisioner?: BunReplProvisioner;
 	/** Artifact dir backing the current provisioner's kernel snapshot, if any. */
 	private _ipythonKernelSnapshotDir?: string;
 	/** True once the runtime has been built once; later builds are in-process rebuilds (/reload). */
@@ -1419,6 +1423,10 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * Persist and surface an agent message that a cell sent without awaiting it, so it
+	 * still lands on that cell's tool result instead of being dropped.
+	 */
 	private _recordLateIpythonSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): void {
 		const record = () => {
 			if (this._disposed || !this._rememberLateIpythonSentAgentMessage(toolCallId, message)) {
@@ -2844,6 +2852,25 @@ export class AgentSession {
 	 * fires it at the turn boundary. This prevents a deadlock that would occur
 	 * if refine() awaited agent idle from within the active tool call.
 	 */
+	/**
+	 * Handle a harness.* request from the kernel host bridge (`rlm.harness`).
+	 * The continual harness store stays host-owned; edits run through the same
+	 * validation/apply path as /refine. Writes target the session-local store
+	 * unless the caller passes `global: true`.
+	 */
+	handleHarnessHostRequest(type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+		return applyHarnessHostRequest(type, payload, {
+			globalDir: getGlobalHarnessStateDir(),
+			localDir: this._localHarnessStateDir(),
+			onStateChanged: () => {
+				// Match /refine: the system prompt embeds a harness-state block, so a
+				// write must be reflected before the next prompt build.
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+				this.agent.state.systemPrompt = this._baseSystemPrompt;
+			},
+		});
+	}
+
 	handleRefineHostRequest(type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
 		switch (type) {
 			case "refine.status": {
@@ -5687,10 +5714,16 @@ export class AgentSession {
 		try {
 			let resultText: string | undefined;
 			switch (input.command.name) {
-				case "compact":
-					await this.compact(input.command.args || undefined, {
+				case "compact": {
+					const compactOptions = parseCompactCommandOptions(input.command.args);
+					await this.compact(compactOptions.instructions, {
 						skipAbort: true,
+						force: compactOptions.force,
 					});
+					break;
+				}
+				case "summarize":
+					resultText = await this._summarizeSession(input.command.args);
 					break;
 				case "refine": {
 					const options = parseRefineCommandOptions(input.command.args);
@@ -5727,6 +5760,31 @@ export class AgentSession {
 			}
 			throw commandError;
 		}
+	}
+
+	/**
+	 * Produce a one-shot, read-only summary of the current session context. Unlike
+	 * compaction this does not rewrite session state; it only generates and returns
+	 * the summary text for the caller to surface to the user.
+	 */
+	private async _summarizeSession(customInstructions?: string): Promise<string> {
+		if (!this.model) {
+			throw new Error(formatNoModelSelectedMessage());
+		}
+		const { apiKey, headers } = await this._getRequiredRequestAuth(this.model);
+		const settings = this.settingsManager.getCompactionSettings();
+		const messages = this.sessionManager.buildSessionContext().messages;
+		return generateSummary(
+			messages,
+			this.model,
+			settings.reserveTokens,
+			apiKey,
+			headers,
+			undefined,
+			customInstructions || undefined,
+			undefined,
+			this.thinkingLevel,
+		);
 	}
 
 	private _appendDurableSessionCommandMessage(
@@ -6802,7 +6860,7 @@ export class AgentSession {
 					: " You have not defined any names yet.";
 		const content = [
 			"<ipython_state>",
-			`Your IPython kernel persisted through compaction; all variables, imports, and helpers you defined remain available.${detail}`,
+			`Your REPL persisted through compaction; all variables, imports, and helpers you defined remain available.${detail}`,
 			"</ipython_state>",
 		].join("\n");
 		const message = {
@@ -6825,20 +6883,20 @@ export class AgentSession {
 		this._emit({ type: "message_end", message });
 	}
 
-	private _onIpythonStateRestored(result: RestoreResult): void {
+	/**
+	 * Tell the model when a resumed session revived its REPL state, so it knows which
+	 * variables are actually available instead of assuming the REPL is the one it left.
+	 * Delivered as context before the next turn.
+	 */
+	private _onIpythonStateRestored(restoredNames: string[]): void {
 		const lines = ["<ipython_state_restored>"];
-		if (result.restored.length > 0) {
+		if (restoredNames.length > 0) {
 			lines.push(
-				`Your IPython kernel state was revived from your previous session. These names are available again: ${result.restored.join(", ")}.`,
+				`Your REPL state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}. Functions and closures are not revived — redefine any you need.`,
 			);
 		} else {
 			lines.push(
-				"Your previous IPython kernel state could not be revived; the kernel is starting fresh, so re-create any variables, imports, or loaded data you need.",
-			);
-		}
-		if (result.failed.length > 0) {
-			lines.push(
-				`These could not be restored and must be recreated if needed: ${result.failed.map((f) => f.name).join(", ")}.`,
+				"Your previous REPL state could not be revived; the REPL is starting fresh, so re-create any variables, imports, or loaded data you need.",
 			);
 		}
 		lines.push("</ipython_state_restored>");
@@ -6847,7 +6905,7 @@ export class AgentSession {
 				customType: IPYTHON_STATE_RESTORED_CUSTOM_TYPE,
 				content: lines.join("\n"),
 				display: true,
-				details: { restored: result.restored.length > 0 },
+				details: { restored: restoredNames.length > 0 },
 			},
 			{ deliverAs: "nextTurn" },
 		).catch(() => {});
@@ -6863,7 +6921,15 @@ export class AgentSession {
 		this.settingsManager.setFollowUpMode(mode);
 	}
 
-	async compact(customInstructions?: string, options: { skipAbort?: boolean } = {}): Promise<CompactionResult> {
+	/**
+	 * Manually compact the session context. Aborts current agent operation first.
+	 * @param options.force When true, compact even if it would otherwise be skipped as
+	 *                       already-compacted or too short (e.g. /compact --force).
+	 */
+	async compact(
+		customInstructions?: string,
+		options: { skipAbort?: boolean; force?: boolean } = {},
+	): Promise<CompactionResult> {
 		if (options.skipAbort && this.isStreaming) {
 			throw new Error("Cannot compact without aborting while the agent is running.");
 		}
@@ -6894,6 +6960,7 @@ export class AgentSession {
 				apiKey,
 				headers,
 				customInstructions,
+				force: options.force,
 				signal: this._compactionAbortController.signal,
 			});
 
@@ -6957,13 +7024,14 @@ export class AgentSession {
 		apiKey: string;
 		headers?: Record<string, string>;
 		customInstructions?: string;
+		force?: boolean;
 		signal: AbortSignal;
 	}): Promise<CompactionResult> {
-		const { model, apiKey, headers, customInstructions, signal } = options;
+		const { model, apiKey, headers, customInstructions, force, signal } = options;
 		const pathEntries = this.sessionManager.getBranch();
 		const settings = this.settingsManager.getCompactionSettings();
 
-		const preparation = prepareCompaction(pathEntries, settings);
+		const preparation = prepareCompaction(pathEntries, settings, force);
 		if (!preparation) {
 			const lastEntry = pathEntries[pathEntries.length - 1];
 			if (lastEntry?.type === "compaction") {
@@ -8410,7 +8478,6 @@ export class AgentSession {
 		flagValues?: Map<string, boolean | string>;
 		includeAllExtensionTools?: boolean;
 	}): void {
-		const pythonSkills = getPythonSkillRuntimeInfo(this._modelVisibleSkills());
 		let configuredBaseToolDefinitions: Record<string, ToolDefinition>;
 		if (this._baseToolsOverride) {
 			configuredBaseToolDefinitions = Object.fromEntries(
@@ -8430,22 +8497,23 @@ export class AgentSession {
 			// build (a genuine resume). A later rebuild (/reload) restores state silently
 			// for continuity — the conversation is unchanged, so there's nothing to flag.
 			const notifyRestore = !this._ipythonRuntimeBuilt;
-			this._ipythonKernelProvisioner = new IpythonKernelProvisioner(this._cwd, {
+			this._ipythonKernelProvisioner = new BunReplProvisioner({
+				cwd: this._cwd,
 				env: this._rlmKernelEnv(),
-				sessionId: this.sessionId,
 				hostHandlers: this._createKernelHostHandlers(),
-				pythonSkills,
 				snapshotDir: this._ipythonKernelSnapshotDir,
+				shellPath: this.settingsManager.getShellPath(),
+				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				readyGate: previousDispose,
-				onRestore: notifyRestore ? (result) => this._onIpythonStateRestored(result) : undefined,
+				onRestore: notifyRestore ? (names) => this._onIpythonStateRestored(names) : undefined,
+				onLateSentAgentMessage: (toolCallId, message) =>
+					this._recordLateIpythonSentAgentMessage(toolCallId, message),
 			});
 			configuredBaseToolDefinitions = createAllToolDefinitions(this._cwd, {
 				ipython: {
 					provisioner: this._ipythonKernelProvisioner,
-					commandPrefix: this.settingsManager.getShellCommandPrefix(),
-					shellPath: this.settingsManager.getShellPath(),
-					onLateSentAgentMessage: (toolCallId, message) =>
-						this._recordLateIpythonSentAgentMessage(toolCallId, message),
+					cwd: this._cwd,
+					env: this._rlmKernelEnv(),
 				},
 			});
 		}
@@ -8496,7 +8564,7 @@ export class AgentSession {
 		// came back before the first turn, rather than a turn later when the kernel
 		// would otherwise lazily start on first use.
 		const hasSnapshot =
-			!!this._ipythonKernelSnapshotDir && existsSync(snapshotPathIn(this._ipythonKernelSnapshotDir));
+			!!this._ipythonKernelSnapshotDir && existsSync(join(this._ipythonKernelSnapshotDir, "manifest.json"));
 		if ((this._prewarmIpythonKernel || hasSnapshot) && this.getActiveToolNames().includes("ipython")) {
 			this._ipythonKernelProvisioner?.prewarm();
 		}
@@ -8560,6 +8628,9 @@ export class AgentSession {
 			for (const type of ["refine.run", "refine.status"]) {
 				handlers[type] = async (payload) => this.handleRefineHostRequest(type, payload);
 			}
+		}
+		for (const type of HARNESS_HOST_REQUEST_TYPES) {
+			handlers[type] = async (payload) => this.handleHarnessHostRequest(type, payload);
 		}
 		if (this._rlmHeartbeatController) {
 			for (const type of [
@@ -8686,7 +8757,24 @@ export class AgentSession {
 			env.RLM_HARNESS_STATE_DIR = this._localHarnessStateDir() ?? getLocalHarnessStateDir(rlmSessionDir)!;
 		}
 		this._addWebsearchKeyEnv(env);
+		this._addReplSkillsEnv(env);
 		return env;
+	}
+
+	/**
+	 * Hand the REPL child the JS skills to preload. Each entry names the global the
+	 * skill is bound to and the ESM module the child imports to build it; the child
+	 * skips (and warns about) any entry that fails to load.
+	 */
+	private _addReplSkillsEnv(env: Record<string, string>): void {
+		const specs = getJsSkillRuntimeInfo(this._resourceLoader.getSkills().skills).map((skill) => ({
+			name: skill.name,
+			global: skill.importName,
+			entry: skill.entryPath,
+		}));
+		if (specs.length > 0) {
+			env.PRIME_AGENT_REPL_SKILLS = JSON.stringify(specs);
+		}
 	}
 
 	private _addWebsearchKeyEnv(env: Record<string, string>): void {
@@ -10845,9 +10933,7 @@ export class AgentSession {
 	exportToJsonl(outputPath?: string): string {
 		const filePath = resolve(outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
 		const dir = dirname(filePath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
+		ensureDir(dir);
 
 		const header: SessionHeader = {
 			type: "session",

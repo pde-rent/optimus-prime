@@ -5,8 +5,10 @@
 
 import { getLogger } from "@earendil-works/pi-ai";
 
+import { isTruthyEnvVar } from "../utils/shared.js";
+
 const log = getLogger("coding-agent.timings");
-const ENABLED = process.env.PI_TIMING === "1";
+const ENABLED = isTruthyEnvVar(process.env.PI_TIMING);
 const timings: Array<{ label: string; ms: number }> = [];
 let lastTime = Date.now();
 

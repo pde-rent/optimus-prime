@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import type { ResourceDiagnostic } from "../src/core/diagnostics.js";
 import {
 	formatSkillsForPrompt,
-	getPythonSkillRuntimeInfo,
+	getJsSkillRuntimeInfo,
 	loadSkills,
 	loadSkillsFromDir,
 	type Skill,
-	type SkillPythonMetadata,
+	type SkillJsMetadata,
 } from "../src/core/skills.js";
 import { createSyntheticSourceInfo } from "../src/core/source-info.js";
 
@@ -22,7 +22,7 @@ function createTestSkill(options: {
 	filePath: string;
 	baseDir: string;
 	disableModelInvocation?: boolean;
-	python?: SkillPythonMetadata;
+	js?: SkillJsMetadata;
 	source?: string;
 }): Skill {
 	const base = {
@@ -33,11 +33,11 @@ function createTestSkill(options: {
 		sourceInfo: createSyntheticSourceInfo(options.filePath, { source: options.source ?? "test" }),
 		disableModelInvocation: options.disableModelInvocation ?? false,
 	};
-	return options.python
+	return options.js
 		? {
 				...base,
-				kind: "python",
-				python: options.python,
+				kind: "js",
+				js: options.js,
 			}
 		: {
 				...base,
@@ -45,10 +45,9 @@ function createTestSkill(options: {
 			};
 }
 
-function writePythonSkill(root: string, name: string): void {
+function writeJsSkill(root: string, name: string): void {
 	const skillDir = join(root, name);
-	const importName = name.replaceAll("-", "_");
-	mkdirSync(join(skillDir, "src", importName), { recursive: true });
+	mkdirSync(skillDir, { recursive: true });
 	writeFileSync(
 		join(skillDir, "SKILL.md"),
 		`---
@@ -59,14 +58,7 @@ description: Test skill ${name}
 Use this skill for tests.
 `,
 	);
-	writeFileSync(
-		join(skillDir, "pyproject.toml"),
-		`[project]
-name = "${name}"
-version = "0.1.0"
-`,
-	);
-	writeFileSync(join(skillDir, "src", importName, "__init__.py"), "async def run():\n    return 'ok'\n");
+	writeFileSync(join(skillDir, "skill.js"), "export default () => ({ run: async () => 'ok' });\n");
 }
 
 describe("skills", () => {
@@ -263,8 +255,8 @@ describe("skills", () => {
 			expect(skills[0].disableModelInvocation).toBe(false);
 		});
 
-		it("should load Python-backed skills from the same skill root", () => {
-			const skillDir = join(fixturesDir, "python-skill");
+		it("should load JS-backed skills from the same skill root", () => {
+			const skillDir = join(fixturesDir, "js-skill");
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: skillDir,
 				source: "test",
@@ -272,38 +264,23 @@ describe("skills", () => {
 
 			expect(skills).toHaveLength(1);
 			expect(skills[0]).toMatchObject({
-				name: "python-skill",
-				kind: "python",
-				python: {
-					importName: "python_skill",
+				name: "js-skill",
+				kind: "js",
+				js: {
+					importName: "js_skill",
 					packagePath: skillDir,
-					pyprojectPath: join(skillDir, "pyproject.toml"),
+					entryPath: join(skillDir, "skill.js"),
 				},
 			});
-			expect(getPythonSkillRuntimeInfo(skills)).toEqual([
+			expect(getJsSkillRuntimeInfo(skills)).toEqual([
 				{
-					name: "python-skill",
-					importName: "python_skill",
+					name: "js-skill",
+					importName: "js_skill",
 					packagePath: skillDir,
-					pyprojectPath: join(skillDir, "pyproject.toml"),
+					entryPath: join(skillDir, "skill.js"),
 				},
 			]);
 			expect(diagnostics).toHaveLength(0);
-		});
-
-		it("should warn and keep metadata-only skills when Python package files are missing", () => {
-			const { skills, diagnostics } = loadSkillsFromDir({
-				dir: join(fixturesDir, "python-package-missing"),
-				source: "test",
-			});
-
-			expect(skills).toHaveLength(1);
-			expect(skills[0].kind).toBe("markdown");
-			expect(
-				diagnostics.some((d: ResourceDiagnostic) =>
-					d.message.includes("python skill package src/python_package_missing/__init__.py not found"),
-				),
-			).toBe(true);
 		});
 	});
 
@@ -334,25 +311,25 @@ describe("skills", () => {
 			expect(result).toContain("<location>/path/to/skill/SKILL.md</location>");
 		});
 
-		it("should include Python import metadata for Python-backed skills", () => {
+		it("should include JS binding metadata for JS-backed skills", () => {
 			const skills: Skill[] = [
 				createTestSkill({
-					name: "python-skill",
-					description: "A Python skill.",
+					name: "js-skill",
+					description: "A JS skill.",
 					filePath: "/path/to/skill/SKILL.md",
 					baseDir: "/path/to/skill",
-					python: {
-						importName: "python_skill",
+					js: {
+						importName: "js_skill",
 						packagePath: "/path/to/skill",
-						pyprojectPath: "/path/to/skill/pyproject.toml",
+						entryPath: "/path/to/skill/skill.js",
 					},
 				}),
 			];
 
 			const result = formatSkillsForPrompt(skills);
 
-			expect(result).toContain("<type>python</type>");
-			expect(result).toContain("<python_import>python_skill</python_import>");
+			expect(result).toContain("<type>js</type>");
+			expect(result).toContain("<js_binding>js_skill</js_binding>");
 		});
 
 		it("should include intro text before XML", () => {
@@ -370,8 +347,8 @@ describe("skills", () => {
 			const introText = result.substring(0, xmlStart);
 
 			expect(introText).toContain("The following skills provide specialized instructions");
-			expect(introText).toContain("Use ipython to inspect a skill's file");
-			expect(introText).toContain("Skills with a python_import are prepared");
+			expect(introText).toContain("to inspect a skill's file");
+			expect(introText).toContain("Skills with a js_binding are preloaded");
 		});
 
 		it("should escape XML special characters", () => {
@@ -498,11 +475,11 @@ describe("skills", () => {
 			expect(withTilde.length).toBe(withoutTilde.length);
 		});
 
-		it("should warn when Python skills share an import name", () => {
+		it("should warn when JS skills share a binding name", () => {
 			const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-skills-"));
 			try {
-				writePythonSkill(tempDir, "web-search");
-				writePythonSkill(tempDir, "web_search");
+				writeJsSkill(tempDir, "web-search");
+				writeJsSkill(tempDir, "web_search");
 
 				const { skills, diagnostics } = loadSkills({
 					agentDir: emptyAgentDir,
@@ -514,9 +491,7 @@ describe("skills", () => {
 				expect(skills.map((skill) => skill.name).sort()).toEqual(["web-search", "web_search"]);
 				expect(
 					diagnostics.some((d: ResourceDiagnostic) =>
-						d.message.includes(
-							'python import name "web_search" is shared by skills "web-search" and "web_search"',
-						),
+						d.message.includes('js binding name "web_search" is shared by skills "web-search" and "web_search"'),
 					),
 				).toBe(true);
 			} finally {

@@ -90,7 +90,7 @@ import type {
 } from "../../core/extensions/index.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
 import { emptyGoalState, formatGoalUsage, GOAL_CONTEXT_PREVIEW_LABEL, type GoalState } from "../../core/goals.js";
-import type { KernelSentAgentMessage } from "../../core/kernel/index.js";
+import { reloadHarnessModules } from "../../core/harness-reloader.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import {
 	bashOutputToText,
@@ -125,6 +125,7 @@ import {
 	captureOnboardingCompleted,
 	type TelemetryOnboardingOutcome,
 } from "../../core/telemetry.js";
+import type { KernelSentAgentMessage } from "../../core/tools/kernel-types.js";
 import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
 import { PRIME_BUTTERFLY_LOGO } from "../../themes/prime-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
@@ -4758,6 +4759,11 @@ export class InteractiveMode {
 					await this.handleReloadCommand();
 					return;
 				}
+				if (commandName === "reload:harness") {
+					this.editor.setText("");
+					await this.handleReloadHarnessCommand();
+					return;
+				}
 				if (commandName === "update") {
 					this.editor.setText("");
 					const updateArgs = parseCommandArgs(commandArgs);
@@ -8783,6 +8789,63 @@ export class InteractiveMode {
 			dismissReloadBox(previousEditor as Component);
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	/**
+	 * /reload:harness — hot-reload the fork's harness modules from source
+	 * mid-session. Same safety boundary as /reload: refused while the agent is
+	 * streaming or compacting, so an in-progress turn is never corrupted. The
+	 * reload only refreshes the harness module cache for future turns/actions;
+	 * already-instantiated singletons keep their running instance.
+	 */
+	private async handleReloadHarnessCommand(): Promise<void> {
+		if (this.isAgentStreaming()) {
+			this.showWarning("Wait for the current response to finish before reloading the harness.");
+			return;
+		}
+		if (this.isAgentCompacting()) {
+			this.showWarning("Wait for compaction to finish before reloading the harness.");
+			return;
+		}
+
+		this.echoLocalCommand("/reload:harness");
+		await this.renderHarnessReloadStatus(await reloadHarnessModules());
+	}
+
+	private async renderHarnessReloadStatus(summary: Awaited<ReturnType<typeof reloadHarnessModules>>): Promise<void> {
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.bold(theme.fg("mdHeading", "Harness reload")), 1, 0));
+		for (const result of summary.results) {
+			const statusText = !result.ok
+				? theme.fg("error", "FAIL")
+				: result.wired
+					? theme.fg("success", "reloaded")
+					: theme.fg("dim", "not wired");
+			const detail = result.ok ? "" : ` — ${result.error}`;
+			this.chatContainer.addChild(new Text(theme.fg("dim", `  ${result.id}: ${statusText}${detail}`), 1, 0));
+		}
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg(
+					"dim",
+					`${summary.wiredLoaded} wired reloaded, ${summary.dead} not wired, ${summary.failed} failed`,
+				),
+				1,
+				0,
+			),
+		);
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg(
+					"muted",
+					"Harness reload takes effect for new turns/actions; in-progress state is untouched. Dead modules are validated but not activated.",
+				),
+				1,
+				0,
+			),
+		);
+		this.ui.requestRender();
 	}
 
 	private async handleExportCommand(text: string): Promise<void> {

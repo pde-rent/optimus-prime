@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Measures daemon cold-start latency: spawn `--mode daemon` and poll the unix
  * socket until it accepts a connection. This is the readiness gate every

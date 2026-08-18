@@ -97,20 +97,14 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high", "xhigh"]);
 	});
 
-	it("includes only high/xhigh plus off for DeepSeek V4 Flash on opencode-go", () => {
-		const model = getModel("opencode-go", "deepseek-v4-flash");
-		expect(model).toBeDefined();
-		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high", "xhigh"]);
-	});
-
 	it("includes only high/xhigh plus off for DeepSeek V4 Flash on OpenRouter", () => {
 		const model = getModel("openrouter", "deepseek/deepseek-v4-flash");
 		expect(model).toBeDefined();
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high", "xhigh"]);
 	});
 
-	it("includes max but not xhigh for OpenRouter Opus 4.6 (openai-completions API)", () => {
-		const model = getModel("openrouter", "anthropic/claude-opus-4.6");
+	it("includes max but not xhigh for Prime Inference Opus 4.6 (openai-completions API)", () => {
+		const model = getModel("prime-inference", "anthropic/claude-opus-4.6");
 		expect(model).toBeDefined();
 		const levels = getSupportedThinkingLevels(model!);
 		expect(levels).toContain("max");
