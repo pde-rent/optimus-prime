@@ -1,4 +1,4 @@
-import { parse as partialParse } from "partial-json";
+import { parsePartialJson } from "./partial-json.js";
 
 const VALID_JSON_ESCAPES = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
 
@@ -109,16 +109,7 @@ export function parseStreamingJson<T = Record<string, unknown>>(partialJson: str
 	try {
 		return parseJsonWithRepair<T>(partialJson);
 	} catch {
-		try {
-			const result = partialParse(partialJson);
-			return (result ?? {}) as T;
-		} catch {
-			try {
-				const result = partialParse(repairJson(partialJson));
-				return (result ?? {}) as T;
-			} catch {
-				return {} as T;
-			}
-		}
+		const result = parsePartialJson(partialJson);
+		return (result ?? {}) as T;
 	}
 }
