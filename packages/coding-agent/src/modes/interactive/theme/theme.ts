@@ -602,13 +602,13 @@ let BUILTIN_THEMES: Record<string, ThemeJson> | undefined;
 function getBuiltinThemes(): Record<string, ThemeJson> {
 	if (!BUILTIN_THEMES) {
 		const themesDir = getThemesDir();
-		const primePath = path.join(themesDir, "prime.json");
-		const darkPath = path.join(themesDir, "dark.json");
-		const lightPath = path.join(themesDir, "light.json");
+		const read = (name: string) =>
+			JSON.parse(fs.readFileSync(path.join(themesDir, `${name}.json`), "utf-8")) as ThemeJson;
 		BUILTIN_THEMES = {
-			prime: JSON.parse(fs.readFileSync(primePath, "utf-8")) as ThemeJson,
-			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
-			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
+			optimus: read("optimus"),
+			prime: read("prime"),
+			dark: read("dark"),
+			light: read("light"),
 		};
 	}
 	return BUILTIN_THEMES;
@@ -812,8 +812,8 @@ function detectTerminalBackground(): "dark" | "light" {
 }
 
 function getDefaultTheme(): string {
-	// Prime brand is dark-first; only fall back to light when the terminal is light.
-	return detectTerminalBackground() === "light" ? "light" : "prime";
+	// Optimus is dark-first; only fall back to light when the terminal is light.
+	return detectTerminalBackground() === "light" ? "light" : "optimus";
 }
 
 // ============================================================================
@@ -951,13 +951,9 @@ export function onThemeChange(callback: () => void): void {
 function startThemeWatcher(): void {
 	stopThemeWatcher();
 
-	// Only watch if it's a custom theme (not built-in)
-	if (
-		!currentThemeName ||
-		currentThemeName === "prime" ||
-		currentThemeName === "dark" ||
-		currentThemeName === "light"
-	) {
+	// Only watch if it's a custom theme. Derived from the built-in registry so
+	// adding a built-in theme cannot leave a stale name list behind.
+	if (!currentThemeName || currentThemeName in getBuiltinThemes()) {
 		return;
 	}
 

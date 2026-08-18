@@ -321,6 +321,6 @@ describe("adaptive TUI theme colors", () => {
 		clearDefaultTerminalColors();
 		initTheme(undefined);
 
-		expect(theme.name).toBe("prime");
+		expect(theme.name).toBe("optimus");
 	});
 });
