@@ -87,6 +87,13 @@ import { AgentConnectionPromptAdmissionError } from "./types.js";
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 type DaemonCommandBody = DistributiveOmit<DaemonCommand, "id">;
+/** The command bodies that carry an `activeSessionId`, with that field removed. */
+type SessionScopedCommand<T> = T extends { activeSessionId?: string }
+	? "activeSessionId" extends keyof T
+		? T
+		: never
+	: never;
+type DaemonSessionCommandBody = DistributiveOmit<SessionScopedCommand<DaemonCommandBody>, "activeSessionId">;
 type DaemonSnapshotBegin = Extract<DaemonOutbound, { type: "session_snapshot_begin" }>;
 
 interface DaemonSnapshotAssembly {
@@ -434,33 +441,23 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async getSessionHeader(): Promise<AgentConnectionSessionHeader | undefined> {
-		const data = await this.requestData<{ header?: AgentConnectionSessionHeader | null }>({
+		const data = await this.sessionRequest<{ header?: AgentConnectionSessionHeader | null }>({
 			type: "get_session_header",
-			activeSessionId: this.activeSessionId,
 		});
 		return data.header ?? undefined;
 	}
 
 	async getCommands(): Promise<AgentConnectionSlashCommand[]> {
-		const data = await this.requestData<{ commands: AgentConnectionSlashCommand[] }>({
-			type: "get_commands",
-			activeSessionId: this.activeSessionId,
-		});
+		const data = await this.sessionRequest<{ commands: AgentConnectionSlashCommand[] }>({ type: "get_commands" });
 		return data.commands;
 	}
 
 	async getResourceSnapshot(): Promise<AgentConnectionResourceSnapshot> {
-		return this.requestData<AgentConnectionResourceSnapshot>({
-			type: "get_resource_snapshot",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentConnectionResourceSnapshot>({ type: "get_resource_snapshot" });
 	}
 
 	async getAvailableModels(): Promise<AgentConnectionModel[]> {
-		const data = await this.requestData<{ models: AgentConnectionModel[] }>({
-			type: "get_available_models",
-			activeSessionId: this.activeSessionId,
-		});
+		const data = await this.sessionRequest<{ models: AgentConnectionModel[] }>({ type: "get_available_models" });
 		return data.models;
 	}
 
@@ -479,17 +476,11 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async getSessionStats(): Promise<SessionStats> {
-		return this.requestData<SessionStats>({
-			type: "get_session_stats",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<SessionStats>({ type: "get_session_stats" });
 	}
 
 	async getContextTree(): Promise<ContextTreeNode> {
-		return this.requestData<ContextTreeNode>({
-			type: "get_context_tree",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<ContextTreeNode>({ type: "get_context_tree" });
 	}
 
 	async getSessionContext(): Promise<AgentConnectionSessionContext> {
@@ -525,10 +516,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async getQueue(): Promise<AgentConnectionQueueState> {
-		return this.requestData<AgentConnectionQueueState>({
-			type: "get_queue",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentConnectionQueueState>({ type: "get_queue" });
 	}
 
 	async mutateQueuedMessage(
@@ -550,10 +538,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async clearQueue(): Promise<AgentConnectionQueueState> {
-		return this.requestData<AgentConnectionQueueState>({
-			type: "clear_queue",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentConnectionQueueState>({ type: "clear_queue" });
 	}
 
 	async abortAndClearQueue(): Promise<AgentConnectionQueueState> {
@@ -621,19 +606,12 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async cancelCronJob(jobId: string): Promise<AgentCronJob> {
-		const data = await this.requestData<{ job: AgentCronJob }>({
-			type: "cron_cancel",
-			activeSessionId: this.activeSessionId,
-			jobId,
-		});
+		const data = await this.sessionRequest<{ job: AgentCronJob }>({ type: "cron_cancel", jobId });
 		return data.job;
 	}
 
 	async getHeartbeat(): Promise<AgentCronJob | undefined> {
-		const data = await this.requestData<{ heartbeat?: AgentCronJob | null }>({
-			type: "heartbeat_get",
-			activeSessionId: this.activeSessionId,
-		});
+		const data = await this.sessionRequest<{ heartbeat?: AgentCronJob | null }>({ type: "heartbeat_get" });
 		return data.heartbeat ?? undefined;
 	}
 
@@ -656,11 +634,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async updateHeartbeat(action: AgentHeartbeatUpdateAction): Promise<AgentCronJob | undefined> {
-		const data = await this.requestData<{ heartbeat?: AgentCronJob | null }>({
-			type: "heartbeat_update",
-			activeSessionId: this.activeSessionId,
-			action,
-		});
+		const data = await this.sessionRequest<{ heartbeat?: AgentCronJob | null }>({ type: "heartbeat_update", action });
 		return data.heartbeat ?? undefined;
 	}
 
@@ -674,61 +648,41 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async getAgentMessageStatus(): Promise<AgentSessionMessageSafetyStatus> {
-		return this.requestData<AgentSessionMessageSafetyStatus>({
-			type: "agent_messages_status",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentSessionMessageSafetyStatus>({ type: "agent_messages_status" });
 	}
 
 	async pauseAgentMessages(): Promise<AgentSessionMessageSafetyStatus> {
-		return this.requestData<AgentSessionMessageSafetyStatus>({
-			type: "agent_messages_pause",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentSessionMessageSafetyStatus>({ type: "agent_messages_pause" });
 	}
 
 	async resumeAgentMessages(): Promise<AgentSessionMessageSafetyStatus> {
-		return this.requestData<AgentSessionMessageSafetyStatus>({
-			type: "agent_messages_resume",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<AgentSessionMessageSafetyStatus>({ type: "agent_messages_resume" });
 	}
 
 	async clearAgentMessages(): Promise<number> {
-		return this.requestData<number>({
-			type: "agent_messages_clear",
-			activeSessionId: this.activeSessionId,
-		});
+		return this.sessionRequest<number>({ type: "agent_messages_clear" });
 	}
 
 	async getUserMessagesForForking(): Promise<AgentConnectionUserMessage[]> {
-		const data = await this.requestData<{ messages: AgentConnectionUserMessage[] }>({
+		const data = await this.sessionRequest<{ messages: AgentConnectionUserMessage[] }>({
 			type: "get_user_messages_for_forking",
-			activeSessionId: this.activeSessionId,
 		});
 		return data.messages;
 	}
 
 	async getLastAssistantText(): Promise<string | undefined> {
-		const data = await this.requestData<{ text?: string | null }>({
-			type: "get_last_assistant_text",
-			activeSessionId: this.activeSessionId,
-		});
+		const data = await this.sessionRequest<{ text?: string | null }>({ type: "get_last_assistant_text" });
 		return data.text ?? undefined;
 	}
 
 	async getSystemPrompt(): Promise<string> {
-		const data = await this.requestData<{ systemPrompt: string }>({
-			type: "get_system_prompt",
-			activeSessionId: this.activeSessionId,
-		});
+		const data = await this.sessionRequest<{ systemPrompt: string }>({ type: "get_system_prompt" });
 		return data.systemPrompt;
 	}
 
 	async getToolDefinition(name: string): Promise<AgentConnectionToolDefinition | undefined> {
-		const data = await this.requestData<{ toolDefinition?: AgentConnectionToolDefinition }>({
+		const data = await this.sessionRequest<{ toolDefinition?: AgentConnectionToolDefinition }>({
 			type: "get_tool_definition",
-			activeSessionId: this.activeSessionId,
 			name,
 		});
 		return data.toolDefinition;
@@ -884,11 +838,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async abortSideQuestion(id: string): Promise<boolean> {
-		const data = await this.requestData<{ aborted: boolean }>({
-			type: "abort_side_question",
-			activeSessionId: this.activeSessionId,
-			sideQuestionId: id,
-		});
+		const data = await this.sessionRequest<{ aborted: boolean }>({ type: "abort_side_question", sideQuestionId: id });
 		this.activeSideQuestionIds.delete(id);
 		return data.aborted;
 	}
@@ -986,18 +936,12 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async setModel(provider: string, modelId: string): Promise<AgentConnectionModel> {
-		return this.requestData<AgentConnectionModel>({
-			type: "set_model",
-			activeSessionId: this.activeSessionId,
-			provider,
-			modelId,
-		});
+		return this.sessionRequest<AgentConnectionModel>({ type: "set_model", provider, modelId });
 	}
 
 	async cycleModel(direction?: "forward" | "backward"): Promise<AgentConnectionModelCycleResult | undefined> {
-		const result = await this.requestData<AgentConnectionModelCycleResult | null>({
+		const result = await this.sessionRequest<AgentConnectionModelCycleResult | null>({
 			type: "cycle_model",
-			activeSessionId: this.activeSessionId,
 			direction,
 		});
 		return result ?? undefined;
@@ -1020,10 +964,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async cycleThinkingLevel(): Promise<ThinkingLevel | undefined> {
-		const result = await this.requestData<{ level: ThinkingLevel } | null>({
-			type: "cycle_thinking_level",
-			activeSessionId: this.activeSessionId,
-		});
+		const result = await this.sessionRequest<{ level: ThinkingLevel } | null>({ type: "cycle_thinking_level" });
 		return result?.level;
 	}
 
@@ -1048,11 +989,7 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		return this.requestData<CompactionResult>({
-			type: "compact",
-			activeSessionId: this.activeSessionId,
-			customInstructions,
-		});
+		return this.sessionRequest<CompactionResult>({ type: "compact", customInstructions });
 	}
 
 	async refine(
@@ -1093,9 +1030,8 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async newSession(options?: AgentConnectionNewSessionOptions): Promise<{ cancelled: boolean }> {
-		return this.requestData<{ cancelled: boolean }>({
+		return this.sessionRequest<{ cancelled: boolean }>({
 			type: "new_session",
-			activeSessionId: this.activeSessionId,
 			parentSession: options?.parentSession,
 		});
 	}
@@ -1208,9 +1144,8 @@ export class DaemonAgentConnection implements AgentConnection {
 		entryId: string,
 		options?: AgentConnectionForkOptions,
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
-		return this.requestData<{ cancelled: boolean; selectedText?: string }>({
+		return this.sessionRequest<{ cancelled: boolean; selectedText?: string }>({
 			type: "fork",
-			activeSessionId: this.activeSessionId,
 			entryId,
 			position: options?.position,
 		});
@@ -1220,9 +1155,8 @@ export class DaemonAgentConnection implements AgentConnection {
 		targetId: string,
 		options?: AgentConnectionNavigateTreeOptions,
 	): Promise<AgentConnectionNavigateTreeResult> {
-		return this.requestData<AgentConnectionNavigateTreeResult>({
+		return this.sessionRequest<AgentConnectionNavigateTreeResult>({
 			type: "navigate_tree",
-			activeSessionId: this.activeSessionId,
 			targetId,
 			summarize: options?.summarize,
 			customInstructions: options?.customInstructions,
@@ -1232,29 +1166,16 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
-		return this.requestData<{ cancelled: boolean }>({
-			type: "import_jsonl",
-			activeSessionId: this.activeSessionId,
-			inputPath,
-			cwdOverride,
-		});
+		return this.sessionRequest<{ cancelled: boolean }>({ type: "import_jsonl", inputPath, cwdOverride });
 	}
 
 	async exportToHtml(outputPath?: string): Promise<string> {
-		const data = await this.requestData<{ path: string }>({
-			type: "export_html",
-			activeSessionId: this.activeSessionId,
-			outputPath,
-		});
+		const data = await this.sessionRequest<{ path: string }>({ type: "export_html", outputPath });
 		return data.path;
 	}
 
 	async exportToJsonl(outputPath?: string): Promise<string> {
-		const data = await this.requestData<{ path: string }>({
-			type: "export_jsonl",
-			activeSessionId: this.activeSessionId,
-			outputPath,
-		});
+		const data = await this.sessionRequest<{ path: string }>({ type: "export_jsonl", outputPath });
 		return data.path;
 	}
 
@@ -1411,6 +1332,12 @@ export class DaemonAgentConnection implements AgentConnection {
 
 	private async requestOk(command: DaemonCommandBody): Promise<void> {
 		await this.requestData<unknown>(command);
+	}
+
+	/** Issue a session-scoped command; `activeSessionId` is filled in from the connection. */
+	private sessionRequest<T>(command: DaemonSessionCommandBody, timeoutMs?: number): Promise<T> {
+		// Spreading a discriminated union widens it; the cast re-narrows what the field types already proved.
+		return this.requestData<T>({ ...command, activeSessionId: this.activeSessionId } as DaemonCommandBody, timeoutMs);
 	}
 
 	private async requestData<T>(
