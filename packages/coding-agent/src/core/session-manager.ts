@@ -18,7 +18,7 @@ import {
 } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
-import { v7 as uuidv7 } from "uuid";
+import { v7 as uuidv7 } from "../utils/uuid.js";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
 import { readFirstLineSync, readLinesAsBuffers } from "../utils/file-lines.js";
 import { captureGitContext, type GitContext, gitContextsEqual } from "../utils/git.js";
