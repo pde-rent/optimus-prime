@@ -10,7 +10,7 @@ import { createInterface } from "node:readline";
 import { type Api, type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import { registerBuiltinMcpOAuthProviders } from "@earendil-works/pi-ai/mcp";
 import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pi-tui";
-import chalk from "chalk";
+import { color as chalk } from "./utils/ansi.js";
 import { type Args, type Mode, parseArgs } from "./cli/args.js";
 import { formatTopLevelHelp } from "./cli/command-registry.js";
 import {

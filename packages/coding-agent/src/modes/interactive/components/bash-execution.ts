@@ -1,5 +1,5 @@
 import { Container, Loader, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
+import { stripAnsi } from "../../../utils/ansi.js";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

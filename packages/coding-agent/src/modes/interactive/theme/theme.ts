@@ -13,7 +13,7 @@ import {
 	rgbTo256,
 	type SelectListTheme,
 } from "@earendil-works/pi-tui";
-import chalk from "chalk";
+import { color as chalk } from "../../../utils/ansi.js";
 import { type Static, type TProperties, Type } from "typebox";
 import type { Validator } from "typebox/compile";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";

@@ -2,7 +2,7 @@
  * One-time migrations that run on startup.
  */
 
-import chalk from "chalk";
+import { color as chalk } from "./utils/ansi.js";
 import {
 	type Dirent,
 	existsSync,

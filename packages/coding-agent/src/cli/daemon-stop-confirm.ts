@@ -11,7 +11,7 @@
  */
 
 import { createInterface } from "node:readline";
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import { isSessionBusy, type RunningDaemonProbe } from "./daemon-launch.js";
 
 /** Prompt for a yes/no answer at a TTY. Empty/anything-but-yes resolves false (default No). */

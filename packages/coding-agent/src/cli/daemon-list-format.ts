@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import { formatSessionDisplayId } from "../modes/daemon/daemon-session-id.js";
 import type { SessionSummary } from "../modes/daemon/daemon-session-list.js";
 

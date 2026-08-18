@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import { APP_NAME, getAgentDir, VERSION } from "../config.js";
 import { isOrphanProcessIdentityCurrent, readActiveOrphanProcesses } from "../core/orphan-process-journal.js";
 import { getProcessStartId } from "../core/session-lease.js";

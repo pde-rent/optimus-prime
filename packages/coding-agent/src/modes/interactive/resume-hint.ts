@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import chalk from "chalk";
+import { color as chalk } from "../../utils/ansi.js";
 import { APP_NAME } from "../../config.js";
 import type { SessionStats } from "../../core/session-stats.js";
 

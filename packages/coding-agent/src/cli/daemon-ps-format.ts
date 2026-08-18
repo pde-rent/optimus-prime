@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import type { DaemonInfo, DaemonStatus } from "./daemon-ps.js";
 
 type DaemonRow = {

@@ -1,5 +1,5 @@
 import type { ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
-import chalk from "chalk";
+import { color as chalk } from "./utils/ansi.js";
 import { spawn } from "child_process";
 import { readFileSync, rmSync, statSync } from "fs";
 import { resolve, sep } from "path";

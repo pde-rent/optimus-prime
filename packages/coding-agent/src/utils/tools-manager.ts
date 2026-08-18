@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import { color as chalk } from "./ansi.js";
 import { spawnSync } from "child_process";
 import extractZip from "extract-zip";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";

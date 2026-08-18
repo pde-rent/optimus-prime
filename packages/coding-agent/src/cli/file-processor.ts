@@ -1,6 +1,6 @@
 import { access, readFile, stat } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import { resolve } from "path";
 import { resolveReadPath } from "../core/tools/path-utils.js";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize.js";

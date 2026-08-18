@@ -4,7 +4,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Api, getLogger, type KnownProvider, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
-import chalk from "chalk";
+import { color as chalk } from "../utils/ansi.js";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.js";
 import { APP_NAME } from "../config.js";
