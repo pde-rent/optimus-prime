@@ -31,6 +31,7 @@ import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
 import { shouldUseWindowsShell } from "../utils/child-process.js";
 import { type GitSource, parseGitUrl } from "../utils/git.js";
 import { canonicalizePath, isLocalPath } from "../utils/paths.js";
+import { ensureDir } from "../utils/shared.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
 import { isStdoutTakenOver } from "./output-guard.js";
 import type { PackageSource, SettingsManager } from "./settings-manager.js";
@@ -1822,9 +1823,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private ensureNpmProject(installRoot: string): void {
-		if (!existsSync(installRoot)) {
-			mkdirSync(installRoot, { recursive: true });
-		}
+		ensureDir(installRoot);
 		this.ensureGitIgnore(installRoot);
 		const packageJsonPath = join(installRoot, "package.json");
 		if (!existsSync(packageJsonPath)) {
@@ -1834,9 +1833,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private ensureGitIgnore(dir: string): void {
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
+		ensureDir(dir);
 		const ignorePath = join(dir, ".gitignore");
 		if (!existsSync(ignorePath)) {
 			writeFileSync(ignorePath, "*\n!.gitignore\n", "utf-8");

@@ -1,6 +1,6 @@
 import { type ChildProcess, type StdioOptions, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession } from "../core/agent-session.js";
@@ -13,6 +13,7 @@ import {
 } from "../core/orphan-process-journal.js";
 import { SESSION_LEASE_OWNER_ID_ENV, SESSION_LEASES_ENABLED_ENV } from "../core/session-lease.js";
 import { attachJsonlLineReader, serializeJsonLine } from "../modes/rpc/jsonl.js";
+import { readJsonFile, writeJsonAtomically } from "../utils/shared.js";
 import { isHelpCommandRequest, PUBLIC_COMMAND_NAMES, REMOVED_COMMAND_NAMES } from "./command-registry.js";
 import { type CliSubprocessLaunchSpec, createCliSubprocessLaunchSpec } from "./subprocess-launch.js";
 
@@ -102,18 +103,15 @@ export function createOwnedWorkerLaunchSpec(
 }
 
 function readOwnedRecoveryDescriptor(path: string): OwnedSessionRecoveryDescriptor | undefined {
-	try {
-		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<OwnedSessionRecoveryDescriptor>;
-		if (
-			value.version === 1 &&
-			typeof value.sessionId === "string" &&
-			typeof value.cwd === "string" &&
-			(value.sessionFile === undefined || typeof value.sessionFile === "string")
-		) {
-			return value as OwnedSessionRecoveryDescriptor;
-		}
-	} catch {
-		// The worker may have stopped before creating a recoverable session.
+	const value = readJsonFile<Partial<OwnedSessionRecoveryDescriptor>>(path);
+	if (
+		value &&
+		value.version === 1 &&
+		typeof value.sessionId === "string" &&
+		typeof value.cwd === "string" &&
+		(value.sessionFile === undefined || typeof value.sessionFile === "string")
+	) {
+		return value as OwnedSessionRecoveryDescriptor;
 	}
 	return undefined;
 }
@@ -127,10 +125,7 @@ function writeOwnedRecoveryDescriptor(path: string, profile: OwnedSessionWorkerP
 		cwd: session.sessionManager.getCwd(),
 		updatedAt: new Date().toISOString(),
 	};
-	const tempPath = `${path}.${process.pid}.tmp`;
-	writeFileSync(tempPath, `${JSON.stringify(descriptor)}\n`, { mode: 0o600 });
-	chmodSync(tempPath, 0o600);
-	renameSync(tempPath, path);
+	writeJsonAtomically(path, descriptor);
 }
 
 export function installOwnedSessionRecoveryTracking(runtime: AgentSessionRuntime): void {

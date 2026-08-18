@@ -1,19 +1,10 @@
-import { randomUUID } from "node:crypto";
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../config.js";
+import { readJsonFile, writeJsonAtomically } from "../../utils/shared.js";
 import { serializeConversation } from "../compaction/utils.js";
 import { convertToLlm } from "../messages.js";
 import type { CustomEntry } from "../session-manager.js";
@@ -283,22 +274,14 @@ export function loadHarnessState(
 	scope: HarnessScope = "global",
 ): HarnessState {
 	const statePath = getHarnessStatePath(harnessStateDir);
-	if (!existsSync(statePath)) {
+	const raw = readJsonFile(statePath);
+	// loadHarnessState runs on every system-prompt build and before each /refine, so
+	// a corrupt or unreadable (or non-object) state file must degrade to empty rather
+	// than throw and break the session. The next saveHarnessState rewrites it cleanly.
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
 		return emptyHarnessState();
 	}
-	let parsed: Partial<HarnessState>;
-	try {
-		const raw = JSON.parse(readFileSync(statePath, "utf8"));
-		// loadHarnessState runs on every system-prompt build and before each /refine, so
-		// a corrupt or unreadable (or non-object) state file must degrade to empty rather
-		// than throw and break the session. The next saveHarnessState rewrites it cleanly.
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-			return emptyHarnessState();
-		}
-		parsed = raw as Partial<HarnessState>;
-	} catch {
-		return emptyHarnessState();
-	}
+	const parsed = raw as Partial<HarnessState>;
 	const state = emptyHarnessState();
 	state.schema = typeof parsed.schema === "number" ? parsed.schema : 1;
 	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
@@ -344,17 +327,8 @@ export function mergeHarnessStates(globalState: HarnessState, localState?: Harne
 
 export function saveHarnessState(harnessStateDir: string, state: HarnessState): string {
 	const statePath = getHarnessStatePath(harnessStateDir);
-	const tempPath = `${statePath}.${process.pid}.${randomUUID()}.tmp`;
 	mkdirSync(harnessStateDir, { recursive: true });
-	try {
-		const mode = existsSync(statePath) ? statSync(statePath).mode & 0o777 : 0o600;
-		writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode });
-		renameSync(tempPath, statePath);
-	} finally {
-		if (existsSync(tempPath)) {
-			unlinkSync(tempPath);
-		}
-	}
+	writeJsonAtomically(statePath, state);
 	return statePath;
 }
 

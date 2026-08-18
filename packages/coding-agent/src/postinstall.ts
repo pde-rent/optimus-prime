@@ -1,8 +1,9 @@
 import { ensureKernelPython } from "./core/kernel/bootstrap.js";
+import { isTruthyEnvVar } from "./utils/shared.js";
 import { ensureTool } from "./utils/tools-manager.js";
 
-const bootstrapKernel = process.env.PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL === "1";
-const bootstrapTools = process.env.PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL === "1";
+const bootstrapKernel = isTruthyEnvVar(process.env.PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL);
+const bootstrapTools = isTruthyEnvVar(process.env.PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL);
 
 if (!bootstrapKernel && !bootstrapTools) {
 	process.exit(0);

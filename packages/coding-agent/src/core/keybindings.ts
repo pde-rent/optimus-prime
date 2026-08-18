@@ -6,9 +6,9 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "@earendil-works/pi-tui";
-import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "../config.js";
+import { isRecord, readJsonFile } from "../utils/shared.js";
 
 export interface AppKeybindings {
 	"app.interrupt": true;
@@ -291,10 +291,6 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	treeToggleLabelTimestamp: "app.tree.toggleLabelTimestamp",
 } as const satisfies Record<string, Keybinding>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isLegacyKeybindingName(key: string): key is keyof typeof KEYBINDING_NAME_MIGRATIONS {
 	return key in KEYBINDING_NAME_MIGRATIONS;
 }
@@ -356,13 +352,8 @@ function orderKeybindingsConfig(config: Record<string, unknown>): Record<string,
 }
 
 function loadRawConfig(path: string): Record<string, unknown> | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
-		return isRecord(parsed) ? parsed : undefined;
-	} catch {
-		return undefined;
-	}
+	const parsed = readJsonFile(path);
+	return isRecord(parsed) ? parsed : undefined;
 }
 
 export class KeybindingsManager extends TuiKeybindingsManager {

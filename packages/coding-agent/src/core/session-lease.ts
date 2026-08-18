@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
+import { readJsonFile } from "../utils/shared.js";
 
 export const SESSION_LEASES_ENABLED_ENV = "PRIME_AGENT_INTERNAL_SESSION_LEASES";
 export const SESSION_LEASE_OWNER_ID_ENV = "PRIME_AGENT_INTERNAL_SESSION_LEASE_OWNER_ID";
@@ -84,21 +85,18 @@ export function canonicalSessionPath(sessionPath: string): string {
 }
 
 function readLeaseOwner(directory: string): SessionLeaseOwner | undefined {
-	try {
-		const parsed = JSON.parse(readFileSync(join(directory, "owner.json"), "utf8")) as Partial<SessionLeaseOwner>;
-		if (
-			parsed.version !== 1 ||
-			typeof parsed.token !== "string" ||
-			typeof parsed.pid !== "number" ||
-			typeof parsed.sessionPath !== "string" ||
-			typeof parsed.createdAt !== "string"
-		) {
-			return undefined;
-		}
-		return parsed as SessionLeaseOwner;
-	} catch {
+	const parsed = readJsonFile<Partial<SessionLeaseOwner>>(join(directory, "owner.json"));
+	if (
+		!parsed ||
+		parsed.version !== 1 ||
+		typeof parsed.token !== "string" ||
+		typeof parsed.pid !== "number" ||
+		typeof parsed.sessionPath !== "string" ||
+		typeof parsed.createdAt !== "string"
+	) {
 		return undefined;
 	}
+	return parsed as SessionLeaseOwner;
 }
 
 function isProcessAlive(pid: number): boolean {

@@ -1,9 +1,10 @@
 import type { ServiceTier, Transport } from "@earendil-works/pi-ai";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
+import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 
 const RECENT_MODELS_LIMIT = 20;
 export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
@@ -268,9 +269,7 @@ export class FileSettingsStorage implements SettingsStorage {
 			const next = fn(current);
 			if (next !== undefined) {
 				// Only create directory when we actually need to write
-				if (!existsSync(dir)) {
-					mkdirSync(dir, { recursive: true });
-				}
+				ensureDir(dir);
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
 				}
@@ -1124,7 +1123,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return isTruthyEnvVar(process.env.PI_CLEAR_ON_SHRINK);
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1139,7 +1138,7 @@ export class SettingsManager {
 	getFullscreen(): boolean {
 		// Env var overrides the setting (both directions) for one-off runs
 		if (process.env.PI_FULLSCREEN !== undefined) {
-			return process.env.PI_FULLSCREEN === "1";
+			return isTruthyEnvVar(process.env.PI_FULLSCREEN);
 		}
 		return this.settings.terminal?.fullscreen ?? true;
 	}
@@ -1232,7 +1231,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? isTruthyEnvVar(process.env.PI_HARDWARE_CURSOR);
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

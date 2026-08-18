@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { ensureDir } from "../utils/shared.js";
 import type { AgentSession } from "./agent-session.js";
 import type { AgentSessionRuntimeConfig } from "./agent-session-config.js";
 import type {
@@ -657,9 +658,7 @@ export class AgentSessionRuntime implements SubagentRuntimeHost {
 		}
 
 		const sessionDir = this.session.sessionManager.getSessionDir();
-		if (!existsSync(sessionDir)) {
-			mkdirSync(sessionDir, { recursive: true });
-		}
+		ensureDir(sessionDir);
 
 		const destinationPath = join(sessionDir, basename(resolvedPath));
 		const beforeResult = await this.emitBeforeSwitch("resume", destinationPath);

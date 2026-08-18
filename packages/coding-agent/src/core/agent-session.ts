@@ -50,6 +50,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
+import { ensureDir } from "../utils/shared.js";
 import { sleep } from "../utils/sleep.js";
 import {
 	AGENT_MESSAGE_CUSTOM_TYPE,
@@ -111,6 +112,7 @@ import {
 	compact,
 	estimateContextTokens,
 	generateBranchSummary,
+	generateSummary,
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.js";
@@ -261,6 +263,7 @@ import type { SessionStats } from "./session-stats.js";
 import type { SettingsManager } from "./settings-manager.js";
 import { getPythonSkillRuntimeInfo, type Skill } from "./skills.js";
 import {
+	parseCompactCommandOptions,
 	parseRefineCommandOptions,
 	parseSessionSlashCommand,
 	parseSlashCommand,
@@ -5812,10 +5815,16 @@ export class AgentSession {
 		try {
 			let resultText: string | undefined;
 			switch (input.command.name) {
-				case "compact":
-					await this.compact(input.command.args || undefined, {
+				case "compact": {
+					const compactOptions = parseCompactCommandOptions(input.command.args);
+					await this.compact(compactOptions.instructions, {
 						skipAbort: true,
+						force: compactOptions.force,
 					});
+					break;
+				}
+				case "summarize":
+					resultText = await this._summarizeSession(input.command.args);
 					break;
 				case "refine": {
 					const options = parseRefineCommandOptions(input.command.args);
@@ -5852,6 +5861,31 @@ export class AgentSession {
 			}
 			throw commandError;
 		}
+	}
+
+	/**
+	 * Produce a one-shot, read-only summary of the current session context. Unlike
+	 * compaction this does not rewrite session state; it only generates and returns
+	 * the summary text for the caller to surface to the user.
+	 */
+	private async _summarizeSession(customInstructions?: string): Promise<string> {
+		if (!this.model) {
+			throw new Error(formatNoModelSelectedMessage());
+		}
+		const { apiKey, headers } = await this._getRequiredRequestAuth(this.model);
+		const settings = this.settingsManager.getCompactionSettings();
+		const messages = this.sessionManager.buildSessionContext().messages;
+		return generateSummary(
+			messages,
+			this.model,
+			settings.reserveTokens,
+			apiKey,
+			headers,
+			undefined,
+			customInstructions || undefined,
+			undefined,
+			this.thinkingLevel,
+		);
 	}
 
 	private _appendDurableSessionCommandMessage(
@@ -7077,8 +7111,13 @@ export class AgentSession {
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
 	 * @param customInstructions Optional instructions for the compaction summary
+	 * @param options.force When true, compact even if it would otherwise be skipped as
+	 *                       already-compacted or too short (e.g. /compact --force).
 	 */
-	async compact(customInstructions?: string, options: { skipAbort?: boolean } = {}): Promise<CompactionResult> {
+	async compact(
+		customInstructions?: string,
+		options: { skipAbort?: boolean; force?: boolean } = {},
+	): Promise<CompactionResult> {
 		if (options.skipAbort && this.isStreaming) {
 			throw new Error("Cannot compact without aborting while the agent is running.");
 		}
@@ -7109,6 +7148,7 @@ export class AgentSession {
 				apiKey,
 				headers,
 				customInstructions,
+				force: options.force,
 				signal: this._compactionAbortController.signal,
 			});
 
@@ -7172,13 +7212,14 @@ export class AgentSession {
 		apiKey: string;
 		headers?: Record<string, string>;
 		customInstructions?: string;
+		force?: boolean;
 		signal: AbortSignal;
 	}): Promise<CompactionResult> {
-		const { model, apiKey, headers, customInstructions, signal } = options;
+		const { model, apiKey, headers, customInstructions, force, signal } = options;
 		const pathEntries = this.sessionManager.getBranch();
 		const settings = this.settingsManager.getCompactionSettings();
 
-		const preparation = prepareCompaction(pathEntries, settings);
+		const preparation = prepareCompaction(pathEntries, settings, force);
 		if (!preparation) {
 			const lastEntry = pathEntries[pathEntries.length - 1];
 			if (lastEntry?.type === "compaction") {
@@ -11177,9 +11218,7 @@ export class AgentSession {
 	exportToJsonl(outputPath?: string): string {
 		const filePath = resolve(outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
 		const dir = dirname(filePath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
+		ensureDir(dir);
 
 		const header: SessionHeader = {
 			type: "session",

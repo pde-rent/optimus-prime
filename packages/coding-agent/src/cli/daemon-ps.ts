@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import chalk from "chalk";
 import { APP_NAME, getAgentDir, VERSION } from "../config.js";
@@ -15,6 +15,7 @@ import { defaultDaemonSocketDir, defaultDaemonSocketPath } from "../modes/daemon
 import { acquireDaemonShutdownAdmission } from "../modes/daemon/daemon-supervisor-ownership.js";
 import type { DaemonWorkerDescriptor } from "../modes/daemon/daemon-worker-protocol.js";
 import { signalProcessGroupOrProcess } from "../utils/child-process.js";
+import { readJsonFile } from "../utils/shared.js";
 import { formatDaemonListTable } from "./daemon-ps-format.js";
 import { promptYesNo } from "./daemon-stop-confirm.js";
 
@@ -1010,13 +1011,9 @@ function findAllTrackedWorkers(): TrackedWorker[] {
 				continue;
 			}
 			const descriptorPath = join(directory, fileName);
-			try {
-				const value: unknown = JSON.parse(readFileSync(descriptorPath, "utf8"));
-				if (isTrackedWorkerDescriptor(value)) {
-					workers.push({ descriptor: value, descriptorPath });
-				}
-			} catch {
-				// Invalid or concurrently removed descriptors are not safe shutdown targets.
+			const value = readJsonFile(descriptorPath);
+			if (value && isTrackedWorkerDescriptor(value)) {
+				workers.push({ descriptor: value, descriptorPath });
 			}
 		}
 	}

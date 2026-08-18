@@ -16,7 +16,7 @@ describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter cache_write repro E
 		retry: 2,
 		timeout: 90000,
 	}, async () => {
-		const model = getModel("openrouter", "google/gemini-2.5-flash");
+		const model = getModel("openrouter", "google/gemini-2.5-pro-preview");
 		const context = {
 			systemPrompt: createLongSystemPrompt(),
 			messages: [

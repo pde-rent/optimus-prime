@@ -306,7 +306,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
+			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 			console.log(`\nCloudflare Workers AI / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, {
@@ -330,7 +330,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
+			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 			console.log(`\nCloudflare AI Gateway / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, {
@@ -351,7 +351,7 @@ describe("totalTokens field", () => {
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face", () => {
 		it("Kimi-K2.5 - should return totalTokens equal to sum of components", { retry: 3, timeout: 60000 }, async () => {
-			const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
+			const llm = getModel("prime-inference", "moonshotai/kimi-k2.5");
 
 			console.log(`\nHugging Face / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.HF_TOKEN });
@@ -436,7 +436,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("xiaomi", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 
 			console.log(`\nXiaomi MiMo / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.XIAOMI_API_KEY });
@@ -458,7 +458,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 
 			console.log(`\nXiaomi MiMo Token Plan CN / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, {
@@ -482,7 +482,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 
 			console.log(`\nXiaomi MiMo Token Plan AMS / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, {
@@ -506,7 +506,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
+			const llm = getModel("openrouter", "xiaomi/mimo-v2.5-pro");
 
 			console.log(`\nXiaomi MiMo Token Plan SGP / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, {
@@ -549,7 +549,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
+			const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
 
 			console.log(`\nVercel AI Gateway / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.AI_GATEWAY_API_KEY });
@@ -571,7 +571,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("openrouter", "anthropic/claude-sonnet-4");
+			const llm = getModel("openrouter", "anthropic/claude-opus-4");
 
 			console.log(`\nOpenRouter / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.OPENROUTER_API_KEY });
@@ -619,7 +619,7 @@ describe("totalTokens field", () => {
 			retry: 3,
 			timeout: 60000,
 		}, async () => {
-			const llm = getModel("openrouter", "google/gemini-2.5-flash");
+			const llm = getModel("openrouter", "google/gemini-2.5-pro-preview");
 
 			console.log(`\nOpenRouter / ${llm.id}:`);
 			const { first, second } = await testTotalTokensWithCache(llm, { apiKey: process.env.OPENROUTER_API_KEY });

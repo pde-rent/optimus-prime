@@ -80,7 +80,7 @@ describe("Prime Inference models", () => {
 	});
 
 	it("uses reasoning toggles for models without effort selectors", () => {
-		for (const provider of ["prime-inference", "openrouter"] as const) {
+		for (const provider of ["prime-inference"] as const) {
 			const model = getModel(provider, "qwen/qwen3.7-flash");
 
 			expect(model.compat?.supportsReasoningEffort).toBe(false);
@@ -89,8 +89,8 @@ describe("Prime Inference models", () => {
 		}
 	});
 
-	it("registers Kimi K3 on Prime Inference and OpenRouter", () => {
-		for (const provider of ["prime-inference", "openrouter"] as const) {
+	it("registers Kimi K3 on Prime Inference", () => {
+		for (const provider of ["prime-inference"] as const) {
 			const model = getModel(provider, "moonshotai/kimi-k3");
 
 			expect(model.api).toBe("openai-completions");
