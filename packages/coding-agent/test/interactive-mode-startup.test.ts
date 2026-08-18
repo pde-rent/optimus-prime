@@ -8,6 +8,7 @@ import {
 	InteractiveMode,
 	START_HINTS,
 } from "../src/modes/interactive/interactive-mode.js";
+import type { PromptStashState } from "../src/modes/interactive/prompt-stash-state.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
 import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
 
@@ -86,22 +87,28 @@ describe("InteractiveMode startup hints", () => {
 			"model   deepseek/deepseek-v4-flash-0731",
 			"cwd     /tmp/project",
 		];
-		const blockWidth = Math.max(...metaLines.map((line) => line.length));
+		// The block reserves one blank row above the brand line and one blank column to its left, so
+		// the text has clear space rather than sitting flush against the mark's ink.
+		const blockRows = metaLines.length + 1;
+		const blockWidth = Math.max(...metaLines.map((line) => line.length)) + 1;
 		const blockStart = canvasWidth - blockWidth;
-		const blockTop = artRows.length - metaLines.length;
+		const blockTop = artRows.length - blockRows;
 
 		// Rows above the block keep the mark byte for byte.
 		for (const [index, row] of artRows.slice(0, blockTop).entries()) {
 			expect(row.trimEnd()).toBe(logoRows[index]);
 		}
 
+		// The block's first row is blank across its whole width.
+		expect(artRows[blockTop]?.slice(blockStart, canvasWidth).trim()).toBe("");
+
 		for (const [index, meta] of metaLines.entries()) {
-			const row = artRows[blockTop + index] ?? "";
+			const row = artRows[blockTop + 1 + index] ?? "";
 			// Right-aligned against the art canvas, not against the trimmed row.
-			expect(row.slice(blockStart, canvasWidth).trimEnd()).toBe(meta);
-			// One blank gutter column keeps the ink from touching the text.
+			expect(row.slice(blockStart, canvasWidth).trimEnd()).toBe(` ${meta}`);
+			// A blank gutter column keeps the ink from touching the text.
 			expect(row[blockStart - 1]).toBe(" ");
-			expect(row.slice(0, blockStart - 1)).toBe((logoRows[blockTop + index] ?? "").slice(0, blockStart - 1));
+			expect(row.slice(0, blockStart - 1)).toBe((logoRows[blockTop + 1 + index] ?? "").slice(0, blockStart - 1));
 		}
 
 		expect(rendered.some((row) => row.includes("type to search sessions"))).toBe(true);
@@ -173,7 +180,7 @@ describe("InteractiveMode startup hints", () => {
 		expect(returnToAgentsView).toHaveBeenCalledOnce();
 	});
 
-	it("explains why a draft blocks the destructive agents-view handoff", async () => {
+	it("no longer blocks the agents-view handoff on a draft", async () => {
 		const returnToAgentsView = vi.fn(async () => {});
 		const showStatus = vi.fn();
 		const mode = Object.assign(
@@ -183,8 +190,51 @@ describe("InteractiveMode startup hints", () => {
 
 		await Reflect.get(InteractiveMode.prototype, "requestAgentsView").call(mode);
 
-		expect(returnToAgentsView).not.toHaveBeenCalled();
-		expect(showStatus).toHaveBeenCalledWith("Send, stash, or clear your draft before opening agents");
+		expect(returnToAgentsView).toHaveBeenCalledOnce();
+		expect(showStatus).not.toHaveBeenCalled();
+	});
+
+	it("no longer blocks the scoped agents-view handoff on a draft", async () => {
+		const returnToAgentsView = vi.fn(async () => {});
+		const showStatus = vi.fn();
+		const mode = Object.assign(
+			createMode(false, true, () => "scoped draft"),
+			{ returnToAgentsView, showStatus },
+		);
+
+		await Reflect.get(InteractiveMode.prototype, "openScopedAgentsView").call(mode);
+
+		expect(returnToAgentsView).toHaveBeenCalledWith("scoped_agents_view");
+		expect(showStatus).not.toHaveBeenCalled();
+	});
+
+	it("stashes the draft once per agents-view handoff even when re-requested mid-teardown", async () => {
+		const promptStashState: PromptStashState = {};
+		let resolveDispose!: () => void;
+		const disposePromise = new Promise<void>((resolve) => {
+			resolveDispose = resolve;
+		});
+		const mode = Object.assign(
+			createMode(false, true, () => "draft prompt"),
+			{
+				promptStashState,
+				pastedImages: new Map(),
+				isShuttingDown: false,
+				agentsViewRequest: undefined,
+				unregisterSignalHandlers: vi.fn(),
+				teardownSessionUi: vi.fn(async () => {}),
+				agentConnection: { dispose: vi.fn(() => disposePromise) },
+			},
+		);
+		const returnToAgentsView = Reflect.get(InteractiveMode.prototype, "returnToAgentsView");
+
+		const firstHandoff = returnToAgentsView.call(mode);
+		await returnToAgentsView.call(mode);
+
+		expect(promptStashState.stash).toMatchObject({ text: "draft prompt", restoreOnOpen: true });
+		expect(promptStashState.queuedStashes).toBeUndefined();
+		resolveDispose();
+		await firstHandoff;
 	});
 
 	it("opens the shared session view on back navigation for process-local chats", async () => {
