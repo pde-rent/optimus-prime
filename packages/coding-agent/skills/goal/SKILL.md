@@ -1,28 +1,28 @@
 ---
 name: goal
-description: Manage the persistent thread goal from IPython. Use to read goal status and budget usage, to start a goal when the user explicitly asks for one, or to mark the active goal complete once its objective is fully achieved.
+description: Manage the persistent thread goal from the REPL. Use to read goal status and budget usage, to start a goal when the user explicitly asks for one, or to mark the active goal complete once its objective is fully achieved.
 ---
 
 # Goal
 
 The thread goal is a persistent objective the harness keeps re-prompting you to
 pursue across turns until it is complete. Goal state (status, token budget,
-usage accounting) lives in the host; this skill is the kernel-side interface to
-it. Call it directly from IPython:
+usage accounting) lives in the host; this skill is the REPL-side interface to
+it. Call it directly:
 
-```python
-await goal.get()
-await goal.create("ship the release notes", token_budget=200000)
-await goal.complete()
+```js
+await goal.get();
+await goal.create("ship the release notes", 200000);
+await goal.complete();
 ```
 
 ## API
 
-- `await goal.get()` — current goal as a dict: `goal` (or `None` when no goal
-  is set), `remaining_tokens`, and `completion_budget_report`. The `goal` dict
+- `await goal.get()` — current goal: `goal` (or `null` when no goal
+  is set), `remaining_tokens`, and `completion_budget_report`. The `goal` object
   carries `objective`, `status`, `token_budget`, `tokens_used`,
   `time_used_seconds`, and timestamps.
-- `await goal.create(objective, token_budget=None)` — start a new active goal.
+- `await goal.create(objective, tokenBudget?)` — start a new active goal.
   Fails while a goal is still pending (active, paused, or budget-limited); a
   completed or errored goal is replaced by the new one. Only create a goal when
   the user or system/developer instructions explicitly ask for a persistent

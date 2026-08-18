@@ -4,17 +4,19 @@ Connect external services (Linear, Notion, …) to Prime Agent over the
 [Model Context Protocol](https://modelcontextprotocol.io).
 
 Consistent with Prime Agent's single-tool design, MCP integrations are **not**
-exposed as new agent tools. Each integration is a [Python-backed skill](skills.md)
-that the model imports and calls from the IPython kernel:
+exposed as new agent tools. Each integration is a [JS-backed skill](skills.md)
+bound as a global in the persistent JavaScript REPL, which the model calls
+directly:
 
-```python
-import linear
-issues = await linear.list_issues(team="Engineering")
+```js
+const issues = await linear.list_issues({ team: "Engineering" });
 ```
 
-The MCP connection runs inside the kernel via the official `mcp` Python SDK. The
-host's only jobs are interactive login (browser OAuth) and minting/refreshing
-credentials in `auth.json`.
+The MCP connection is spoken from the REPL: MCP Streamable HTTP (JSON-RPC 2.0
+over `fetch`, handling both plain-JSON and `text/event-stream` responses), with
+no npm dependencies. The host's only jobs are interactive login (browser OAuth),
+minting/refreshing credentials in `auth.json`, and resolving the server's URL and
+headers.
 
 ## Table of Contents
 
@@ -22,9 +24,9 @@ credentials in `auth.json`.
 - [How a call works](#how-a-call-works)
 - [Authoring your own integration](#authoring-your-own-integration)
   - [1. Declare the server](#1-declare-the-server)
-  - [2. Ship the skill package](#2-ship-the-skill-package)
+  - [2. Ship the skill](#2-ship-the-skill)
   - [Authentication](#authentication)
-- [The `McpIntegration` API](#the-mcpintegration-api)
+- [The MCP skill API](#the-mcp-skill-api)
 - [Enable-by-login lifecycle](#enable-by-login-lifecycle)
 - [Caveats](#caveats)
 
@@ -34,8 +36,8 @@ Built-in integrations (Linear, Notion) ship **disabled**. Logging in enables the
 
 - Open `/login`, switch to **MCP Connections**, pick the integration, and
   complete OAuth in the browser. `/mcp login <name>` does the same from the CLI.
-- Once connected, the integration's skill becomes visible to the model and is
-  auto-imported into the kernel.
+- Once connected, the integration's skill becomes visible to the model and its
+  `skill.js` is preloaded into the REPL as a global.
 - `/mcp` lists integrations and connection status; `/mcp logout <name>`
   disconnects.
 
@@ -48,33 +50,42 @@ on/off switch.
 The tool set is defined by the **server**, not the skill, so discover before you
 call — don't assume tool names or arguments:
 
-```python
-import linear
+```js
+// 1. Discover available tools (names + JSON Schemas)
+for (const tool of await linear.list_tools()) {
+	console.log(tool.name, "-", tool.description);
+}
 
-# 1. Discover available tools
-for tool in await linear.list_tools():
-    print(tool["name"], "-", tool["description"])
+// 2. Inspect a tool's argument schema
+const tools = await linear.list_tools();
+console.log(JSON.stringify(tools.find((t) => t.name === "list_issues").inputSchema, null, 2));
 
-# 2. Inspect a tool's argument schema
-help(linear.list_issues)        # populated once list_tools() has run
-
-# 3. Call it; keyword args match the tool's JSON Schema
-result = await linear.list_issues(team="Engineering")
+// 3. Call it; the argument object must match the tool's input schema
+const result = await linear.list_issues({ team: "Engineering" });
 ```
 
-- Every tool is an `async` method — always `await`.
-- Results are already-parsed Python: a `dict` for structured output, a string for
-  text, or a list of content blocks otherwise. No need to `json.loads` them.
-- A tool whose name isn't a valid Python identifier (e.g. Notion's `notion-search`)
-  is called via the escape hatch: `await notion.call_tool("notion-search", {...})`.
-- A call against an integration with no credentials raises `NotEnabled` (telling
-  the user to `/mcp login`); a tool that returns an error raises `McpToolError`.
+- Every tool call is `async` — always `await`.
+- Any property that isn't `list_tools` / `call_tool` / `client` is dispatched to
+  a matching MCP tool by a `Proxy`, so `linear.<tool>(args)` works for every tool
+  the server exposes. An unknown name fails with the list of available tools.
+- Results are already-parsed JavaScript: an object for structured output, a
+  string for text, or an array of content blocks otherwise. No `JSON.parse`.
+- A tool whose name isn't a valid JavaScript identifier (e.g. Notion's
+  `notion-search`) is called via the escape hatch:
+  `await notion.call_tool("notion-search", { query: "roadmap" })`.
+- A call against an integration with no credentials throws `NotEnabled` (telling
+  the user to run `/mcp login <server>`); a tool that returns an error result
+  throws `McpToolError`.
+- Each call opens a fresh MCP session (`initialize` → `notifications/initialized`
+  → request). On a 401/403 the skill asks the host to refresh the token once and
+  retries the whole exchange.
 
 ## Authoring your own integration
 
-An integration is a [Python skill package](skills.md#python-backed-skills) whose
-module subclasses `McpIntegration`. The built-in `linear` / `notion` packages are
-the reference implementations.
+An integration is a [JS-backed skill](skills.md#js-backed-skills) whose
+`skill.js` returns the object built by the shared `createMcpSkill` helper. The
+built-in `linear` / `notion` skills are the reference implementations: each is a
+directory holding `SKILL.md`, `skill.js`, and a copy of `mcp-client.js`.
 
 ### 1. Declare the server
 
@@ -94,8 +105,7 @@ Add it under `mcpServers` in `~/.prime/agent/settings.json` (or project
 }
 ```
 
-Currently only remote `"http"` servers are supported by `McpIntegration`. HTTP
-server fields:
+Only remote `"http"` servers are wired through to the REPL. HTTP server fields:
 
 | Field | Meaning |
 |-------|---------|
@@ -106,64 +116,63 @@ server fields:
 | `headers` | Extra static HTTP headers sent on every request |
 | `enabled` | Set `false` to force-disable even when credentials exist |
 
-> `stdio` (local-subprocess) servers are not yet wired through to the kernel —
-> the host drops non-HTTP entries — so an integration must target an HTTP endpoint.
+> `stdio` (local-subprocess) servers are not wired through — the host drops
+> non-HTTP entries — so an integration must target an HTTP endpoint.
 
-### 2. Ship the skill package
+### 2. Ship the skill
 
 Create a skill directory (any [skills location](skills.md#locations), e.g.
-`~/.prime/agent/skills/acme/`) with the standard Python-skill layout:
+`~/.prime/agent/skills/acme/`) with the JS-skill layout:
 
 ```
 acme/
   SKILL.md
-  pyproject.toml
-  src/acme/__init__.py
+  skill.js
+  mcp-client.js   # copied from skills/linear/mcp-client.js
 ```
 
-`pyproject.toml` (depends on `mcp`, `httpx`, and `prime-agent-runtime`):
+Copy `mcp-client.js` verbatim from a built-in MCP skill. It is duplicated into
+every MCP skill on purpose: skills are loaded by absolute entry path from
+independent roots (user dir, project dir, bundled dir) and may be installed
+individually, so a relative import across skill directories isn't robust.
 
-```toml
-[project]
-name = "prime-agent-skill-acme"
-version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["mcp", "httpx", "prime-agent-runtime"]
+`skill.js`:
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+```js
+/**
+ * Acme integration: tools auto-discovered from Acme's MCP server.
+ *
+ * Usage in the REPL:
+ *
+ *     const widgets = await acme.list_widgets({ team: "Engineering" });
+ */
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/acme"]
+import { createMcpSkill } from "./mcp-client.js";
+
+export default function createSkill(ctx) {
+	return createMcpSkill({ server: "acme", url: "https://mcp.acme.com/mcp" }, ctx);
+}
 ```
 
-`src/acme/__init__.py`:
+That is the whole integration. `createMcpSkill` connects over Streamable HTTP,
+resolves the URL and extra headers from the host (`hostRequest("mcp.config", …)`,
+honoring the `mcpServers` entry), injects the bearer token read from `auth.json`
+(refreshing via `hostRequest("mcp.refresh", …)` when stale), discovers and caches
+the server's tools, and returns the proxied API. `server` must match the
+`mcpServers` key and the `auth.json` credential id (`mcp:acme`). The REPL binds
+the returned object under the skill name with hyphens converted to underscores.
 
-```python
-from rlm import McpIntegration
+For a server behind a static token, name the env var in the same call:
 
-class Acme(McpIntegration):
-    server = "acme"                      # matches the mcpServers key / auth.json `mcp:acme`
-    url = "https://mcp.acme.com/mcp"
-
-acme = Acme()
-
-# Forward bare module access (`import acme; await acme.<tool>(...)`) to the
-# instance, but NOT the names the kernel bootstrap probes — forwarding `run`
-# would make it treat the module as a callable skill and break tool dispatch.
-_RESERVED = {"run", "__wrapped__", "__call__"}
-
-def __getattr__(name):
-    if name.startswith("_") or name in _RESERVED:
-        raise AttributeError(name)
-    return getattr(acme, name)
+```js
+return createMcpSkill(
+	{ server: "acme", url: "https://mcp.acme.com/mcp", bearerTokenEnv: "ACME_TOKEN" },
+	ctx,
+);
 ```
 
-The base class connects with the `mcp` SDK, resolves the URL/headers from the host
-(honoring the `mcpServers` config), injects the bearer token from `auth.json`
-(refreshing when expired), and binds the server's tools as async methods. Authoring
-is a few lines — the package above is the whole integration.
+There is no install step — add or edit the files, then start a fresh session (or
+`/reload` for metadata) so the REPL preloads the module.
 
 ### Authentication
 
@@ -173,44 +182,39 @@ is a few lines — the package above is the whole integration.
   and runs PKCE. Servers requiring a pre-registered client id are not yet
   supported via `mcpServers`.
 - **Static bearer token** (`"bearerTokenEnvVar": "ACME_TOKEN"`): no login needed;
-  the integration is "connected" whenever that env var is set. Set the matching
-  `bearer_token_env = "ACME_TOKEN"` on the subclass.
+  the integration is "connected" whenever that env var is set. Pass the matching
+  `bearerTokenEnv: "ACME_TOKEN"` to `createMcpSkill`.
 
-## The `McpIntegration` API
+## The MCP skill API
 
-Imported from `rlm` (`from rlm import McpIntegration`).
+Exported by `mcp-client.js`:
 
-Class attributes to set on your subclass:
+- `createMcpSkill({ server, url, bearerTokenEnv }, ctx)` — build the object a
+  skill returns. `ctx` is the skill context (`hostRequest`, `env` are used).
+- `McpClient` — the underlying client; also reachable as `linear.client`.
+- `NotEnabled` — thrown when no usable credentials exist (not logged in).
+- `McpToolError` — thrown when a tool call returns a result flagged as an error.
 
-- `server: str` — required; the `mcpServers` key and `auth.json` credential id.
-- `url: str | None` — the remote endpoint (required unless you override
-  `_open_session` for a non-HTTP transport).
-- `bearer_token_env: str | None` — optional env var holding a static bearer token.
+Methods on the returned object:
 
-Methods:
-
-- `await list_tools() -> list[dict]` — the server's tools as
-  `[{name, description, inputSchema}]`. Also populates the docstrings shown by
-  `help(integration.<tool>)`.
-- `await call_tool(name, arguments={}) -> Any` — explicit call; the escape hatch
-  for non-identifier tool names.
-- `integration.<tool>(**kwargs)` — auto-bound async method for any discovered tool.
-
-Exceptions (both importable from `rlm`):
-
-- `NotEnabled` — raised when no usable credentials exist (not logged in).
-- `McpToolError` — raised when a tool call returns a result flagged as an error.
+- `await list_tools()` — the server's tools as
+  `[{ name, description, inputSchema }]`. Discovered once and cached for the
+  life of the REPL process.
+- `await call_tool(name, args)` — explicit call by exact name; the escape hatch
+  for names that aren't valid JavaScript identifiers.
+- `await <tool>(args)` — any other property is proxied to the matching tool,
+  after checking that the server actually exposes it.
 
 ## Enable-by-login lifecycle
 
 This auth-gating applies to the **built-in** integrations (Linear, Notion):
 
 1. The built-in skill ships installed but **disabled** — excluded from the prompt
-   and not imported into the kernel — because no credentials exist.
+   and not preloaded into the REPL — because no credentials exist. (The host adds
+   a `-<server>/SKILL.md` override for every built-in you aren't logged into.)
 2. The user logs in; credentials land in `auth.json` under `mcp:<server>`.
 3. A resource reload (automatic after `/login`/`/mcp login`, or `/reload`) detects
-   the credentials, enables the skill, and the kernel installs + imports the
-   package.
+   the credentials and enables the skill; the next REPL start binds it as a global.
 4. Logout (or losing credentials) disables it again.
 
 If you log in mid-turn, the reload is deferred — run `/reload` after the turn to
@@ -218,10 +222,10 @@ activate the integration.
 
 **User-authored integrations are not auth-gated this way.** A skill you drop into
 a skills directory is loaded like any other skill — visible to the model and
-imported into the kernel immediately, regardless of `auth.json`. It simply fails
-at call time with `NotEnabled` until credentials exist. So make the skill's
-`SKILL.md` tell the model how to connect when a call raises `NotEnabled`, matching
-the auth mode you configured:
+bound in the REPL immediately, regardless of `auth.json`. It simply fails at call
+time with `NotEnabled` until credentials exist. So make the skill's `SKILL.md`
+tell the model how to connect when a call throws `NotEnabled`, matching the auth
+mode you configured:
 
 - **OAuth** (`"oauth": true`): instruct the user to run `/mcp login <server>` (or
   `/login` → MCP Connections). `/mcp login` only works for OAuth servers.
@@ -232,17 +236,19 @@ the auth mode you configured:
 ## Caveats
 
 - **Discover before assuming.** Tool names and argument schemas come from the
-  server and can change; call `list_tools()` / `help()` rather than hardcoding.
-- **Custom kernel + name collisions.** The kernel import name is the `server`
-  value. On a custom `PRIME_AGENT_KERNEL_PYTHON` that already has an unrelated PyPI
-  package of the same name (e.g. `notion`), `import <name>` may resolve to that
-  package instead. Use the default managed kernel venv to avoid this.
+  server and can change; call `list_tools()` rather than hardcoding.
+- **Binding-name collisions.** The REPL binding is the skill name with hyphens
+  converted to underscores. Two loaded skills that map to the same binding warn
+  and only one wins, so don't name a custom integration after a built-in skill.
 - **Overriding a built-in name.** Declaring an `mcpServers` entry whose key matches
   a built-in (e.g. `linear`) with a custom `url` points the integration at your
   URL. A previously stored official credential is *not* reused for the override, to
   avoid sending the official token to your endpoint. Authenticate such an override
   via `bearerTokenEnvVar` only — OAuth credentials are not honored for a
   catalog-name override. (Use a name that isn't a built-in to get OAuth.)
+- **Session state doesn't survive.** Each call opens its own MCP session, and the
+  REPL's state snapshot is JSON, so a live client isn't restored across a resume —
+  tools are simply rediscovered on the next call.
 - **Multi-session daemon.** OAuth provider registration is process-global; a
   user-declared server unique to one daemon session is re-registered on that
   session's next reload.

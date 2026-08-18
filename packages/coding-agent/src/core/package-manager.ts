@@ -27,7 +27,7 @@ import type { Readable } from "node:stream";
 import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
-import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
+import { CONFIG_DIR_NAME, getBundledSkillsDir, type InstallMethod } from "../config.js";
 import { shouldUseWindowsShell } from "../utils/child-process.js";
 import { type GitSource, parseGitUrl } from "../utils/git.js";
 import { canonicalizePath, isLocalPath } from "../utils/paths.js";
@@ -39,6 +39,140 @@ import type { PackageSource, SettingsManager } from "./settings-manager.js";
 const NETWORK_TIMEOUT_MS = 10000;
 const UPDATE_CHECK_CONCURRENCY = 4;
 const GIT_UPDATE_CONCURRENCY = 4;
+
+/**
+ * Package managers we know how to drive for extension/skill package installs.
+ * Reuses the `InstallMethod` vocabulary from config.ts. "unknown" covers a
+ * configured `npmCommand` wrapper whose underlying manager we cannot identify
+ * (e.g. `["mise", "exec", "node@20", "--", "some-wrapper"]`); it sticks to the
+ * npm-compatible surface and avoids manager-specific flags.
+ */
+type PackageManagerKind = Extract<InstallMethod, "bun" | "npm" | "pnpm" | "yarn"> | "unknown";
+
+const DEFAULT_PACKAGE_MANAGER: PackageManagerKind = "bun";
+
+interface PackageManagerAdapter {
+	kind: PackageManagerKind;
+	/** Install package specs into the manager's global prefix. */
+	installGlobal(specs: string[]): string[];
+	/** Install package specs into `dir` (a directory holding a package.json). */
+	installInto(dir: string, specs: string[]): string[];
+	/** Remove packages from the manager's global prefix. */
+	uninstallGlobal(names: string[]): string[];
+	/** Remove packages from `dir`. */
+	uninstallFrom(dir: string, names: string[]): string[];
+	/** Install a package.json's dependencies without devDependencies (cwd is passed separately). */
+	installProductionDeps(): string[];
+	/** Read the latest published version of a package; output shape varies, see parseLatestVersionOutput. */
+	latestVersion(packageName: string): string[];
+	/** Query the global modules directory. */
+	globalRootArgs(): string[];
+	/** Turn globalRootArgs stdout into the global node_modules path. */
+	resolveGlobalRoot(stdout: string): string;
+}
+
+const NPM_ADAPTER: PackageManagerAdapter = {
+	kind: "npm",
+	installGlobal: (specs) => ["install", "-g", ...specs],
+	installInto: (dir, specs) => ["install", ...specs, "--prefix", dir],
+	uninstallGlobal: (names) => ["uninstall", "-g", ...names],
+	uninstallFrom: (dir, names) => ["uninstall", ...names, "--prefix", dir],
+	installProductionDeps: () => ["install", "--omit=dev"],
+	latestVersion: (packageName) => ["view", packageName, "version", "--json"],
+	globalRootArgs: () => ["root", "-g"],
+	resolveGlobalRoot: (stdout) => stdout.trim(),
+};
+
+const PACKAGE_MANAGER_ADAPTERS: Record<PackageManagerKind, PackageManagerAdapter> = {
+	bun: {
+		kind: "bun",
+		installGlobal: (specs) => ["add", "-g", ...specs],
+		installInto: (dir, specs) => ["add", ...specs, "--cwd", dir],
+		uninstallGlobal: (names) => ["remove", "-g", ...names],
+		uninstallFrom: (dir, names) => ["remove", ...names, "--cwd", dir],
+		installProductionDeps: () => ["install", "--production"],
+		// `bun pm view` prints a bare version string, not JSON.
+		latestVersion: (packageName) => ["pm", "view", packageName, "version"],
+		// bun has no `root -g`; `pm bin -g` yields <prefix>/bin, and globals live in
+		// <prefix>/install/global/node_modules.
+		globalRootArgs: () => ["pm", "bin", "-g"],
+		resolveGlobalRoot: (stdout) => join(dirname(stdout.trim()), "install", "global", "node_modules"),
+	},
+	npm: NPM_ADAPTER,
+	pnpm: {
+		kind: "pnpm",
+		installGlobal: (specs) => ["add", "-g", ...specs],
+		installInto: (dir, specs) => ["add", ...specs, "--dir", dir],
+		uninstallGlobal: (names) => ["remove", "-g", ...names],
+		uninstallFrom: (dir, names) => ["remove", ...names, "--dir", dir],
+		installProductionDeps: () => ["install", "--prod"],
+		latestVersion: (packageName) => ["view", packageName, "version", "--json"],
+		globalRootArgs: () => ["root", "-g"],
+		resolveGlobalRoot: (stdout) => stdout.trim(),
+	},
+	yarn: {
+		kind: "yarn",
+		installGlobal: (specs) => ["global", "add", ...specs],
+		installInto: (dir, specs) => ["--cwd", dir, "add", ...specs],
+		uninstallGlobal: (names) => ["global", "remove", ...names],
+		uninstallFrom: (dir, names) => ["--cwd", dir, "remove", ...names],
+		installProductionDeps: () => ["install", "--production"],
+		// yarn classic prints JSON lines like {"type":"inspect","data":"1.2.3"}.
+		latestVersion: (packageName) => ["info", packageName, "version", "--json"],
+		// yarn has no `root -g`; `global dir` yields the global project dir.
+		globalRootArgs: () => ["global", "dir"],
+		resolveGlobalRoot: (stdout) => join(stdout.trim(), "node_modules"),
+	},
+	unknown: {
+		...NPM_ADAPTER,
+		kind: "unknown",
+		// Wrappers may not accept npm-only flags, so keep dependency installs plain.
+		installProductionDeps: () => ["install"],
+	},
+};
+
+/**
+ * Identify which package manager a resolved `npmCommand` argv drives. Wrapper
+ * prefixes are common (`mise exec node@20 -- pnpm`), so the last recognizable
+ * manager binary in the argv wins.
+ */
+function detectPackageManagerKind(argv: string[]): PackageManagerKind {
+	for (let i = argv.length - 1; i >= 0; i--) {
+		const name = basename(argv[i] ?? "")
+			.toLowerCase()
+			.replace(/\.(cmd|exe|bat|ps1|js|cjs|mjs)$/, "");
+		if (name === "bun" || name === "npm" || name === "pnpm" || name === "yarn") {
+			return name;
+		}
+	}
+	return "unknown";
+}
+
+/**
+ * Normalize a "latest version" lookup: npm/pnpm `view --json` emit a JSON
+ * string, bun's `pm view` a bare version, yarn classic JSON lines carrying the
+ * value under `data`.
+ */
+function parseLatestVersionOutput(stdout: string): string {
+	const raw = stdout.trim();
+	if (!raw) throw new Error("Empty response from package manager version lookup");
+	for (const line of raw.split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (typeof parsed === "string") return parsed;
+			if (typeof parsed === "number") return String(parsed);
+			if (parsed && typeof parsed === "object" && typeof (parsed as { data?: unknown }).data === "string") {
+				return (parsed as { data: string }).data;
+			}
+		} catch {
+			// Not JSON: a bare version string (bun).
+			return trimmed;
+		}
+	}
+	throw new Error(`Unrecognized version lookup output: ${raw}`);
+}
 
 function isOfflineModeEnabled(): boolean {
 	const value = process.env.PI_OFFLINE;
@@ -1131,12 +1265,12 @@ export class DefaultPackageManager implements PackageManager {
 
 	private async installNpmBatch(specs: string[], scope: InstalledSourceScope): Promise<void> {
 		if (scope === "user") {
-			await this.runNpmCommand(["install", "-g", ...specs]);
+			await this.runNpmCommand(this.getPackageManagerAdapter().installGlobal(specs));
 			return;
 		}
 		const installRoot = this.getNpmInstallRoot(scope, false);
 		this.ensureNpmProject(installRoot);
-		await this.runNpmCommand(["install", ...specs, "--prefix", installRoot]);
+		await this.runNpmCommand(this.getPackageManagerAdapter().installInto(installRoot, specs));
 	}
 
 	async checkForAvailableUpdates(): Promise<PackageUpdate[]> {
@@ -1456,12 +1590,10 @@ export class DefaultPackageManager implements PackageManager {
 		const npmCommand = this.getNpmCommand();
 		const stdout = await this.runCommandCapture(
 			npmCommand.command,
-			[...npmCommand.args, "view", packageName, "version", "--json"],
+			[...npmCommand.args, ...this.getPackageManagerAdapter().latestVersion(packageName)],
 			{ cwd: this.cwd, timeoutMs: NETWORK_TIMEOUT_MS },
 		);
-		const raw = stdout.trim();
-		if (!raw) throw new Error("Empty response from npm view");
-		return JSON.parse(raw);
+		return parseLatestVersionOutput(stdout);
 	}
 
 	private async gitHasAvailableUpdate(installedPath: string): Promise<boolean> {
@@ -1675,7 +1807,7 @@ export class DefaultPackageManager implements PackageManager {
 	private getNpmCommand(): { command: string; args: string[] } {
 		const configuredCommand = this.settingsManager.getNpmCommand();
 		if (!configuredCommand || configuredCommand.length === 0) {
-			return { command: "npm", args: [] };
+			return { command: DEFAULT_PACKAGE_MANAGER, args: [] };
 		}
 		const [command, ...args] = configuredCommand;
 		if (!command) {
@@ -1684,17 +1816,22 @@ export class DefaultPackageManager implements PackageManager {
 		return { command, args };
 	}
 
+	/** Argument mapping for the package manager the resolved npmCommand drives. */
+	private getPackageManagerAdapter(): PackageManagerAdapter {
+		const configuredCommand = this.settingsManager.getNpmCommand();
+		if (!configuredCommand || configuredCommand.length === 0) {
+			return PACKAGE_MANAGER_ADAPTERS[DEFAULT_PACKAGE_MANAGER];
+		}
+		return PACKAGE_MANAGER_ADAPTERS[detectPackageManagerKind(configuredCommand)];
+	}
+
 	private async runNpmCommand(args: string[], options?: { cwd?: string }): Promise<void> {
 		const npmCommand = this.getNpmCommand();
 		await this.runCommand(npmCommand.command, [...npmCommand.args, ...args], options);
 	}
 
 	private getGitDependencyInstallArgs(): string[] {
-		const configuredCommand = this.settingsManager.getNpmCommand();
-		if (configuredCommand && configuredCommand.length > 0) {
-			return ["install"];
-		}
-		return ["install", "--omit=dev"];
+		return this.getPackageManagerAdapter().installProductionDeps();
 	}
 
 	private runNpmCommandSync(args: string[]): string {
@@ -1704,24 +1841,24 @@ export class DefaultPackageManager implements PackageManager {
 
 	private async installNpm(source: NpmSource, scope: SourceScope, temporary: boolean): Promise<void> {
 		if (scope === "user" && !temporary) {
-			await this.runNpmCommand(["install", "-g", source.spec]);
+			await this.runNpmCommand(this.getPackageManagerAdapter().installGlobal([source.spec]));
 			return;
 		}
 		const installRoot = this.getNpmInstallRoot(scope, temporary);
 		this.ensureNpmProject(installRoot);
-		await this.runNpmCommand(["install", source.spec, "--prefix", installRoot]);
+		await this.runNpmCommand(this.getPackageManagerAdapter().installInto(installRoot, [source.spec]));
 	}
 
 	private async uninstallNpm(source: NpmSource, scope: SourceScope): Promise<void> {
 		if (scope === "user") {
-			await this.runNpmCommand(["uninstall", "-g", source.name]);
+			await this.runNpmCommand(this.getPackageManagerAdapter().uninstallGlobal([source.name]));
 			return;
 		}
 		const installRoot = this.getNpmInstallRoot(scope, false);
 		if (!existsSync(installRoot)) {
 			return;
 		}
-		await this.runNpmCommand(["uninstall", source.name, "--prefix", installRoot]);
+		await this.runNpmCommand(this.getPackageManagerAdapter().uninstallFrom(installRoot, [source.name]));
 	}
 
 	private async installGit(source: GitSource, scope: SourceScope): Promise<void> {
@@ -1856,13 +1993,8 @@ export class DefaultPackageManager implements PackageManager {
 		if (this.globalNpmRoot && this.globalNpmRootCommandKey === commandKey) {
 			return this.globalNpmRoot;
 		}
-		const isBunPackageManager = npmCommand.command === "bun";
-		if (isBunPackageManager) {
-			const binDir = this.runNpmCommandSync(["pm", "bin", "-g"]).trim();
-			this.globalNpmRoot = join(dirname(binDir), "install", "global", "node_modules");
-		} else {
-			this.globalNpmRoot = this.runNpmCommandSync(["root", "-g"]).trim();
-		}
+		const adapter = this.getPackageManagerAdapter();
+		this.globalNpmRoot = adapter.resolveGlobalRoot(this.runNpmCommandSync(adapter.globalRootArgs()));
 		this.globalNpmRootCommandKey = commandKey;
 		return this.globalNpmRoot;
 	}

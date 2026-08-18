@@ -4,12 +4,12 @@ See the repository [AGENTS.md](../../../AGENTS.md) for the current contribution 
 
 ## Setup
 
-Prime Agent requires Node.js 22.8.0 or newer.
+Prime Agent requires [Bun](https://bun.sh) 1.3.0 or newer. Bun is both the build toolchain and the runtime for the agent's REPL, so no separate interpreter is needed.
 
 ```bash
 git clone https://github.com/PrimeIntellect-ai/prime-agent
 cd prime-agent
-npm ci
+bun install
 ```
 
 Run from source:
@@ -68,7 +68,7 @@ prime-agent shutdown
 After code changes, run the repository check from the root:
 
 ```bash
-npm run check
+bun run check
 ```
 
 This performs formatting, linting, type checking, installer rendering checks, and the browser smoke check. It does not run the test suite.
@@ -77,7 +77,7 @@ Run focused tests from the package root. For example:
 
 ```bash
 cd packages/coding-agent
-npx tsx ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts
+bunx vitest --run test/specific.test.ts
 ```
 
 If you create or modify a test file, run that file and iterate until it passes. Coding-agent suite regressions belong under `test/suite/regressions/` and use the suite harness and faux provider rather than live provider credentials.

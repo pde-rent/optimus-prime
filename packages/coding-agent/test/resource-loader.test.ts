@@ -471,10 +471,10 @@ Content`,
 			expect(websearch?.description).toContain("/login");
 			expect(websearch?.description).toContain("MCP Connections");
 			expect(websearch?.description).toContain("Serper (web search)");
-			expect(websearch?.kind).toBe("python");
-			if (websearch?.kind === "python") {
-				expect(websearch.python.importName).toBe("websearch");
-				expect(websearch.python.pyprojectPath.endsWith("pyproject.toml")).toBe(true);
+			expect(websearch?.kind).toBe("js");
+			if (websearch?.kind === "js") {
+				expect(websearch.js.importName).toBe("websearch");
+				expect(websearch.js.entryPath.endsWith("skill.js")).toBe(true);
 			}
 		});
 

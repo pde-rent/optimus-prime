@@ -1,0 +1,52 @@
+{
+  "size": {
+    "bundleBytes": 13547318,
+    "distBytes": 32512237,
+    "binaryBytes": 0,
+    "nodeModulesBytes": 362627186,
+    "runtimeDeps": {
+      "agent": 2,
+      "ai": 11,
+      "coding-agent": 23,
+      "tui": 6
+    },
+    "runtimeDepsTotal": 42,
+    "sourceLoc": {
+      "agent": 1760,
+      "ai": 22931,
+      "coding-agent": 100511,
+      "tui": 11514,
+      "skills": 1288
+    },
+    "sourceLocTotal": 138004
+  },
+  "speed": {
+    "replStartMs": {
+      "p50": 16.9,
+      "p95": 18.1,
+      "min": 16.6,
+      "max": 18.1,
+      "runs": 7
+    },
+    "replFirstCellMs": {
+      "p50": 1.5,
+      "p95": 1.6,
+      "min": 1.4,
+      "max": 1.6,
+      "runs": 7
+    },
+    "replFanOut": {
+      "concurrency": 8,
+      "wallMs": 33.9,
+      "failures": 0
+    },
+    "cliVersionMs": {
+      "p50": 107.9,
+      "p95": 113.5,
+      "min": 107.5,
+      "max": 113.5,
+      "runs": 3
+    },
+    "replRssMb": 35.8
+  }
+}

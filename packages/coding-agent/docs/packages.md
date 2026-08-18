@@ -55,9 +55,9 @@ npm:pkg
 ```
 
 - Versioned specs are pinned and skipped by `prime-agent package update`.
-- Global installs use `npm install -g`.
+- Global installs use `bun add -g` (or the equivalent for whichever package manager `npmCommand` names).
 - Project installs go under `.prime/agent/npm/`.
-- Set `npmCommand` in `settings.json` to pin npm package lookup and install operations to a specific wrapper command such as `mise` or `asdf`.
+- Set `npmCommand` in `settings.json` to run package lookup and install operations through a different package manager or a wrapper command such as `mise` or `asdf`.
 
 Example:
 

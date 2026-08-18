@@ -407,7 +407,7 @@ describe("IPythonCellComponent diff rendering", () => {
 
 	it("keeps the top line stable when expanded — only the hint flips, no header line, no layout shift", () => {
 		const state = {
-			code: "print(55)",
+			code: "console.log(55)",
 			content: [{ type: "text", text: "55" }],
 			details: { status: "ok", durationMs: 780_000 },
 			executionStarted: true,
@@ -418,8 +418,8 @@ describe("IPythonCellComponent diff rendering", () => {
 
 		// Top line is unchanged through the duration; only the trailing hint flips
 		// "to expand" → "to collapse", so nothing before it can shift.
-		expect(stripAnsi(collapsed[0])).toMatch(/^ ✓ python · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to expand\)$/);
-		expect(stripAnsi(expanded[0])).toMatch(/^ ✓ python · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to collapse\)$/);
+		expect(stripAnsi(collapsed[0])).toMatch(/^ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to expand\)$/);
+		expect(stripAnsi(expanded[0])).toMatch(/^ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to collapse\)$/);
 		const upToHint = (line: string) => stripAnsi(line).replace(/· \([^·]*to (expand|collapse)\)$/, "");
 		expect(upToHint(expanded[0])).toBe(upToHint(collapsed[0]));
 
@@ -428,7 +428,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(stripped.filter((l) => /python · done/.test(l)).length).toBe(0);
 
 		// Expanding only attaches code + output below, backgroundless like the top.
-		expect(stripped.join("\n")).toContain("print(55)");
+		expect(stripped.join("\n")).toContain("console.log(55)");
 		expect(stripped.join("\n")).toContain("55");
 		expect(expanded.some(hasBackground)).toBe(false);
 	});

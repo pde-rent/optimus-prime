@@ -1,4 +1,4 @@
-import type { KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
 
 export interface BunReplExecuteRequest {
 	id: string;
@@ -66,6 +66,8 @@ export interface BunReplResult {
 	value?: string;
 	error?: string;
 	displayData?: Array<{ mime: string; data: unknown }>;
+	/** File edits emitted via `display()`, in order, for inline diff rendering. */
+	diffs?: KernelDiffDisplay[];
 	/** Agent-family messages sent from within this cell, for surfacing on the host tool result. */
 	sentAgentMessages?: KernelSentAgentMessage[];
 }
@@ -97,6 +99,14 @@ export interface BunReplListNamesResult {
 	names: string[];
 }
 
+/** A sent agent message that arrived after its cell's result frame. */
+export interface BunReplLateSentAgentMessage {
+	/** Execute id of the cell that issued the send. */
+	id: string;
+	type: "lateSentAgentMessage";
+	message: KernelSentAgentMessage;
+}
+
 export interface BunReplHostRequest {
 	type: "hostRequest";
 	requestId: string;
@@ -121,5 +131,6 @@ export type BunReplReplToHost =
 	| BunReplSnapshotResult
 	| BunReplRestoreResult
 	| BunReplListNamesResult
+	| BunReplLateSentAgentMessage
 	| BunReplHostRequest
 	| BunReplHostResponse;

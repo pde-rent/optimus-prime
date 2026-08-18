@@ -23,8 +23,24 @@ Optional overrides (environment variables):
 
 ## Usage
 
-Call the prepared `websearch` import directly in the IPython kernel:
+Call the prepared `websearch` object directly in the JS REPL:
 
-```python
-print(await websearch("latest Prime Agent release"))
+```js
+console.log(await websearch.run("latest Prime Agent release"));
 ```
+
+## API
+
+- `await websearch.run(query, options?)` — run one Google search and return
+  formatted results as a string. Options (all optional):
+  - `max_output` — truncate output to this many chars (default 8192);
+    the middle is replaced with a `... [output truncated, N chars total] ...` marker.
+  - `timeout` — HTTP timeout in seconds (default `PRIME_AGENT_WEBSEARCH_TIMEOUT` or 45).
+  - `num_results` — organic results to return (default `PRIME_AGENT_WEBSEARCH_NUM_RESULTS` or 5).
+
+```js
+await websearch.run("bun test runner docs", { num_results: 10, timeout: 20 });
+```
+
+Network and API errors are returned inside the result string rather than
+thrown, so a failed search never breaks the surrounding cell.

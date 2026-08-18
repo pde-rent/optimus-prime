@@ -25,12 +25,12 @@ cd /path/to/project
 prime-agent
 ```
 
-To run a source checkout instead, use Node.js 22.8.0 or newer:
+To run a source checkout instead, use Bun 1.3.0 or newer:
 
 ```bash
 git clone https://github.com/PrimeIntellect-ai/prime-agent
 cd prime-agent
-npm ci
+bun install
 ./prime-agent.sh
 ```
 
@@ -71,13 +71,13 @@ Once Prime Agent starts, type a request and press Enter:
 Summarize this repository and tell me how to run its checks.
 ```
 
-Prime Agent gives the model one built-in tool, `ipython`. The long-lived kernel is a control environment for reading and editing files, running project commands, inspecting data, retaining Python state, and invoking installed skills. The kernel runtime is bootstrapped automatically on first use; set `PRIME_AGENT_KERNEL_PYTHON` to use an existing Python environment with `ipykernel`.
+Prime Agent gives the model one built-in tool, `ipython`. The name is kept for compatibility, but it executes JavaScript/TypeScript in a persistent Bun REPL. The long-lived REPL is a control environment for reading and editing files, running project commands, inspecting data, retaining JavaScript state, and invoking installed skills. It starts automatically on first use and needs no extra runtime setup beyond Bun itself.
 
 Prime Agent runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 
 ## Recursive Subagents
 
-Recursive subagents are a built-in Prime Agent capability. The model spawns independent work from IPython with `await rlm("subtask")`; each call returns at admission with a child handle and never returns the answer. Children send requested results as explicit `agent_message` replies to the parent or write them to files. Child agents use the same TypeScript agent runtime, providers, tools, skills, and session machinery as the parent.
+Recursive subagents are a built-in Prime Agent capability. The model spawns independent work from the REPL with `await rlm("subtask")`; each call returns at admission with a child handle and never returns the answer. Children send requested results as explicit `agent_message` replies to the parent or write them to files. Child agents use the same TypeScript agent runtime, providers, tools, skills, and session machinery as the parent.
 
 You can prompt the model to use that capability directly:
 
@@ -94,7 +94,7 @@ Prime Agent loads context files at startup. Add an `AGENTS.md` file to tell it h
 ```markdown
 # Project Instructions
 
-- Run `npm run check` after code changes.
+- Run `bun run check` after code changes.
 - Do not run production migrations locally.
 - Keep responses concise.
 ```
@@ -124,10 +124,10 @@ Images can be pasted with Ctrl+V (Alt+V on Windows) or dragged into supported te
 In interactive mode:
 
 ```text
-!npm run lint
+!bun run lint
 ```
 
-The command output is sent to the model. Use `!!command` to run a command without adding its output to model context. During agent work, the model normally runs project commands from the IPython control environment with a `%%bash` cell.
+The command output is sent to the model. Use `!!command` to run a command without adding its output to model context. During agent work, the model normally runs project commands from the Bun REPL control environment with a `%%bash` cell.
 
 ### Switch Models
 

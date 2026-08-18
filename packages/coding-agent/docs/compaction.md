@@ -259,7 +259,7 @@ Before summarization, messages are serialized to text via [`serializeConversatio
 [User]: What they said
 [Assistant thinking]: Internal reasoning
 [Assistant]: Response text
-[Assistant tool calls]: ipython(code="open('foo.ts').read()"); edit(path="bar.ts", ...)
+[Assistant tool calls]: ipython(code="await Bun.file('foo.ts').text()"); edit(path="bar.ts", ...)
 [Tool result]: Output from tool
 ```
 
@@ -323,7 +323,7 @@ pi.on("session_before_compact", async (event, ctx) => {
   // [User]: message text
   // [Assistant thinking]: thinking content
   // [Assistant]: response text
-  // [Assistant tool calls]: ipython(code="open('...').read()"); bash(command="...")
+  // [Assistant tool calls]: ipython(code="await Bun.file('...').text()"); bash(command="...")
   // [Tool result]: output text
 
   // Now send to your model for summarization

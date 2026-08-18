@@ -2,7 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ServiceTier } from "@earendil-works/pi-ai";
 import type { AgentSession } from "./agent-session.js";
 import type { ToolDefinition } from "./extensions/index.js";
-import type { HostRequestHandler } from "./kernel/index.js";
+import type { HostRequestHandler } from "./tools/kernel-types.js";
 
 export interface RlmRunRequest {
 	prompt: string;

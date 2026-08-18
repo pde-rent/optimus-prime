@@ -14,12 +14,17 @@ Prime Agent runs on Android via [Termux](https://termux.dev/), a terminal emulat
 pkg update && pkg upgrade
 
 # Install dependencies
-pkg install nodejs termux-api git ripgrep
+pkg install termux-api git ripgrep
+
+# Prime Agent needs Bun (>= 1.3.0) for both the build and the agent's REPL.
+# Install it from your Termux repository if it provides a `bun` package, or
+# follow https://bun.sh/docs/installation. Verify with:
+bun --version
 
 # Clone and install Prime Agent from source
 git clone https://github.com/PrimeIntellect-ai/prime-agent.git
 cd prime-agent
-npm ci
+bun install
 
 # Run Prime Agent
 ./prime-agent.sh
@@ -118,9 +123,12 @@ Run once to grant storage permissions:
 termux-setup-storage
 ```
 
-### Node.js installation issues
+### Dependency installation issues
 
-If npm fails, try clearing the cache:
+If `bun install` fails, try clearing Bun's cache and reinstalling:
 ```bash
-npm cache clean --force
+rm -rf ~/.bun/install/cache node_modules
+bun install
 ```
+
+If `bun` itself is missing or fails to start, Prime Agent cannot run: the agent's REPL is a Bun child process and there is no fallback interpreter.

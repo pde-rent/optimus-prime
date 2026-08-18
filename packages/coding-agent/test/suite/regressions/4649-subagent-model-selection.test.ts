@@ -1,7 +1,7 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import type { HostRequestHandlers } from "../../../src/core/kernel/index.js";
 import { SessionManager } from "../../../src/core/session-manager.js";
+import type { HostRequestHandlers } from "../../../src/core/tools/kernel-types.js";
 import { createHarness } from "../harness.js";
 
 const provider = "faux-eng-4649";

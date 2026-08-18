@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 // TODO: Remove this R2 tarball packer once prime-agent and its internal workspace
 // dependencies are published through a real npm release flow.

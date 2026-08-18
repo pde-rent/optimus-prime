@@ -1,11 +1,14 @@
 /**
- * Shared types previously defined in the kernel module.
- * These are kept for use by the bun-repl backend, agent-session, and other
- * components that reference kernel-shaped data without depending on the
- * deleted Python kernel infrastructure.
+ * Shared REPL-facing types. The `Kernel*` names are kept because they are part of
+ * the public `ipython` tool-details contract that extensions and the TUI read;
+ * the implementation behind them is the Bun REPL (`src/core/bun-repl/`).
  */
 
-import { join } from "node:path";
+/** Display MIME carrying one file edit, emitted by the `edit` skill. */
+export const DIFF_DISPLAY_MIME = "application/vnd.prime-agent.diff+json";
+
+/** Display MIME carrying one agent-message send receipt. */
+export const AGENT_MESSAGE_DISPLAY_MIME = "application/vnd.prime-agent.agent-message+json";
 
 /** Handler for host requests arriving from the REPL comm bridge. */
 export type HostRequestHandler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -43,32 +46,30 @@ export interface KernelSentAgentMessage {
 	};
 }
 
-export interface ExecuteResult {
-	stdout: string;
-	stderr: string;
-	/** Last `execute_result` payload (text/plain), if the cell produced one. */
+/** Input accepted by the agent's `ipython` tool (now the Bun REPL backend). */
+export interface IpythonToolInput {
+	code: string;
+}
+
+/** Tool-result details surfaced to the UI for the `ipython` tool. */
+export interface IpythonToolDetails {
+	durationMs?: number;
+	status?: "ok" | "error" | "aborted" | "starting";
+	errorEname?: string;
+	stdout?: string;
+	stderr?: string;
 	result?: string;
-	/** Diffs emitted via display_data, in order. */
+	/** Diffs streamed from file edits, rendered by the IPython cell. */
 	diffs?: KernelDiffDisplay[];
-	/** Media attachments emitted via display_data, in order. */
+	/** Media attachments loaded into context (e.g. by the attach-image skill). */
 	attachments?: KernelAttachment[];
-	/** Agent messages sent from this cell, in order. */
+	/** Agent messages sent from this cell. */
 	sentAgentMessages?: KernelSentAgentMessage[];
-	status: "ok" | "error" | "aborted";
-	error?: { ename: string; evalue: string; traceback: string[] };
-	durationMs: number;
-}
-
-/** Result of reviving a prior session's namespace. */
-export interface RestoreResult {
-	/** Names successfully revived into the kernel namespace. */
-	restored: string[];
-	/** Names present in the snapshot that failed to revive, with a short reason. */
-	failed: { name: string; reason: string }[];
-	path: string;
-}
-
-/** Absolute path to the snapshot payload within a session's artifact directory. */
-export function snapshotPathIn(artifactDir: string): string {
-	return join(artifactDir, "kernel-state.json");
+	/** True when this result came after killing and restarting a busy kernel. */
+	kernelRestarted?: boolean;
+	error?: {
+		ename: string;
+		evalue: string;
+		traceback: string[];
+	};
 }

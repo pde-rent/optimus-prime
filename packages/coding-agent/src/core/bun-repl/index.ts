@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { KernelAttachment, KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
 import type {
 	BunReplExecuteRequest,
 	BunReplHostRequest,
 	BunReplHostResponse,
 	BunReplHostToRepl,
+	BunReplLateSentAgentMessage,
 	BunReplListNamesResult,
 	BunReplReplToHost,
 	BunReplRestoreResult,
@@ -20,6 +21,12 @@ import { loadSnapshot, saveSnapshot } from "./state-snapshot.js";
 export interface BunReplExecuteOptions {
 	signal?: AbortSignal;
 	timeout?: number;
+	/**
+	 * Caller-side id for this cell (the tool call id). Retained after the cell
+	 * settles so an agent message sent from an un-awaited promise can still be
+	 * attributed to the right tool result via `onLateSentAgentMessage`.
+	 */
+	correlationId?: string;
 }
 
 export interface BunReplExecuteResult {
@@ -28,6 +35,8 @@ export interface BunReplExecuteResult {
 	result?: string;
 	/** Media emitted via the sandbox `display()` helper, converted for the attachment pipeline. */
 	attachments?: KernelAttachment[];
+	/** File edits emitted via `display()`, in order, for inline diff rendering. */
+	diffs?: KernelDiffDisplay[];
 	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
 	sentAgentMessages?: KernelSentAgentMessage[];
 	status: "ok" | "error" | "aborted";
@@ -64,6 +73,8 @@ export interface BunReplManagerOptions {
 	shellPath?: string;
 	/** Command prefix prepended to every %%bash cell. */
 	commandPrefix?: string;
+	/** Called when a cell's agent message arrives after that cell's result. */
+	onLateSentAgentMessage?: (correlationId: string, message: KernelSentAgentMessage) => void;
 }
 
 type ReplState = "idle" | "starting" | "running" | "shutdown";
@@ -93,6 +104,8 @@ export class BunReplManager {
 	private _resolveExit: (() => void) | null = null;
 	private _readyResolve: (() => void) | null = null;
 	private _readyPromise: Promise<void> | null = null;
+	/** exec id -> caller correlation id, bounded so a long session cannot grow it without limit. */
+	private _execCorrelationIds = new Map<string, string>();
 
 	constructor(options: BunReplManagerOptions = {}) {
 		this._options = options;
@@ -193,6 +206,13 @@ export class BunReplManager {
 			return;
 		}
 
+		if (msg.type === "lateSentAgentMessage") {
+			const late = msg as BunReplLateSentAgentMessage;
+			const correlationId = this._execCorrelationIds.get(late.id);
+			if (correlationId) this._options.onLateSentAgentMessage?.(correlationId, late.message);
+			return;
+		}
+
 		if (this._activeCollector && msg.id === this._activeCollector._execId) {
 			if (msg.type === "stdout") {
 				this._activeCollector.stdout((msg as { chunk: string }).chunk);
@@ -290,6 +310,14 @@ export class BunReplManager {
 			}
 
 			const id = randomUUID();
+			if (opts?.correlationId) {
+				// Bounded FIFO: only recent cells can still produce a late message.
+				if (this._execCorrelationIds.size >= 64) {
+					const oldest = this._execCorrelationIds.keys().next().value;
+					if (oldest !== undefined) this._execCorrelationIds.delete(oldest);
+				}
+				this._execCorrelationIds.set(id, opts.correlationId);
+			}
 			let stdout = "";
 			let stderr = "";
 			let _resolveResult!: (value: BunReplResult) => void;
@@ -371,6 +399,9 @@ export class BunReplManager {
 					return {
 						stdout,
 						stderr,
+						attachments: displayDataToAttachments(resultMsg.displayData),
+						diffs: resultMsg.diffs,
+						sentAgentMessages: resultMsg.sentAgentMessages,
 						status: "error" as const,
 						error: {
 							ename: "Error",
@@ -388,6 +419,7 @@ export class BunReplManager {
 					stderr,
 					result: resultMsg.value,
 					attachments: displayDataToAttachments(resultMsg.displayData),
+					diffs: resultMsg.diffs,
 					sentAgentMessages: resultMsg.sentAgentMessages,
 					status: "ok" as const,
 					durationMs,

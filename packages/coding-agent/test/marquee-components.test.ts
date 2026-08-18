@@ -191,7 +191,7 @@ describe("marquee TUI components", () => {
 
 	test("caches ipython cell renders until state, width, or invalidation changes", () => {
 		const state: IPythonCellState = {
-			code: "value = 1\nprint(value)",
+			code: "const value = 1;\nconsole.log(value);",
 			content: [{ type: "text", text: "1" }],
 			details: { status: "ok", durationMs: 15 },
 			executionStarted: true,
@@ -408,7 +408,7 @@ describe("marquee TUI components", () => {
 		const component = new ToolExecutionComponent(
 			"ipython",
 			"tool-1",
-			{ code: "print(55)" },
+			{ code: "console.log(55)" },
 			{},
 			undefined,
 			createFakeTui(),
@@ -426,7 +426,7 @@ describe("marquee TUI components", () => {
 		// generic JSON arg dump.
 		const collapsedLines = component.render(100);
 		const collapsed = stripAnsi(collapsedLines.join("\n"));
-		expect(collapsed).toContain("python");
+		expect(collapsed).toContain("js");
 		expect(collapsed).toContain("12ms");
 		expect(collapsed).toContain("Ctrl+O to expand");
 		expect(collapsed).not.toContain("ipython");
@@ -437,10 +437,10 @@ describe("marquee TUI components", () => {
 		component.setExpanded(true);
 		const expandedLines = component.render(100);
 		const expanded = stripAnsi(expandedLines.join("\n"));
-		const expandedStatus = expandedLines.map(stripAnsi).find((line) => line.includes("python · print(55)"));
+		const expandedStatus = expandedLines.map(stripAnsi).find((line) => line.includes("js · console.log(55)"));
 		expect(expandedStatus).toContain("↑ 1 ↓ 1 lines · 12ms");
 		expect(expanded).toContain("Ctrl+O to collapse");
-		expect(expanded).toContain("print(55)");
+		expect(expanded).toContain("console.log(55)");
 		expect(expanded).toContain("55");
 		expect(expanded).not.toContain('"code"');
 		expect(expandedLines.some((line) => /\x1b\[48;/.test(line))).toBe(false);

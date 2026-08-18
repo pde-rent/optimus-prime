@@ -13,6 +13,8 @@ export interface BunReplProvisionerOptions {
 	commandPrefix?: string;
 	readyGate?: Promise<void>;
 	onRestore?: (restoredNames: string[]) => void;
+	/** Called when a cell's agent message arrives after that cell's result. */
+	onLateSentAgentMessage?: BunReplManagerOptions["onLateSentAgentMessage"];
 }
 
 export class BunReplProvisioner {
@@ -105,6 +107,7 @@ export class BunReplProvisioner {
 			bunPath: this.options.bunPath,
 			shellPath: this.options.shellPath,
 			commandPrefix: this.options.commandPrefix,
+			onLateSentAgentMessage: this.options.onLateSentAgentMessage,
 		};
 
 		const manager = new BunReplManager(managerOptions);

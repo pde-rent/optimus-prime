@@ -40,7 +40,7 @@ await session.prompt("What files are in the current directory?");
 ## Installation
 
 ```bash
-npm install @earendil-works/pi-coding-agent
+bun add @earendil-works/pi-coding-agent
 ```
 
 The SDK is included in the main package. No separate installation needed.
@@ -467,7 +467,7 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 ### Tools
 
 ```typescript
-// Use the default built-in tool set: ipython
+// Use the default built-in tool set: the `ipython` tool, which runs a persistent Bun JS/TS REPL
 const { session } = await createAgentSession({
   tools: ["ipython"],
 });
@@ -484,7 +484,6 @@ const { session } = await createAgentSession({
 
 ```typescript
 import {
-  createIpythonToolDefinition,
   createBashToolDefinition,
   createEditToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -493,13 +492,11 @@ const cwd = "/path/to/project";
 
 const { session } = await createAgentSession({
   cwd,
-  customTools: [
-    createIpythonToolDefinition(cwd),
-    createBashToolDefinition(cwd),
-    createEditToolDefinition(cwd),
-  ],
+  customTools: [createBashToolDefinition(cwd), createEditToolDefinition(cwd)],
 });
 ```
+
+The `ipython` tool (the persistent Bun REPL) has no public factory export: pass it by name in `tools` and the session spawns its REPL child with the session `cwd`.
 
 **When you don't need factories:**
 - If you omit `tools`, Prime Agent automatically creates them with the correct `cwd`
@@ -1106,8 +1103,8 @@ SessionManager
 SettingsManager
 
 // Tool factories (for custom cwd)
-createIpythonTool, createBashTool, createEditTool
-createIpythonToolDefinition, createBashToolDefinition, createEditToolDefinition
+createBashTool, createEditTool
+createBashToolDefinition, createEditToolDefinition
 
 // Types
 type CreateAgentSessionOptions

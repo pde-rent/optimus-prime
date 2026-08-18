@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";

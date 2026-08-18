@@ -3,7 +3,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
 import type { ToolDefinition } from "../extensions/types.js";
-import type { KernelAttachment, KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.js";
 import { BunReplProvisioner } from "./provisioner.js";
 
@@ -22,6 +22,8 @@ export interface BunReplToolDetails {
 	result?: string;
 	/** Media attachments emitted via `display()`, loaded into context (surfaced as images). */
 	attachments?: KernelAttachment[];
+	/** File edits streamed from the `edit` skill, rendered inline by the IPython cell. */
+	diffs?: KernelDiffDisplay[];
 	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
 	sentAgentMessages?: KernelSentAgentMessage[];
 	error?: { ename: string; evalue: string; traceback: string[] };
@@ -45,6 +47,8 @@ export interface BunReplToolOptions {
 	/** Command prefix prepended to every %%bash cell. Mirrors the old ipython commandPrefix option. */
 	commandPrefix?: string;
 	provisioner?: BunReplProvisioner;
+	/** Called when a cell's agent message arrives after that cell's result. */
+	onLateSentAgentMessage?: (toolCallId: string, message: KernelSentAgentMessage) => void;
 }
 
 export function createBunReplToolDefinition(
@@ -59,6 +63,7 @@ export function createBunReplToolDefinition(
 			snapshotDir: _options.snapshotDir,
 			shellPath: _options.shellPath,
 			commandPrefix: _options.commandPrefix,
+			onLateSentAgentMessage: _options.onLateSentAgentMessage,
 		});
 
 	return {
@@ -70,12 +75,12 @@ export function createBunReplToolDefinition(
 			"ipython - persistent agent REPL for JavaScript/TypeScript scratchpad code and %%bash orchestration",
 		executionMode: "sequential",
 		parameters: bunReplSchema,
-		execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+		execute: async (toolCallId, params, signal, _onUpdate, _ctx) => {
 			try {
 				const manager = await provisioner.ensure(signal);
 
 				const code = params.code;
-				const result = await manager.execute(code, { signal });
+				const result = await manager.execute(code, { signal, correlationId: toolCallId });
 
 				let text = result.stdout;
 				if (result.stderr) text += (text ? "\n" : "") + result.stderr;
@@ -96,6 +101,7 @@ export function createBunReplToolDefinition(
 						stderr: result.stderr,
 						result: result.result,
 						attachments: result.attachments,
+						diffs: result.diffs,
 						sentAgentMessages: result.sentAgentMessages,
 						error: result.error,
 					},

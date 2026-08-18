@@ -25,14 +25,7 @@ export {
 	type EditToolOptions,
 } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
-export {
-	createIpythonTool,
-	createIpythonToolDefinition,
-	IpythonKernelProvisioner,
-	type IpythonToolDetails,
-	type IpythonToolInput,
-	type IpythonToolOptions,
-} from "./ipython.js";
+export type { IpythonToolDetails, IpythonToolInput } from "./kernel-types.js";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -60,8 +53,7 @@ export interface ToolsOptions {
 export function createToolDefinition(toolName: ToolName, _cwd: string, options?: ToolsOptions): ToolDef {
 	switch (toolName) {
 		case "ipython":
-			// The agent's code-execution tool is now the Bun REPL (Bun-only fork). The
-			// Python `createIpythonTool*` factories remain exported as the fallback.
+			// The agent's code-execution tool is the Bun REPL (Bun-only fork).
 			return createBunReplToolDefinition(options?.ipython ?? {});
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);

@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { createContext, runInContext } from "node:vm";
-import type { KernelSentAgentMessage } from "../tools/kernel-types.js";
+import {
+	AGENT_MESSAGE_DISPLAY_MIME,
+	DIFF_DISPLAY_MIME,
+	type KernelDiffDisplay,
+	type KernelSentAgentMessage,
+} from "../tools/kernel-types.js";
 import { bashCommand, parseCell } from "./cell.js";
 import type {
 	BunReplExecuteRequest,
@@ -129,16 +134,6 @@ const hostBridge = {
 			};
 			send(msg);
 		});
-		if (requestType === "agent_message.send") {
-			// Surface a cell's side-agent message back to the host session as a
-			// KernelSentAgentMessage on the current cell result.
-			void pending
-				.then((reply) => {
-					const sent = receiptToKernelSentAgentMessage(reply, payload.receiver_role);
-					if (sent) _sentAgentMessages.push(sent);
-				})
-				.catch(() => {});
-		}
 		return pending;
 	},
 };
@@ -146,13 +141,45 @@ const hostBridge = {
 const rlm = async (prompt: string, kwargs?: Record<string, unknown>) =>
 	hostBridge.hostRequest("rlm.run", { prompt, kwargs: kwargs ?? {} });
 
-const rlmObj = {
+type HarnessOptions = Record<string, unknown>;
+const harnessRequest = (type: string, options?: HarnessOptions) => hostBridge.hostRequest(type, options ?? {});
+
+/**
+ * Continual harness CRUD. Host-owned store; every call is a host request.
+ * `harness.delete_subagent` deletes a stored subagent spec and is unrelated to
+ * `rlm.delete_subagent`, which terminates a live child agent.
+ */
+const harnessObj = {
+	create_memory: (options?: HarnessOptions) => harnessRequest("harness.create_memory", options),
+	update_memory: (options?: HarnessOptions) => harnessRequest("harness.update_memory", options),
+	delete_memory: (options?: HarnessOptions) => harnessRequest("harness.delete_memory", options),
+	create_skill: (options?: HarnessOptions) => harnessRequest("harness.create_skill", options),
+	update_skill: (options?: HarnessOptions) => harnessRequest("harness.update_skill", options),
+	delete_skill: (options?: HarnessOptions) => harnessRequest("harness.delete_skill", options),
+	create_subagent: (options?: HarnessOptions) => harnessRequest("harness.create_subagent", options),
+	update_subagent: (options?: HarnessOptions) => harnessRequest("harness.update_subagent", options),
+	delete_subagent: (options?: HarnessOptions) => harnessRequest("harness.delete_subagent", options),
+	create_prompt_note: (options?: HarnessOptions) => harnessRequest("harness.create_prompt_note", options),
+	update_prompt_note: (options?: HarnessOptions) => harnessRequest("harness.update_prompt_note", options),
+	delete_prompt_note: (options?: HarnessOptions) => harnessRequest("harness.delete_prompt_note", options),
+	record_refinement: (options?: HarnessOptions) => harnessRequest("harness.record_refinement", options),
+	overview: (options?: HarnessOptions) => harnessRequest("harness.overview", options),
+};
+
+/**
+ * `rlm` is documented to the model as a callable (`await rlm('sub-task')`) that also
+ * carries the registry and harness helpers, so the injected binding is the spawn
+ * function with those members assigned onto it.
+ */
+const rlmObj = Object.assign(rlm, {
 	run: rlm,
+	harness: harnessObj,
+	get_harness_state: (options?: HarnessOptions) => harnessRequest("harness.get_state", options),
 	find_models: (query: string) => hostBridge.hostRequest("rlm.find_models", { query }),
 	list_subagents: () => hostBridge.hostRequest("rlm.list_subagents", {}),
-	delete_subagent: (id: string) => hostBridge.hostRequest("rlm.delete_subagent", { id }),
+	delete_subagent: (target: string) => hostBridge.hostRequest("rlm.delete_subagent", { target }),
 	host_request: (type: string, payload: Record<string, unknown>) => hostBridge.hostRequest(type, payload),
-};
+});
 
 // Names injected into the sandbox that must never appear in snapshots/namespace listings.
 const INJECTED = new Set([
@@ -174,6 +201,9 @@ const INJECTED = new Set([
 	"display",
 	"sys",
 	"util",
+	"cd",
+	"pwd",
+	"env",
 	"__import",
 	"__rlm_host_request",
 	"rlm",
@@ -181,7 +211,11 @@ const INJECTED = new Set([
 
 // Per-execute state.
 let _execId: string | null = null;
+// Kept after the cell settles so a send that resolves late can still be attributed
+// to the cell that issued it.
+let _lastExecId: string | null = null;
 let _displayData: Array<{ mime: string; data: unknown }> = [];
+let _diffs: KernelDiffDisplay[] = [];
 let _sentAgentMessages: KernelSentAgentMessage[] = [];
 
 function sendStdout(chunk: string): void {
@@ -192,6 +226,21 @@ function sendStderr(chunk: string): void {
 }
 
 const util = { inspect: (v: unknown) => serializeValue(v) };
+
+/**
+ * Working-directory and environment control for the sandbox. The REPL is a
+ * dedicated child process, so `process.chdir` is safe here and keeps JS cells and
+ * `%%bash` cells on the same cwd. `env` is the child's real environment, so an
+ * assignment carries into every later `%%bash` cell.
+ */
+function cd(dir: string): string {
+	process.chdir(dir);
+	return process.cwd();
+}
+
+function pwd(): string {
+	return process.cwd();
+}
 
 function sandboxConsole() {
 	const format = (...args: unknown[]): string =>
@@ -224,8 +273,40 @@ function normalizeDisplay(args: unknown[]): Array<{ mime: string; data: unknown 
 	return [{ mime: "text/plain", data: first }];
 }
 
+/** Parse a DIFF_DISPLAY_MIME payload, tolerating malformed input. */
+function parseDiffDisplay(data: unknown): KernelDiffDisplay | undefined {
+	if (!isRecord(data)) return undefined;
+	const { path, old_str: oldStr, new_str: newStr, start_line: startLine } = data;
+	if (typeof path !== "string" || typeof oldStr !== "string" || typeof newStr !== "string") return undefined;
+	return {
+		path,
+		oldStr,
+		newStr,
+		...(typeof startLine === "number" ? { startLine } : {}),
+	};
+}
+
 function display(...args: unknown[]): void {
 	for (const d of normalizeDisplay(args)) {
+		if (d.mime === DIFF_DISPLAY_MIME) {
+			const diff = parseDiffDisplay(d.data);
+			if (diff) _diffs.push(diff);
+			continue;
+		}
+		if (d.mime === AGENT_MESSAGE_DISPLAY_MIME) {
+			const sent = isRecord(d.data)
+				? receiptToKernelSentAgentMessage(d.data, d.data.receiverRole ?? d.data.receiver_role)
+				: undefined;
+			if (!sent) continue;
+			if (_execId !== null) {
+				_sentAgentMessages.push(sent);
+			} else if (_lastExecId !== null) {
+				// The cell already returned (an un-awaited send): report it separately so
+				// the host can still attach it to that cell's tool result.
+				send({ id: _lastExecId, type: "lateSentAgentMessage", message: sent });
+			}
+			continue;
+		}
 		_displayData.push(d);
 	}
 }
@@ -256,6 +337,9 @@ Object.assign(context, {
 	display,
 	sys: { display },
 	util,
+	cd,
+	pwd,
+	env: process.env,
 	__import: importModule,
 	__rlm_host_request: hostBridge.hostRequest.bind(hostBridge),
 	rlm: rlmObj,
@@ -276,6 +360,7 @@ async function runBash(req: BunReplExecuteRequest, body: string): Promise<void> 
 	const shell = req.shellPath?.trim() || "bash";
 	const proc = spawn(shell, ["-c", cmd], {
 		cwd: process.cwd(),
+		env: process.env,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 
@@ -328,13 +413,16 @@ async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 		status: "ok",
 		value: resultStr,
 		displayData: _displayData.length > 0 ? _displayData : undefined,
+		diffs: _diffs.length > 0 ? _diffs : undefined,
 		sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 	});
 }
 
 async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 	_execId = req.id;
+	_lastExecId = req.id;
 	_displayData = [];
+	_diffs = [];
 	const cell = parseCell(req.code);
 	try {
 		if (cell.kind === "bash") {
@@ -345,6 +433,7 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 				type: "result",
 				status: "ok",
 				displayData: _displayData.length > 0 ? _displayData : undefined,
+				diffs: _diffs.length > 0 ? _diffs : undefined,
 				sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 			});
 		} else {
@@ -358,11 +447,13 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 			status: "error",
 			error: errorMsg,
 			displayData: _displayData.length > 0 ? _displayData : undefined,
+			diffs: _diffs.length > 0 ? _diffs : undefined,
 			sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 		});
 	} finally {
 		_execId = null;
 		_displayData = [];
+		_diffs = [];
 		_sentAgentMessages = [];
 		send({ id: req.id, type: "idle" });
 	}
@@ -480,6 +571,58 @@ process.stdin.on("data", (chunk: string) => {
 process.stdin.on("end", () => {
 	process.exit(0);
 });
+
+/**
+ * Preloaded skills. The host passes `PRIME_AGENT_REPL_SKILLS` as JSON
+ * `[{ name, global, entry }]`; each entry is an ESM module that default-exports
+ * (or exports `createSkill`) a factory taking the skill context and returning the
+ * object bound into the sandbox under `global`. A module without a factory is
+ * bound as its own namespace. Failures are reported on stderr and skipped so one
+ * broken skill cannot stop the REPL from booting.
+ */
+interface PreloadedSkillSpec {
+	name: string;
+	global: string;
+	entry: string;
+}
+
+const skillContext = {
+	hostRequest: hostBridge.hostRequest.bind(hostBridge),
+	display,
+	get cwd(): string {
+		return process.cwd();
+	},
+	env: process.env,
+};
+
+async function loadPreloadedSkills(): Promise<void> {
+	const raw = process.env.PRIME_AGENT_REPL_SKILLS;
+	if (!raw) return;
+	let specs: PreloadedSkillSpec[];
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return;
+		specs = parsed as PreloadedSkillSpec[];
+	} catch {
+		return;
+	}
+	for (const spec of specs) {
+		if (!spec?.global || !spec?.entry) continue;
+		try {
+			const mod = (await import(spec.entry)) as Record<string, unknown>;
+			const factory = typeof mod.createSkill === "function" ? mod.createSkill : mod.default;
+			const api = typeof factory === "function" ? await (factory as (ctx: unknown) => unknown)(skillContext) : mod;
+			context[spec.global] = api;
+			INJECTED.add(spec.global);
+		} catch (err: unknown) {
+			process.stderr.write(
+				`prime-agent: skill "${spec.name}" failed to load: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
+	}
+}
+
+await loadPreloadedSkills();
 
 const readyMsg: BunReplReplToHost = { id: "ready", type: "idle" };
 send(readyMsg);

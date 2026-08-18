@@ -172,7 +172,6 @@ import {
 	validateGoalBudget,
 	validateGoalObjective,
 } from "./goals.js";
-import type { HostRequestHandlers, KernelSentAgentMessage } from "./kernel/index.js";
 import type { McpManager } from "./mcp/mcp-manager.js";
 import {
 	type BashExecutionMessage,
@@ -197,10 +196,12 @@ import {
 	type AutoRefineReason,
 	type AutoRefineReview,
 	appendGlobalRefinement,
+	handleHarnessHostRequest as applyHarnessHostRequest,
 	applyRefinementProposal,
 	getGlobalHarnessStateDir,
 	getLocalHarnessStateDir,
 	getRefinementHistory,
+	HARNESS_HOST_REQUEST_TYPES,
 	type HarnessState,
 	inferRefinementResultScope,
 	loadGlobalRefinementHistory,
@@ -261,7 +262,7 @@ import {
 } from "./session-manager.js";
 import type { SessionStats } from "./session-stats.js";
 import type { SettingsManager } from "./settings-manager.js";
-import type { Skill } from "./skills.js";
+import { getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 import {
 	parseCompactCommandOptions,
 	parseRefineCommandOptions,
@@ -274,6 +275,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
+import type { HostRequestHandlers, KernelSentAgentMessage } from "./tools/kernel-types.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addAssistantUsage, emptyUsage } from "./usage.js";
 import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
@@ -1543,6 +1545,22 @@ export class AgentSession {
 		for (const sentMessage of this._lateIpythonSentAgentMessages.get(message.toolCallId) ?? []) {
 			appendSentAgentMessageToToolResult(message, message.toolCallId, sentMessage);
 		}
+	}
+
+	/**
+	 * Persist and surface an agent message that a cell sent without awaiting it, so it
+	 * still lands on that cell's tool result instead of being dropped.
+	 */
+	private _recordLateIpythonSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): void {
+		const record = () => {
+			if (this._disposed || !this._rememberLateIpythonSentAgentMessage(toolCallId, message)) {
+				return;
+			}
+			this.sessionManager.appendCustomEntry(IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_ENTRY, { toolCallId, message });
+			this._emit({ type: "ipython_sent_agent_message", toolCallId, message });
+		};
+		this._agentEventQueue = this._agentEventQueue.then(record, record);
+		this._agentEventQueue.catch(() => {});
 	}
 
 	private _emitGoalUpdate(): void {
@@ -2893,6 +2911,25 @@ export class AgentSession {
 	 * fires it at the turn boundary. This prevents a deadlock that would occur
 	 * if refine() awaited agent idle from within the active tool call.
 	 */
+	/**
+	 * Handle a harness.* request from the kernel host bridge (`rlm.harness`).
+	 * The continual harness store stays host-owned; edits run through the same
+	 * validation/apply path as /refine. Writes target the session-local store
+	 * unless the caller passes `global: true`.
+	 */
+	handleHarnessHostRequest(type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+		return applyHarnessHostRequest(type, payload, {
+			globalDir: getGlobalHarnessStateDir(),
+			localDir: this._localHarnessStateDir(),
+			onStateChanged: () => {
+				// Match /refine: the system prompt embeds a harness-state block, so a
+				// write must be reflected before the next prompt build.
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+				this.agent.state.systemPrompt = this._baseSystemPrompt;
+			},
+		});
+	}
+
 	handleRefineHostRequest(type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
 		switch (type) {
 			case "refine.status": {
@@ -7011,7 +7048,7 @@ export class AgentSession {
 					: " You have not defined any names yet.";
 		const content = [
 			"<ipython_state>",
-			`Your IPython kernel persisted through compaction; all variables, imports, and helpers you defined remain available.${detail}`,
+			`Your REPL persisted through compaction; all variables, imports, and helpers you defined remain available.${detail}`,
 			"</ipython_state>",
 		].join("\n");
 		const message = {
@@ -7036,19 +7073,19 @@ export class AgentSession {
 	}
 
 	/**
-	 * Tell the model when a resumed session revived its IPython kernel state, so it
-	 * knows which variables are actually available instead of assuming the kernel is
-	 * the one it left. Delivered as context before the next turn.
+	 * Tell the model when a resumed session revived its REPL state, so it knows which
+	 * variables are actually available instead of assuming the REPL is the one it left.
+	 * Delivered as context before the next turn.
 	 */
 	private _onIpythonStateRestored(restoredNames: string[]): void {
 		const lines = ["<ipython_state_restored>"];
 		if (restoredNames.length > 0) {
 			lines.push(
-				`Your kernel state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}.`,
+				`Your REPL state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}. Functions and closures are not revived — redefine any you need.`,
 			);
 		} else {
 			lines.push(
-				"Your previous kernel state could not be revived; the kernel is starting fresh, so re-create any variables, imports, or loaded data you need.",
+				"Your previous REPL state could not be revived; the REPL is starting fresh, so re-create any variables, imports, or loaded data you need.",
 			);
 		}
 		lines.push("</ipython_state_restored>");
@@ -8686,6 +8723,8 @@ export class AgentSession {
 				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				readyGate: previousDispose,
 				onRestore: notifyRestore ? (names) => this._onIpythonStateRestored(names) : undefined,
+				onLateSentAgentMessage: (toolCallId, message) =>
+					this._recordLateIpythonSentAgentMessage(toolCallId, message),
 			});
 			configuredBaseToolDefinitions = createAllToolDefinitions(this._cwd, {
 				ipython: {
@@ -8807,6 +8846,9 @@ export class AgentSession {
 			for (const type of ["refine.run", "refine.status"]) {
 				handlers[type] = async (payload) => this.handleRefineHostRequest(type, payload);
 			}
+		}
+		for (const type of HARNESS_HOST_REQUEST_TYPES) {
+			handlers[type] = async (payload) => this.handleHarnessHostRequest(type, payload);
 		}
 		if (this._rlmHeartbeatController) {
 			for (const type of [
@@ -8934,7 +8976,24 @@ export class AgentSession {
 			env.RLM_HARNESS_STATE_DIR = this._localHarnessStateDir() ?? getLocalHarnessStateDir(rlmSessionDir)!;
 		}
 		this._addWebsearchKeyEnv(env);
+		this._addReplSkillsEnv(env);
 		return env;
+	}
+
+	/**
+	 * Hand the REPL child the JS skills to preload. Each entry names the global the
+	 * skill is bound to and the ESM module the child imports to build it; the child
+	 * skips (and warns about) any entry that fails to load.
+	 */
+	private _addReplSkillsEnv(env: Record<string, string>): void {
+		const specs = getJsSkillRuntimeInfo(this._resourceLoader.getSkills().skills).map((skill) => ({
+			name: skill.name,
+			global: skill.importName,
+			entry: skill.entryPath,
+		}));
+		if (specs.length > 0) {
+			env.PRIME_AGENT_REPL_SKILLS = JSON.stringify(specs);
+		}
 	}
 
 	private _addWebsearchKeyEnv(env: Record<string, string>): void {

@@ -184,7 +184,7 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 |---------|------|---------|-------------|
 | `shellPath` | string | - | Custom shell path (e.g., for Cygwin on Windows) |
 | `shellCommandPrefix` | string | - | Prefix for every bash command (e.g., `"shopt -s expand_aliases"`) |
-| `npmCommand` | string[] | - | Command argv used for npm package lookup/install operations (e.g., `["mise", "exec", "node@20", "--", "npm"]`) |
+| `npmCommand` | string[] | `["bun"]` | Command argv used for package lookup/install operations, overriding the default `bun` (e.g., `["mise", "exec", "node@20", "--", "npm"]`) |
 
 ```json
 {
@@ -192,9 +192,9 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 }
 ```
 
-`npmCommand` is used for all npm package-manager operations, including installs, uninstalls, and dependency installs inside git packages. Use argv-style entries exactly as the process should be launched. When `npmCommand` is configured, git package dependency installs use plain `install` to avoid npm-specific flags in wrappers or alternate package managers.
+`npmCommand` is used for all package-manager operations, including installs, uninstalls, and dependency installs inside git packages. Use argv-style entries exactly as the process should be launched.
 
-Normally the package manager's global modules location is queried using `root -g`. As a special case, if the first element of `npmCommand` is `"bun"`, the modules location will instead be queried with `pm bin -g`.
+Prime Agent identifies which package manager the argv names — `bun`, `npm`, `pnpm`, or `yarn`, scanning the whole argv so wrappers such as `["mise", "exec", "node@20", "--", "pnpm"]` are recognized — and emits that manager's own flags for each operation (production installs, install directory, version lookup, global modules root). An argv whose manager cannot be identified falls back to npm-style flags, and its git package dependency installs use plain `install`.
 
 ### Daemon
 

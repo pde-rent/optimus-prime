@@ -4,7 +4,7 @@ import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { Type } from "typebox";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { parseIpythonBashCell } from "../../../src/core/tools/ipython-cell-code.js";
+import { parseIpythonBashCell } from "../../../src/core/tools/code-preview.js";
 import { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { createHarness, type Harness } from "../harness.js";
