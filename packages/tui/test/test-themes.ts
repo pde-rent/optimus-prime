@@ -1,7 +1,7 @@
-import { Chalk } from "chalk";
 import type { EditorTheme, MarkdownTheme, SelectListTheme } from "../src/index.js";
+import { style } from "./ansi-style.js";
 
-const chalk = new Chalk({ level: 3 });
+const chalk = style;
 
 export const defaultSelectListTheme: SelectListTheme = {
 	selectedPrefix: (text: string) => chalk.blue(text),

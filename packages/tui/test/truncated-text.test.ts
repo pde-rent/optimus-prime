@@ -1,10 +1,10 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { Chalk } from "chalk";
 import { TruncatedText } from "../src/components/truncated-text.js";
 import { visibleWidth } from "../src/utils.js";
+import { style } from "./ansi-style.js";
 
-const chalk = new Chalk({ level: 3 });
+const chalk = style;
 
 describe("TruncatedText component", () => {
 	it("pads output lines to exactly match width", () => {

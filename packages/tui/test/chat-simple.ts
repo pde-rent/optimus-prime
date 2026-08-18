@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import { CombinedAutocompleteProvider } from "../src/autocomplete.js";
 import { Editor } from "../src/components/editor.js";
 import { Loader } from "../src/components/loader.js";
@@ -6,6 +5,7 @@ import { Markdown } from "../src/components/markdown.js";
 import { Text } from "../src/components/text.js";
 import { ProcessTerminal } from "../src/terminal.js";
 import { TUI } from "../src/tui.js";
+import { autoStyle as chalk } from "./ansi-style.js";
 import { defaultEditorTheme, defaultMarkdownTheme } from "./test-themes.js";
 
 const terminal = new ProcessTerminal();
