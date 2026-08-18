@@ -127,6 +127,13 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		} else {
 			skillLines.push(`Installed skills: ${installed}. Read their SKILL.md files for usage.`);
 		}
+		// Rendered only when the skill exists: an instruction to search, given to an agent with
+		// no search, is pure prefix cost and an invitation to hallucinate a capability.
+		if (installedSkills.includes("websearch")) {
+			skillLines.push(
+				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
+			);
+		}
 		if (hasIpython && installedSkills.includes("edit")) {
 			skillLines.push(
 				'For targeted existing-file edits, prefer the preloaded async `edit` skill: `await edit("pkg/file.ts", oldText, newText)`. Use exact old/new strings, built from inspected file slices when the text contains backticks or template placeholders.',

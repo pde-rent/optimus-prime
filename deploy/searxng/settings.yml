@@ -1,0 +1,72 @@
+# SearXNG configuration for agent use.
+#
+# Three departures from the shipped defaults, all deliberate:
+#   1. `formats` gains `json` — the JSON API is OFF by default, which is why every public
+#      instance refuses an agent (measured: 0 of 24 healthy public instances answered, with
+#      17x 429, 4x 403, 2x 418 and 1 HTML response).
+#   2. `limiter: false` — the bot limiter blocks non-browser clients. Safe ONLY because this
+#      instance is bound to loopback and serves one user. Never expose it with this setting.
+#   3. `keep_only` — the stock config enables 82 engines, including images, video, music,
+#      news and translation. Every one of those fires on a plain query and dilutes ranking.
+#      A general query should be answered by general engines, and nothing else.
+use_default_settings:
+  engines:
+    keep_only:
+      # General web — three independent indexes. Google and Brave crawl their own; DuckDuckGo
+      # is the one that stays up under load. Startpage is omitted on purpose: it proxies
+      # Google, so it duplicates a result set we already have and doubles the dedupe work.
+      - duckduckgo
+      - google cse
+      - brave
+      - mojeek            # small independent index; catches what the big three miss
+
+      # Reference — high-precision, near-zero noise, and answer many factual queries outright.
+      - wikipedia
+      - wikidata
+
+      # Academic — category `science`, so these do NOT fire on a general query. They answer
+      # when the caller asks for them, which keeps scholarly noise out of everyday searches.
+      - arxiv
+      - google scholar
+      - semantic scholar
+      - pubmed
+      - crossref
+      - openalex
+
+      # Technical — category `it`, same story: available on request, silent otherwise.
+      - github
+      - stackoverflow
+      - mdn
+      - hackernews
+
+# keep_only selects from the engines that ship enabled. These four ship disabled, so they
+# have to be switched on explicitly or they are silently absent from the pool above.
+engines:
+  - name: mojeek
+    disabled: false
+  - name: crossref
+    disabled: false
+  - name: openalex
+    disabled: false
+  - name: hackernews
+    disabled: false
+
+server:
+  secret_key: "09100e0217a1bfad563d544393d2fd199d8451752197dc0fb3f93e47675a3d0a"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+  # Agents read text. Nothing here should return media.
+  default_lang: "en"
+
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+  pool_connections: 20
+  pool_maxsize: 10

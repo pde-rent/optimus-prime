@@ -56,7 +56,6 @@ Prime Agent ships with built-in skills that load by default:
 - `goal` - JS-backed. Read, create, and complete the persistent thread goal.
 - `linear` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.
 - `notion` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.
-- `prime-intellect` - markdown. Prime Intellect products and workflows via the prime CLI: verifiers environments and the Environments Hub, evaluations (local and hosted), Hosted Training and prime-rl, sandboxes, tunnels, Prime Inference, GPU compute, and storage. Reference docs for each area load on demand from the skill's `references/` directory.
 - `refine` - JS-backed. Trigger continual harness refinement from the REPL.
 - `skill-creator` - markdown. Teaches the agent to create new skills: markdown skill layout, frontmatter rules, placement and precedence, and the full JS-backed skill contract (`skill.js` detection, the factory signature, the skill context, verification) with a working template in `references/js-skills.md`.
 - `websearch` - JS-backed web search and page reader. Backed by a self-hosted [SearXNG](https://docs.searxng.org) instance (free, keyless) or the [Serper](https://serper.dev) API.
@@ -153,7 +152,7 @@ To disable all built-in skills, set `enableBuiltinSkills` to `false` in `setting
 
 ```json
 {
-  "skills": ["-prime-intellect/SKILL.md"]
+  "skills": ["-linear/SKILL.md"]
 }
 ```
 

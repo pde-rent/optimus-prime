@@ -524,7 +524,7 @@ export function installOwnedSessionWorkerOwnerWatch(): void {
 		ownerGone = true;
 		process.off("disconnect", terminate);
 		if (process.connected) {
-			process.disconnect();
+			process.disconnect?.();
 		}
 		closeOwnerWatch = undefined;
 	};

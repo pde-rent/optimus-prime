@@ -3,22 +3,11 @@ import { getModel } from "../src/models.js";
 import { streamOpenAIResponses } from "../src/providers/openai-responses.js";
 import type { Model } from "../src/types.js";
 
-type CapturedHeaders = Headers | string[][] | Record<string, string | readonly string[]> | undefined;
+/** Read one header regardless of which `HeadersInit` shape the caller used. */
+type HeadersArg = ConstructorParameters<typeof Headers>[0];
 
-function getHeader(headers: CapturedHeaders, name: string): string | null {
-	if (!headers) return null;
-	if (headers instanceof Headers) return headers.get(name);
-
-	const lowerName = name.toLowerCase();
-	if (Array.isArray(headers)) {
-		const match = headers.find(([key]) => key?.toLowerCase() === lowerName);
-		return match?.[1] ?? null;
-	}
-
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === lowerName) return typeof value === "string" ? value : value.join(", ");
-	}
-	return null;
+function getHeader(headers: HeadersArg | undefined, name: string): string | null {
+	return headers ? new Headers(headers).get(name) : null;
 }
 
 async function captureOpenAIResponseHeaders(
