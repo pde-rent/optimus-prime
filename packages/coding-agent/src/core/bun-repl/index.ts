@@ -457,6 +457,14 @@ export class BunReplManager {
 	 * only be stopped by terminating the OS process) and respawn a fresh REPL so a
 	 * following execute isn't wedged. In-memory state is lost; on-disk snapshots survive.
 	 */
+	/**
+	 * Replace a child that ignored every cooperative signal.
+	 *
+	 * The kill loses the live namespace, but the last snapshot on disk is still valid and is the
+	 * only way back — so it must survive the restart untouched. Previously the fresh child came
+	 * up and immediately overwrote it with an empty namespace, turning a recoverable runaway into
+	 * permanent loss of everything the agent had built up.
+	 */
 	private async _restartForRunaway(): Promise<void> {
 		if (this._state === "shutdown") return;
 		if (this._child?.pid) {

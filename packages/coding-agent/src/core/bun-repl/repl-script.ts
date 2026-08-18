@@ -210,6 +210,8 @@ const INJECTED = new Set([
 ]);
 
 // Per-execute state.
+/** Child process of a running %%bash cell, so an interrupt can stop it. */
+let _activeBash: { kill: (signal?: NodeJS.Signals) => boolean } | null = null;
 let _execId: string | null = null;
 // Kept after the cell settles so a send that resolves late can still be attributed
 // to the cell that issued it.
@@ -363,6 +365,7 @@ async function runBash(req: BunReplExecuteRequest, body: string): Promise<void> 
 		env: process.env,
 		stdio: ["ignore", "pipe", "pipe"],
 	});
+	_activeBash = proc;
 
 	proc.stdout.setEncoding("utf8");
 	proc.stdout.on("data", (d: string) => sendStdout(d));
@@ -451,6 +454,7 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 			sentAgentMessages: _sentAgentMessages.length > 0 ? _sentAgentMessages : undefined,
 		});
 	} finally {
+		_activeBash = null;
 		_execId = null;
 		_displayData = [];
 		_diffs = [];
@@ -512,6 +516,24 @@ process.stdin.on("data", (chunk: string) => {
 			case "execute":
 				void executeCode(msg);
 				break;
+			// Without this, an interrupt fell through to `default` and did nothing: the host's
+			// only remaining lever was a hard kill, which destroys the whole namespace. Cancel
+			// what can be cancelled and let the cell settle as aborted instead.
+			case "interrupt": {
+				const bash = _activeBash;
+				if (bash) {
+					try {
+						bash.kill("SIGINT");
+					} catch {
+						// already exited
+					}
+				}
+				for (const [requestId, pending] of pendingHostRequests) {
+					pendingHostRequests.delete(requestId);
+					pending.reject(new Error("interrupted"));
+				}
+				break;
+			}
 			case "shutdown":
 				send({ id: msg.id, type: "result", status: "ok", value: '"shutdown"' });
 				send({ id: msg.id, type: "idle" });
