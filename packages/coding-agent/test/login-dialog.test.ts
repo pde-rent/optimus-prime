@@ -7,10 +7,6 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { KeybindingsManager } from "../src/core/keybindings.js";
-import { LoginDialogComponent } from "../src/modes/interactive/components/login-dialog.js";
-import { initTheme } from "../src/modes/interactive/theme/theme.js";
-import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
 
 const mocks = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),
@@ -24,6 +20,11 @@ vi.mock("child_process", () => ({
 vi.mock("../src/utils/clipboard.js", () => ({
 	copyToClipboard: mocks.copyToClipboard,
 }));
+
+const { KeybindingsManager } = await import("../src/core/keybindings.js");
+const { LoginDialogComponent } = await import("../src/modes/interactive/components/login-dialog.js");
+const { initTheme } = await import("../src/modes/interactive/theme/theme.js");
+const { OPTIMUS_LOGO } = await import("../src/themes/optimus-logo.js");
 
 function createFakeTui(): TUI {
 	return {

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { execSync, spawn } from "child_process";
 import { platform } from "os";
-import { copyToClipboard } from "../src/utils/clipboard.js";
 
 const mocks = vi.hoisted(() => {
 	return {
@@ -39,6 +38,8 @@ vi.mock("../src/utils/clipboard-image.js", () => {
 		isWaylandSession: mocks.isWaylandSession,
 	};
 });
+
+const { copyToClipboard } = await import("../src/utils/clipboard.js");
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedSpawn = vi.mocked(spawn);

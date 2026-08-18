@@ -2,14 +2,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentAutonomousStatus } from "../src/core/autonomous.js";
-import {
-	createCompactionOutcomeMessage,
-	createCustomMessage,
-	createSessionSlashCommandResultMessage,
-} from "../src/core/messages.js";
 import type { SessionShutdownEvent } from "../src/index.js";
-import { selectHeadlessTerminalResult } from "../src/modes/headless-completion.js";
-import { runPrintMode } from "../src/modes/print-mode.js";
 
 const output = vi.hoisted(() => ({ write: vi.fn(), flush: vi.fn(async () => {}) }));
 vi.mock("../src/core/output-guard.js", () => ({
@@ -19,6 +12,12 @@ vi.mock("../src/core/output-guard.js", () => ({
 vi.mock("../src/utils/shell.js", () => ({
 	killTrackedDetachedChildren: vi.fn(),
 }));
+
+const { createCompactionOutcomeMessage, createCustomMessage, createSessionSlashCommandResultMessage } = await import(
+	"../src/core/messages.js"
+);
+const { selectHeadlessTerminalResult } = await import("../src/modes/headless-completion.js");
+const { runPrintMode } = await import("../src/modes/print-mode.js");
 
 type EmitEvent = SessionShutdownEvent;
 

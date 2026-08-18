@@ -2,28 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	acquireDaemonUpdateRestartCoordinator,
-	type DaemonUpdateRestartStatus,
-	DaemonUpdateRestartStatusWriter,
-	waitForActiveDaemonUpdateRestartCoordinator,
-} from "../src/cli/daemon-update-restart.js";
-import {
-	ENV_AGENT_DIR,
-	getDaemonUpdateRestartManifestPath,
-	getLegacyDaemonUpdateRestartManifestPath,
-	PACKAGE_NAME,
-	SELF_UPDATE_INTERACTIVE_CHILD_ENV,
-	SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE,
-	VERSION,
-} from "../src/config.js";
 import type { AgentSessionRuntimeMetadata } from "../src/core/agent-session-runtime.js";
-import { DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_ID } from "../src/modes/daemon/daemon-protocol.js";
-import {
-	handlePackageCommand,
-	prepareDaemonUpdateRestart,
-	runDaemonUpdateRestartCoordinator,
-} from "../src/package-manager-cli.js";
 
 interface MockSessionSummary {
 	id: string;
@@ -389,6 +368,27 @@ vi.mock("../src/modes/daemon/daemon-client.js", () => ({
 		}
 	},
 }));
+
+import type { DaemonUpdateRestartStatus } from "../src/cli/daemon-update-restart.js";
+
+const {
+	acquireDaemonUpdateRestartCoordinator,
+	DaemonUpdateRestartStatusWriter,
+	waitForActiveDaemonUpdateRestartCoordinator,
+} = await import("../src/cli/daemon-update-restart.js");
+const {
+	ENV_AGENT_DIR,
+	getDaemonUpdateRestartManifestPath,
+	getLegacyDaemonUpdateRestartManifestPath,
+	PACKAGE_NAME,
+	SELF_UPDATE_INTERACTIVE_CHILD_ENV,
+	SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE,
+	VERSION,
+} = await import("../src/config.js");
+const { DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_ID } = await import("../src/modes/daemon/daemon-protocol.js");
+const { handlePackageCommand, prepareDaemonUpdateRestart, runDaemonUpdateRestartCoordinator } = await import(
+	"../src/package-manager-cli.js"
+);
 
 describe("self-update daemon restart", () => {
 	let tempDir: string;

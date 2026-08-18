@@ -1,11 +1,15 @@
 /** Runtime capabilities the REPL sandbox exposes without any install step. */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
-	"Bun (Bun.file, Bun.write, Bun.Glob, Bun.spawn)",
-	"native fetch",
+	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
+	"`$` — Bun's shell, pre-bound: ``await $`ls -la`.text()``",
+	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
+	"`pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
+	"native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing",
 	"Web Crypto (crypto.randomUUID, crypto.subtle)",
 	"Buffer",
-	"TextEncoder/TextDecoder",
-	"URL/URLSearchParams",
+	"TextEncoder/TextDecoder, Compression/DecompressionStream",
+	"URL/URLSearchParams/URLPattern",
+	"a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel",
 ];
 
 export interface RlmPromptOptions {

@@ -10,14 +10,7 @@ import {
 	getModel,
 	type Model,
 } from "@earendil-works/pi-ai";
-import { AgentSession } from "../src/core/agent-session.js";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
-import { AuthStorage } from "../src/core/auth-storage.js";
-import { ModelRegistry } from "../src/core/model-registry.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { SettingsManager } from "../src/core/settings-manager.js";
-import { runRpcMode } from "../src/modes/rpc/rpc-mode.js";
-import { createTestResourceLoader } from "./utilities.js";
 
 const rpcIo = vi.hoisted(() => ({
 	outputLines: [] as string[],
@@ -40,6 +33,16 @@ vi.mock("../src/modes/rpc/jsonl.js", () => ({
 	}),
 	serializeJsonLine: (value: unknown) => `${JSON.stringify(value)}\n`,
 }));
+
+const { AgentSession } = await import("../src/core/agent-session.js");
+// `await import` only binds a value; classes used as types need this alias.
+type AgentSession = InstanceType<typeof AgentSession>;
+const { AuthStorage } = await import("../src/core/auth-storage.js");
+const { ModelRegistry } = await import("../src/core/model-registry.js");
+const { SessionManager } = await import("../src/core/session-manager.js");
+const { SettingsManager } = await import("../src/core/settings-manager.js");
+const { runRpcMode } = await import("../src/modes/rpc/rpc-mode.js");
+const { createTestResourceLoader } = await import("./utilities.js");
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
 	constructor() {

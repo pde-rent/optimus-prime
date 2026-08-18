@@ -11,7 +11,7 @@ vi.mock("../../../src/cli/daemon-command.js", () => ({
 	},
 }));
 
-import { handlePublicCommand } from "../../../src/cli/public-command.js";
+const { handlePublicCommand } = await import("../../../src/cli/public-command.js");
 
 describe("issue #622 global options before commands", () => {
 	beforeEach(() => {

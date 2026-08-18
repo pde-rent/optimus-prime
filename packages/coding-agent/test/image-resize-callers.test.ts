@@ -8,8 +8,8 @@ vi.mock("../src/utils/image-resize.js", () => ({
 	formatDimensionNote: vi.fn(() => undefined),
 }));
 
-import { processFileArguments } from "../src/cli/file-processor.js";
-import { resizeImage } from "../src/utils/image-resize.js";
+const { processFileArguments } = await import("../src/cli/file-processor.js");
+const { resizeImage } = await import("../src/utils/image-resize.js");
 
 const TINY_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -192,4 +192,43 @@ describe("Bun REPL", () => {
 		expect(r2.result).toBe("12");
 		await p2.dispose().catch(() => {});
 	});
+});
+
+describe("snapshot excludes live handles", () => {
+	test("a resumed session keeps Bun intact and does not resurrect handles", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "repl-handles-"));
+		const snapshotDir = join(dir, "snap");
+		const first = new BunReplManager({ cwd: dir, snapshotDir });
+		await first.start();
+		await first.execute(
+			`const answer = 42; const cfg = { deep: { ok: true } };` +
+				` const server = Bun.serve({ port: 8893, fetch: () => new Response("x") });` +
+				` const timer = setInterval(() => {}, 1000);`,
+		);
+		await first.dispose();
+
+		const second = new BunReplManager({ cwd: dir, snapshotDir });
+		await second.start();
+		try {
+			await second.restoreState();
+
+			// The regression this guards: the Bun namespace was itself snapshotted, serialized to
+			// `{}`, and restored over the real global — leaving every later cell without Bun.file,
+			// Bun.spawn or Bun.Glob.
+			expect((await second.execute("typeof Bun?.serve")).result).toBe('"function"');
+			expect((await second.execute("typeof Bun?.file")).result).toBe('"function"');
+
+			// Plain data still survives.
+			expect((await second.execute("answer")).result).toBe("42");
+			expect((await second.execute("JSON.stringify(cfg)")).result).toBe('"{\\"deep\\":{\\"ok\\":true}}"');
+
+			// Live handles must be absent rather than restored as hollow `{}` objects that still
+			// look callable to the model.
+			expect((await second.execute("typeof server")).result).toBe('"undefined"');
+			expect((await second.execute("typeof timer")).result).toBe('"undefined"');
+		} finally {
+			await second.dispose();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
 });

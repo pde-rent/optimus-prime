@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { AgentSession } from "../../src/core/agent-session.js";
 import { normalizeRequestedRlmEffort } from "../../src/core/rlm-runtime.js";

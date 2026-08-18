@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
 import { inspect } from "node:util";
 import { createContext, runInContext } from "node:vm";
+import { generateDiffString } from "../tools/edit-diff.js";
 import {
 	AGENT_MESSAGE_DISPLAY_MIME,
 	DIFF_DISPLAY_MIME,
 	type KernelDiffDisplay,
 	type KernelSentAgentMessage,
 } from "../tools/kernel-types.js";
+import { truncateHead, truncateTail } from "../tools/truncate.js";
 import { bashCommand, parseCell } from "./cell.js";
 import type {
 	BunReplExecuteRequest,
@@ -192,6 +194,30 @@ const rlmObj = Object.assign(rlm, {
 	host_request: (type: string, payload: Record<string, unknown>) => hostBridge.hostRequest(type, payload),
 });
 
+/**
+ * Harness-owned helpers the runtime has no equivalent for, grouped under one
+ * name so the sandbox's bare-name surface does not grow and so a cell's own
+ * variables cannot shadow them by accident. `pi` is the CLI's own name.
+ *
+ * Deliberately small: anything Bun already ships (`Bun.stringWidth`,
+ * `Bun.stripANSI`, `Bun.sliceAnsi`, `Bun.wrapAnsi`, `Bun.markdown`) stays with
+ * Bun rather than being mirrored here. What is left are the two things a cell
+ * would otherwise hand-roll wrongly: a line diff, and truncation that cannot
+ * split a UTF-8 sequence or a line.
+ *
+ * Pure functions over their arguments: no harness state is read or mutated, so
+ * a cell can call them freely.
+ */
+const piObj = Object.freeze({
+	/** Line diff with line numbers and elided context, in the format the edit tool prints. */
+	diff: (oldText: string, newText: string, options?: { contextLines?: number; startLine?: number }) =>
+		generateDiffString(oldText, newText, options?.contextLines ?? 4, options?.startLine ?? 1),
+	/** Keep the first lines/bytes; never returns a partial line. */
+	truncateHead,
+	/** Keep the last lines/bytes; splits on UTF-8 boundaries, not bytes. */
+	truncateTail,
+});
+
 // Names injected into the sandbox that must never appear in snapshots/namespace listings.
 const INJECTED = new Set([
 	"globalThis",
@@ -218,6 +244,7 @@ const INJECTED = new Set([
 	"__import",
 	"__rlm_host_request",
 	"rlm",
+	"pi",
 ]);
 
 // Per-execute state.
@@ -337,6 +364,48 @@ const importModule = async (specifier: string): Promise<unknown> => import(speci
 
 // Curated set of globals exposed to the sandbox. The sandbox deliberately does
 // not get `process`, so user code cannot kill the REPL child or touch its host.
+/**
+ * A read-only slice of `process`. The full object is withheld so a cell cannot
+ * `exit()` the REPL child or `chdir()` out from under `cd()`/`pwd()`, but the
+ * informational fields are what agents actually reach for, and a bare
+ * `process is not defined` sent them hunting for a shim. The mutating members
+ * throw an explanation rather than being absent, so the failure names its cause.
+ */
+const sandboxProcess = Object.freeze({
+	platform: process.platform,
+	arch: process.arch,
+	version: process.version,
+	versions: Object.freeze({ ...process.versions }),
+	pid: process.pid,
+	env: process.env,
+	cwd: () => process.cwd(),
+	uptime: () => process.uptime(),
+	memoryUsage: () => process.memoryUsage(),
+	hrtime: process.hrtime,
+	nextTick: (cb: (...args: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => cb(...args)),
+	exit: () => {
+		throw new Error(
+			"process.exit is unavailable in the REPL: it would kill the persistent kernel. Return a value instead.",
+		);
+	},
+	chdir: () => {
+		throw new Error(
+			"process.chdir is unavailable in the REPL: use cd('<dir>') so %%bash cells and file paths stay in sync.",
+		);
+	},
+	kill: () => {
+		throw new Error("process.kill is unavailable in the REPL. Use Bun.spawn to manage child processes you started.");
+	},
+});
+
+/**
+ * Globals Bun provides that `@types/node` does not declare. Read off globalThis
+ * for the same reason `Bun` is: the build must stay dependency-free.
+ */
+function bunOnlyGlobal(name: string): unknown {
+	return (globalThis as Record<string, unknown>)[name];
+}
+
 // The Bun runtime object, resolved dynamically so the build needs no @types/bun.
 const bunGlobal = (globalThis as { Bun?: unknown }).Bun;
 
@@ -381,6 +450,26 @@ Object.assign(context, {
 	ReadableStream,
 	WritableStream,
 	TransformStream,
+	ByteLengthQueuingStrategy,
+	CountQueuingStrategy,
+	// Streaming HTML parsing, correct on malformed markup where a regex is not.
+	HTMLRewriter: bunOnlyGlobal("HTMLRewriter"),
+	CompressionStream,
+	DecompressionStream,
+	TextEncoderStream,
+	TextDecoderStream,
+	URLPattern: bunOnlyGlobal("URLPattern"),
+	WebSocket,
+	Worker: bunOnlyGlobal("Worker"),
+	BroadcastChannel,
+	MessageChannel,
+	MessagePort,
+	Event,
+	EventTarget,
+	CustomEvent,
+	DOMException,
+	navigator,
+	process: sandboxProcess,
 	display,
 	sys: { display },
 	util,
@@ -390,6 +479,7 @@ Object.assign(context, {
 	__import: importModule,
 	__rlm_host_request: hostBridge.hostRequest.bind(hostBridge),
 	rlm: rlmObj,
+	pi: piObj,
 });
 context.globalThis = context; // keep the context's own globalThis pointing at itself
 
@@ -616,18 +706,56 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 /** Ceiling on the whole snapshot, mirroring the old kernel's DEFAULT_SNAPSHOT_MAX_BYTES. */
 const SNAPSHOT_MAX_CHARS = 256 * 1024 * 1024;
 
+/**
+ * True when a value is plain data that survives a JSON round-trip intact.
+ *
+ * Host objects and class instances stringify to `{}` without throwing, so `jsonSafe` cannot
+ * detect them: a live `Bun.serve` handle, a `Timeout`, or the `Bun` namespace itself all look
+ * like empty objects. Snapshotting those produced two failures — the agent got back a hollow
+ * `{}` that still looked like a server, and restoring an entry named `Bun` overwrote the real
+ * global, leaving every later cell without `Bun.file`, `Bun.spawn` or `Bun.Glob`.
+ */
+function isPlainData(value: unknown): boolean {
+	if (value === null) return true;
+	const t = typeof value;
+	if (t === "string" || t === "number" || t === "boolean") return true;
+	if (t !== "object") return false;
+	if (Array.isArray(value)) return value.every(isPlainData);
+	// Prototype identity cannot be compared across realms — an object literal created inside the
+	// vm has the vm's own Object.prototype — and constructor names are unreliable for host
+	// objects. Depth is neither: a plain object sits exactly one link above null, while any class
+	// or host instance sits at least two.
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== null && Object.getPrototypeOf(proto) !== null) return false;
+	return Object.values(value as Record<string, unknown>).every(isPlainData);
+}
+
+/**
+ * Every global present before user code runs. Captured once at boot so runtime globals — the
+ * `Bun` namespace, `fetch`, `Response`, `process`, the stream classes — are excluded from
+ * snapshots silently, rather than being reported to the model as variables that failed to
+ * restore.
+ */
+const BUILTIN_KEYS = new Set(Object.keys(context));
+
 function snapshotState(): { data: Record<string, unknown>; dropped: string[] } {
 	const data: Record<string, unknown> = {};
 	const dropped: string[] = [];
 	let total = 0;
 	for (const [key, value] of Object.entries(context)) {
 		if (key.startsWith("__")) continue;
-		if (INJECTED.has(key)) continue;
+		if (INJECTED.has(key) || BUILTIN_KEYS.has(key)) continue;
 		if (typeof value === "function" || typeof value === "symbol") {
 			dropped.push(key);
 			continue;
 		}
 		if (typeof value === "undefined") continue;
+		// Live handles and runtime globals are not data. Reported as dropped so the model is
+		// told what did not come back rather than finding a hollow object later.
+		if (!isPlainData(value)) {
+			dropped.push(key);
+			continue;
+		}
 		const safe = jsonSafe(value);
 		// `jsonSafe` falls back to `String(value)` when a value cannot be serialized; a
 		// non-string original that came back as a string did not survive intact.

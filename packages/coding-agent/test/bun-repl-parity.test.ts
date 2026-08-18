@@ -67,6 +67,111 @@ describe("Bun REPL parity", () => {
 		}
 	});
 
+	it("exposes the web and Bun-module surface the runtime labels promise", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const names = [
+				"HTMLRewriter",
+				"WebSocket",
+				"Worker",
+				"BroadcastChannel",
+				"MessageChannel",
+				"CompressionStream",
+				"DecompressionStream",
+				"TextEncoderStream",
+				"TextDecoderStream",
+				"URLPattern",
+				"Event",
+				"EventTarget",
+				"CustomEvent",
+				"DOMException",
+				"navigator",
+				"$",
+			];
+			const missing = await manager.execute(
+				`JSON.stringify(${JSON.stringify(names)}.filter((n) => typeof globalThis[n] === "undefined"))`,
+			);
+			expect(missing.status).toBe("ok");
+			expect(JSON.parse(JSON.parse(missing.result ?? '""'))).toEqual([]);
+
+			// Built-in modules must be reachable through dynamic import, not just listed.
+			const sqlite = await manager.execute(
+				`(async () => { const { Database } = await import("bun:sqlite"); const db = new Database(":memory:"); db.run("create table t(x)"); db.run("insert into t values (42)"); return db.query("select x from t").get().x; })()`,
+			);
+			expect(sqlite.status).toBe("ok");
+			expect(JSON.parse(sqlite.result ?? "null")).toBe(42);
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	// `pi` groups the harness helpers the runtime labels advertise. They are promised
+	// in the system prompt, so an injected-but-broken binding costs a turn the same way
+	// a missing global does.
+	it("exposes the `pi` helper namespace the runtime labels promise", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const diff = await manager.execute(
+				`JSON.stringify(pi.diff(["a", "b", "c"].join("\\n"), ["a", "B", "c"].join("\\n")))`,
+			);
+			expect(diff.status).toBe("ok");
+			const diffValue = JSON.parse(JSON.parse(diff.result ?? '""')) as { diff: string; firstChangedLine: number };
+			expect(diffValue.firstChangedLine).toBe(2);
+			expect(diffValue.diff.split("\n")).toEqual([" 1 a", "-2 b", "+2 B", " 3 c"]);
+
+			const head = await manager.execute(
+				`JSON.stringify(pi.truncateHead(["l1", "l2", "l3"].join("\\n"), { maxLines: 2 }))`,
+			);
+			expect(head.status).toBe("ok");
+			expect(JSON.parse(JSON.parse(head.result ?? '""'))).toMatchObject({
+				content: "l1\nl2",
+				truncated: true,
+				truncatedBy: "lines",
+				totalLines: 3,
+			});
+
+			const tail = await manager.execute(
+				`JSON.stringify(pi.truncateTail(["l1", "l2", "l3"].join("\\n"), { maxLines: 2 }))`,
+			);
+			expect(tail.status).toBe("ok");
+			expect(JSON.parse(JSON.parse(tail.result ?? '""'))).toMatchObject({
+				content: "l2\nl3",
+				truncated: true,
+				truncatedBy: "lines",
+			});
+
+			// The reason this is worth exposing: a byte budget cut by hand splits a
+			// multi-byte character and yields replacement chars.
+			const bytes = await manager.execute(`pi.truncateTail("é".repeat(10), { maxBytes: 5 }).content`);
+			expect(bytes.status).toBe("ok");
+			expect(JSON.parse(bytes.result ?? '""')).toBe("éé");
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
+	it("withholds the process members that would break the kernel, with an explanation", async () => {
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			// Absent members would fail as "undefined is not a function"; these must say why.
+			for (const member of ["exit", "chdir", "kill"]) {
+				const r = await manager.execute(
+					`(() => { try { process.${member}(); return "NOT THROWN"; } catch (e) { return e.message; } })()`,
+				);
+				expect(r.status).toBe("ok");
+				const message = JSON.parse(r.result ?? '""');
+				expect(message).toContain(`process.${member} is unavailable`);
+			}
+			const readable = await manager.execute(`JSON.stringify(typeof process.platform === "string")`);
+			expect(JSON.parse(JSON.parse(readable.result ?? '""'))).toBe(true);
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+
 	it("round-trips a real file through the advertised Bun APIs", async () => {
 		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
 		await manager.start();

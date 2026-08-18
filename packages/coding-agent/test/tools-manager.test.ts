@@ -23,12 +23,11 @@ vi.mock("extract-zip", () => ({
 	default: (source: string, options: { dir: string }) => toolState.extractZip(source, options),
 }));
 
-import {
-	ensureToolWithStatus,
-	formatMissingRipgrepMessage,
-	getToolPath,
-	type ToolUnavailableResult,
-} from "../src/utils/tools-manager.js";
+import type { ToolUnavailableResult } from "../src/utils/tools-manager.js";
+
+const { ensureToolWithStatus, formatMissingRipgrepMessage, getToolPath } = await import(
+	"../src/utils/tools-manager.js"
+);
 
 const originalPath = process.env.PATH;
 const originalOffline = process.env.PI_OFFLINE;

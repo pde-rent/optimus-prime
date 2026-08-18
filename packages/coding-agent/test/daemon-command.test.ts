@@ -127,7 +127,7 @@ vi.mock("node:child_process", () => {
 	return { ...original, spawn: spawnMock.mockSpawn as never };
 });
 
-import { handleDaemonCommand } from "../src/cli/daemon-command.js";
+const { handleDaemonCommand } = await import("../src/cli/daemon-command.js");
 
 describe("daemon command", () => {
 	let consoleErrorMessages: unknown[];

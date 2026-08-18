@@ -37,7 +37,7 @@ vi.mock("child_process", () => ({
 	}),
 }));
 
-import { FooterDataProvider } from "../src/core/footer-data-provider.js";
+const { FooterDataProvider } = await import("../src/core/footer-data-provider.js");
 
 type WorktreeFixture = {
 	worktreeDir: string;

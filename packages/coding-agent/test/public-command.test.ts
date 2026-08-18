@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { SELF_UPDATE_INTERACTIVE_CHILD_ENV } from "../src/config.js";
 
 const mocks = vi.hoisted(() => ({
 	daemonCommands: [] as string[][],
@@ -36,10 +35,12 @@ vi.mock("../src/cli/daemon-ps.js", () => ({
 	},
 }));
 
-import { INTERNAL_RUNTIME_COMMAND_MARKER } from "../src/cli/args.js";
-import { formatTopLevelHelp } from "../src/cli/command-registry.js";
-import { DAEMON_UPDATE_RESTART_COORDINATOR_FLAG } from "../src/cli/daemon-update-restart.js";
-import { handlePublicCommand } from "../src/cli/public-command.js";
+const { SELF_UPDATE_INTERACTIVE_CHILD_ENV } = await import("../src/config.js");
+
+const { INTERNAL_RUNTIME_COMMAND_MARKER } = await import("../src/cli/args.js");
+const { formatTopLevelHelp } = await import("../src/cli/command-registry.js");
+const { DAEMON_UPDATE_RESTART_COORDINATOR_FLAG } = await import("../src/cli/daemon-update-restart.js");
+const { handlePublicCommand } = await import("../src/cli/public-command.js");
 
 describe("public command routing", () => {
 	beforeEach(() => {

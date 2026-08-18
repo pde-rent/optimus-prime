@@ -4,29 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import {
-	appendGlobalRefinement,
-	applyRefinementProposal,
-	formatHarnessStateForPrompt,
-	getGlobalHarnessStateDir,
-	getHarnessStatePath,
-	getLocalHarnessStateDir,
-	getRefinementHistory,
-	getRefinementHistoryPath,
-	type HarnessState,
-	inferRefinementResultScope,
-	loadGlobalRefinementHistory,
-	loadHarnessState,
-	mergeHarnessStates,
-	mergeRefinementHistory,
-	planRefinement,
-	type RefinementAction,
-	type RefinementKind,
-	type RefinementProposal,
-	type RefinementResult,
-	refineHarness,
-	saveHarnessState,
-} from "../src/core/refinement/index.js";
 import type { CustomEntry } from "../src/core/session-manager.js";
 
 const { completeSimpleMock } = vi.hoisted(() => ({
@@ -41,6 +18,33 @@ vi.mock("@earendil-works/pi-ai", () => {
 		completeSimple: completeSimpleMock,
 	};
 });
+
+import type {
+	HarnessState,
+	RefinementAction,
+	RefinementKind,
+	RefinementProposal,
+	RefinementResult,
+} from "../src/core/refinement/index.js";
+
+const {
+	appendGlobalRefinement,
+	applyRefinementProposal,
+	formatHarnessStateForPrompt,
+	getGlobalHarnessStateDir,
+	getHarnessStatePath,
+	getLocalHarnessStateDir,
+	getRefinementHistory,
+	getRefinementHistoryPath,
+	inferRefinementResultScope,
+	loadGlobalRefinementHistory,
+	loadHarnessState,
+	mergeHarnessStates,
+	mergeRefinementHistory,
+	planRefinement,
+	refineHarness,
+	saveHarnessState,
+} = await import("../src/core/refinement/index.js");
 
 let tempDir: string | undefined;
 

@@ -13,6 +13,7 @@
  * ambient declarations in types/bun-test.d.ts always hold at runtime.
  */
 import {
+	afterAll,
 	afterEach,
 	describe,
 	expect,
@@ -46,7 +47,7 @@ function flushMicrotasks(): Promise<void> {
 // inside the same window. Bun's advanceTimersByTime is synchronous, so slice the
 // window and flush between slices: the total advance is identical and
 // continuations still get to schedule follow-up timers within the window.
-const ADVANCE_SLICES = 16;
+const ADVANCE_SLICES = 64;
 
 async function advanceTimersByTimeAsync(ms: number): Promise<void> {
 	await flushMicrotasks();
@@ -178,6 +179,13 @@ function unstubAllGlobals(): void {
 afterEach(() => {
 	unstubAllEnvs();
 	unstubAllGlobals();
+});
+
+// `bun test` runs every file in one process. A file that switches on fake timers
+// and never switches them back would freeze real timers for every later file, so
+// the runner state is reset at each file boundary (--isolate runs this per file).
+afterAll(() => {
+	if (vi.isFakeTimers()) vi.useRealTimers();
 });
 
 // --- install -----------------------------------------------------------------

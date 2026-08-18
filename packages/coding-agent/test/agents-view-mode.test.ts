@@ -1,21 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import { KeybindingsManager } from "../src/core/keybindings.js";
 import type { ModelRegistry } from "../src/core/model-registry.js";
-import { SettingsManager } from "../src/core/settings-manager.js";
-import { DaemonAgentConnection } from "../src/modes/agent-connection/daemon-agent-connection.js";
 import type { AgentConnectionSavedSessionInfo } from "../src/modes/agent-connection/types.js";
-import {
-	AgentsViewMode,
-	type AgentsViewPersistentState,
-	combineAgentsViewStartupNotices,
-	createInitialAgentsViewPersistentState,
-	runAgentsViewMode,
-} from "../src/modes/agents-view/agents-view-mode.js";
-import { type AgentsViewRow, resolveAgentsViewLeftResult } from "../src/modes/agents-view/agents-view-state.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import type { InteractiveModeUiServices } from "../src/modes/interactive/interactive-mode-services.js";
-import { stopThemeWatcher } from "../src/modes/interactive/theme/theme.js";
 
 const modeMocks = vi.hoisted(() => ({
 	interactiveRun: vi.fn<() => Promise<never>>(),
@@ -57,6 +45,19 @@ vi.mock("../src/modes/interactive/interactive-mode.js", () => {
 		},
 	};
 });
+
+import type { AgentsViewPersistentState } from "../src/modes/agents-view/agents-view-mode.js";
+import type { AgentsViewRow } from "../src/modes/agents-view/agents-view-state.js";
+
+const { KeybindingsManager } = await import("../src/core/keybindings.js");
+const { SettingsManager } = await import("../src/core/settings-manager.js");
+const { DaemonAgentConnection } = await import("../src/modes/agent-connection/daemon-agent-connection.js");
+const { AgentsViewMode, combineAgentsViewStartupNotices, createInitialAgentsViewPersistentState, runAgentsViewMode } =
+	await import("../src/modes/agents-view/agents-view-mode.js");
+// `await import` only binds a value; classes used as types need this alias.
+type AgentsViewMode = InstanceType<typeof AgentsViewMode>;
+const { resolveAgentsViewLeftResult } = await import("../src/modes/agents-view/agents-view-state.js");
+const { stopThemeWatcher } = await import("../src/modes/interactive/theme/theme.js");
 
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
 	return {

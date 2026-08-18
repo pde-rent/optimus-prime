@@ -35,19 +35,25 @@ import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
 import type { CreateRlmSubagentRuntimeOptions, SubagentRuntimeHost } from "../src/core/rlm-runtime.js";
-import { canonicalSessionPath } from "../src/core/session-lease.js";
-import { SessionManager } from "../src/core/session-manager.js";
+
+const { canonicalSessionPath } = await import("../src/core/session-lease.js");
+const { SessionManager } = await import("../src/core/session-manager.js");
+
 import type { ActiveSessionState } from "../src/modes/daemon/active-session-state.js";
-import { AgentDaemon } from "../src/modes/daemon/daemon-mode.js";
+
+const { AgentDaemon } = await import("../src/modes/daemon/daemon-mode.js");
+
 import type { DaemonCommand } from "../src/modes/daemon/daemon-protocol.js";
-import { DaemonSupervisor } from "../src/modes/daemon/daemon-supervisor.js";
-import {
-	RLM_LEDGER_MAX_BYTES,
-	RLM_LEDGER_MAX_RECORDS,
-	type RlmLedgerDeleteReason,
-	RlmSpawnLedger,
-	rlmLedgerPath,
-} from "../src/modes/daemon/rlm-ledger.js";
+
+const { DaemonSupervisor } = await import("../src/modes/daemon/daemon-supervisor.js");
+
+import type { RlmLedgerDeleteReason } from "../src/modes/daemon/rlm-ledger.js";
+
+const { RLM_LEDGER_MAX_BYTES, RLM_LEDGER_MAX_RECORDS, RlmSpawnLedger, rlmLedgerPath } = await import(
+	"../src/modes/daemon/rlm-ledger.js"
+);
+// `await import` only binds a value; classes used as types need this alias.
+type RlmSpawnLedger = InstanceType<typeof RlmSpawnLedger>;
 
 function makeRoots(root: string) {
 	const sessionsDir = join(root, "sessions");

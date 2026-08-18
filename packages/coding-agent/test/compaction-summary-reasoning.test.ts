@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { generateSummary } from "../src/core/compaction/index.js";
 
 const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
@@ -15,6 +14,8 @@ vi.mock("@earendil-works/pi-ai", () => {
 		completeSimple: completeSimpleMock,
 	};
 });
+
+const { generateSummary } = await import("../src/core/compaction/index.js");
 
 function createModel(reasoning: boolean): Model<"anthropic-messages"> {
 	return {

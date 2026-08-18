@@ -7,7 +7,7 @@ vi.mock("../src/models.js", () => ({
 	getModels: () => models,
 }));
 
-import { getZaiTestModel } from "./zai-test-model.js";
+const { getZaiTestModel } = await import("./zai-test-model.js");
 
 function createZaiModel(id: string, contextWindow: number, zaiToolStream = true): Model<"openai-completions"> {
 	return {

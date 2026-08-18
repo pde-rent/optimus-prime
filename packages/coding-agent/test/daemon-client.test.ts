@@ -1,10 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { DaemonClient, getDaemonSocketCloseReason } from "../src/modes/daemon/daemon-client.js";
-import {
-	DAEMON_COMMAND_COMPATIBILITY,
-	DAEMON_PROTOCOL_VERSION,
-	DAEMON_SCHEMA_REVISION,
-} from "../src/modes/daemon/daemon-protocol.js";
 
 const netMock = vi.hoisted(() => {
 	type Listener = (...args: unknown[]) => void;
@@ -89,6 +83,11 @@ const netMock = vi.hoisted(() => {
 vi.mock("node:net", () => ({
 	createConnection: netMock.createConnection,
 }));
+
+const { DaemonClient, getDaemonSocketCloseReason } = await import("../src/modes/daemon/daemon-client.js");
+const { DAEMON_COMMAND_COMPATIBILITY, DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_REVISION } = await import(
+	"../src/modes/daemon/daemon-protocol.js"
+);
 
 function emitHello(
 	socket: (typeof netMock.sockets)[number],

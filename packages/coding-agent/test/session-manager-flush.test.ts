@@ -47,7 +47,10 @@ vi.mock("node:fs", () => {
 	};
 });
 
-import { SessionManager } from "../src/core/session-manager.js";
+const { SessionManager } = await import("../src/core/session-manager.js");
+// `await import` only binds a value; SessionManager has a private constructor,
+// so its instance type comes from the static factory rather than InstanceType.
+type SessionManager = ReturnType<typeof SessionManager.create>;
 
 const tempDirs: string[] = [];
 

@@ -6,30 +6,9 @@ import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { getProcessStartId } from "../src/core/session-lease.js";
 import type { DaemonSocketClient } from "../src/modes/daemon/active-session-state.js";
-import { CommandRecoveryJournal } from "../src/modes/daemon/command-recovery-journal.js";
-import { DaemonCatalogClient } from "../src/modes/daemon/daemon-catalog-process.js";
-import { DaemonClient } from "../src/modes/daemon/daemon-client.js";
-import { AgentDaemon } from "../src/modes/daemon/daemon-mode.js";
-import {
-	createDaemonCommandEnvelope,
-	DAEMON_UPDATE_RESTART_FORMAT_VERSION,
-	type DaemonAttachResult,
-	success,
-} from "../src/modes/daemon/daemon-protocol.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
-import { DaemonSupervisor } from "../src/modes/daemon/daemon-supervisor.js";
-import {
-	DAEMON_WORKER_STARTUP_GATE_COMMIT,
-	DAEMON_WORKER_SUPERVISOR_SOCKET_ENV,
-	type DaemonWorkerFrameHeader,
-} from "../src/modes/daemon/daemon-worker-protocol.js";
-import { MutationDrainLatch } from "../src/modes/daemon/mutation-drain-latch.js";
-import { WorkerRecoveryJournal } from "../src/modes/daemon/worker-recovery-journal.js";
 import type { PrivateFrame } from "../src/modes/session-worker/private-framing.js";
-import * as childProcessModule from "../src/utils/child-process.js";
-import { createDeferred } from "./suite/scheduling.js";
 
 const workerLaunchTestState = vi.hoisted(() => ({
 	capture: false,
@@ -116,6 +95,26 @@ vi.mock("../src/core/session-lease.js", () => {
 		},
 	};
 });
+
+import type { DaemonAttachResult } from "../src/modes/daemon/daemon-protocol.js";
+import type { DaemonWorkerFrameHeader } from "../src/modes/daemon/daemon-worker-protocol.js";
+
+const { getProcessStartId } = await import("../src/core/session-lease.js");
+const { CommandRecoveryJournal } = await import("../src/modes/daemon/command-recovery-journal.js");
+const { DaemonCatalogClient } = await import("../src/modes/daemon/daemon-catalog-process.js");
+const { DaemonClient } = await import("../src/modes/daemon/daemon-client.js");
+const { AgentDaemon } = await import("../src/modes/daemon/daemon-mode.js");
+const { createDaemonCommandEnvelope, DAEMON_UPDATE_RESTART_FORMAT_VERSION, success } = await import(
+	"../src/modes/daemon/daemon-protocol.js"
+);
+const { DaemonSupervisor } = await import("../src/modes/daemon/daemon-supervisor.js");
+const { DAEMON_WORKER_STARTUP_GATE_COMMIT, DAEMON_WORKER_SUPERVISOR_SOCKET_ENV } = await import(
+	"../src/modes/daemon/daemon-worker-protocol.js"
+);
+const { MutationDrainLatch } = await import("../src/modes/daemon/mutation-drain-latch.js");
+const { WorkerRecoveryJournal } = await import("../src/modes/daemon/worker-recovery-journal.js");
+const { createDeferred } = await import("./suite/scheduling.js");
+const childProcessModule = await import("../src/utils/child-process.js");
 
 const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const previousSupervisorRegistryDir = process.env[supervisorRegistryDirEnv];
