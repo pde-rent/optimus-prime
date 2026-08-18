@@ -30,7 +30,9 @@
 		"postinstall.cjs",
 		"CHANGELOG.md"
 	],
-	"trustedDependencies": ["@earendil-works/pi-coding-agent"],
+	"trustedDependencies": [
+		"@earendil-works/pi-coding-agent"
+	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
@@ -61,7 +63,6 @@
 		"hosted-git-info": "^9.0.2",
 		"ignore": "^7.0.5",
 		"jiti": "^2.7.0",
-		"marked": "^18.0.7",
 		"minimatch": "^10.2.3",
 		"proper-lockfile": "^4.1.2",
 		"strip-ansi": "^7.1.0",
@@ -106,6 +107,6 @@
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
-		"bun": ">=1.3.0"
+		"bun": ">=1.3.14"
 	}
 }
