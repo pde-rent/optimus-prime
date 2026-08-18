@@ -225,24 +225,21 @@ export class RpcClient {
 	 * @returns Object with `cancelled: true` if an extension cancelled the new session
 	 */
 	async newSession(parentSession?: string): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "new_session", parentSession });
-		return this.getData(response);
+		return this.request({ type: "new_session", parentSession });
 	}
 
 	/**
 	 * Get current session state.
 	 */
 	async getState(): Promise<RpcSessionState> {
-		const response = await this.send({ type: "get_state" });
-		return this.getData(response);
+		return this.request({ type: "get_state" });
 	}
 
 	/**
 	 * Set model by provider and ID.
 	 */
 	async setModel(provider: string, modelId: string): Promise<{ provider: string; id: string }> {
-		const response = await this.send({ type: "set_model", provider, modelId });
-		return this.getData(response);
+		return this.request({ type: "set_model", provider, modelId });
 	}
 
 	/**
@@ -253,16 +250,14 @@ export class RpcClient {
 		thinkingLevel: ThinkingLevel;
 		isScoped: boolean;
 	} | null> {
-		const response = await this.send({ type: "cycle_model" });
-		return this.getData(response);
+		return this.request({ type: "cycle_model" });
 	}
 
 	/**
 	 * Get list of available models.
 	 */
 	async getAvailableModels(): Promise<ModelInfo[]> {
-		const response = await this.send({ type: "get_available_models" });
-		return this.getData<{ models: ModelInfo[] }>(response).models;
+		return (await this.request<{ models: ModelInfo[] }>({ type: "get_available_models" })).models;
 	}
 
 	/**
@@ -276,8 +271,7 @@ export class RpcClient {
 	 * Cycle thinking level.
 	 */
 	async cycleThinkingLevel(): Promise<{ level: ThinkingLevel } | null> {
-		const response = await this.send({ type: "cycle_thinking_level" });
-		return this.getData(response);
+		return this.request({ type: "cycle_thinking_level" });
 	}
 
 	/**
@@ -298,8 +292,7 @@ export class RpcClient {
 	 * Compact session context.
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
-		const response = await this.send({ type: "compact", customInstructions });
-		return this.getData(response);
+		return this.request({ type: "compact", customInstructions });
 	}
 
 	/**
@@ -319,8 +312,7 @@ export class RpcClient {
 		if (options.global !== undefined) {
 			command.global = options.global;
 		}
-		const response = await this.send(command, REFINE_REQUEST_TIMEOUT_MS);
-		return this.getData(response);
+		return this.request(command, REFINE_REQUEST_TIMEOUT_MS);
 	}
 
 	/**
@@ -348,8 +340,7 @@ export class RpcClient {
 	 * Execute a bash command.
 	 */
 	async bash(command: string): Promise<BashResult> {
-		const response = await this.send({ type: "bash", command });
-		return this.getData(response);
+		return this.request({ type: "bash", command });
 	}
 
 	/**
@@ -363,16 +354,14 @@ export class RpcClient {
 	 * Get session statistics.
 	 */
 	async getSessionStats(): Promise<SessionStats> {
-		const response = await this.send({ type: "get_session_stats" });
-		return this.getData(response);
+		return this.request({ type: "get_session_stats" });
 	}
 
 	/**
 	 * Export session to HTML.
 	 */
 	async exportHtml(outputPath?: string): Promise<{ path: string }> {
-		const response = await this.send({ type: "export_html", outputPath });
-		return this.getData(response);
+		return this.request({ type: "export_html", outputPath });
 	}
 
 	/**
@@ -380,8 +369,7 @@ export class RpcClient {
 	 * @returns Object with `cancelled: true` if an extension cancelled the switch
 	 */
 	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "switch_session", sessionPath });
-		return this.getData(response);
+		return this.request({ type: "switch_session", sessionPath });
 	}
 
 	/**
@@ -389,8 +377,7 @@ export class RpcClient {
 	 * @returns Object with `text` (the message text) and `cancelled` (if extension cancelled)
 	 */
 	async fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
-		const response = await this.send({ type: "fork", entryId });
-		return this.getData(response);
+		return this.request({ type: "fork", entryId });
 	}
 
 	/**
@@ -398,8 +385,7 @@ export class RpcClient {
 	 * @returns Object with `cancelled: true` if an extension cancelled the clone
 	 */
 	async clone(): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "clone" });
-		return this.getData(response);
+		return this.request({ type: "clone" });
 	}
 
 	/**
@@ -414,8 +400,7 @@ export class RpcClient {
 	 * Get text of last assistant message.
 	 */
 	async getLastAssistantText(): Promise<string | null> {
-		const response = await this.send({ type: "get_last_assistant_text" });
-		return this.getData<{ text: string | null }>(response).text;
+		return (await this.request<{ text: string | null }>({ type: "get_last_assistant_text" })).text;
 	}
 
 	/**
@@ -429,8 +414,7 @@ export class RpcClient {
 	 * Get all messages in the session.
 	 */
 	async getMessages(): Promise<AgentMessage[]> {
-		const response = await this.send({ type: "get_messages" });
-		return this.getData<{ messages: AgentMessage[] }>(response).messages;
+		return (await this.request<{ messages: AgentMessage[] }>({ type: "get_messages" })).messages;
 	}
 
 	async sendAgentMessage(targetActiveSessionId: string, message: string): Promise<AgentSessionMessageReceipt> {
@@ -455,33 +439,27 @@ export class RpcClient {
 	}
 
 	async clearAgentMessages(): Promise<number> {
-		const response = await this.send({ type: "agent_messages_clear" });
-		return this.getData<{ cleared: number }>(response).cleared;
+		return (await this.request<{ cleared: number }>({ type: "agent_messages_clear" })).cleared;
 	}
 
 	async listSchedules(includeInactive?: boolean): Promise<AgentCronJob[]> {
-		const response = await this.send({ type: "list_schedules", includeInactive });
-		return this.getData<{ jobs: AgentCronJob[] }>(response).jobs;
+		return (await this.request<{ jobs: AgentCronJob[] }>({ type: "list_schedules", includeInactive })).jobs;
 	}
 
 	async addSchedule(schedule: string, prompt: string): Promise<AgentCronJob> {
-		const response = await this.send({ type: "add_schedule", schedule, prompt });
-		return this.getData<{ job: AgentCronJob }>(response).job;
+		return (await this.request<{ job: AgentCronJob }>({ type: "add_schedule", schedule, prompt })).job;
 	}
 
 	async cancelSchedule(jobId: string): Promise<AgentCronJob> {
-		const response = await this.send({ type: "cancel_schedule", jobId });
-		return this.getData<{ job: AgentCronJob }>(response).job;
+		return (await this.request<{ job: AgentCronJob }>({ type: "cancel_schedule", jobId })).job;
 	}
 
 	async listHeartbeats(): Promise<AgentConnectionHeartbeat[]> {
-		const response = await this.send({ type: "list_heartbeats" });
-		return this.getData<{ heartbeats: AgentConnectionHeartbeat[] }>(response).heartbeats;
+		return (await this.request<{ heartbeats: AgentConnectionHeartbeat[] }>({ type: "list_heartbeats" })).heartbeats;
 	}
 
 	async getHeartbeat(): Promise<AgentCronJob | null> {
-		const response = await this.send({ type: "get_heartbeat" });
-		return this.getData<{ heartbeat: AgentCronJob | null }>(response).heartbeat;
+		return (await this.request<{ heartbeat: AgentCronJob | null }>({ type: "get_heartbeat" })).heartbeat;
 	}
 
 	async setHeartbeat(
@@ -498,8 +476,7 @@ export class RpcClient {
 	}
 
 	async updateHeartbeat(action: AgentHeartbeatUpdateAction): Promise<AgentCronJob | null> {
-		const response = await this.send({ type: "update_heartbeat", action });
-		return this.getData<{ heartbeat: AgentCronJob | null }>(response).heartbeat;
+		return (await this.request<{ heartbeat: AgentCronJob | null }>({ type: "update_heartbeat", action })).heartbeat;
 	}
 
 	async manageHeartbeat(
@@ -516,8 +493,7 @@ export class RpcClient {
 	}
 
 	async observe(activeSessionId: string): Promise<AgentMessage[]> {
-		const response = await this.send({ type: "observe", activeSessionId });
-		return this.getData<{ messages: AgentMessage[] }>(response).messages;
+		return (await this.request<{ messages: AgentMessage[] }>({ type: "observe", activeSessionId })).messages;
 	}
 
 	async unobserve(activeSessionId: string): Promise<void> {
@@ -528,8 +504,7 @@ export class RpcClient {
 	 * Get available commands (extension commands, prompt templates, skills).
 	 */
 	async getCommands(): Promise<RpcSlashCommand[]> {
-		const response = await this.send({ type: "get_commands" });
-		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
+		return (await this.request<{ commands: RpcSlashCommand[] }>({ type: "get_commands" })).commands;
 	}
 
 	// =========================================================================
@@ -656,6 +631,11 @@ export class RpcClient {
 
 			this.process!.stdin!.write(serializeJsonLine(fullCommand));
 		});
+	}
+
+	/** Send a command and unwrap its response payload. */
+	private async request<T>(command: RpcCommandBody, ...timeout: [] | [number]): Promise<T> {
+		return this.getData<T>(await this.send(command, ...timeout));
 	}
 
 	private getData<T>(response: RpcResponse): T {
