@@ -1,13 +1,13 @@
-import type { KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";
 
 export interface BunReplExecuteRequest {
 	id: string;
 	type: "execute";
 	code: string;
 	timeout: number;
-	/** Custom shell binary for bare %%bash cells (defaults to "bash"). Mirrors the old ipython shellPath option. */
+	/** Custom shell binary for bare %%bash cells (defaults to "bash"). */
 	shellPath?: string;
-	/** Command prefix prepended to every %%bash cell. Mirrors the old ipython commandPrefix option. */
+	/** Command prefix prepended to every %%bash cell. */
 	commandPrefix?: string;
 }
 
@@ -30,7 +30,10 @@ export interface BunReplSnapshotRequest {
 export interface BunReplRestoreRequest {
 	id: string;
 	type: "restore";
-	data: Record<string, unknown>;
+	/** Structured-clone payload, base64 so it survives the newline-JSON transport. */
+	dataB64?: string;
+	/** Payload of a snapshot written before the structured-clone format. */
+	data?: Record<string, unknown>;
 }
 
 export interface BunReplListNamesRequest {
@@ -85,10 +88,16 @@ export interface BunReplSnapshotResult {
 	id: string;
 	type: "snapshotResult";
 	status: "ok" | "error";
-	data?: Record<string, unknown>;
 	/**
-	 * Names present in the namespace that the snapshot could not carry: functions,
-	 * classes, symbols, and values JSON cannot represent. Recorded here so a later
+	 * Structured-clone payload, base64-encoded. The child serializes, because the host
+	 * link is newline-delimited JSON and would flatten Map/Set/Date back to `{}` in transit.
+	 */
+	dataB64?: string;
+	/** Names carried by the payload, so the host can write a manifest without decoding it. */
+	names?: string[];
+	/**
+	 * Names present in the namespace that the snapshot could not carry: live handles,
+	 * symbols, and functions whose source cannot be re-evaluated. Recorded here so a later
 	 * restore can tell the model exactly what it lost rather than silently omitting it.
 	 */
 	dropped?: string[];

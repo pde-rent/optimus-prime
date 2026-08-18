@@ -166,6 +166,26 @@ describe("transformTopLevel: what must never be rewritten", () => {
 		const result = transformTopLevel("foo()\n// done");
 		expect(result.lastExpression).toBe("foo()");
 	});
+
+	// A comment directly above a block used to be classified from the raw text, so the
+	// statement started with `//`, matched no keyword, and was captured as the cell's result:
+	// `return (// note\nfor (…) {…});`. Every cell that annotated a loop failed to compile.
+	it.each([
+		["// note\nfor (const x of [1]) {\n  console.log(x);\n}"],
+		["// note\nif (1) {\n  console.log(1);\n}"],
+		["let i = 0;\n// note\nwhile (i < 1) {\n  i++;\n}"],
+		["/* block */\ntry {\n  console.log(1);\n} catch {}"],
+		["const a = 1;\n/* inline */ for (const q of [a]) {\n  console.log(q);\n}"],
+	] as const)("does not capture a commented block as the result value: %p", (src) => {
+		const result = transformTopLevel(src);
+		const assembled = result.lastExpression ? `${result.code}\nreturn (${result.lastExpression});` : result.code;
+		expect(() => new Function(`return (async () => {${assembled}})`)).not.toThrow();
+	});
+
+	it("still returns a trailing expression that carries a leading comment", () => {
+		const result = transformTopLevel("const a = 1;\n// note\na + 1");
+		expect(result.lastExpression).toContain("a + 1");
+	});
 });
 
 describe("hasStaticImport", () => {

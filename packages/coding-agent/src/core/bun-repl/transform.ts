@@ -637,7 +637,10 @@ function transformSegment(seg: Seg, index: number): Seg {
 		seg.isExpression = false;
 		return seg;
 	}
-	const isDecl = /^(async\s+)?(const|let|var|class|function)\b/.test(trimmed);
+	// Classify on the comment-masked source, not the raw text. A statement preceded by a
+	// comment starts with `//`, which matches neither the declaration nor the keyword test, so
+	// a block would be mistaken for an expression and emitted as `return (// note\nfor (…) {…});`.
+	const isDecl = /^(async\s+)?(const|let|var|class|function)\b/.test(stmt);
 	seg.isDecl = isDecl;
 	if (isDecl) {
 		const { out } = rewriteDeclaration(seg.src);
@@ -648,16 +651,14 @@ function transformSegment(seg: Seg, index: number): Seg {
 		seg.isExpression = false;
 	} else {
 		seg.out = seg.src;
-		seg.isExpression = !/^(if|for|while|switch|try|return|throw|break|continue|import|export|do|with)\b/.test(
-			trimmed,
-		);
+		seg.isExpression = !/^(if|for|while|switch|try|return|throw|break|continue|import|export|do|with)\b/.test(stmt);
 	}
 	return seg;
 }
 
 export function transformTopLevel(src: string): TransformResult {
 	const segs = splitTopLevelSegments(src).map((seg, i) => transformSegment(seg, i));
-	// Last top-level expression becomes the cell's result value (like IPython's `Out`),
+	// Last top-level expression becomes the cell's result value (the way a REPL echoes its last expression),
 	// so it is emitted as a `return` rather than executed a second time.
 	let lastIndex = -1;
 	for (let k = segs.length - 1; k >= 0; k--) {

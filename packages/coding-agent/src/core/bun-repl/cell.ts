@@ -1,6 +1,5 @@
 /**
- * Minimal cell parser for the Bun REPL, mirroring the Python kernel's
- * `parseIpythonBashCell` but with JS semantics.
+ * Minimal cell parser for the Bun REPL.
  *
  * A cell is `%%bash ...` (shell, routed to Bun.spawn) or a plain JS/TS block
  * (routed to the vm). `%%js` is accepted as an explicit alias for JS.

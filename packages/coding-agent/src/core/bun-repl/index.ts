@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";
 import type {
 	BunReplExecuteRequest,
 	BunReplHostRequest,
@@ -661,20 +661,25 @@ export class BunReplManager {
 			type: "snapshot",
 		});
 
-		if (result.status === "error" || !("data" in result) || !result.data) {
+		if (result.status === "error" || !result.dataB64) {
 			return null;
 		}
 
-		const names = await saveSnapshot(this._options.snapshotDir, result.data, result.dropped ?? []);
+		const names = await saveSnapshot(
+			this._options.snapshotDir,
+			{ dataB64: result.dataB64, names: result.names ?? [] },
+			result.dropped ?? [],
+		);
 		return { names };
 	}
 
 	/**
 	 * Revive the last snapshot into the live namespace.
 	 *
-	 * `failed` is the other half of the answer and matters as much as `restoredNames`: the
-	 * snapshot is JSON, so every function, class and closure the agent built is gone. Reporting
-	 * only what came back leaves the model assuming the rest is still there.
+	 * `failed` is the other half of the answer and matters as much as `restoredNames`: live
+	 * handles are never captured and some functions cannot be re-evaluated, so part of the
+	 * namespace is always gone. Reporting only what came back leaves the model assuming the
+	 * rest is still there.
 	 */
 	async restoreState(): Promise<{ restoredNames: string[]; failed: string[] } | null> {
 		if (!this.isRunning || !this._options.snapshotDir) return null;
@@ -685,6 +690,7 @@ export class BunReplManager {
 		const result = await this._sendAndWait<BunReplRestoreResult>({
 			id: randomUUID(),
 			type: "restore",
+			dataB64: snapshot.dataB64,
 			data: snapshot.data,
 		});
 

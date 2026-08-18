@@ -15,13 +15,18 @@ export interface SnapshotManifest {
 
 /** A snapshot as read back from disk: the revivable data plus the names that were never captured. */
 export interface LoadedSnapshot {
-	data: Record<string, unknown>;
+	/** Structured-clone payload, base64; absent for legacy JSON snapshots. */
+	dataB64?: string;
+	/** Payload of a snapshot written before the structured-clone format. */
+	data?: Record<string, unknown>;
 	droppedNames: string[];
 }
 
 const SNAPSHOT_VERSION = 1;
 const MANIFEST_FILE = "manifest.json";
-const DATA_FILE = "data.json";
+const DATA_FILE = "data.v8";
+/** Snapshots written before the structured-clone format; still readable. */
+const LEGACY_DATA_FILE = "data.json";
 
 /**
  * Write one snapshot file safely.
@@ -32,7 +37,7 @@ const DATA_FILE = "data.json";
  * the destination cannot redirect the write), with `wx` so an attacker-planted temp path fails
  * instead of being followed.
  */
-async function writeSnapshotFile(dir: string, name: string, payload: string): Promise<void> {
+async function writeSnapshotFile(dir: string, name: string, payload: string | Uint8Array): Promise<void> {
 	const finalPath = join(dir, name);
 	const tempPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
 	await writeFile(tempPath, payload, { mode: 0o600, flag: "wx" });
@@ -42,12 +47,12 @@ async function writeSnapshotFile(dir: string, name: string, payload: string): Pr
 
 export async function saveSnapshot(
 	dir: string,
-	data: Record<string, unknown>,
+	payload: { dataB64: string; names: string[] },
 	droppedNames: string[] = [],
 ): Promise<string[]> {
 	// 0700: the directory listing alone leaks which variables the agent held.
 	await mkdir(dir, { recursive: true, mode: 0o700 });
-	const names = Object.keys(data);
+	const names = payload.names;
 	const manifest: SnapshotManifest = {
 		version: SNAPSHOT_VERSION,
 		createdAt: new Date().toISOString(),
@@ -56,7 +61,10 @@ export async function saveSnapshot(
 	};
 	// Data first: a manifest without its data reads as a corrupt snapshot and is discarded,
 	// whereas data without a manifest is simply ignored. Fail in the recoverable direction.
-	await writeSnapshotFile(dir, DATA_FILE, JSON.stringify(data, null, 2));
+	// The payload is the child's structured clone, written through verbatim: Map, Set, Date,
+	// RegExp, BigInt, TypedArrays and circular references all survive, where JSON silently
+	// flattened them to `{}`. The host never decodes it, so it cannot corrupt it either.
+	await writeSnapshotFile(dir, DATA_FILE, Buffer.from(payload.dataB64, "base64"));
 	await writeSnapshotFile(dir, MANIFEST_FILE, JSON.stringify(manifest, null, 2));
 	return names;
 }
@@ -66,13 +74,30 @@ export async function loadSnapshot(dir: string): Promise<LoadedSnapshot | null> 
 		const manifestRaw = await readFile(join(dir, MANIFEST_FILE), "utf-8");
 		const manifest: SnapshotManifest = JSON.parse(manifestRaw);
 		if (manifest.version !== SNAPSHOT_VERSION) return null;
-		const dataRaw = await readFile(join(dir, DATA_FILE), "utf-8");
+		const payload = await readSnapshotData(dir);
+		if (!payload) return null;
 		return {
-			data: JSON.parse(dataRaw),
+			...payload,
 			droppedNames: Array.isArray(manifest.droppedNames)
 				? manifest.droppedNames.filter((n): n is string => typeof n === "string")
 				: [],
 		};
+	} catch {
+		return null;
+	}
+}
+
+/** Read the payload, accepting both the structured-clone format and older JSON snapshots. */
+async function readSnapshotData(dir: string): Promise<{ dataB64?: string; data?: Record<string, unknown> } | null> {
+	try {
+		const buffer = await readFile(join(dir, DATA_FILE));
+		return { dataB64: buffer.toString("base64") };
+	} catch {
+		// Fall through to the legacy format.
+	}
+	try {
+		const raw = await readFile(join(dir, LEGACY_DATA_FILE), "utf-8");
+		return { data: JSON.parse(raw) as Record<string, unknown> };
 	} catch {
 		return null;
 	}

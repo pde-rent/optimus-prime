@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { inspect } from "node:util";
+import { deserialize, serialize } from "node:v8";
 import { createContext, runInContext } from "node:vm";
 import { generateDiffString } from "../tools/edit-diff.js";
 import {
@@ -7,7 +8,7 @@ import {
 	DIFF_DISPLAY_MIME,
 	type KernelDiffDisplay,
 	type KernelSentAgentMessage,
-} from "../tools/kernel-types.js";
+} from "../tools/repl-types.js";
 import { truncateHead, truncateTail } from "../tools/truncate.js";
 import { bashCommand, parseCell } from "./cell.js";
 import type {
@@ -48,8 +49,8 @@ function serializeValue(value: unknown): string {
 	if (typeof value === "bigint") return `${value}n`;
 	if (typeof value === "symbol") return value.toString();
 	if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
-	// `inspect` is the JS analogue of Python's `repr` the old kernel returned: it renders
-	// Map/Set/Error/class instances faithfully, where JSON.stringify flattens them to `{}`.
+	// `inspect` renders Map/Set/Error/class instances faithfully, where JSON.stringify
+	// flattens them to `{}`.
 	try {
 		return inspect(value, INSPECT_OPTIONS);
 	} catch {
@@ -66,30 +67,6 @@ const INSPECT_OPTIONS = {
 	colors: false,
 	getters: false,
 } as const;
-
-function jsonSafe(value: unknown): unknown {
-	if (value === undefined) return null;
-	if (value === null) return null;
-	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-	if (typeof value === "bigint") return value.toString();
-	if (typeof value === "function" || typeof value === "symbol") return String(value);
-	try {
-		const seen = new WeakSet();
-		return JSON.parse(
-			JSON.stringify(value, (_key, val) => {
-				if (typeof val === "object" && val !== null) {
-					if (seen.has(val)) return "[Circular]";
-					seen.add(val);
-				}
-				if (typeof val === "function") return undefined;
-				if (typeof val === "bigint") return val.toString();
-				return val;
-			}),
-		);
-	} catch {
-		return String(value);
-	}
-}
 
 const SENT_AGENT_MESSAGE_ROLES = ["parent", "sibling", "child"] as const;
 type SentAgentMessageRole = (typeof SENT_AGENT_MESSAGE_ROLES)[number];
@@ -236,7 +213,6 @@ const INJECTED = new Set([
 	"btoa",
 	"crypto",
 	"display",
-	"sys",
 	"util",
 	"cd",
 	"pwd",
@@ -471,7 +447,6 @@ Object.assign(context, {
 	navigator,
 	process: sandboxProcess,
 	display,
-	sys: { display },
 	util,
 	cd,
 	pwd,
@@ -493,7 +468,7 @@ async function runBash(req: BunReplExecuteRequest, body: string): Promise<void> 
 	// build's types green without requiring @types/bun for the Bun.spawn global.
 	// Bash output is piped and forwarded as JSON protocol frames so it never corrupts
 	// the NDJSON control stream on the child's stdout. Bare %%bash cells run through the
-	// configured shell (shellPath) when one is provided, mirroring the old ipython option.
+	// configured shell (shellPath) when one is provided.
 	const shell = req.shellPath?.trim() || "bash";
 	const proc = spawn(shell, ["-c", cmd], {
 		cwd: process.cwd(),
@@ -707,27 +682,26 @@ async function executeCode(req: BunReplExecuteRequest): Promise<void> {
 const SNAPSHOT_MAX_CHARS = 256 * 1024 * 1024;
 
 /**
- * True when a value is plain data that survives a JSON round-trip intact.
+ * True when a value can actually be carried by the snapshot.
  *
- * Host objects and class instances stringify to `{}` without throwing, so `jsonSafe` cannot
- * detect them: a live `Bun.serve` handle, a `Timeout`, or the `Bun` namespace itself all look
- * like empty objects. Snapshotting those produced two failures — the agent got back a hollow
- * `{}` that still looked like a server, and restoring an entry named `Bun` overwrote the real
- * global, leaving every later cell without `Bun.file`, `Bun.spawn` or `Bun.Glob`.
+ * The test is an attempted `structuredClone`, which is exactly the algorithm the snapshot
+ * writer uses, so nothing can pass here and fail there. It accepts far more than JSON did —
+ * Map, Set, Date, RegExp, BigInt, TypedArrays and circular references all survive — and it
+ * throws on the things that must never be captured: functions, and host objects such as a live
+ * `Bun.serve` handle, a `Timeout`, or the `Bun` namespace itself.
+ *
+ * That last case was a real failure: host objects stringify to `{}` without throwing, so JSON
+ * captured the `Bun` global as an empty object and restoring it wiped `Bun.file`, `Bun.spawn`
+ * and `Bun.Glob` for the rest of the session.
  */
-function isPlainData(value: unknown): boolean {
-	if (value === null) return true;
-	const t = typeof value;
-	if (t === "string" || t === "number" || t === "boolean") return true;
-	if (t !== "object") return false;
-	if (Array.isArray(value)) return value.every(isPlainData);
-	// Prototype identity cannot be compared across realms — an object literal created inside the
-	// vm has the vm's own Object.prototype — and constructor names are unreliable for host
-	// objects. Depth is neither: a plain object sits exactly one link above null, while any class
-	// or host instance sits at least two.
-	const proto = Object.getPrototypeOf(value);
-	if (proto !== null && Object.getPrototypeOf(proto) !== null) return false;
-	return Object.values(value as Record<string, unknown>).every(isPlainData);
+function isSnapshotable(value: unknown): boolean {
+	if (typeof value === "function" || typeof value === "symbol") return false;
+	try {
+		structuredClone(value);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -738,65 +712,212 @@ function isPlainData(value: unknown): boolean {
  */
 const BUILTIN_KEYS = new Set(Object.keys(context));
 
-function snapshotState(): { data: Record<string, unknown>; dropped: string[] } {
-	const data: Record<string, unknown> = {};
+function snapshotState(): { payload: string; names: string[]; dropped: string[] } {
+	const values: Record<string, unknown> = {};
+	/** Function sources, kept apart so restore can re-evaluate rather than assign them. */
+	const sources: Record<string, string> = {};
+	const names: string[] = [];
 	const dropped: string[] = [];
 	let total = 0;
 	for (const [key, value] of Object.entries(context)) {
 		if (key.startsWith("__")) continue;
 		if (INJECTED.has(key) || BUILTIN_KEYS.has(key)) continue;
-		if (typeof value === "function" || typeof value === "symbol") {
-			dropped.push(key);
+		if (typeof value === "undefined" || typeof value === "symbol") {
+			if (typeof value === "symbol") dropped.push(key);
 			continue;
 		}
-		if (typeof value === "undefined") continue;
+		// Functions cannot be cloned, but their source usually can be re-evaluated, which is
+		// what saves the helpers the agent defines once and expects to still have next turn.
+		if (typeof value === "function") {
+			const src = functionSource(value as (...args: never) => unknown);
+			if (!src) {
+				dropped.push(key);
+				continue;
+			}
+			const cost = src.length;
+			if (total + cost > SNAPSHOT_MAX_CHARS) {
+				dropped.push(key);
+				continue;
+			}
+			total += cost;
+			sources[key] = src;
+			names.push(key);
+			continue;
+		}
 		// Live handles and runtime globals are not data. Reported as dropped so the model is
 		// told what did not come back rather than finding a hollow object later.
-		if (!isPlainData(value)) {
+		if (!isSnapshotable(value)) {
 			dropped.push(key);
 			continue;
 		}
-		const safe = jsonSafe(value);
-		// `jsonSafe` falls back to `String(value)` when a value cannot be serialized; a
-		// non-string original that came back as a string did not survive intact.
-		if (typeof safe === "string" && typeof value !== "string") {
+		let bytes: number;
+		try {
+			bytes = serialize(value).byteLength;
+		} catch {
 			dropped.push(key);
 			continue;
 		}
 		// One runaway variable must not make the whole snapshot unwritable, so the cap is
 		// charged per name and the offender is reported rather than the save failing.
-		const size = JSON.stringify(safe)?.length ?? 0;
-		if (total + size > SNAPSHOT_MAX_CHARS) {
+		if (total + bytes > SNAPSHOT_MAX_CHARS) {
 			dropped.push(key);
 			continue;
 		}
-		total += size;
-		data[key] = safe;
+		total += bytes;
+		values[key] = value;
+		names.push(key);
 	}
-	return { data, dropped };
+	const payload = serialize({ values, sources }).toString("base64");
+	return { payload, names, dropped };
 }
 
-function restoreState(data: Record<string, unknown>): { restored: string[]; failed: string[] } {
+/**
+ * Source text for a function that can be re-evaluated on restore, or null.
+ *
+ * Native and bound functions stringify to a `[native code]` stub that would re-evaluate into
+ * something that throws at call time, so they are refused here and reported as dropped.
+ */
+function functionSource(fn: (...args: never) => unknown): string | null {
+	let src: string;
+	try {
+		src = Function.prototype.toString.call(fn);
+	} catch {
+		return null;
+	}
+	if (src.includes("[native code]")) return null;
+	// A method shorthand (`foo() {}`) is not a valid standalone expression; only forms that
+	// parse on their own are worth keeping.
+	try {
+		runInContext(`(${src})`, context, { timeout: 1000 });
+	} catch {
+		return null;
+	}
+	return src;
+}
+
+/**
+ * Rebuild a host-realm value using the sandbox's own intrinsics.
+ *
+ * The vm context starts empty, so it has its own `Map`, `Date`, `Array` and friends. Anything
+ * `deserialize` produces belongs to the host realm instead, which means user code sees an
+ * object whose methods all work but which fails `instanceof Map` — the confusing half-broken
+ * state. Rebuilding through constructors read out of the vm makes restored values
+ * indistinguishable from ones the agent constructs itself.
+ *
+ * Values of a type not listed here (class instances, ArrayBuffers) pass through untouched:
+ * cross-realm is still better than dropped.
+ */
+function makeReRealmer(): (value: unknown) => unknown {
+	const VM = runInContext(
+		"({ Object, Array, Map, Set, Date, RegExp, Error, Uint8Array, Int8Array, Uint8ClampedArray," +
+			" Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array," +
+			" BigInt64Array, BigUint64Array })",
+		context,
+	) as Record<string, any>;
+	const seen = new WeakMap<object, unknown>();
+
+	const walk = (value: unknown): unknown => {
+		if (value === null || typeof value !== "object") return value;
+		const existing = seen.get(value);
+		// Preserves shared references and stops cycles from recursing forever.
+		if (existing !== undefined) return existing;
+
+		if (Array.isArray(value)) {
+			const out: unknown[] = new VM.Array();
+			seen.set(value, out);
+			for (const item of value) out.push(walk(item));
+			return out;
+		}
+		if (value instanceof Map) {
+			const out = new VM.Map();
+			seen.set(value, out);
+			for (const [k, v] of value) out.set(walk(k), walk(v));
+			return out;
+		}
+		if (value instanceof Set) {
+			const out = new VM.Set();
+			seen.set(value, out);
+			for (const item of value) out.add(walk(item));
+			return out;
+		}
+		if (value instanceof Date) return new VM.Date(value.getTime());
+		if (value instanceof RegExp) return new VM.RegExp(value.source, value.flags);
+		if (ArrayBuffer.isView(value)) {
+			const Ctor = VM[value.constructor.name];
+			if (typeof Ctor === "function") return new Ctor(value);
+			return value;
+		}
+		if (value instanceof Error) {
+			const out = new VM.Error(value.message);
+			out.name = value.name;
+			out.stack = value.stack;
+			return out;
+		}
+		// Plain object, or a class instance whose prototype the clone already flattened away.
+		if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
+			const out: Record<string, unknown> = new VM.Object();
+			seen.set(value, out);
+			for (const [k, v] of Object.entries(value)) out[k] = walk(v);
+			return out;
+		}
+		return value;
+	};
+	return walk;
+}
+
+function restoreState(input: { dataB64?: string; data?: Record<string, unknown> }): {
+	restored: string[];
+	failed: string[];
+} {
 	const restored: string[] = [];
 	const failed: string[] = [];
-	for (const [key, value] of Object.entries(data)) {
+	let values: Record<string, unknown> = {};
+	let sources: Record<string, string> = {};
+	if (input.dataB64) {
+		const decoded = deserialize(Buffer.from(input.dataB64, "base64")) as {
+			values?: Record<string, unknown>;
+			sources?: Record<string, string>;
+		};
+		values = decoded.values ?? {};
+		sources = decoded.sources ?? {};
+	} else if (input.data) {
+		// Snapshot written before the structured-clone format: plain JSON, no functions.
+		values = input.data;
+	}
+	const reRealm = makeReRealmer();
+	const assign = (key: string, value: unknown): void => {
 		// An injected name is host-owned; overwriting it would replace a live helper
 		// (`display`, `rlm`, …) with dead snapshot data.
+		if (INJECTED.has(key)) {
+			failed.push(key);
+			return;
+		}
+		try {
+			context[key] = reRealm(value);
+			restored.push(key);
+		} catch {
+			// A frozen/getter-only global on the context can reject assignment.
+			failed.push(key);
+		}
+	};
+	for (const [key, value] of Object.entries(values)) assign(key, value);
+	for (const [key, src] of Object.entries(sources)) {
 		if (INJECTED.has(key)) {
 			failed.push(key);
 			continue;
 		}
 		try {
-			context[key] = value;
-			restored.push(key);
+			assign(key, runInContext(`(${src})`, context, { timeout: 5000 }));
 		} catch {
-			// A frozen/getter-only global on the context can reject assignment.
+			// The source was re-evaluable when captured but is not now — a closure over a name
+			// this session never defined, most often.
 			failed.push(key);
 		}
 	}
 	return { restored, failed };
 }
 
+/** Names the agent itself has defined, excluding host-injected helpers and internals. */
 function listNames(): string[] {
 	return Object.keys(context).filter((k) => !k.startsWith("__") && !INJECTED.has(k));
 }
@@ -852,8 +973,8 @@ process.stdin.on("data", (chunk: string) => {
 				break;
 			case "snapshot": {
 				try {
-					const { data, dropped } = snapshotState();
-					send({ id: msg.id, type: "snapshotResult", status: "ok", data, dropped });
+					const { payload, names, dropped } = snapshotState();
+					send({ id: msg.id, type: "snapshotResult", status: "ok", dataB64: payload, names, dropped });
 				} catch (err: unknown) {
 					send({
 						id: msg.id,
@@ -866,7 +987,7 @@ process.stdin.on("data", (chunk: string) => {
 			}
 			case "restore": {
 				try {
-					const { restored, failed } = restoreState(msg.data);
+					const { restored, failed } = restoreState({ dataB64: msg.dataB64, data: msg.data });
 					send({ id: msg.id, type: "restoreResult", status: "ok", restoredNames: restored, failed });
 				} catch (err: unknown) {
 					send({

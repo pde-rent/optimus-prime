@@ -3,7 +3,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
 import type { ToolDefinition } from "../extensions/types.js";
-import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/kernel-types.js";
+import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.js";
 import { BunReplProvisioner } from "./provisioner.js";
 
@@ -14,14 +14,11 @@ const bunReplSchema = Type.Object({
 	}),
 });
 
-/**
- * Told to the model when the REPL child was replaced mid-session. The old kernel used the
- * same tag; keeping the wording means a resumed transcript reads consistently.
- */
+/** Told to the model when the REPL child was replaced mid-session. */
 const REPL_RESTART_NOTICE = [
-	"<ipython_kernel_reset>",
+	"<repl_kernel_reset>",
 	"The REPL was restarted after a cell could not be stopped any other way. Variables, imports, async tasks, and open resources from before the restart are no longer available; recreate them before using them.",
-	"</ipython_kernel_reset>",
+	"</repl_kernel_reset>",
 ].join("\n");
 
 export interface BunReplToolDetails {
@@ -36,7 +33,7 @@ export interface BunReplToolDetails {
 	result?: string;
 	/** Media attachments emitted via `display()`, loaded into context (surfaced as images). */
 	attachments?: KernelAttachment[];
-	/** File edits streamed from the `edit` skill, rendered inline by the IPython cell. */
+	/** File edits streamed from the `edit` skill, rendered inline by the REPL cell. */
 	diffs?: KernelDiffDisplay[];
 	/** Agent-family messages sent from within this cell, surfaced on the host tool result. */
 	sentAgentMessages?: KernelSentAgentMessage[];
@@ -56,9 +53,9 @@ export interface BunReplToolOptions {
 	env?: Record<string, string>;
 	hostHandlers?: Record<string, (payload: Record<string, unknown>) => Promise<Record<string, unknown>>>;
 	snapshotDir?: string;
-	/** Custom shell binary for bare %%bash cells (defaults to "bash"). Mirrors the old ipython shellPath option. */
+	/** Custom shell binary for bare %%bash cells (defaults to "bash"). */
 	shellPath?: string;
-	/** Command prefix prepended to every %%bash cell. Mirrors the old ipython commandPrefix option. */
+	/** Command prefix prepended to every %%bash cell. */
 	commandPrefix?: string;
 	provisioner?: BunReplProvisioner;
 	/** Called when a cell's agent message arrives after that cell's result. */
@@ -81,12 +78,11 @@ export function createBunReplToolDefinition(
 		});
 
 	return {
-		name: "ipython",
-		label: "ipython",
+		name: "repl",
+		label: "repl",
 		description:
 			"Execute JavaScript/TypeScript code in a persistent Bun REPL. Variables and imports persist across calls, and are revived on a best-effort basis when a session is resumed. Use %%bash cells for shell commands.",
-		promptSnippet:
-			"ipython - persistent agent REPL for JavaScript/TypeScript scratchpad code and %%bash orchestration",
+		promptSnippet: "repl - persistent Bun JavaScript/TypeScript REPL for scratchpad code and %%bash orchestration",
 		executionMode: "sequential",
 		parameters: bunReplSchema,
 		execute: async (toolCallId, params, signal, onUpdate, _ctx) => {
