@@ -1,55 +1,98 @@
-# SearXNG configuration for agent use.
+# SearXNG for agent use. Loopback only.
 #
-# Three departures from the shipped defaults, all deliberate:
-#   1. `formats` gains `json` — the JSON API is OFF by default, which is why every public
-#      instance refuses an agent (measured: 0 of 24 healthy public instances answered, with
-#      17x 429, 4x 403, 2x 418 and 1 HTML response).
+# Departures from stock, all deliberate:
+#   1. `formats` gains `json` — the JSON API is OFF by default. This is why the public pool is
+#      unusable: measured 1 of 76 instances answered a JSON query (52x 429, 11x 403/418,
+#      10x HTML). Do not reach for hosted instances; run this.
 #   2. `limiter: false` — the bot limiter blocks non-browser clients. Safe ONLY because this
-#      instance is bound to loopback and serves one user. Never expose it with this setting.
-#   3. `keep_only` — the stock config enables 82 engines, including images, video, music,
-#      news and translation. Every one of those fires on a plain query and dilutes ranking.
-#      A general query should be answered by general engines, and nothing else.
+#      binds to 127.0.0.1 and serves one user. Never expose it with this setting.
+#   3. `keep_only` — stock enables 82 engines including images, video, music and translation,
+#      all of which fire on a plain query and dilute ranking.
+#
+# Categories are the noise control. A plain query hits `general` only; scholarly, code, news
+# and encyclopedic sources answer when asked for and stay silent otherwise.
 use_default_settings:
   engines:
     keep_only:
-      # General web — three independent indexes. Google and Brave crawl their own; DuckDuckGo
-      # is the one that stays up under load. Startpage is omitted on purpose: it proxies
-      # Google, so it duplicates a result set we already have and doubles the dedupe work.
       - duckduckgo
-      - google cse
+      - bing
       - brave
-      - mojeek            # small independent index; catches what the big three miss
-
-      # Reference — high-precision, near-zero noise, and answer many factual queries outright.
       - wikipedia
       - wikidata
-
-      # Academic — category `science`, so these do NOT fire on a general query. They answer
-      # when the caller asks for them, which keeps scholarly noise out of everyday searches.
       - arxiv
-      - google scholar
       - semantic scholar
       - pubmed
       - crossref
       - openalex
-
-      # Technical — category `it`, same story: available on request, silent otherwise.
       - github
       - stackoverflow
+      - gitlab
       - mdn
       - hackernews
+      - google news
+      - bing news
 
-# keep_only selects from the engines that ship enabled. These four ship disabled, so they
-# have to be switched on explicitly or they are silently absent from the pool above.
 engines:
-  - name: mojeek
+  # --- general: two reliable indexes, two for diversity -------------------------------------
+  # Deliberately small. Crawlers return the same domains; adding more multiplies duplicates
+  # rather than coverage. Google CSE is omitted (duplicates Bing's role, brittle keyless path).
+  # Mojeek was tried and removed: it returns zero results with no error, which is worse than
+  # failing loudly.
+  - name: duckduckgo
+    weight: 2
+  - name: bing
     disabled: false
+    weight: 2
+  - name: brave
+    weight: 1
+
+  # --- knowledge: moved OUT of general ------------------------------------------------------
+  # Wikipedia and Wikidata are knowledge bases, not crawlers, and their articles already surface
+  # through the general engines — leaving them in `general` duplicated the same article twice.
+  # They answer on request instead, where they are high-precision and near-zero noise.
+  - name: wikipedia
+    categories: [knowledge]
+    weight: 2
+  - name: wikidata
+    categories: [knowledge]
+    weight: 1
+
+  # --- science: specialised sources only ----------------------------------------------------
+  # Google Scholar is dropped on purpose: it aggregates most of the others, so it duplicates
+  # them, and its keyless path is the most fragile of the set.
+  - name: arxiv
+    weight: 1
+  - name: semantic scholar
+    weight: 1
+  - name: pubmed
+    weight: 1
   - name: crossref
     disabled: false
+    weight: 1
   - name: openalex
     disabled: false
-  - name: hackernews
+    weight: 1
+
+  # --- it: near-zero overlap, all high signal for coding work -------------------------------
+  - name: github
+    weight: 2
+  - name: stackoverflow
+    weight: 2
+  - name: gitlab
     disabled: false
+    weight: 1
+  - name: mdn
+    weight: 1
+  - name: hackernews
+    weight: 1
+
+  # --- news: recency, on request only -------------------------------------------------------
+  # The system prompt tells the agent never to trust dated knowledge about current events.
+  # This is what it verifies against.
+  - name: google news
+    weight: 2
+  - name: bing news
+    weight: 1
 
 server:
   secret_key: "09100e0217a1bfad563d544393d2fd199d8451752197dc0fb3f93e47675a3d0a"
@@ -62,7 +105,6 @@ search:
     - json
   safe_search: 0
   autocomplete: ""
-  # Agents read text. Nothing here should return media.
   default_lang: "en"
 
 outgoing:

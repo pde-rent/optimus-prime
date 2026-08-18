@@ -68,6 +68,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
+				"Your training has a cutoff; this session does not. Never assert today's date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat \"current\", \"latest\" and \"today\" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.",
 				"",
 				"The `ipython` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
 				"",

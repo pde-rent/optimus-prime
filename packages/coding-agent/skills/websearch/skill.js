@@ -259,7 +259,18 @@ async function searchSearxng(base, query, { timeoutMs, extra }) {
 		throw new Error(`SearXNG at ${base} returned HTML, not JSON - add "json" to \`search.formats\` in settings.yml`);
 	}
 	const data = await resp.json();
-	return Array.isArray(data?.results) ? data.results : [];
+	const results = Array.isArray(data?.results) ? data.results : [];
+
+	// Wikipedia and Wikidata answer as `infoboxes`, not `results` — a knowledge-category query
+	// otherwise looks empty while carrying exactly the clean factual answer the agent asked for.
+	// Mapped onto the common shape and placed first, because a curated summary beats a crawl hit.
+	const infoboxes = (Array.isArray(data?.infoboxes) ? data.infoboxes : []).map((box) => ({
+		title: box?.infobox ?? "",
+		url: box?.id ?? box?.urls?.[0]?.url ?? "",
+		content: box?.content ?? "",
+	}));
+
+	return [...infoboxes.filter((b) => b.title && b.url), ...results];
 }
 
 /**
