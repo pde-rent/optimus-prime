@@ -2,7 +2,7 @@ const DESCRIPTOR_MAX_WIDTH = 64;
 
 const BASH_CELL_MAGIC_PATTERN = /^((?:[ \t]*\r?\n)*)([ \t]*)%%bash\b([^\r\n]*)(\r?\n|$)/;
 
-export interface ParsedIpythonBashCell {
+export interface ParsedReplBashCell {
 	leadingWhitespace: string;
 	indent: string;
 	magicArguments: string;
@@ -10,7 +10,7 @@ export interface ParsedIpythonBashCell {
 	body: string;
 }
 
-export function parseIpythonBashCell(code: string): ParsedIpythonBashCell | undefined {
+export function parseReplBashCell(code: string): ParsedReplBashCell | undefined {
 	const match = BASH_CELL_MAGIC_PATTERN.exec(code);
 	if (!match) {
 		return undefined;
@@ -143,14 +143,14 @@ function simplifyRunnerCommand(line: string): string | undefined {
 		const rest = words.filter((_, index) => index !== cwdIndex && index !== cwdIndex + 1);
 		return cwd ? `${rest.join(" ")} (${pathTail(cwd)})` : undefined;
 	}
-	const pytestIndex = words.findIndex(
-		(word, index) => word === "pytest" || (word === "pytest" && words[index - 1] === "-m"),
-	);
-	if (words[0] === "uv" && words[1] === "run" && pytestIndex >= 0) {
-		return `pytest ${words.slice(pytestIndex + 1).join(" ")}`.trim();
-	}
-	if ((words[0] === "python" || words[0] === "python3") && words[1] === "-m" && words[2] === "pytest") {
-		return `pytest ${words.slice(3).join(" ")}`.trim();
+	// No per-language runner branches. Special-casing one ecosystem's test command
+	// means either playing favourites or maintaining a branch per language forever;
+	// an unrecognised command falls through and is shown as the user typed it.
+	if (words[0] === "bun" || words[0] === "bunx") {
+		// `bunx` is not `bun run`; keep the verb the user typed.
+		const runIndex = words[0] === "bun" ? words.indexOf("run") : -1;
+		const rest = runIndex >= 0 ? words.slice(runIndex + 1) : words.slice(1);
+		return rest.length > 0 ? `${words[0]} ${rest.join(" ")}`.trim() : undefined;
 	}
 	if (joined.includes("node_modules/.bin/")) {
 		return joined.replace(/\S*node_modules\/\.bin\//g, "");
@@ -201,7 +201,7 @@ function heredocBody(lines: readonly string[], startIndex: number, delimiter: st
 
 function previewHeredoc(lines: readonly string[]): CodePreview | undefined {
 	// A generic heredoc body is low-signal; keep it as a fallback and prefer a
-	// later, more specific heredoc (python/bash/node/write) if one follows.
+	// later, more specific heredoc (node/bash/write/patch) if one follows.
 	let fallback: CodePreview | undefined;
 	for (let i = 0; i < lines.length; i++) {
 		const line = stripBashPrefix(lines[i] ?? "");
@@ -247,7 +247,7 @@ function bashLineScore(line: string, index: number): number {
 	const words = shellWords(line);
 	let score = 30;
 	if (simplified !== line) score += 40;
-	if (["rm", "mv", "cp", "git", "npm", "pnpm", "pytest", "vitest"].includes(words[0] ?? "")) score += 20;
+	if (["rm", "mv", "cp", "git", "npm", "pnpm", "bun", "bunx"].includes(words[0] ?? "")) score += 20;
 	if (/\b(?:rm|mv|cp|git\s+(?:add|commit)|npm\s+install|sed\s+-i|perl\s+-pi|tee|cat\s*>|apply_patch)\b/.test(line))
 		score += 40;
 	return score + index;
@@ -550,9 +550,9 @@ export function previewJsCode(code: string): CodePreview {
 	return { language: "js", text: "" };
 }
 
-export function previewIpythonCode(code: string): CodePreview {
+export function previewReplCode(code: string): CodePreview {
 	const trimmedCode = code.trimEnd();
-	const bashCell = parseIpythonBashCell(trimmedCode);
+	const bashCell = parseReplBashCell(trimmedCode);
 	if (bashCell) {
 		return previewBashCommand(bashCell.body);
 	}

@@ -53,7 +53,7 @@ deletion) and read as the specification.
 | `{ename, evalue, traceback[]}` shape | IPython `error` message | **present** (shape) / **implemented** (content) | `ename` was hardcoded `"Error"` and `traceback` was always `[]` |
 | Real error class name | `ename` | **implemented** | Cells run in a separate vm realm, so `err instanceof Error` is always false there; the error is now described structurally |
 | Traceback limited to the cell's frames | Python traceback | **implemented** | Frames below the last `evalmachine` frame (the vm entry, the stdin pump, node internals) are dropped — they are the REPL's plumbing, not the agent's code. Capped at 32 lines |
-| `errorEname` in tool details | `IpythonToolDetails.errorEname` | **implemented** | The TUI reads it for the collapsed error summary; the Bun tool never set it |
+| `errorEname` in tool details | `ReplToolDetails.errorEname` | **implemented** | The TUI reads it for the collapsed error summary; the Bun tool never set it |
 | Host errors surface as catchable exceptions | `RuntimeError` in the cell | **present** | |
 
 ## Interrupt, abort, restart
@@ -64,7 +64,7 @@ deletion) and read as the specification.
 | Abort grace then force | 1000 ms grace | **present** | |
 | Hard-kill + respawn on runaway | manual `kill()` | **present** | Bun goes further: the old kernel had no runaway detection |
 | Snapshot survives a runaway restart | — | **present** | fixed in `819eccc5` |
-| Model told its state was reset | `<ipython_kernel_reset>` notice | **implemented** | Same class of defect as the three just fixed. After a hard kill the *next* cell ran against an empty namespace and the model was never told. `kernelRestarted` now rides on the next result and the tool prepends the notice. The aborted result itself is not flagged — it already explains itself in its `evalue` |
+| Model told its state was reset | `<repl_kernel_reset>` notice | **implemented** | Same class of defect as the three just fixed. After a hard kill the *next* cell ran against an empty namespace and the model was never told. `kernelRestarted` now rides on the next result and the tool prepends the notice. The aborted result itself is not flagged — it already explains itself in its `evalue` |
 | `kernelRestarted` in tool details | present | **implemented** | |
 | Busy-kernel wait/kill user prompt | `KernelBusyAfterInterruptError` + UI choice | **dropped** | The Bun REPL serializes through one queue and hard-kills a child that ignores the interrupt, so a cell can never be wedged behind a previous one. The prompt has nothing to ask about |
 | Orphaned child processes on exit | `liveKernels` + signal handlers | **implemented** | The REPL is a separate `bun` process that does not die with its parent; any exit path skipping `dispose()` stranded it. A live-manager registry with one synchronous `process.on("exit")` hook now kills them. SIGINT/SIGTERM are deliberately **not** intercepted — that would change how the whole app shuts down, which is not this module's call |
@@ -76,7 +76,7 @@ deletion) and read as the specification.
 | Debounced auto-snapshot (1500 ms) after a successful cell | present | **present** | |
 | Atomic write, owner-only permissions | tmp + rename, `0600`/`0700` | **present** | hardened in `819eccc5` |
 | Injected/host-owned names excluded | `always_skip` set | **present** | `INJECTED` |
-| **`failed` reported on restore** | `RestoreResult.failed` | **implemented** | The headline gap. The old kernel told the model which names did not revive; the Bun REPL reported only `restoredNames`. Because the snapshot is JSON, **every function, class and closure is silently gone** — exactly the case the model most needs told. Now: the snapshot records what it could not carry (`manifest.droppedNames`), restore reports per-name assignment failures, the manager unions the two into `failed`, and `AgentSession._onIpythonStateRestored` names them: *"These did NOT survive and are gone: … redefine any you still need before using them."* |
+| **`failed` reported on restore** | `RestoreResult.failed` | **implemented** | The headline gap. The old kernel told the model which names did not revive; the Bun REPL reported only `restoredNames`. Because the snapshot is JSON, **every function, class and closure is silently gone** — exactly the case the model most needs told. Now: the snapshot records what it could not carry (`manifest.droppedNames`), restore reports per-name assignment failures, the manager unions the two into `failed`, and `AgentSession._onReplStateRestored` names them: *"These did NOT survive and are gone: … redefine any you still need before using them."* |
 | Snapshot size cap | 256 MiB, per-variable | **implemented** | There was no cap; one large variable could write an unbounded snapshot. Charged per name so one offender is reported rather than the whole save failing |
 | Bounded final snapshot on dispose | `SNAPSHOT_DISPOSE_TIMEOUT_MS` 5000 | **implemented** | `dispose()` awaited the snapshot with no timeout, so a wedged child held shutdown open forever |
 | Manifest back-compatibility | version 1 | **present** | `droppedNames` is an additive optional field; snapshots written before it still load and report nothing lost, rather than being discarded |

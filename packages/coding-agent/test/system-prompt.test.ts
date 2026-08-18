@@ -57,7 +57,7 @@ describe("buildRlmPrompt", () => {
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			installedSkills: ["websearch", "refine"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		});
 
@@ -80,13 +80,13 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Working directory: /repo",
 				"Recursive agent depth: 0",
-				"REPL runtime: the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...), `$` \u2014 Bun's shell, pre-bound: ``await $`ls -la`.text()``, Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin, `pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence, native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing, Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern, a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel.",
+				"REPL runtime: the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...), `$` \u2014 Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control., Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin, `pi` \u2014 harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence, native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing, Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern, a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel.",
 				"",
 				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 				"",
-				"The `ipython` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
+				"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
 				"",
 				"Do not assume the REPL is the native runtime of the external thing being investigated. A repository, package, service, dataset, paper, website, benchmark, or API may have its own environment and normal interface. Evaluate external systems through their own interface, then use the REPL to coordinate the process and analyze what comes back.",
 				"",
@@ -127,7 +127,7 @@ describe("buildRlmPrompt", () => {
 		const base = {
 			cwd: "/repo",
 			installedSkills: ["websearch", "refine"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		};
 		const first = buildRlmPrompt({ ...base, messagesPath: "/repo/.pi/sessions/child-a.jsonl" });
@@ -149,7 +149,7 @@ describe("buildRlmPrompt", () => {
 		expect(first.length - logStart).toBeLessThan(120);
 	});
 
-	test("defaults omitted activeTools to ipython guidance", () => {
+	test("defaults omitted activeTools to repl guidance", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -166,7 +166,7 @@ describe("buildRlmPrompt", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 		});
 
 		expect(prompt).toContain("await rlm.find_models(...)");
@@ -176,7 +176,7 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).not.toContain("model choices for subagents");
 	});
 
-	test("only documents ipython shell prefixes when ipython is active", () => {
+	test("only documents repl control guidance when repl is active", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -184,10 +184,10 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(prompt).not.toContain("IPython is the agent's long-lived notebook");
+		expect(prompt).not.toContain("The `repl` tool is a persistent JavaScript/TypeScript REPL");
 	});
 
-	test("falls back to plain skill listing when ipython is inactive", () => {
+	test("falls back to plain skill listing when repl is inactive", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -201,11 +201,11 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).not.toContain("Read each skill's SKILL.md for its API");
 	});
 
-	test("gates agent messaging and observation doctrine on installed Python skills", () => {
+	test("gates agent messaging and observation doctrine on installed skills", () => {
 		const withoutCapabilities = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/session.jsonl",
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: true,
 			depth: 1,
 		});
@@ -214,7 +214,7 @@ describe("buildRlmPrompt", () => {
 		expect(withoutCapabilities).not.toContain("agent_observe");
 
 		const systemPromptWithoutCapabilities = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [],
 			cwd: "/repo",
@@ -226,7 +226,7 @@ describe("buildRlmPrompt", () => {
 			cwd: "/repo",
 			messagesPath: "/repo/session.jsonl",
 			installedSkills: ["agent_message", "agent_observe"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: true,
 			depth: 1,
 		});
@@ -236,7 +236,7 @@ describe("buildRlmPrompt", () => {
 		expect(withCapabilities).toContain("restricted to your parent, siblings, and direct children");
 	});
 
-	test("does not prescribe kernel-only child replies without ipython", () => {
+	test("does not prescribe kernel-only child replies without repl", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/session.jsonl",
@@ -253,13 +253,13 @@ describe("buildRlmPrompt", () => {
 		const withoutObserve = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 		});
 		const withObserve = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			installedSkills: ["agent_observe"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 		});
 
 		for (const prompt of [withoutObserve, withObserve]) {
@@ -270,22 +270,22 @@ describe("buildRlmPrompt", () => {
 		}
 	});
 
-	test("documents the %%bash first-line rule when ipython is active", () => {
+	test("documents the %%bash first-line rule when repl is active", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		});
 
 		expect(prompt).toContain("it must be the first line of the code cell");
 	});
 
-	test("documents preferring JavaScript for reading and searching files when ipython is active", () => {
+	test("documents preferring JavaScript for reading and searching files when repl is active", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		});
 
@@ -298,7 +298,7 @@ describe("buildRlmPrompt", () => {
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			installedSkills: ["edit"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		});
 
@@ -309,7 +309,7 @@ describe("buildRlmPrompt", () => {
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			installedSkills: ["websearch"],
-			activeTools: ["ipython"],
+			activeTools: ["repl"],
 			allowRecursion: false,
 		});
 
@@ -407,7 +407,7 @@ describe("buildSystemPrompt", () => {
 		};
 
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [jsSkill("refine"), jsSkill("agent-message"), jsSkill("agent-observe")],
 			cwd: "/repo",
@@ -429,8 +429,6 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("receiver_role: 'parent'");
 		expect(prompt).toContain("await rlm.list_subagents()");
 		expect(prompt).toContain("receiver_role: 'child'");
-		expect(prompt).not.toContain("asyncio.create_task(rlm('sub-task'))");
-		expect(prompt).not.toContain("asyncio.gather(rlm('task1'), rlm('task2'))");
 		expect(prompt).toContain("after a repeated failure");
 		expect(prompt).toContain("a reusable tactic emerges");
 		expect(prompt).toContain("a repeated delegation role should become a subagent spec");
@@ -507,7 +505,7 @@ describe("buildSystemPrompt", () => {
 		};
 
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [],
 			cwd: "/repo",
@@ -522,7 +520,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("more memory entries");
 	});
 
-	test("describes memory as unreachable when ipython is inactive", () => {
+	test("describes memory as unreachable when repl is inactive", () => {
 		const harnessState: HarnessState = {
 			schema: 1,
 			entries: {
@@ -545,7 +543,7 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain(
-			"memory: not reachable in this session (no `ipython` tool); memory contents are never injected into this prompt.",
+			"memory: not reachable in this session (no `repl` tool); memory contents are never injected into this prompt.",
 		);
 		expect(prompt).toContain("Refinement history is not injected.");
 		expect(prompt).not.toContain("rlm.harness.search_memory");
@@ -611,7 +609,7 @@ describe("buildSystemPrompt", () => {
 
 		const build = (harnessState: HarnessState) =>
 			buildSystemPrompt({
-				selectedTools: ["ipython"],
+				selectedTools: ["repl"],
 				contextFiles: [],
 				skills: [],
 				cwd: "/repo",
@@ -623,7 +621,7 @@ describe("buildSystemPrompt", () => {
 
 	test("uses the model-agnostic rlm harness prompt", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [jsSkill("refine"), jsSkill("agent-message"), jsSkill("agent-observe")],
 			cwd: "/repo",
@@ -647,7 +645,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("restricted to your parent, siblings, and direct children");
 	});
 
-	test("omits ipython-only subagent guidance when ipython is inactive", () => {
+	test("omits repl-only subagent guidance when repl is inactive", () => {
 		const harnessState: HarnessState = {
 			schema: 1,
 			entries: {
@@ -688,10 +686,9 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).toContain("subagent specs (delegation roles to match a task against):");
 		expect(prompt).toContain("[global:worker] Worker (review)");
-		expect(prompt).not.toContain("IPython is the agent's long-lived notebook");
+		expect(prompt).not.toContain("The `repl` tool is a persistent JavaScript/TypeScript REPL");
 		expect(prompt).not.toContain("Default to non-blocking subagents");
 		expect(prompt).not.toContain("agent_observe.list_agents");
-		expect(prompt).not.toContain("asyncio.create_task");
 		expect(prompt).not.toContain("await <skill_import>");
 		expect(prompt).not.toContain("await refine.run()");
 	});
@@ -732,10 +729,9 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("without the `ipython` tool or shell access");
+		expect(prompt).toContain("without the `repl` tool or shell access");
 		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).not.toContain("<skill_import> ...");
-		expect(prompt).not.toContain("asyncio.create_task");
 		expect(prompt).not.toContain("await <skill_import>");
 		expect(prompt).not.toContain("await refine.run()");
 	});
@@ -769,7 +765,7 @@ describe("buildSystemPrompt", () => {
 
 		const prompt = buildSystemPrompt({
 			customPrompt: "custom body",
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			appendSystemPrompt: "custom append",
 			contextFiles: [],
 			skills: [],
@@ -784,7 +780,6 @@ describe("buildSystemPrompt", () => {
 		);
 		expect(prompt).not.toContain("[global:custom_memory]");
 		expect(prompt).not.toContain("Custom prompts still receive harness state.");
-		expect(prompt).not.toContain("# IPython Kernel Guidance");
 		expect(prompt).not.toContain("You are a general purpose agent that uses code to solve tasks.");
 		expect(prompt.indexOf("Current working directory: /repo")).toBeLessThan(
 			prompt.indexOf("# Continual Harness State"),
@@ -796,7 +791,7 @@ describe("buildSystemPrompt", () => {
 	test("adds child reply doctrine to custom prompts when messaging is available", () => {
 		const prompt = buildSystemPrompt({
 			customPrompt: "custom body",
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [jsSkill("agent-message")],
 			cwd: "/repo",
@@ -809,7 +804,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("You are a general purpose agent that uses code to solve tasks.");
 	});
 
-	test("gates custom-prompt child reply doctrine on IPython and agent messaging", () => {
+	test("gates custom-prompt child reply doctrine on the REPL and agent messaging", () => {
 		const build = (selectedTools: string[], skills: Skill[]) =>
 			buildSystemPrompt({
 				customPrompt: "custom body",
@@ -820,14 +815,14 @@ describe("buildSystemPrompt", () => {
 				rlmDepth: 1,
 			});
 
-		expect(build(["ipython"], [])).toContain("You are a child agent spawned by your parent agent");
-		expect(build(["ipython"], [])).not.toContain("agent_message.send");
+		expect(build(["repl"], [])).toContain("You are a child agent spawned by your parent agent");
+		expect(build(["repl"], [])).not.toContain("agent_message.send");
 		expect(build(["bash"], [jsSkill("agent-message")])).not.toContain("agent_message.send");
 	});
 
 	test("append system prompt content is included after the rlm harness prompt", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			appendSystemPrompt: "extra instruction",
 			contextFiles: [],
 			skills: [],
@@ -842,7 +837,7 @@ describe("buildSystemPrompt", () => {
 
 	test("project context files are appended", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [{ path: "AGENTS.md", content: "project rules" }],
 			skills: [],
 			cwd: "/repo",
@@ -852,15 +847,15 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("## AGENTS.md\n\nproject rules");
 	});
 
-	test("markdown skills are included in rlm harness prompts without Python pre-imports", () => {
+	test("markdown skills are included in rlm harness prompts without a REPL binding", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [skill("websearch")],
 			cwd: "/repo",
 		});
 
-		expect(prompt).not.toContain("Installed Python skill modules (pre-imported)");
+		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("<available_skills>");
 		expect(prompt).toContain("<name>websearch</name>");
 		expect(prompt).toContain("<type>markdown</type>");
@@ -869,7 +864,7 @@ describe("buildSystemPrompt", () => {
 
 	test("JS skills are preloaded into the REPL and included in skill metadata", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython"],
+			selectedTools: ["repl"],
 			contextFiles: [],
 			skills: [jsSkill("web-search")],
 			cwd: "/repo",
@@ -883,7 +878,7 @@ describe("buildSystemPrompt", () => {
 
 	test("prompt guidelines are appended and deduplicated", () => {
 		const prompt = buildSystemPrompt({
-			selectedTools: ["ipython", "dynamic_tool"],
+			selectedTools: ["repl", "dynamic_tool"],
 			promptGuidelines: ["Use dynamic_tool for summaries.", "  Use dynamic_tool for summaries.  ", "   "],
 			contextFiles: [],
 			skills: [],

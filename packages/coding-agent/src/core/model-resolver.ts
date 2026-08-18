@@ -4,10 +4,10 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Api, getLogger, type KnownProvider, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
-import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.js";
 import { APP_NAME } from "../config.js";
 import { color as chalk } from "../utils/ansi.js";
+import { matchGlob } from "../utils/glob-match.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { isPrivatePrimeInferenceModel } from "./prime-inference-models.js";
@@ -276,7 +276,7 @@ export function resolveModelScopeFromModels(patterns: string[], availableModels:
 			// This allows "*sonnet*" to match without requiring "anthropic/*sonnet*"
 			const matchingModels = availableModels.filter((m) => {
 				const fullId = `${m.provider}/${m.id}`;
-				return minimatch(fullId, globPattern, { nocase: true }) || minimatch(m.id, globPattern, { nocase: true });
+				return matchGlob(fullId, globPattern, { nocase: true }) || matchGlob(m.id, globPattern, { nocase: true });
 			});
 
 			if (matchingModels.length === 0) {

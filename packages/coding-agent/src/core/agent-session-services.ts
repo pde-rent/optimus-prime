@@ -64,7 +64,7 @@ export interface AgentSessionCreationOptions {
 	rlmParentAgent?: string;
 	subagentRuntimeHost?: SubagentRuntimeHost;
 	rlmHeartbeatController?: AgentRlmHeartbeatController;
-	prewarmIpythonKernel?: boolean;
+	prewarmReplKernel?: boolean;
 	autonomous?: AgentAutonomousConfig;
 	serializedRefine?: boolean;
 	executionMode?: AgentExecutionMode;
@@ -254,7 +254,7 @@ export async function createAgentSessionFromServices(
 		subagentRuntimeHost: options.subagentRuntimeHost,
 		rlmHeartbeatController: options.rlmHeartbeatController,
 		sessionStartEvent: options.sessionStartEvent,
-		prewarmIpythonKernel: options.prewarmIpythonKernel,
+		prewarmReplKernel: options.prewarmReplKernel,
 		autonomous: options.autonomous,
 		serializedRefine: options.serializedRefine,
 		initialGoal: options.initialGoal,

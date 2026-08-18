@@ -171,8 +171,14 @@ describe("GitHub Copilot OAuth device flow", () => {
 			onAuth: () => {},
 			onPrompt: async () => "",
 		});
-		const rejection = expect(loginPromise).rejects.toThrow(
-			/Device flow timed out after one or more slow_down responses/,
+		// `expect(promise).rejects` drains the event loop synchronously in Bun, so it cannot be built
+		// while the promise can only settle by advancing the fake clock. Mark the rejection handled
+		// now and assert on it after the final advance.
+		const rejection = loginPromise.then(
+			() => {
+				throw new Error("expected the device flow login to reject");
+			},
+			(error: unknown) => error,
 		);
 
 		await vi.advanceTimersByTimeAsync(6000);
@@ -185,7 +191,9 @@ describe("GitHub Copilot OAuth device flow", () => {
 		expect(accessTokenPollTimes).toEqual([startTime.getTime() + 6000, startTime.getTime() + 20000]);
 
 		await vi.advanceTimersByTimeAsync(1);
-		await rejection;
+		const error = await rejection;
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toMatch(/Device flow timed out after one or more slow_down responses/);
 
 		expect(accessTokenPollTimes).toEqual([
 			startTime.getTime() + 6000,

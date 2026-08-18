@@ -74,15 +74,15 @@ describe("createAgentSession session manager defaults", () => {
 			agentDir,
 			model: model!,
 			sessionManager,
-			tools: ["ipython"],
+			tools: ["repl"],
 		});
 
 		expect(session.sessionManager).toBe(sessionManager);
 		expect(session.systemPrompt).toContain(`Working directory: ${sessionCwd}`);
 
-		const ipythonTool = session.agent.state.tools.find((tool) => tool.name === "ipython");
-		expect(ipythonTool).toBeTruthy();
-		const result = await ipythonTool!.execute("test", { code: "%%bash\npwd" });
+		const replTool = session.agent.state.tools.find((tool) => tool.name === "repl");
+		expect(replTool).toBeTruthy();
+		const result = await replTool!.execute("test", { code: "%%bash\npwd" });
 		const output = result.content
 			.filter((item): item is { type: "text"; text: string } => item.type === "text")
 			.map((item) => item.text)

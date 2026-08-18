@@ -125,7 +125,7 @@ import {
 	captureOnboardingCompleted,
 	type TelemetryOnboardingOutcome,
 } from "../../core/telemetry.js";
-import type { KernelSentAgentMessage } from "../../core/tools/kernel-types.js";
+import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
 import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
 import { OPTIMUS_LOGO, OPTIMUS_LOGO_META_MAX_ROWS } from "../../themes/optimus-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
@@ -1030,8 +1030,8 @@ export class InteractiveMode {
 	private fastModeToggleQueue: Promise<void> = Promise.resolve();
 
 	private pendingTools = new Map<string, ToolExecutionComponent>();
-	private ipythonToolComponents = new Map<string, ToolExecutionComponent>();
-	private lateIpythonSentAgentMessages = new Map<string, KernelSentAgentMessage[]>();
+	private replToolComponents = new Map<string, ToolExecutionComponent>();
+	private lateReplSentAgentMessages = new Map<string, KernelSentAgentMessage[]>();
 	private pendingToolCreations = new Set<string>();
 	private startedToolCalls = new Set<string>();
 	private pendingToolGeneration = 0;
@@ -2938,8 +2938,8 @@ export class InteractiveMode {
 		this.resetPendingToolState();
 		this.agentRunFileChanges.clear();
 		this.renderRecap();
-		this.ipythonToolComponents.clear();
-		this.lateIpythonSentAgentMessages.clear();
+		this.replToolComponents.clear();
+		this.lateReplSentAgentMessages.clear();
 		this.resetSubagentSummary();
 		this.setGoalAnnouncementBaseline(this.getGoalState());
 		this.syncGoalTray(this.getGoalState());
@@ -3034,12 +3034,12 @@ export class InteractiveMode {
 		);
 	}
 
-	private registerIpythonToolComponent(toolName: string, toolCallId: string, component: ToolExecutionComponent): void {
-		if (toolName !== "ipython") {
+	private registerReplToolComponent(toolName: string, toolCallId: string, component: ToolExecutionComponent): void {
+		if (toolName !== "repl") {
 			return;
 		}
-		this.ipythonToolComponents.set(toolCallId, component);
-		for (const lateMessage of this.lateIpythonSentAgentMessages.get(toolCallId) ?? []) {
+		this.replToolComponents.set(toolCallId, component);
+		for (const lateMessage of this.lateReplSentAgentMessages.get(toolCallId) ?? []) {
 			component.appendSentAgentMessage(lateMessage);
 		}
 	}
@@ -3091,7 +3091,7 @@ export class InteractiveMode {
 			selectLatestToolExpandHint(this.chatContainer.children, component);
 			this.chatContainer.addChild(component);
 			this.pendingTools.set(latestToolCall.id, component);
-			this.registerIpythonToolComponent(latestToolCall.name, latestToolCall.id, component);
+			this.registerReplToolComponent(latestToolCall.name, latestToolCall.id, component);
 			return component;
 		} finally {
 			this.pendingToolCreations.delete(toolCall.id);
@@ -3424,7 +3424,7 @@ export class InteractiveMode {
 	}
 
 	private shouldShowWorkingLoader(): boolean {
-		// Background subagents (agent turn done, asyncio tasks still running) would
+		// Background subagents (agent turn done, background tasks still running) would
 		// otherwise show a textless spinner; the subagent tree above the loader carries
 		// that state, so the loader only shows while the main agent is itself streaming.
 		return this.workingVisible && this.isAgentStreaming();
@@ -5581,13 +5581,13 @@ export class InteractiveMode {
 				break;
 			}
 
-			case "ipython_sent_agent_message": {
-				const messages = this.lateIpythonSentAgentMessages.get(event.toolCallId) ?? [];
+			case "repl_sent_agent_message": {
+				const messages = this.lateReplSentAgentMessages.get(event.toolCallId) ?? [];
 				if (!messages.some((message) => message.id === event.message.id)) {
 					messages.push(event.message);
-					this.lateIpythonSentAgentMessages.set(event.toolCallId, messages);
+					this.lateReplSentAgentMessages.set(event.toolCallId, messages);
 				}
-				this.ipythonToolComponents.get(event.toolCallId)?.appendSentAgentMessage(event.message);
+				this.replToolComponents.get(event.toolCallId)?.appendSentAgentMessage(event.message);
 				this.ui.requestRender();
 				break;
 			}
@@ -6460,8 +6460,8 @@ export class InteractiveMode {
 		this.resetPendingToolState();
 		const transcriptMessages = this.orderMessagesForTranscript(sessionContext.messages);
 		const messagesToRender = options.limitTranscript ? initialRenderMessages(transcriptMessages) : transcriptMessages;
-		this.ipythonToolComponents.clear();
-		this.lateIpythonSentAgentMessages.clear();
+		this.replToolComponents.clear();
+		this.lateReplSentAgentMessages.clear();
 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
 		const toolNames: string[] = [];
 		for (const message of messagesToRender) {
@@ -6531,7 +6531,7 @@ export class InteractiveMode {
 						component.setEditDiffsExpanded(this.editDiffsExpanded);
 						selectLatestToolExpandHint(this.chatContainer.children, component);
 						this.chatContainer.addChild(component);
-						this.registerIpythonToolComponent(content.name, content.id, component);
+						this.registerReplToolComponent(content.name, content.id, component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -7556,7 +7556,7 @@ export class InteractiveMode {
 					transport: this.settingsManager.getTransport(),
 					thinkingLevel: state.thinkingLevel,
 					availableThinkingLevels: state.availableThinkingLevels,
-					currentTheme: this.settingsManager.getTheme() || "prime",
+					currentTheme: this.settingsManager.getTheme() || "optimus",
 					availableThemes: getAvailableThemes(),
 					hideThinkingBlock: this.hideThinkingBlock,
 					treeFilterMode: this.settingsManager.getTreeFilterMode(),

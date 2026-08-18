@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { renderRichDiff } from "../src/modes/interactive/components/diff.js";
-import { IPythonCellComponent } from "../src/modes/interactive/components/ipython-cell.js";
+import { ReplCellComponent } from "../src/modes/interactive/components/repl-cell.js";
 import { initTheme, preloadCodeHighlighter, theme } from "../src/modes/interactive/theme/theme.js";
 
 function stripAnsi(text: string): string {
@@ -32,23 +32,23 @@ function changedRow(rows: readonly string[], prefix: "+" | "-"): string {
 	return row ?? "";
 }
 
-function renderCell(state: ConstructorParameters<typeof IPythonCellComponent>[0]): string {
-	return stripAnsi(new IPythonCellComponent(state).render(80).join("\n"));
+function renderCell(state: ConstructorParameters<typeof ReplCellComponent>[0]): string {
+	return stripAnsi(new ReplCellComponent(state).render(80).join("\n"));
 }
 
-describe("IPythonCellComponent diff rendering", () => {
+describe("ReplCellComponent diff rendering", () => {
 	beforeAll(() => {
 		initTheme("dark");
 	});
 
 	it("renders a diff with absolute line numbers and suppresses the Edited confirmation", () => {
 		const out = renderCell({
-			code: 'await edit(path="sample.py", old_str="gamma", new_str="GAMMA")',
+			code: 'await edit("sample.ts", "gamma", "GAMMA")',
 			details: {
 				status: "ok",
 				durationMs: 12,
-				result: "'Edited sample.py'",
-				diffs: [{ path: "sample.py", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 10 }],
+				result: "'Edited sample.ts'",
+				diffs: [{ path: "sample.ts", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 10 }],
 			},
 			executionStarted: true,
 			argsComplete: true,
@@ -56,25 +56,25 @@ describe("IPythonCellComponent diff rendering", () => {
 			editDiffsExpanded: true,
 		});
 
-		expect(out).toContain("sample.py");
-		expect(out).not.toMatch(/edit sample\.py/);
+		expect(out).toContain("sample.ts");
+		expect(out).not.toMatch(/edit sample\.ts/);
 		expect(out).toMatch(/\+1\s+-1/);
 		expect(out).toMatch(/11 - .*gamma/);
 		expect(out).toMatch(/11 \+ .*GAMMA/);
 		expect(out).toMatch(/10 .*alpha/);
-		expect(out.split("\n").some((line) => /^\s*'?Edited sample\.py'?\s*$/.test(line.trim()))).toBe(false);
-		expect(out).toContain('await edit(path="sample.py", old_str="gamma", new_str="GAMMA")');
+		expect(out.split("\n").some((line) => /^\s*'?Edited sample\.ts'?\s*$/.test(line.trim()))).toBe(false);
+		expect(out).toContain('await edit("sample.ts", "gamma", "GAMMA")');
 	});
 
 	it("shows diffs on collapsed cells when edit diffs are expanded", () => {
 		const state = {
-			code: 'await edit(path="sample.py", old_str="gamma", new_str="GAMMA")\nprint("edit-done-marker")',
+			code: 'await edit("sample.ts", "gamma", "GAMMA")\nconsole.log("edit-done-marker")',
 			details: {
 				status: "ok",
 				durationMs: 12,
-				result: "'Edited sample.py'",
+				result: "'Edited sample.ts'",
 				stdout: "unrelated stdout line",
-				diffs: [{ path: "sample.py", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 10 }],
+				diffs: [{ path: "sample.ts", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 10 }],
 			},
 			executionStarted: true,
 			argsComplete: true,
@@ -83,7 +83,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		const collapsedWithDiffs = renderCell({ ...state, expanded: false, editDiffsExpanded: true });
 		expect(collapsedWithDiffs).toMatch(/11 - .*gamma/);
 		expect(collapsedWithDiffs).toMatch(/11 \+ .*GAMMA/);
-		expect(collapsedWithDiffs).not.toContain('print("edit-done-marker")');
+		expect(collapsedWithDiffs).not.toContain('console.log("edit-done-marker")');
 		expect(collapsedWithDiffs).not.toContain("unrelated stdout line");
 
 		const collapsed = renderCell({ ...state, expanded: false, editDiffsExpanded: false });
@@ -92,16 +92,16 @@ describe("IPythonCellComponent diff rendering", () => {
 
 		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: false });
 		expect(expanded).not.toMatch(/11 - .*gamma/);
-		expect(expanded).toContain('print("edit-done-marker")');
+		expect(expanded).toContain('console.log("edit-done-marker")');
 	});
 
 	it("renders diff rows as full-width colored blocks", () => {
 		const width = 72;
-		const lines = new IPythonCellComponent({
+		const lines = new ReplCellComponent({
 			code: "await edit(...)",
 			details: {
 				status: "ok",
-				diffs: [{ path: "sample.py", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 1 }],
+				diffs: [{ path: "sample.ts", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 1 }],
 			},
 			executionStarted: true,
 			argsComplete: true,
@@ -172,7 +172,7 @@ describe("IPythonCellComponent diff rendering", () => {
 	});
 
 	it("formats the summary path like the built-in edit tool, resolving symlinked cwds", () => {
-		const root = mkdtempSync(join(tmpdir(), "ipython-cell-diff-symlink-"));
+		const root = mkdtempSync(join(tmpdir(), "repl-cell-diff-symlink-"));
 		try {
 			const realCwd = join(root, "real");
 			const linkedCwd = join(root, "linked");
@@ -200,7 +200,7 @@ describe("IPythonCellComponent diff rendering", () => {
 	it("wraps a long diff line across rows without truncating or overflowing the width", () => {
 		const width = 92;
 		const longLine = `const x = ${Array.from({ length: 30 }, (_, i) => `arg${i}`).join(", ")};`;
-		const lines = new IPythonCellComponent({
+		const lines = new ReplCellComponent({
 			code: "await edit(...)",
 			details: { status: "ok", diffs: [{ path: "a.ts", oldStr: "const x = 1;", newStr: longLine, startLine: 1 }] },
 			executionStarted: true,
@@ -219,7 +219,7 @@ describe("IPythonCellComponent diff rendering", () => {
 	it("truncates a long summary path so it never overflows the width, keeping the counts", () => {
 		const width = 40;
 		const longPath = `src/${"very-long-directory-name/".repeat(8)}file.ts`;
-		const lines = new IPythonCellComponent({
+		const lines = new ReplCellComponent({
 			code: "await edit(...)",
 			details: { status: "ok", diffs: [{ path: longPath, oldStr: "x", newStr: "X", startLine: 1 }] },
 			executionStarted: true,
@@ -234,7 +234,7 @@ describe("IPythonCellComponent diff rendering", () => {
 	});
 
 	it("advertises the collapse key once per cell when diffs are expanded", () => {
-		const lines = new IPythonCellComponent({
+		const lines = new ReplCellComponent({
 			code: "await edit(...)",
 			details: {
 				status: "ok",
@@ -256,7 +256,7 @@ describe("IPythonCellComponent diff rendering", () => {
 
 	it("never overflows a narrow pane when expanded diffs render", () => {
 		const width = 24;
-		const lines = new IPythonCellComponent({
+		const lines = new ReplCellComponent({
 			code: "await edit(...)",
 			details: {
 				status: "ok",
@@ -275,7 +275,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		const oldStr = Array.from({ length: n }, (_, i) => `line ${i}`).join("\n");
 		const newStr = Array.from({ length: n }, (_, i) => `LINE ${i}`).join("\n");
 		expect(() =>
-			new IPythonCellComponent({
+			new ReplCellComponent({
 				code: "await edit(...)",
 				details: { status: "ok", diffs: [{ path: "big.txt", oldStr, newStr, startLine: 1 }] },
 				executionStarted: true,
@@ -320,12 +320,12 @@ describe("IPythonCellComponent diff rendering", () => {
 	it("keeps the summary line but hides diff rows when edit diffs are collapsed", () => {
 		const collapsed = renderCell({
 			code: "await edit(...)",
-			details: { status: "ok", diffs: [{ path: "big.py", oldStr: "old", newStr: "NEW", startLine: 1 }] },
+			details: { status: "ok", diffs: [{ path: "big.ts", oldStr: "old", newStr: "NEW", startLine: 1 }] },
 			executionStarted: true,
 			argsComplete: true,
 			expanded: false,
 		});
-		expect(collapsed).toContain("╰─ big.py +1 -1");
+		expect(collapsed).toContain("╰─ big.ts +1 -1");
 		expect(collapsed).toContain("to expand");
 		expect(collapsed).not.toContain("old");
 		expect(collapsed).not.toContain("NEW");
@@ -333,21 +333,21 @@ describe("IPythonCellComponent diff rendering", () => {
 
 	it("hides edit source when collapsed and shows it when globally expanded", () => {
 		const state = {
-			code: 'hidden_side_effect = "only in full source"\nawait edit(path="a.py", old_str="old", new_str="new")',
-			details: { status: "ok", diffs: [{ path: "a.py", oldStr: "old", newStr: "new", startLine: 1 }] },
+			code: 'const hiddenSideEffect = "only in full source"\nawait edit("a.ts", "old", "new")',
+			details: { status: "ok", diffs: [{ path: "a.ts", oldStr: "old", newStr: "new", startLine: 1 }] },
 			executionStarted: true,
 			argsComplete: true,
 		};
 		const collapsed = renderCell({ ...state, expanded: false });
 		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: true });
 
-		expect(collapsed).not.toContain("hidden_side_effect");
-		expect(collapsed).toContain("a.py");
-		expect(expanded).toContain('hidden_side_effect = "only in full source"');
-		expect(expanded).toContain("a.py");
+		expect(collapsed).not.toContain("hiddenSideEffect");
+		expect(collapsed).toContain("a.ts");
+		expect(expanded).toContain('const hiddenSideEffect = "only in full source"');
+		expect(expanded).toContain("a.ts");
 		const expandedLines = expanded.split("\n");
-		expect(expandedLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
-			expandedLines.findIndex((line) => /╰─ a\.py \+1 -1/.test(line)),
+		expect(expandedLines.findIndex((line) => line.includes("const hiddenSideEffect ="))).toBeLessThan(
+			expandedLines.findIndex((line) => /╰─ a\.ts \+1 -1/.test(line)),
 		);
 	});
 
@@ -372,16 +372,16 @@ describe("IPythonCellComponent diff rendering", () => {
 			details: {
 				status: "ok",
 				diffs: [
-					{ path: "app.py", oldStr: "a = 1", newStr: "a = 2", startLine: 1 },
-					{ path: "app.py", oldStr: "b = 1", newStr: "b = 2", startLine: 50 },
-					{ path: "app.py", oldStr: "c = 1", newStr: "c = 2", startLine: 90 },
+					{ path: "app.ts", oldStr: "const a = 1;", newStr: "const a = 2;", startLine: 1 },
+					{ path: "app.ts", oldStr: "const b = 1;", newStr: "const b = 2;", startLine: 50 },
+					{ path: "app.ts", oldStr: "const c = 1;", newStr: "const c = 2;", startLine: 90 },
 				],
 			},
 			executionStarted: true,
 			argsComplete: true,
 		});
-		expect(out.split("\n").filter((l) => l.includes("app.py")).length).toBe(1);
-		expect(out).toMatch(/app\.py\s+\+3\s+-3/);
+		expect(out.split("\n").filter((l) => l.includes("app.ts")).length).toBe(1);
+		expect(out).toMatch(/app\.ts\s+\+3\s+-3/);
 		expect((out.match(/⋮/g) ?? []).length).toBe(2);
 	});
 
@@ -393,8 +393,8 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 		};
-		const collapsed = new IPythonCellComponent({ ...state, expanded: false }).render(80);
-		const expanded = new IPythonCellComponent({ ...state, expanded: true }).render(80);
+		const collapsed = new ReplCellComponent({ ...state, expanded: false }).render(80);
+		const expanded = new ReplCellComponent({ ...state, expanded: true }).render(80);
 
 		expect(stripAnsi(collapsed[0])).toMatch(/^ ▸ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to expand\)$/);
 		expect(stripAnsi(expanded[0])).toMatch(/^ ▾ ✓ js · .* · ↑ 1 ↓ 1 lines · 780\.0s · \(.*to collapse\)$/);
@@ -407,7 +407,6 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(upToHint(expanded[0])).toBe(upToHint(collapsed[0]));
 
 		const stripped = expanded.map(stripAnsi);
-		expect(stripped.filter((l) => /python · done/.test(l)).length).toBe(0);
 
 		expect(stripped.join("\n")).toContain("console.log(55)");
 		expect(stripped.join("\n")).toContain("55");
@@ -416,7 +415,7 @@ describe("IPythonCellComponent diff rendering", () => {
 
 	it("does not show a 'no output' line under an edit-only diff", () => {
 		const out = renderCell({
-			code: 'await edit(path="a.ts", old_str="x", new_str="X")',
+			code: 'await edit("a.ts", "x", "X")',
 			details: { status: "ok", diffs: [{ path: "a.ts", oldStr: "x", newStr: "X", startLine: 1 }] },
 			executionStarted: true,
 			argsComplete: true,
@@ -429,7 +428,7 @@ describe("IPythonCellComponent diff rendering", () => {
 
 	it("never emits a line wider than the viewport, even in a very narrow pane", () => {
 		for (const width of [1, 2, 3, 5, 8]) {
-			const lines = new IPythonCellComponent({
+			const lines = new ReplCellComponent({
 				code: "import numpy as np\nresult = np.linspace(0, 100, 50)",
 				content: [{ type: "text", text: "a fairly long line of output that must wrap" }],
 				details: { status: "ok", durationMs: 12, stdout: "a fairly long line of output that must wrap" },

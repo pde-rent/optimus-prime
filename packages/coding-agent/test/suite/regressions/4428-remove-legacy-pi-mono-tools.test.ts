@@ -27,14 +27,14 @@ describe("regression #4428: remove legacy pi-mono built-in tools", () => {
 		}
 	});
 
-	it("registers only ipython as a built-in tool", () => {
-		expect(Object.keys(createAllToolDefinitions(process.cwd()))).toEqual(["ipython"]);
+	it("registers only repl as a built-in tool", () => {
+		expect(Object.keys(createAllToolDefinitions(process.cwd()))).toEqual(["repl"]);
 	});
 
 	it("keeps legacy names available for extension and custom tool allowlists", () => {
-		const result = parseArgs(["--tools", "bash,edit,ipython"]);
+		const result = parseArgs(["--tools", "bash,edit,repl"]);
 
-		expect(result.tools).toEqual(["bash", "edit", "ipython"]);
+		expect(result.tools).toEqual(["bash", "edit", "repl"]);
 		expect(result.diagnostics).toEqual([]);
 	});
 
@@ -107,7 +107,7 @@ describe("regression #4428: remove legacy pi-mono built-in tools", () => {
 		session.dispose();
 	});
 
-	it("applies shell settings to ipython bash cells", async () => {
+	it("applies shell settings to repl bash cells", async () => {
 		const shellPath = join(tempDir, "custom-shell.sh");
 		writeFileSync(shellPath, "#!/bin/sh\nprintf 'custom-shell\\n'\nexec /bin/sh \"$@\"\n");
 		chmodSync(shellPath, 0o755);
@@ -130,15 +130,15 @@ describe("regression #4428: remove legacy pi-mono built-in tools", () => {
 			settingsManager,
 			sessionManager,
 			resourceLoader,
-			tools: ["ipython"],
+			tools: ["repl"],
 		});
 
 		try {
-			expect(session.getActiveToolNames()).toEqual(["ipython"]);
-			const ipythonTool = session.agent.state.tools.find((tool) => tool.name === "ipython");
-			expect(ipythonTool).toBeTruthy();
+			expect(session.getActiveToolNames()).toEqual(["repl"]);
+			const replTool = session.agent.state.tools.find((tool) => tool.name === "repl");
+			expect(replTool).toBeTruthy();
 
-			const result = await ipythonTool!.execute("tool-1", { code: "%%bash\necho body" });
+			const result = await replTool!.execute("tool-1", { code: "%%bash\necho body" });
 			const output = result.content
 				.filter((item): item is { type: "text"; text: string } => item.type === "text")
 				.map((item) => item.text)

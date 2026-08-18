@@ -153,13 +153,13 @@ describe("ToolExecutionComponent parity", () => {
 	});
 
 	test.each(["kitty", "iterm2", null] as const)(
-		"keeps one visible IPython image row without emitting terminal graphics for %s capability",
+		"keeps one visible REPL image row without emitting terminal graphics for %s capability",
 		(protocol) => {
 			setCapabilities({ images: protocol, trueColor: true, hyperlinks: true });
 			try {
 				const component = new ToolExecutionComponent(
-					"ipython",
-					`tool-ipython-image-${protocol}`,
+					"repl",
+					`tool-repl-image-${protocol}`,
 					{ code: "display(image)" },
 					{ showImages: true, includeImageDimensions: false },
 					undefined,
@@ -186,7 +186,7 @@ describe("ToolExecutionComponent parity", () => {
 		},
 	);
 
-	test("uses the compact fallback for a live IPython image in fullscreen", async () => {
+	test("uses the compact fallback for a live REPL image in fullscreen", async () => {
 		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
 		const terminal = new VirtualTerminal(120, 12);
 		const tui = new TUI(terminal);
@@ -194,8 +194,8 @@ describe("ToolExecutionComponent parity", () => {
 			const transcript = new Container();
 			const dock = new Text("> prompt", 0, 0);
 			const component = new ToolExecutionComponent(
-				"ipython",
-				"tool-ipython-image-fullscreen",
+				"repl",
+				"tool-repl-image-fullscreen",
 				{ code: "display(image)" },
 				{ showImages: true },
 				undefined,
@@ -825,15 +825,15 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).toContain("custom_tool");
 		expect(rendered).toContain("done");
 	});
-	test("does not add built-in edit stats to custom IPython renderers", () => {
+	test("does not add built-in edit stats to custom REPL renderers", () => {
 		const component = new ToolExecutionComponent(
-			"ipython",
-			"custom-ipython",
+			"repl",
+			"custom-repl",
 			{},
 			{},
 			{
-				...createBaseToolDefinition("ipython"),
-				renderCall: () => new Text("custom ipython", 0, 0),
+				...createBaseToolDefinition("repl"),
+				renderCall: () => new Text("custom repl", 0, 0),
 			},
 			createFakeTui(),
 			process.cwd(),
@@ -845,16 +845,16 @@ describe("ToolExecutionComponent parity", () => {
 		});
 
 		const rendered = stripAnsi(component.render(120).join("\n"));
-		expect(rendered).toContain("custom ipython");
+		expect(rendered).toContain("custom repl");
 		expect(rendered).not.toContain("README.md +1 -1");
 	});
 
-	test("globally expands built-in IPython source associated with diffs", () => {
+	test("globally expands built-in REPL source associated with diffs", () => {
 		const component = new ToolExecutionComponent(
-			"ipython",
-			"tool-ipython-edit",
+			"repl",
+			"tool-repl-edit",
 			{
-				code: 'hidden_side_effect = "only in full source"\nawait edit(path="README.md", old_str="before", new_str="after")',
+				code: 'const hiddenSideEffect = "only in full source"\nawait edit("README.md", "before", "after")',
 			},
 			{},
 			undefined,
@@ -876,7 +876,7 @@ describe("ToolExecutionComponent parity", () => {
 		);
 
 		const collapsed = stripAnsi(component.render(120).join("\n"));
-		expect(collapsed).not.toContain("hidden_side_effect");
+		expect(collapsed).not.toContain("hiddenSideEffect");
 		expect(collapsed).toContain("╰─ README.md +1 -1");
 		expect(collapsed).not.toMatch(/1 - before/);
 		expect(collapsed).not.toMatch(/1 \+ after/);
@@ -884,14 +884,14 @@ describe("ToolExecutionComponent parity", () => {
 		// Tool expansion shows the full source but never the diff; that belongs to ctrl+j.
 		component.setExpanded(true);
 		const expanded = stripAnsi(component.render(120).join("\n"));
-		expect(expanded).toContain('hidden_side_effect = "only in full source"');
+		expect(expanded).toContain('const hiddenSideEffect = "only in full source"');
 		expect(expanded).toContain("╰─ README.md +1 -1");
 		expect(expanded).not.toMatch(/1 - before/);
 
 		component.setEditDiffsExpanded(true);
 		const withDiffs = stripAnsi(component.render(120).join("\n"));
 		const withDiffLines = withDiffs.split("\n");
-		expect(withDiffLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
+		expect(withDiffLines.findIndex((line) => line.includes("const hiddenSideEffect ="))).toBeLessThan(
 			withDiffLines.findIndex((line) => line.includes("╰─ README.md +1 -1")),
 		);
 		// Exactly one summary line — the cell owns the block; no extra component doubles it.

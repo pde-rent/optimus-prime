@@ -33,9 +33,8 @@ function replSkillsEnv(): string {
 /**
  * Read a cell's result as data.
  *
- * Result values are rendered with `util.inspect` (the JS analogue of the old kernel's
- * Python `repr`), so they are for reading, not parsing. Cells that need to hand data back
- * to the test stringify it themselves; the outer parse unwraps the quoted string literal.
+ * Result values are rendered with `util.inspect`, so they are for reading, not parsing.
+ * Cells that need to hand data back to the test stringify it themselves; the outer parse unwraps the quoted string literal.
  */
 function jsonResult(result: string | undefined): unknown {
 	return JSON.parse(JSON.parse(result ?? '"null"') as string);
@@ -153,7 +152,7 @@ describe("bundled skills preload into the REPL", () => {
 			await manager.start();
 			const result = await manager.execute(
 				`void agent_message.send("later", { receiver_role: "parent" }); "cell done"`,
-				{ correlationId: "ipython_call_1" },
+				{ correlationId: "repl_call_1" },
 			);
 
 			expect(result.status).toBe("ok");
@@ -164,7 +163,7 @@ describe("bundled skills preload into the REPL", () => {
 				await new Promise((resolve) => setTimeout(resolve, 20));
 			}
 
-			expect(late).toEqual([{ correlationId: "ipython_call_1", id: "agentmsg_late" }]);
+			expect(late).toEqual([{ correlationId: "repl_call_1", id: "agentmsg_late" }]);
 		} finally {
 			await manager.dispose();
 		}

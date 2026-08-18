@@ -74,7 +74,7 @@ Google wire types. Provider SDKs are replaced by plain `fetch`.
 
 The TUI keeps its differential renderer and zero dependencies; these are additions on top.
 
-- **Collapsible blocks are clickable.** Tool calls, bash runs, agent messages, and IPython cells
+- **Collapsible blocks are clickable.** Tool calls, bash runs, agent messages, and REPL cells
   carry a `▸`/`▾` chevron that toggles that one block. Clicking rides the existing OSC 8 hyperlink
   path — no layout or bounds tracking — and is active in fullscreen mouse mode; the keybindings
   (`Ctrl+O` / `Ctrl+P` / `Ctrl+J` / `Ctrl+T`) still drive everything globally.

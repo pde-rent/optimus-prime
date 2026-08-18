@@ -25,7 +25,7 @@ import type {
 } from "../../core/session-action-store.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
 import type { SessionStats } from "../../core/session-stats.js";
-import type { KernelSentAgentMessage } from "../../core/tools/kernel-types.js";
+import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
 
 /**
  * Client-side interaction boundary consumed by InteractiveMode.
@@ -570,7 +570,7 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 
 export type AgentConnectionSessionEvent =
 	| AgentEvent
-	| { type: "ipython_sent_agent_message"; toolCallId: string; message: KernelSentAgentMessage }
+	| { type: "repl_sent_agent_message"; toolCallId: string; message: KernelSentAgentMessage }
 	| { type: "session_action_update"; actions: SessionActionSnapshot }
 	| {
 			type: "compaction_start";

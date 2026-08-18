@@ -35,7 +35,6 @@ describe("PrimeOnboardingSplashComponent", () => {
 		expect(output).not.toContain("prime agent");
 		expect(output).not.toContain("Research and infrastructure assistant for high-context work.");
 		expect(output).not.toContain("• Inspect logs, evals, training runs, and environments.");
-		expect(output).not.toContain("• Keep context alive in Python state and artifacts.");
 		expect(output).not.toContain("• Delegate focused work through recursive RLM calls.");
 		expect(output).not.toContain("long-context coding tasks");
 		expect(output).not.toContain("Login with Prime Intellect");

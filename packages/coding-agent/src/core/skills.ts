@@ -282,7 +282,11 @@ function loadSkillsFromDirInternal(
 	addIgnoreRules(ig, dir, root);
 
 	try {
-		const entries = readdirSync(dir, { withFileTypes: true });
+		// Sort by name: readdir order is filesystem-dependent, and discovery order
+		// decides which skill wins a name/js-binding collision.
+		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+			a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+		);
 
 		for (const entry of entries) {
 			if (entry.name !== "SKILL.md") {
@@ -435,7 +439,7 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 	const lines = [
 		"\n\nThe following skills provide specialized instructions for specific tasks.",
-		"Use the ipython tool (a JavaScript REPL) to inspect a skill's file when the task matches its description.",
+		"Use the repl tool (a JavaScript REPL) to inspect a skill's file when the task matches its description.",
 		"Skills with a js_binding are preloaded into the persistent JavaScript REPL and can be called directly by that binding name.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",

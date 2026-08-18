@@ -404,15 +404,15 @@ export function formatHarnessStateForPrompt(
 	options: {
 		maxEntriesPerKind?: number;
 		maxContentLength?: number;
-		includeIpythonExamples?: boolean;
+		includeReplExamples?: boolean;
 		includeShellExamples?: boolean;
 		includeRefineExamples?: boolean;
 	} = {},
 ): string {
 	const maxEntriesPerKind = options.maxEntriesPerKind ?? DEFAULT_OVERVIEW_ENTRY_LIMIT;
 	const maxContentLength = options.maxContentLength ?? DEFAULT_OVERVIEW_CONTENT_LIMIT;
-	const includeIpythonExamples = options.includeIpythonExamples ?? true;
-	const includeRefineExamples = options.includeRefineExamples ?? includeIpythonExamples;
+	const includeReplExamples = options.includeReplExamples ?? true;
+	const includeRefineExamples = options.includeRefineExamples ?? includeReplExamples;
 	const lines = [
 		"# Continual Harness State",
 		"",
@@ -425,11 +425,11 @@ export function formatHarnessStateForPrompt(
 			? "When to call `await refine.run()`: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep `await refine.run()` continual harness edits small and evidence-backed."
 			: "When to refine the continual harness: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep continual harness edits small and evidence-backed.",
 		"",
-		includeIpythonExamples
-			? 'Call contract: read each installed JS skill\'s SKILL.md and call its documented method on the skill\'s preloaded global binding in the `ipython` JavaScript/TypeScript REPL; do not assume a `.run` entrypoint. Continual harness skill entries are JS REPL skills with an explicit `reference` ({"type":"js","binding":"<skill_binding>","callable":"<method>"}) and `arguments` contract; call them with `await <binding>.<method>(...)`. Skills ship no CLI entry points, so never invoke them as shell commands. Spawn a continual harness subagent spec by composing a concise task prompt and calling `const handle = await rlm(\'sub-task\')`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child\'s answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, { receiver_role: \'parent\' })`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(message, { receiver_role: \'child\', receiver_name: handle.name })` for follow-ups. Do not invent wrappers such as `call_skill(...)`, `run_subagent(...)`, or named subagent registries.'
+		includeReplExamples
+			? 'Call contract: read each installed JS skill\'s SKILL.md and call its documented method on the skill\'s preloaded global binding in the `repl` JavaScript/TypeScript REPL; do not assume a `.run` entrypoint. Continual harness skill entries are JS REPL skills with an explicit `reference` ({"type":"js","binding":"<skill_binding>","callable":"<method>"}) and `arguments` contract; call them with `await <binding>.<method>(...)`. Skills ship no CLI entry points, so never invoke them as shell commands. Spawn a continual harness subagent spec by composing a concise task prompt and calling `const handle = await rlm(\'sub-task\')`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child\'s answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, { receiver_role: \'parent\' })`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(message, { receiver_role: \'child\', receiver_name: handle.name })` for follow-ups. Do not invent wrappers such as `call_skill(...)`, `run_subagent(...)`, or named subagent registries.'
 			: options.includeShellExamples
-				? "Call contract: continual harness entries are routing/context hints only in sessions without the `ipython` tool. Installed skills ship no CLI entry points, so never invoke them as shell commands; do not use `await`, `rlm`, or `agent_message` examples unless the prompt also documents the `ipython` JavaScript/TypeScript REPL."
-				: "Call contract: continual harness entries are routing/context hints only in sessions without the `ipython` tool or shell access; do not use `await`, `rlm`, `agent_message`, or shell skill commands unless the prompt also documents those interfaces.",
+				? "Call contract: continual harness entries are routing/context hints only in sessions without the `repl` tool. Installed skills ship no CLI entry points, so never invoke them as shell commands; do not use `await`, `rlm`, or `agent_message` examples unless the prompt also documents the `repl` JavaScript/TypeScript REPL."
+				: "Call contract: continual harness entries are routing/context hints only in sessions without the `repl` tool or shell access; do not use `await`, `rlm`, `agent_message`, or shell skill commands unless the prompt also documents those interfaces.",
 		"",
 	];
 
@@ -444,9 +444,9 @@ export function formatHarnessStateForPrompt(
 		);
 		if (kind === "memory") {
 			lines.push(
-				includeIpythonExamples
+				includeReplExamples
 					? 'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`; contents are never injected into this prompt. Read one in full with `await rlm.harness.get_memory({ id, scope })`.'
-					: "memory: not reachable in this session (no `ipython` tool); memory contents are never injected into this prompt.",
+					: "memory: not reachable in this session (no `repl` tool); memory contents are never injected into this prompt.",
 			);
 			lines.push("");
 			continue;
@@ -456,9 +456,9 @@ export function formatHarnessStateForPrompt(
 		}
 		listedEntries += entries.length;
 		// Render subagent specs as a task-shaped roster the model can match against — the
-		// analogue of Claude Code's agent-type menu. In `ipython` REPL sessions, include
+		// analogue of Claude Code's agent-type menu. in `repl` sessions, include
 		// the native `rlm` invocation hint.
-		if (kind === "subagent" && includeIpythonExamples) {
+		if (kind === "subagent" && includeReplExamples) {
 			lines.push(
 				"subagent specs (invoke a spec by turning it into a concise task prompt and spawning with `await rlm('<task>')`; admission returns a child handle, never the answer):",
 			);
@@ -499,7 +499,7 @@ export function formatHarnessStateForPrompt(
 	}
 
 	lines.push(
-		includeIpythonExamples
+		includeReplExamples
 			? "Refinement history is not injected; call `await rlm.harness.overview()` for recent refinement events."
 			: "Refinement history is not injected.",
 	);

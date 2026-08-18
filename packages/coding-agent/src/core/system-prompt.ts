@@ -62,8 +62,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
-	const tools = selectedTools ?? ["ipython"];
-	const hasIpython = tools.includes("ipython");
+	const tools = selectedTools ?? ["repl"];
+	const hasRepl = tools.includes("repl");
 	const hasBash = tools.includes("bash");
 	const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
 	const visibleJsSkillBindings = getJsSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName);
@@ -83,7 +83,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 		// Append skills section only when the model has a way to inspect skill files.
 		const customPromptHasFileAccess =
-			!selectedTools || selectedTools.includes("ipython") || selectedTools.includes("bash");
+			!selectedTools || selectedTools.includes("repl") || selectedTools.includes("bash");
 		if (customPromptHasFileAccess && skills.length > 0) {
 			prompt += formatSkillsForPrompt(skills);
 		}
@@ -103,7 +103,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		}
 
 		if (harnessState) {
-			prompt += `\n\n${formatHarnessStateForPrompt(harnessState, { includeIpythonExamples: hasIpython, includeShellExamples: hasBash, includeRefineExamples: hasIpython && hasRefineSkill })}`;
+			prompt += `\n\n${formatHarnessStateForPrompt(harnessState, { includeReplExamples: hasRepl, includeShellExamples: hasBash, includeRefineExamples: hasRepl && hasRefineSkill })}`;
 		}
 
 		if (appendSection) {
@@ -117,7 +117,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		cwd: promptCwd,
 		messagesPath: promptMessagesPath,
 		installedSkills: visibleJsSkillBindings,
-		activeTools: tools.filter((name) => name === "ipython" || name === "bash" || name === "edit"),
+		activeTools: tools.filter((name) => name === "repl" || name === "bash" || name === "edit"),
 		allowRecursion,
 		depth: options.rlmDepth,
 		parentAgent: options.rlmParentAgent,
@@ -126,7 +126,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	// Appended AFTER the trained buildRlmPrompt prefix, and before the harness-state
 	// menu, so the model reads when/why to delegate and then sees the concrete subagent
 	// specs it can match against — the same ordering as Claude Code's Agent tool.
-	if ((allowRecursion ?? true) && hasIpython) {
+	if ((allowRecursion ?? true) && hasRepl) {
 		const visibleJsSkillNames = new Set(getJsSkillRuntimeInfo(visibleSkills).map((skill) => skill.importName));
 		prompt += `\n\n${buildSubagentGuidance({
 			includeRefineExamples: hasRefineSkill,
@@ -136,7 +136,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 
 	if (harnessState) {
-		prompt += `\n\n${formatHarnessStateForPrompt(harnessState, { includeIpythonExamples: hasIpython, includeShellExamples: hasBash, includeRefineExamples: hasIpython && hasRefineSkill })}`;
+		prompt += `\n\n${formatHarnessStateForPrompt(harnessState, { includeReplExamples: hasRepl, includeShellExamples: hasBash, includeRefineExamples: hasRepl && hasRefineSkill })}`;
 	}
 
 	const guidelines = formatPromptGuidelines(promptGuidelines);
@@ -154,7 +154,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 
 	// Append skills section only when the model has a way to inspect skill files.
-	const hasFileAccess = tools.includes("ipython") || tools.includes("bash");
+	const hasFileAccess = tools.includes("repl") || tools.includes("bash");
 	if (hasFileAccess && skills.length > 0) {
 		prompt += formatSkillsForPrompt(skills);
 	}

@@ -62,7 +62,7 @@ const { session } = await createAgentSession();
 // Custom: override specific options
 const { session } = await createAgentSession({
   model: myModel,
-  tools: ["ipython"],
+  tools: ["repl"],
   sessionManager: SessionManager.inMemory(),
 });
 ```
@@ -467,14 +467,14 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 ### Tools
 
 ```typescript
-// Use the default built-in tool set: the `ipython` tool, which runs a persistent Bun JS/TS REPL
+// Use the default built-in tool set: the `repl` tool, which runs a persistent Bun JS/TS REPL
 const { session } = await createAgentSession({
-  tools: ["ipython"],
+  tools: ["repl"],
 });
 
 // Pick specific tools
 const { session } = await createAgentSession({
-  tools: ["ipython"],
+  tools: ["repl"],
 });
 ```
 
@@ -496,7 +496,7 @@ const { session } = await createAgentSession({
 });
 ```
 
-The `ipython` tool (the persistent Bun REPL) has no public factory export: pass it by name in `tools` and the session spawns its REPL child with the session `cwd`.
+The `repl` tool (the persistent Bun REPL) has no public factory export: pass it by name in `tools` and the session spawns its REPL child with the session `cwd`.
 
 **When you don't need factories:**
 - If you omit `tools`, Prime Agent automatically creates them with the correct `cwd`
@@ -923,7 +923,7 @@ const { session } = await createAgentSession({
   authStorage,
   modelRegistry,
 
-  tools: ["ipython"],
+  tools: ["repl"],
   customTools: [statusTool],
   resourceLoader: loader,
 

@@ -3704,13 +3704,24 @@ describe("daemon mode helpers", () => {
 			fromState,
 			origin: "agent",
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		// "first" must actually be parked inside acceptAgentMessagePrompt — holding the target lock
+		// and its queue reservation, past its own capacity check — before the pending count is
+		// bumped. Microtask pumps do not reliably cross the awaits in between, so wait on the mock.
+		await vi.waitFor(() => expect(acceptAgentMessagePrompt).toHaveBeenCalledTimes(1));
 		(targetState.runtime.session as { unfinishedActionCount: number }).unfinishedActionCount = 20;
 
+		// Capture both settlements before releasing the lock: "second" rejects as soon as "first"
+		// hands the target lock over, and bun:test reports a rejection whose handler is attached
+		// only afterwards as an unhandled rejection.
+		const secondError = second.then(
+			() => undefined,
+			(error: unknown) => error,
+		);
 		resolveFirstPrompt();
 		await expect(first).resolves.toMatchObject({ message: "first" });
-		await expect(second).rejects.toThrow("Target session has too many pending messages");
+		const rejection = await secondError;
+		expect(rejection).toBeInstanceOf(Error);
+		expect(String(rejection)).toContain("Target session has too many pending messages");
 		expect(followUp).not.toHaveBeenCalled();
 	});
 

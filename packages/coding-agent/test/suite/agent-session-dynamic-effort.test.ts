@@ -274,10 +274,10 @@ describe("escalation triggers", () => {
 			session as unknown as { _recordEffortToolOutcome(toolName: string, isError: boolean): void }
 		)._recordEffortToolOutcome.bind(session);
 
-		record("ipython", true);
-		record("ipython", true);
+		record("repl", true);
+		record("repl", true);
 		expect(session.effortEscalationTriggered).toBe(false);
-		record("ipython", true);
+		record("repl", true);
 		expect(session.effortEscalationTriggered).toBe(true);
 		expect(session.setModelRequestedThinkingLevel("xhigh").effort).toBe("xhigh");
 	});
@@ -289,10 +289,10 @@ describe("escalation triggers", () => {
 			session as unknown as { _recordEffortToolOutcome(toolName: string, isError: boolean): void }
 		)._recordEffortToolOutcome.bind(session);
 
-		record("ipython", true);
-		record("ipython", true);
-		record("ipython", false);
-		record("ipython", true);
+		record("repl", true);
+		record("repl", true);
+		record("repl", false);
+		record("repl", true);
 		expect(session.effortEscalationTriggered).toBe(false);
 	});
 

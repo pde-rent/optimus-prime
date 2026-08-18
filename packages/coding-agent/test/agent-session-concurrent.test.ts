@@ -503,7 +503,9 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		await session.prompt("First message");
 		expect(session.isStreaming).toBe(false);
-		await expect(session.prompt("Second message")).resolves.not.toThrow();
+		// prompt() resolves to void; asserting that proves the second call was
+		// admitted instead of rejecting with the concurrent-prompt guard error.
+		await expect(session.prompt("Second message")).resolves.toBeUndefined();
 	});
 
 	it("should wait for queued agent events before emitting tool_call", async () => {

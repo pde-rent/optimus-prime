@@ -1,7 +1,7 @@
 /**
- * Shared REPL-facing types. The `Kernel*` names are kept because they are part of
- * the public `ipython` tool-details contract that extensions and the TUI read;
- * the implementation behind them is the Bun REPL (`src/core/bun-repl/`).
+ * Shared REPL-facing types. `Kernel*` names the REPL child process — the
+ * long-lived Bun process (`src/core/bun-repl/`) that executes cells — and is
+ * part of the public `repl` tool-details contract extensions and the TUI read.
  */
 
 /** Display MIME carrying one file edit, emitted by the `edit` skill. */
@@ -46,20 +46,20 @@ export interface KernelSentAgentMessage {
 	};
 }
 
-/** Input accepted by the agent's `ipython` tool (now the Bun REPL backend). */
-export interface IpythonToolInput {
+/** Input accepted by the agent's `repl` tool. */
+export interface ReplToolInput {
 	code: string;
 }
 
-/** Tool-result details surfaced to the UI for the `ipython` tool. */
-export interface IpythonToolDetails {
+/** Tool-result details surfaced to the UI for the `repl` tool. */
+export interface ReplToolDetails {
 	durationMs?: number;
 	status?: "ok" | "error" | "aborted" | "starting";
 	errorEname?: string;
 	stdout?: string;
 	stderr?: string;
 	result?: string;
-	/** Diffs streamed from file edits, rendered by the IPython cell. */
+	/** Diffs streamed from file edits, rendered by the REPL cell. */
 	diffs?: KernelDiffDisplay[];
 	/** Media attachments loaded into context (e.g. by the attach-image skill). */
 	attachments?: KernelAttachment[];

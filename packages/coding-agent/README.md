@@ -66,9 +66,9 @@ prime-agent
 /login  # Then select provider
 ```
 
-Then just talk to Prime Agent. By default, Prime Agent gives the model one tool, named `ipython`: a persistent Bun JavaScript/TypeScript REPL. The model uses it to read files, run commands, edit code, and inspect data. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Prime Agent packages](#prime-agent-packages).
+Then just talk to Prime Agent. By default, Prime Agent gives the model one tool, named `repl`: a persistent Bun JavaScript/TypeScript REPL. The model uses it to read files, run commands, edit code, and inspect data. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [Prime Agent packages](#prime-agent-packages).
 
-The tool name is kept for compatibility with existing sessions and `--tools` filters; there is no IPython, Jupyter, or Python involved. Cells are JavaScript/TypeScript with top-level `await`, the last expression is echoed as the result, and declarations persist across cells. A cell whose first line is `%%bash` runs as a shell command instead. The REPL starts on first use and needs no setup, but [Bun](https://bun.sh) must be on your `PATH`.
+Cells are JavaScript/TypeScript with top-level `await`, the last expression is echoed as the result, and declarations persist across cells. A cell whose first line is `%%bash` runs as a shell command instead. The REPL starts on first use and needs no setup, but [Bun](https://bun.sh) must be on your `PATH`.
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -291,7 +291,7 @@ Place in `~/.prime/agent/prompts/`, `.prime/agent/prompts/`, or a [Prime Agent p
 
 ### Skills
 
-On-demand capability packages following the [Agent Skills standard](https://agentskills.io). At startup, Prime Agent gives the model each visible skill's name, type, description, and location. The full `SKILL.md` stays out of context until the model inspects it with `ipython` or you explicitly invoke `/skill:name`.
+On-demand capability packages following the [Agent Skills standard](https://agentskills.io). At startup, Prime Agent gives the model each visible skill's name, type, description, and location. The full `SKILL.md` stays out of context until the model inspects it with `repl` or you explicitly invoke `/skill:name`.
 
 ```markdown
 <!-- ~/.prime/agent/skills/my-skill/SKILL.md -->
@@ -591,7 +591,7 @@ Use `prime-agent session export <file> [output]` to export a saved session to HT
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools by default but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools by default |
 
-Available built-in tools: `ipython` (the persistent Bun JS/TS REPL; the name is historical)
+Available built-in tools: `repl` (the persistent Bun JS/TS REPL)
 
 ### Resource Options
 
@@ -671,7 +671,7 @@ prime-agent --model sonnet:high "Solve this complex problem"
 prime-agent --models "claude-*,gpt-4o"
 
 # Restrict to the built-in REPL tool
-prime-agent --tools ipython -p "Review the code"
+prime-agent --tools repl -p "Review the code"
 
 # High thinking level
 prime-agent --thinking high "Solve this complex problem"

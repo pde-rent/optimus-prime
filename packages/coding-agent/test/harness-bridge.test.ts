@@ -14,9 +14,8 @@ import {
 /**
  * Read a cell's result as data.
  *
- * Result values are rendered with `util.inspect` (the JS analogue of the old kernel's
- * Python `repr`), so they are for reading, not parsing. Cells that need to hand data back
- * to the test stringify it themselves; the outer parse unwraps the quoted string literal.
+ * Result values are rendered with `util.inspect`, so they are for reading, not parsing.
+ * Cells that need to hand data back to the test stringify it themselves; the outer parse unwraps the quoted string literal.
  */
 function jsonResult(result: string | undefined): unknown {
 	return JSON.parse(JSON.parse(result ?? '"null"') as string);
@@ -206,7 +205,7 @@ describe("harness host handlers", () => {
 		expect(() =>
 			handleHarnessHostRequest(
 				"harness.create_skill",
-				{ ...VALID_SKILL, title: "Bad ref", reference: { type: "python", binding: "x", callable: "run" } },
+				{ ...VALID_SKILL, title: "Bad ref", reference: { type: "bash", binding: "x", callable: "run" } },
 				ctx,
 			),
 		).toThrow(/reference.type must be js/);

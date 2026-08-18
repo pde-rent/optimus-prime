@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { imageBlocksFromAttachments } from "../src/core/bun-repl/tool.js";
-import type { KernelAttachment } from "../src/core/tools/kernel-types.js";
+import type { KernelAttachment } from "../src/core/tools/repl-types.js";
 
 describe("imageBlocksFromAttachments", () => {
 	it("returns no blocks when there are no attachments", () => {

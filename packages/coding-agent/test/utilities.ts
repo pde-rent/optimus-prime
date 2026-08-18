@@ -243,7 +243,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 		initialState: {
 			model,
 			systemPrompt: options.systemPrompt ?? "You are a helpful assistant. Be extremely concise.",
-			tools: [createAllTools(process.cwd()).ipython],
+			tools: [createAllTools(process.cwd()).repl],
 		},
 	});
 

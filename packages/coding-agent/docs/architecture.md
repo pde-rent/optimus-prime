@@ -44,7 +44,7 @@ flowchart LR
 - The supervisor owns discovery, routing, attachments, worker health, and cross-agent message delivery.
 - Each worker owns one root runtime, its scheduler, REPL children, and all descendants below that root.
 - `AgentSession` owns provider calls, queues, tools, compaction, goals, child lifecycles, and transcript writes.
-- The persistent Bun JavaScript/TypeScript REPL is the model-facing control environment, exposed to the model as the `ipython` tool (the name is kept for compatibility). Typed host requests return authoritative operations to the TypeScript session.
+- The persistent Bun JavaScript/TypeScript REPL is the model-facing control environment, exposed to the model as the `repl` tool. Typed host requests return authoritative operations to the TypeScript session.
 
 Workers and REPL children are separate processes for lifecycle and failure containment, not security sandboxes. They normally run with the same operating-system permissions as the client.
 
@@ -66,8 +66,8 @@ sequenceDiagram
     S->>W: route to active session
     W->>A: enqueue prompt
     A->>P: stream model request
-    P-->>A: text or ipython tool call
-    opt ipython tool call
+    P-->>A: text or repl tool call
+    opt repl tool call
         A->>K: execute JS/TS cell
         alt Typed host request
             K->>A: request host operation

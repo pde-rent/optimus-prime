@@ -97,6 +97,8 @@ describe("SubagentSummaryLine", () => {
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
 			subagentGraphPanel: new SubagentGraphPanel(),
+			// `settingsManager` is a getter over uiServices; the graph feed reads it.
+			uiServices: { settingsManager: { getSubagentGraph: () => true } },
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -124,6 +126,8 @@ describe("SubagentSummaryLine", () => {
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
 			subagentGraphPanel: new SubagentGraphPanel(),
+			// `settingsManager` is a getter over uiServices; the graph feed reads it.
+			uiServices: { settingsManager: { getSubagentGraph: () => true } },
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -154,6 +158,8 @@ describe("SubagentSummaryLine", () => {
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
 			subagentGraphPanel: new SubagentGraphPanel(),
+			// `settingsManager` is a getter over uiServices; the graph feed reads it.
+			uiServices: { settingsManager: { getSubagentGraph: () => true } },
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),
@@ -187,6 +193,8 @@ describe("SubagentSummaryLine", () => {
 			heartbeatCatalog: [],
 			subagentSummaryLine: line,
 			subagentGraphPanel: new SubagentGraphPanel(),
+			// `settingsManager` is a getter over uiServices; the graph feed reads it.
+			uiServices: { settingsManager: { getSubagentGraph: () => true } },
 			updateScopedHeartbeats: vi.fn(),
 			updateWorkingPulse: vi.fn(),
 			syncWorkingLoader: vi.fn(),

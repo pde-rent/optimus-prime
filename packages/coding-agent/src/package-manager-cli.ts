@@ -405,13 +405,9 @@ function reportDaemonUpdateRestartStatus(status: DaemonUpdateRestartStatus): voi
 	}
 }
 
-function printSelfUpdateUnavailable(
-	npmCommand?: string[],
-	updateSpec = PACKAGE_NAME,
-	updatePackageName = updateSpec,
-): void {
+function printSelfUpdateUnavailable(updateSpec = PACKAGE_NAME, updatePackageName = updateSpec): void {
 	console.error(`error: ${APP_NAME} cannot self-update this installation.`);
-	console.error(getSelfUpdateUnavailableInstruction(PACKAGE_NAME, npmCommand, updateSpec, updatePackageName));
+	console.error(getSelfUpdateUnavailableInstruction(PACKAGE_NAME, updateSpec, updatePackageName));
 
 	const entrypoint = process.argv[1];
 	if (entrypoint) {
@@ -1491,8 +1487,6 @@ export async function handlePackageCommand(args: string[]): Promise<boolean> {
 	const agentDir = getAgentDir();
 	const settingsManager = SettingsManager.create(cwd, agentDir);
 	reportSettingsErrors(settingsManager, "package command");
-	const selfUpdateNpmCommand = settingsManager.getGlobalSettings().npmCommand;
-
 	const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
 
 	packageManager.setProgressCallback((event) => {
@@ -1574,16 +1568,11 @@ export async function handlePackageCommand(args: string[]): Promise<boolean> {
 					}
 					const selfUpdateCommand = getSelfUpdateCommand(
 						PACKAGE_NAME,
-						selfUpdateNpmCommand,
 						selfUpdatePlan.installSpec,
 						selfUpdatePlan.packageName,
 					);
 					if (!selfUpdateCommand) {
-						printSelfUpdateUnavailable(
-							selfUpdateNpmCommand,
-							selfUpdatePlan.installSpec,
-							selfUpdatePlan.packageName,
-						);
+						printSelfUpdateUnavailable(selfUpdatePlan.installSpec, selfUpdatePlan.packageName);
 						process.exitCode = 1;
 						return true;
 					}

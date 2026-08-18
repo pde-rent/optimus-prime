@@ -15,7 +15,7 @@ flowchart LR
     answer["Answer or next turn"]
 
     task --> parent
-    parent -->|"ipython tool call"| repl
+    parent -->|"repl tool call"| repl
     repl <-->|"inspect · search · transform"| data
     repl <-->|"call functions"| skills
     repl -->|"spawn focused work"| children
@@ -30,7 +30,7 @@ The parent keeps its own context focused while the REPL holds working state and 
 
 ### 1. Execution is programmatic
 
-The default RLM runtime exposes one built-in model tool: `ipython`. The name is kept for compatibility; the tool executes JavaScript/TypeScript in a persistent Bun REPL, not Python. Reading and editing files, running project commands, transforming results, invoking skills, and delegating work all begin from that REPL instead of separate built-in tool calls.
+The default RLM runtime exposes one built-in model tool: `repl`. It executes JavaScript/TypeScript in a persistent Bun REPL. Reading and editing files, running project commands, transforming results, invoking skills, and delegating work all begin from that REPL instead of separate built-in tool calls.
 
 A cell is JS/TS with top-level `await`, and its last top-level expression is echoed as the cell result. Top-level `const`, `let`, `var`, `function`, and `class` declarations persist across cells, so variables, parsed results, and task handles remain available on later turns:
 

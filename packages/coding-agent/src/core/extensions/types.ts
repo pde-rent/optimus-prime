@@ -61,13 +61,7 @@ import type { SourceInfo } from "../source-info.js";
 import type { BuildSystemPromptOptions } from "../system-prompt.js";
 import type { BashOperations } from "../tools/bash.js";
 import type { EditToolDetails } from "../tools/edit.js";
-import type {
-	BashToolDetails,
-	BashToolInput,
-	EditToolInput,
-	IpythonToolDetails,
-	IpythonToolInput,
-} from "../tools/index.js";
+import type { BashToolDetails, BashToolInput, EditToolInput, ReplToolDetails, ReplToolInput } from "../tools/index.js";
 
 export type { ExecOptions, ExecResult } from "../exec.js";
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.js";
@@ -747,9 +741,9 @@ export interface EditToolCallEvent extends ToolCallEventBase {
 	input: EditToolInput;
 }
 
-export interface IpythonToolCallEvent extends ToolCallEventBase {
-	toolName: "ipython";
-	input: IpythonToolInput;
+export interface ReplToolCallEvent extends ToolCallEventBase {
+	toolName: "repl";
+	input: ReplToolInput;
 }
 
 export interface CustomToolCallEvent extends ToolCallEventBase {
@@ -763,7 +757,7 @@ export interface CustomToolCallEvent extends ToolCallEventBase {
  * `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
  * Later `tool_call` handlers see earlier mutations. No re-validation is performed after mutation.
  */
-export type ToolCallEvent = BashToolCallEvent | EditToolCallEvent | IpythonToolCallEvent | CustomToolCallEvent;
+export type ToolCallEvent = BashToolCallEvent | EditToolCallEvent | ReplToolCallEvent | CustomToolCallEvent;
 
 interface ToolResultEventBase {
 	type: "tool_result";
@@ -783,9 +777,9 @@ export interface EditToolResultEvent extends ToolResultEventBase {
 	details: EditToolDetails | undefined;
 }
 
-export interface IpythonToolResultEvent extends ToolResultEventBase {
-	toolName: "ipython";
-	details: IpythonToolDetails | undefined;
+export interface ReplToolResultEvent extends ToolResultEventBase {
+	toolName: "repl";
+	details: ReplToolDetails | undefined;
 }
 
 export interface CustomToolResultEvent extends ToolResultEventBase {
@@ -794,11 +788,7 @@ export interface CustomToolResultEvent extends ToolResultEventBase {
 }
 
 /** Fired after a tool executes. Can modify result. */
-export type ToolResultEvent =
-	| BashToolResultEvent
-	| EditToolResultEvent
-	| IpythonToolResultEvent
-	| CustomToolResultEvent;
+export type ToolResultEvent = BashToolResultEvent | EditToolResultEvent | ReplToolResultEvent | CustomToolResultEvent;
 
 export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
 	return e.toolName === "bash";
@@ -806,8 +796,8 @@ export function isBashToolResult(e: ToolResultEvent): e is BashToolResultEvent {
 export function isEditToolResult(e: ToolResultEvent): e is EditToolResultEvent {
 	return e.toolName === "edit";
 }
-export function isIpythonToolResult(e: ToolResultEvent): e is IpythonToolResultEvent {
-	return e.toolName === "ipython";
+export function isReplToolResult(e: ToolResultEvent): e is ReplToolResultEvent {
+	return e.toolName === "repl";
 }
 
 /**
@@ -832,7 +822,7 @@ export function isIpythonToolResult(e: ToolResultEvent): e is IpythonToolResultE
  */
 export function isToolCallEventType(toolName: "bash", event: ToolCallEvent): event is BashToolCallEvent;
 export function isToolCallEventType(toolName: "edit", event: ToolCallEvent): event is EditToolCallEvent;
-export function isToolCallEventType(toolName: "ipython", event: ToolCallEvent): event is IpythonToolCallEvent;
+export function isToolCallEventType(toolName: "repl", event: ToolCallEvent): event is ReplToolCallEvent;
 export function isToolCallEventType<TName extends string, TInput extends Record<string, unknown>>(
 	toolName: TName,
 	event: ToolCallEvent,

@@ -154,11 +154,12 @@ describe("DaemonClient", () => {
 		expect(netMock.sockets).toHaveLength(1);
 		const firstSocket = netMock.sockets[0]!;
 
-		const timeoutRejection = expect(firstAttempt).resolves.toMatchObject({
+		// `expect(promise).resolves` drains the event loop synchronously in Bun, so it must not be
+		// built while the promise can only settle by advancing the fake clock — that deadlocks.
+		await vi.advanceTimersByTimeAsync(5);
+		await expect(firstAttempt).resolves.toMatchObject({
 			message: expect.stringContaining("Timed out after 5ms connecting to the Prime Agent daemon."),
 		});
-		await vi.advanceTimersByTimeAsync(5);
-		await timeoutRejection;
 
 		expect(firstSocket.destroyed).toBe(true);
 		expect(firstSocket.listenerCount("data")).toBe(0);
@@ -403,17 +404,13 @@ describe("DaemonClient", () => {
 
 		const request = client.request({ type: "list", all: true });
 
-		await expect(request).rejects.toMatchObject({
-			message: expect.stringContaining(
-				'Cannot send daemon command "list" because the Prime Agent daemon is not connected.',
-			),
-		});
-		await expect(request).rejects.toMatchObject({
-			message: expect.stringContaining("Socket: /tmp/prime-agent.sock."),
-		});
-		await expect(request).rejects.toMatchObject({
-			message: expect.stringContaining("Daemon log:"),
-		});
+		// One await: Bun's `.rejects` only reads a given promise's rejection once.
+		const error = await captureRejection(request);
+		expect(error.message).toContain(
+			'Cannot send daemon command "list" because the Prime Agent daemon is not connected.',
+		);
+		expect(error.message).toContain("Socket: /tmp/prime-agent.sock.");
+		expect(error.message).toContain("Daemon log:");
 	});
 
 	it("keeps durable command envelopes on the session-action protocol", async () => {
@@ -915,7 +912,7 @@ describe("DaemonClient", () => {
 	});
 });
 
-async function captureRejection(promise: Promise<void>): Promise<Error> {
+async function captureRejection(promise: Promise<unknown>): Promise<Error> {
 	try {
 		await promise;
 	} catch (error) {

@@ -587,7 +587,7 @@ function createConnectionState(activeSessionId: string, sessionId: string): Agen
 			continuationsUsed: 0,
 		},
 		scopedModels: [],
-		activeToolNames: ["ipython"],
+		activeToolNames: ["repl"],
 		contextUsage: undefined,
 	};
 }
@@ -1415,7 +1415,7 @@ describe("DaemonAgentConnection", () => {
 			cwd: "/tmp/project",
 			sessionId: "session-current",
 			sessionName: "session-current name",
-			activeToolNames: ["ipython"],
+			activeToolNames: ["repl"],
 		});
 
 		fakeClient.emitMessage({
@@ -1439,7 +1439,7 @@ describe("DaemonAgentConnection", () => {
 					activeSessionId: "active-1",
 					sessionId: "session-next",
 					sessionName: "session-next name",
-					activeToolNames: ["ipython"],
+					activeToolNames: ["repl"],
 				}),
 				messages: [{ role: "user", content: "replacement prompt", timestamp: 1 }],
 			},

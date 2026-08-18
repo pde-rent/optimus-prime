@@ -13,7 +13,7 @@ import {
 	statSync,
 } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join, resolve, sep, win32 } from "path";
+import { basename, dirname, join, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { shouldUseWindowsShell } from "./utils/child-process.js";
 
@@ -31,9 +31,6 @@ const __dirname = dirname(__filename);
 export const isBunBinary =
 	import.meta.url.includes("$bunfs") || import.meta.url.includes("~BUN") || import.meta.url.includes("%7EBUN");
 
-/** Detect if Bun is the runtime (compiled binary or bun run) */
-export const isBunRuntime = !!process.versions.bun;
-
 export const SELF_UPDATE_INTERACTIVE_CHILD_ENV = "PRIME_AGENT_INTERACTIVE_SELF_UPDATE";
 export const SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE = 75;
 
@@ -41,7 +38,13 @@ export const SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE = 75;
 // Install Method Detection
 // =============================================================================
 
-export type InstallMethod = "bun-binary" | "homebrew" | "npm" | "pnpm" | "yarn" | "bun" | "unknown";
+/**
+ * How this installation was placed on disk. There is no npm/node entry: the
+ * published bin is `#!/usr/bin/env bun` (src/cli.ts) and package.json declares
+ * `engines.bun` only, so every process — including daemons and subprocesses that
+ * re-exec `process.execPath` — runs under Bun.
+ */
+export type InstallMethod = "bun-binary" | "homebrew" | "pnpm" | "yarn" | "bun";
 
 interface SelfUpdateCommandStep {
 	command: string;
@@ -97,38 +100,15 @@ export function detectInstallMethod(): InstallMethod {
 	if (resolvedPath.includes("/yarn/") || resolvedPath.includes("/.yarn/")) {
 		return "yarn";
 	}
-	if (isBunRuntime || resolvedPath.includes("/install/global/node_modules/")) {
-		return "bun";
-	}
-	if (resolvedPath.includes("/npm/") || resolvedPath.includes("/node_modules/")) {
-		return "npm";
-	}
-
-	return "unknown";
+	// Anything that is not a pnpm or yarn global is a Bun install: the runtime is
+	// always Bun (see InstallMethod). Whether the install is actually managed —
+	// i.e. self-updatable — is decided by isManagedByGlobalPackageManager, not here.
+	return "bun";
 }
 
 function isHomebrewInstall(): boolean {
 	const packageDir = getPackageDir().toLowerCase().replace(/\\/g, "/");
 	return packageDir.includes("/cellar/") && packageDir.includes("/libexec/lib/node_modules/");
-}
-
-function getInferredNpmInstall(): { root: string; prefix: string } | undefined {
-	const packageDir = getPackageDir();
-	const path = process.platform === "win32" || packageDir.includes("\\") ? win32 : { basename, dirname };
-	const parent = path.dirname(packageDir);
-	let root: string | undefined;
-	if (path.basename(parent).startsWith("@") && path.basename(path.dirname(parent)) === "node_modules") {
-		root = path.dirname(parent);
-	} else if (path.basename(parent) === "node_modules") {
-		root = parent;
-	}
-	if (!root) return undefined;
-	const rootParent = path.dirname(root);
-	if (path.basename(rootParent) === "lib") return { root, prefix: path.dirname(rootParent) };
-	// Windows global npm prefixes use `<prefix>\\node_modules`, which is
-	// indistinguishable from local project installs by path shape alone. Do not
-	// infer unsupported Windows custom prefixes without `npm root -g` evidence.
-	return undefined;
 }
 
 function isDirectPackageArtifactSpec(updateSpec: string): boolean {
@@ -153,7 +133,6 @@ function getSelfUpdateCommandForMethod(
 	method: InstallMethod,
 	installedPackageName: string,
 	updateSpec = installedPackageName,
-	npmCommand?: string[],
 	updatePackageName = getDefaultUpdatePackageName(installedPackageName, updateSpec),
 ): SelfUpdateCommand | undefined {
 	const uninstallAfterInstall = isDirectPackageArtifactSpec(updateSpec);
@@ -185,61 +164,20 @@ function getSelfUpdateCommandForMethod(
 					: makeSelfUpdateCommandStep("bun", ["uninstall", "-g", installedPackageName]),
 				{ uninstallAfterInstall },
 			);
-		case "npm": {
-			const [command = "npm", ...npmArgs] = npmCommand ?? [];
-			const inferred = npmCommand?.length ? undefined : getInferredNpmInstall();
-			const prefixArgs = [...npmArgs, ...(inferred ? ["--prefix", inferred.prefix] : [])];
-			const installStep = makeSelfUpdateCommandStep(command, [...prefixArgs, "install", "-g", updateSpec]);
-			const uninstallStep =
-				updatePackageName === installedPackageName
-					? undefined
-					: makeSelfUpdateCommandStep(command, [...prefixArgs, "uninstall", "-g", installedPackageName]);
-			return makeSelfUpdateCommand(installStep, uninstallStep, { uninstallAfterInstall });
-		}
-		case "unknown":
-			return undefined;
 	}
 }
 
-function readCommandOutput(
-	command: string,
-	args: string[],
-	options: { requireSuccess?: boolean } = {},
-): string | undefined {
+function readCommandOutput(command: string, args: string[]): string | undefined {
 	const result = spawnSync(command, args, {
 		encoding: "utf-8",
 		stdio: ["ignore", "pipe", "pipe"],
 		shell: shouldUseWindowsShell(command),
 	});
-	if (result.status === 0) return result.stdout.trim() || undefined;
-	if (options.requireSuccess) {
-		const reason = result.error?.message || result.stderr.trim() || `exit code ${result.status ?? "unknown"}`;
-		throw new Error(`Failed to run ${[command, ...args].join(" ")}: ${reason}`);
-	}
-	return undefined;
+	return result.status === 0 ? result.stdout.trim() || undefined : undefined;
 }
 
-function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmCommand?: string[]): string[] {
+function getGlobalPackageRoots(method: InstallMethod): string[] {
 	switch (method) {
-		case "npm": {
-			const configured = !!npmCommand?.length;
-			const [command = "npm", ...npmArgs] = npmCommand ?? [];
-			if (configured && command === "bun") {
-				const bunBin = readCommandOutput(command, [...npmArgs, "pm", "bin", "-g"], {
-					requireSuccess: true,
-				});
-				const roots = [join(homedir(), ".bun", "install", "global", "node_modules")];
-				if (bunBin) {
-					roots.push(join(dirname(bunBin), "install", "global", "node_modules"));
-				}
-				return roots;
-			}
-			const root = readCommandOutput(command, [...npmArgs, "root", "-g"], {
-				requireSuccess: configured,
-			});
-			const inferred = configured ? undefined : getInferredNpmInstall();
-			return [root, inferred?.root].filter((x): x is string => !!x);
-		}
 		case "pnpm": {
 			const root = readCommandOutput("pnpm", ["root", "-g"]);
 			return root ? [root, dirname(root)] : [];
@@ -258,7 +196,6 @@ function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmC
 		}
 		case "bun-binary":
 		case "homebrew":
-		case "unknown":
 			return [];
 	}
 }
@@ -291,11 +228,11 @@ function isSelfUpdatePathWritable(): boolean {
 	}
 }
 
-function isManagedByGlobalPackageManager(method: InstallMethod, packageName: string, npmCommand?: string[]): boolean {
+function isManagedByGlobalPackageManager(method: InstallMethod): boolean {
 	const packageDir = normalizeExistingPathForComparison(getPackageDir());
 	return (
 		!!packageDir &&
-		getGlobalPackageRoots(method, packageName, npmCommand).some((root) => {
+		getGlobalPackageRoots(method).some((root) => {
 			const normalizedRoot = normalizeExistingPathForComparison(root);
 			return (
 				!!normalizedRoot &&
@@ -307,13 +244,12 @@ function isManagedByGlobalPackageManager(method: InstallMethod, packageName: str
 
 export function getSelfUpdateCommand(
 	packageName: string,
-	npmCommand?: string[],
 	updateSpec = packageName,
 	updatePackageName = getDefaultUpdatePackageName(packageName, updateSpec),
 ): SelfUpdateCommand | undefined {
 	const method = detectInstallMethod();
-	const command = getSelfUpdateCommandForMethod(method, packageName, updateSpec, npmCommand, updatePackageName);
-	if (!command || !isManagedByGlobalPackageManager(method, packageName, npmCommand) || !isSelfUpdatePathWritable()) {
+	const command = getSelfUpdateCommandForMethod(method, packageName, updateSpec, updatePackageName);
+	if (!command || !isManagedByGlobalPackageManager(method) || !isSelfUpdatePathWritable()) {
 		return undefined;
 	}
 	return command;
@@ -321,7 +257,6 @@ export function getSelfUpdateCommand(
 
 export function getSelfUpdateUnavailableInstruction(
 	packageName: string,
-	npmCommand?: string[],
 	updateSpec = packageName,
 	updatePackageName = getDefaultUpdatePackageName(packageName, updateSpec),
 ): string {
@@ -332,9 +267,9 @@ export function getSelfUpdateUnavailableInstruction(
 	if (method === "homebrew") {
 		return `Update with: brew upgrade ${APP_NAME}`;
 	}
-	const command = getSelfUpdateCommandForMethod(method, packageName, updateSpec, npmCommand, updatePackageName);
+	const command = getSelfUpdateCommandForMethod(method, packageName, updateSpec, updatePackageName);
 	if (command) {
-		if (isManagedByGlobalPackageManager(method, packageName, npmCommand) && !isSelfUpdatePathWritable()) {
+		if (isManagedByGlobalPackageManager(method) && !isSelfUpdatePathWritable()) {
 			return `This installation is managed by a global ${method} install, but the install path is not writable. Update it yourself with: ${command.display}`;
 		}
 		return `This installation is not managed by a global ${method} install. Update it with the package manager, wrapper, or source checkout that provides it.`;

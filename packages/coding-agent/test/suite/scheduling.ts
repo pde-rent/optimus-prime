@@ -1,7 +1,27 @@
+import { expect } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createHarness, type Harness } from "./harness.js";
+
+/**
+ * Captures a pending promise's rejection now and defers the assertion to the returned promise.
+ *
+ * `expect(promise).rejects.…` drains Bun's event loop synchronously, so building one while the
+ * promise can only settle through work the test body has not run yet deadlocks the whole file.
+ * Attaching the handler here also keeps the rejection from being reported as unhandled.
+ */
+export function expectRejection(promise: Promise<unknown>, message: string): Promise<void> {
+	return promise.then(
+		(value) => {
+			throw new Error(`Expected a rejection but the promise resolved with ${String(value)}`);
+		},
+		(error: unknown) => {
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain(message);
+		},
+	);
+}
 
 /** A promise with its resolve/reject functions exposed. */
 export interface Deferred<T = void> {

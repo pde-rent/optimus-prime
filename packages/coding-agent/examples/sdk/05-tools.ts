@@ -14,23 +14,23 @@ import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-ag
 
 // Default tool surface
 await createAgentSession({
-	tools: ["ipython"],
+	tools: ["repl"],
 	sessionManager: SessionManager.inMemory(),
 });
-console.log("IPython session created");
+console.log("REPL session created");
 
 // Custom tool selection
 await createAgentSession({
-	tools: ["ipython"],
+	tools: ["repl"],
 	sessionManager: SessionManager.inMemory(),
 });
-console.log("Explicit IPython session created");
+console.log("Explicit REPL session created");
 
 // With custom cwd
 const customCwd = "/path/to/project";
 await createAgentSession({
 	cwd: customCwd,
-	tools: ["ipython"],
+	tools: ["repl"],
 	sessionManager: SessionManager.inMemory(customCwd),
 });
 console.log("Custom cwd session created");
@@ -38,7 +38,7 @@ console.log("Custom cwd session created");
 // Or pick specific tools for custom cwd
 await createAgentSession({
 	cwd: customCwd,
-	tools: ["ipython"],
+	tools: ["repl"],
 	sessionManager: SessionManager.inMemory(customCwd),
 });
 console.log("Specific tools with custom cwd session created");

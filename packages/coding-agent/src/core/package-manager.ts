@@ -24,12 +24,11 @@ function getEnv(): NodeJS.ProcessEnv {
 
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
-import { globSync } from "glob";
 import ignore from "ignore";
-import { minimatch } from "minimatch";
-import { CONFIG_DIR_NAME, getBundledSkillsDir, type InstallMethod } from "../config.js";
+import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
 import { shouldUseWindowsShell } from "../utils/child-process.js";
 import { type GitSource, parseGitUrl } from "../utils/git.js";
+import { matchGlob } from "../utils/glob-match.js";
 import { canonicalizePath, isLocalPath } from "../utils/paths.js";
 import { ensureDir } from "../utils/shared.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
@@ -42,12 +41,13 @@ const GIT_UPDATE_CONCURRENCY = 4;
 
 /**
  * Package managers we know how to drive for extension/skill package installs.
- * Reuses the `InstallMethod` vocabulary from config.ts. "unknown" covers a
- * configured `npmCommand` wrapper whose underlying manager we cannot identify
- * (e.g. `["mise", "exec", "node@20", "--", "some-wrapper"]`); it sticks to the
- * npm-compatible surface and avoids manager-specific flags.
+ * Independent of config.ts's InstallMethod: that describes how the agent itself
+ * was installed (always Bun), this describes what a user's `npmCommand` drives.
+ * "unknown" covers a configured wrapper whose underlying manager we cannot
+ * identify (e.g. `["mise", "exec", "node@20", "--", "some-wrapper"]`); it sticks
+ * to the npm-compatible surface and avoids manager-specific flags.
  */
-type PackageManagerKind = Extract<InstallMethod, "bun" | "npm" | "pnpm" | "yarn"> | "unknown";
+type PackageManagerKind = "bun" | "npm" | "pnpm" | "yarn" | "unknown";
 
 const DEFAULT_PACKAGE_MANAGER: PackageManagerKind = "bun";
 
@@ -777,17 +777,17 @@ function matchesAnyPattern(filePath: string, patterns: string[], baseDir: string
 	return patterns.some((pattern) => {
 		const normalizedPattern = toPosixPath(pattern);
 		if (
-			minimatch(rel, normalizedPattern) ||
-			minimatch(name, normalizedPattern) ||
-			minimatch(filePathPosix, normalizedPattern)
+			matchGlob(rel, normalizedPattern) ||
+			matchGlob(name, normalizedPattern) ||
+			matchGlob(filePathPosix, normalizedPattern)
 		) {
 			return true;
 		}
 		if (!isSkillFile) return false;
 		return (
-			minimatch(parentRel!, normalizedPattern) ||
-			minimatch(parentName!, normalizedPattern) ||
-			minimatch(parentDirPosix!, normalizedPattern)
+			matchGlob(parentRel!, normalizedPattern) ||
+			matchGlob(parentName!, normalizedPattern) ||
+			matchGlob(parentDirPosix!, normalizedPattern)
 		);
 	});
 }
@@ -2206,12 +2206,11 @@ export class DefaultPackageManager implements PackageManager {
 				return [resolve(root, entry)];
 			}
 
-			return globSync(entry, {
-				cwd: root,
-				absolute: true,
-				dot: false,
-				nodir: false,
-			}).map((match) => resolve(match));
+			// `onlyFiles: false` keeps directories in the result, which the old `nodir: false`
+			// also did; the caller expands directories itself.
+			return Array.from(
+				new Bun.Glob(entry).scanSync({ cwd: root, absolute: true, dot: false, onlyFiles: false }),
+			).map((match) => resolve(match));
 		});
 		return this.collectFilesFromPaths(resolved, resourceType);
 	}

@@ -26,7 +26,7 @@ import {
 } from "../../src/core/refinement/index.js";
 import { parseSessionSlashCommand } from "../../src/core/slash-commands.js";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
-import { createDeferred, createWaitingHarness, gatedHook, withStreaming } from "./scheduling.js";
+import { createDeferred, createWaitingHarness, expectRejection, gatedHook, withStreaming } from "./scheduling.js";
 
 type AutoRefineReason = "turn_interval" | "compact";
 
@@ -1442,7 +1442,7 @@ describe("AgentSession queue characterization", () => {
 			{ customType: "hidden-trigger", content: "hidden queued prompt", display: false },
 			{ triggerTurn: true },
 		);
-		const hiddenRejection = expect(hidden).rejects.toThrow("Prompt aborted before delivery.");
+		const hiddenRejection = expectRejection(hidden, "Prompt aborted before delivery.");
 
 		await vi.waitFor(() => expect(harness.session.getSessionActionRecoverySnapshot().actions).toHaveLength(2));
 		expect(harness.session.getFollowUpMessages()).toEqual(["visible queued prompt"]);
@@ -1911,8 +1911,8 @@ describe("AgentSession queue characterization", () => {
 			streamingBehavior: "followUp",
 			resumeIfIdle: true,
 		});
-		const firstCompletionRejection = expect(firstCompletion).rejects.toThrow("cleared before delivery");
-		const completionRejection = expect(completion).rejects.toThrow("cleared before delivery");
+		const firstCompletionRejection = expectRejection(firstCompletion, "cleared before delivery");
+		const completionRejection = expectRejection(completion, "cleared before delivery");
 		withStreaming(harness, false);
 		await waitForPreparation;
 		gatePreparation = false;
@@ -1950,7 +1950,7 @@ describe("AgentSession queue characterization", () => {
 			streamingBehavior: "followUp",
 			resumeIfIdle: true,
 		});
-		const terminalRejection = expect(terminalCompletion).rejects.toThrow("No API key");
+		const terminalRejection = expectRejection(terminalCompletion, "No API key");
 		await vi.waitFor(() => expect(authHarness.session.getFollowUpMessages()).toEqual(["cannot start"]));
 		withStreaming(authHarness, false);
 		await authHarness.session.waitForSessionInputIdle();
@@ -2126,9 +2126,13 @@ describe("AgentSession queue characterization", () => {
 		const delivery = harness.session.waitForAgentMessagePromptDelivery(id);
 		const completion = harness.session.promptAndWait("/autonomous status", { agentMessageId: id });
 
+		// Both legs reject off the same failed append; attach both handlers before releasing so
+		// neither rejection is momentarily unhandled while the other is being awaited.
+		const deliveryFailure = expectRejection(delivery, "durable invocation append failed");
+		const completionFailure = expectRejection(completion, "durable invocation append failed");
 		pause.release();
-		await expect(delivery).rejects.toThrow("durable invocation append failed");
-		await expect(completion).rejects.toThrow("durable invocation append failed");
+		await deliveryFailure;
+		await completionFailure;
 
 		// The failed append must roll back fully: no live-only command message and
 		// no unsaved leaf, so later durable entries persist cleanly.
@@ -2970,7 +2974,8 @@ describe("AgentSession scheduler scenarios", () => {
 		await harness.session.queueAgentMessagePrompt(agentPrompt, "steer");
 
 		// Phase 3: keyed duplicates reject both agent-message outcome legs.
-		const dupDelivery = expect(harness.session.waitForAgentMessagePromptDelivery("agentmsg_s2_dup")).rejects.toThrow(
+		const dupDelivery = expectRejection(
+			harness.session.waitForAgentMessagePromptDelivery("agentmsg_s2_dup"),
 			"equivalent follow-up is already pending",
 		);
 		await expect(
@@ -3247,9 +3252,10 @@ describe("AgentSession scheduler scenarios", () => {
 		const failedId = "agentmsg_failed_command";
 		const failedDelivery = harness.session.waitForAgentMessagePromptDelivery(failedId);
 		const failedCompletion = harness.session.promptAndWait("/refine --local", { agentMessageId: failedId });
+		const failedCompletionFailure = expectRejection(failedCompletion, "refine execution failed");
 		failedPause.release();
 		await expect(failedDelivery).resolves.toBeUndefined();
-		await expect(failedCompletion).rejects.toThrow("refine execution failed");
+		await failedCompletionFailure;
 	});
 
 	it("S6: auto-refine reviews after real turns, defers while busy, and drops reviews on navigation", async () => {

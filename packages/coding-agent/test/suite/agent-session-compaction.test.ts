@@ -124,17 +124,20 @@ describe("AgentSession compaction characterization", () => {
 		expect(result.summary).toContain("model-generated summary");
 		expect(result.tokensBefore).toBeGreaterThan(0);
 		expect(result.firstKeptEntryId).toBeTruthy();
+		// NOTE: bun:test's toMatchObject writes the asymmetric matcher back onto the *received*
+		// object. Both `entry` and `messages[0]` are live session state that is later persisted and
+		// structuredClone()d by the extension context hook, so match their summaries explicitly
+		// instead of handing an ExpectStringContaining to toMatchObject.
 		expect(entry).toMatchObject({
 			type: "compaction",
-			summary: expect.stringContaining("model-generated summary"),
 			firstKeptEntryId: result.firstKeptEntryId,
 			tokensBefore: result.tokensBefore,
 			fromHook: false,
 		});
-		expect(harness.session.messages[0]).toMatchObject({
-			role: "compactionSummary",
-			summary: expect.stringContaining("model-generated summary"),
-		});
+		expect(String((entry as { summary?: unknown } | undefined)?.summary)).toContain("model-generated summary");
+		const summaryMessage = harness.session.messages[0] as { role: string; summary?: unknown } | undefined;
+		expect(summaryMessage?.role).toBe("compactionSummary");
+		expect(String(summaryMessage?.summary)).toContain("model-generated summary");
 		expect(harness.eventsOfType("compaction_start")).toEqual([expect.objectContaining({ reason: "manual" })]);
 		expect(harness.eventsOfType("compaction_end")).toEqual([
 			expect.objectContaining({
@@ -1102,8 +1105,10 @@ describe("AgentSession compaction characterization", () => {
 		expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(0);
 	});
 
+	// Real timers: the autonomous gate spawns a real subprocess, so this flow only completes when
+	// real time passes. A faked clock cannot drive it — vi.waitFor would burn its whole (faked)
+	// deadline in zero real milliseconds while the gate process is still starting up.
 	it("waits for threshold-compaction autonomous continuations before finishing prompt", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -1122,8 +1127,9 @@ describe("AgentSession compaction characterization", () => {
 		harness.setResponses([highUsageDone, fauxAssistantMessage("retry")]);
 		const promptPromise = harness.session.prompt("make the change");
 
-		await vi.waitFor(() => expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(1));
-		await vi.advanceTimersByTimeAsync(100);
+		await vi.waitFor(() => expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(1), {
+			timeout: 5000,
+		});
 		await promptPromise;
 
 		expect(harness.session.getAutonomousStatus()).toMatchObject({
@@ -1242,12 +1248,16 @@ describe("AgentSession compaction characterization", () => {
 			internals._persistCompactionOutcome("requested", "failed", "Requested compaction failed"),
 		).not.toThrow();
 		// The live outcome message discloses that it was not saved.
-		expect(harness.session.messages.at(-1)).toMatchObject({
-			role: "custom",
-			customType: "compaction_outcome",
-			content: expect.stringContaining("could not be saved to session history"),
-			details: { reason: "requested", outcome: "failed" },
-		});
+		// NOTE: bun:test's toMatchObject writes the asymmetric matcher back onto the *received*
+		// object, so `expect(live).toMatchObject({ content: expect.stringContaining(...) })` would
+		// replace this live message's content with the matcher and corrupt the assertions below.
+		// Assert content explicitly instead.
+		type OutcomeMessage = { role: string; customType?: string; content?: unknown; details?: unknown };
+		const liveOutcome = harness.session.messages.at(-1) as OutcomeMessage | undefined;
+		expect(liveOutcome?.role).toBe("custom");
+		expect(liveOutcome?.customType).toBe("compaction_outcome");
+		expect(String(liveOutcome?.content)).toContain("could not be saved to session history");
+		expect(liveOutcome?.details).toMatchObject({ reason: "requested", outcome: "failed" });
 		// In-memory state is fully rolled back: no outcome entry, same leaf and entries.
 		expect(harness.sessionManager.getLeafId()).toBe(persistedLeafId);
 		expect(harness.sessionManager.getEntries()).toEqual(persistedEntries);
@@ -1264,11 +1274,10 @@ describe("AgentSession compaction characterization", () => {
 		);
 		// The unpersisted disclosure survives context rebuilds (e.g. thinking toggle).
 		const rebuilt = harness.session.buildSessionContext();
-		expect(rebuilt.messages.at(-1)).toMatchObject({
-			role: "custom",
-			customType: "compaction_outcome",
-			content: expect.stringContaining("could not be saved to session history"),
-		});
+		const rebuiltOutcome = rebuilt.messages.at(-1) as OutcomeMessage | undefined;
+		expect(rebuiltOutcome?.role).toBe("custom");
+		expect(rebuiltOutcome?.customType).toBe("compaction_outcome");
+		expect(String(rebuiltOutcome?.content)).toContain("could not be saved to session history");
 
 		// Cross a millisecond boundary so the later turn's timestamp is strictly newer.
 		await new Promise((resolve) => setTimeout(resolve, 5));

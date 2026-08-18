@@ -172,8 +172,8 @@ import {
 	createSessionSlashCommandResultMessage,
 	HEARTBEAT_PROMPT_CUSTOM_TYPE,
 	HEARTBEAT_PROMPT_PREVIEW_LABEL,
-	IPYTHON_STATE_RESTORED_CUSTOM_TYPE,
 	isSessionSlashCommandMessage,
+	REPL_STATE_RESTORED_CUSTOM_TYPE,
 } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { throwIfPromptAdmissionCancelled } from "./prompt-admission.js";
@@ -273,7 +273,7 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
-import type { HostRequestHandlers, KernelSentAgentMessage } from "./tools/kernel-types.js";
+import type { HostRequestHandlers, KernelSentAgentMessage } from "./tools/repl-types.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addAssistantUsage, emptyUsage } from "./usage.js";
 import { SERPER_CREDENTIAL_ID, SERPER_ENV_VAR, WEBSEARCH_SKILL_NAME } from "./websearch-credential.js";
@@ -315,7 +315,7 @@ export type CompactionReason = "manual" | "threshold" | "overflow" | "requested"
 export type AgentSessionEvent =
 	| AgentEvent
 	| {
-			type: "ipython_sent_agent_message";
+			type: "repl_sent_agent_message";
 			toolCallId: string;
 			message: KernelSentAgentMessage;
 	  }
@@ -407,7 +407,7 @@ export interface AgentSessionConfig {
 	allowedToolNames?: string[];
 	/**
 	 * Whether the built-in long-running goals feature is available: the bundled
-	 * goal skill in the IPython kernel, its goal.* host handlers, and /goal.
+	 * goal skill in the REPL kernel, its goal.* host handlers, and /goal.
 	 * Default: true.
 	 */
 	includeGoals?: boolean;
@@ -419,7 +419,7 @@ export interface AgentSessionConfig {
 	 */
 	includeCompactSkill?: boolean;
 	/**
-	 * Optional host-side controller for the bundled rlm-heartbeat Python skill.
+	 * Optional host-side controller for the bundled rlm-heartbeat skill.
 	 * When omitted, rlm_heartbeat.* host requests are unavailable.
 	 */
 	rlmHeartbeatController?: AgentRlmHeartbeatController;
@@ -444,7 +444,7 @@ export interface AgentSessionConfig {
 	rlmParentAgent?: string;
 	subagentRuntimeHost?: SubagentRuntimeHost;
 	autonomous?: AgentAutonomousConfig;
-	prewarmIpythonKernel?: boolean;
+	prewarmReplKernel?: boolean;
 	autoRefineReviewer?: AutoRefineReviewer;
 	/**
 	 * When true, auto-refine runs synchronously between turns at the
@@ -738,9 +738,9 @@ function visibleSessionActionProjection(actions: readonly QueuedSessionAction[])
 	);
 }
 
-const IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_ENTRY = "ipython_sent_agent_message";
+const REPL_SENT_AGENT_MESSAGE_CUSTOM_ENTRY = "repl_sent_agent_message";
 
-interface PersistedIpythonSentAgentMessage {
+interface PersistedReplSentAgentMessage {
 	toolCallId: string;
 	message: KernelSentAgentMessage;
 }
@@ -749,7 +749,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parsePersistedIpythonSentAgentMessage(value: unknown): PersistedIpythonSentAgentMessage | undefined {
+function parsePersistedReplSentAgentMessage(value: unknown): PersistedReplSentAgentMessage | undefined {
 	if (!isObjectRecord(value) || typeof value.toolCallId !== "string" || !isObjectRecord(value.message)) {
 		return undefined;
 	}
@@ -784,7 +784,7 @@ function appendSentAgentMessageToToolResult(
 	toolCallId: string,
 	sentMessage: KernelSentAgentMessage,
 ): boolean {
-	if (message.role !== "toolResult" || message.toolName !== "ipython" || message.toolCallId !== toolCallId) {
+	if (message.role !== "toolResult" || message.toolName !== "repl" || message.toolCallId !== toolCallId) {
 		return false;
 	}
 	const details = isObjectRecord(message.details) ? message.details : {};
@@ -1105,7 +1105,7 @@ export class AgentSession {
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _retryAuthFailureSources: AuthSourceToken[] = [];
 	private _agentMessageOutcomes = new Map<string, AgentMessageOutcome>();
-	private _lateIpythonSentAgentMessages = new Map<string, KernelSentAgentMessage[]>();
+	private _lateReplSentAgentMessages = new Map<string, KernelSentAgentMessage[]>();
 	/** Outcome disclosures whose session-file append failed; retained for context rebuilds. */
 	private readonly _unpersistedCompactionOutcomes: CustomMessage[] = [];
 
@@ -1149,12 +1149,12 @@ export class AgentSession {
 	// re-populate the retained map after it's been cleared.
 	private _disposing = false;
 	private _disposeAsyncPromise?: Promise<void>;
-	private _ipythonKernelProvisioner?: BunReplProvisioner;
+	private _replKernelProvisioner?: BunReplProvisioner;
 	/** Artifact dir backing the current provisioner's kernel snapshot, if any. */
-	private _ipythonKernelSnapshotDir?: string;
+	private _replKernelSnapshotDir?: string;
 	/** True once the runtime has been built once; later builds are in-process rebuilds (/reload). */
-	private _ipythonRuntimeBuilt = false;
-	private readonly _prewarmIpythonKernel: boolean;
+	private _replRuntimeBuilt = false;
+	private readonly _prewarmReplKernel: boolean;
 	private _rlmDepth: number;
 	/**
 	 * Per-session boot gate. Depth-weighted so a subtree cannot multiply out: a
@@ -1264,7 +1264,7 @@ export class AgentSession {
 		const resolvedRlmMaxDepth = this._resolveRlmMaxDepth();
 		this._rlmMaxDepth = resolvedRlmMaxDepth.maxDepth;
 		this._rlmMaxDepthSource = resolvedRlmMaxDepth.source;
-		this._prewarmIpythonKernel = (config.prewarmIpythonKernel ?? false) && this._rlmDepth === 0;
+		this._prewarmReplKernel = (config.prewarmReplKernel ?? false) && this._rlmDepth === 0;
 		this._autoRefineReviewer = config.autoRefineReviewer;
 		this._serializedRefine = config.serializedRefine ?? false;
 		this._rlmSessionDir = config.rlmSessionDir;
@@ -1292,7 +1292,7 @@ export class AgentSession {
 			// admission is unavailable mid-construction, so ride the next turn.
 			this._pendingNextTurnMessages.push(createGoalContextMessage(this._goalState, "continuation"));
 		}
-		this._restoreLateIpythonSentAgentMessages();
+		this._restoreLateReplSentAgentMessages();
 		if (this._goalState.status === "active") {
 			this._goalAccountingStartedAt = Date.now();
 		}
@@ -1443,25 +1443,25 @@ export class AgentSession {
 		this._emit({ type: "session_action_update", actions });
 	}
 
-	private _restoreLateIpythonSentAgentMessages(): void {
-		this._lateIpythonSentAgentMessages.clear();
+	private _restoreLateReplSentAgentMessages(): void {
+		this._lateReplSentAgentMessages.clear();
 		for (const entry of this.sessionManager.getBranch()) {
-			if (entry.type !== "custom" || entry.customType !== IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_ENTRY) {
+			if (entry.type !== "custom" || entry.customType !== REPL_SENT_AGENT_MESSAGE_CUSTOM_ENTRY) {
 				continue;
 			}
-			const persisted = parsePersistedIpythonSentAgentMessage(entry.data);
+			const persisted = parsePersistedReplSentAgentMessage(entry.data);
 			if (persisted) {
-				this._rememberLateIpythonSentAgentMessage(persisted.toolCallId, persisted.message);
+				this._rememberLateReplSentAgentMessage(persisted.toolCallId, persisted.message);
 			}
 		}
 	}
 
-	private _rememberLateIpythonSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): boolean {
-		const messages = this._lateIpythonSentAgentMessages.get(toolCallId) ?? [];
+	private _rememberLateReplSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): boolean {
+		const messages = this._lateReplSentAgentMessages.get(toolCallId) ?? [];
 		const isNew = !messages.some((entry) => entry.id === message.id);
 		if (isNew) {
 			messages.push(message);
-			this._lateIpythonSentAgentMessages.set(toolCallId, messages);
+			this._lateReplSentAgentMessages.set(toolCallId, messages);
 		}
 		for (let index = this.agent.state.messages.length - 1; index >= 0; index -= 1) {
 			if (appendSentAgentMessageToToolResult(this.agent.state.messages[index], toolCallId, message)) {
@@ -1471,11 +1471,11 @@ export class AgentSession {
 		return isNew;
 	}
 
-	private _applyLateIpythonSentAgentMessages(message: AgentMessage): void {
-		if (message.role !== "toolResult" || message.toolName !== "ipython") {
+	private _applyLateReplSentAgentMessages(message: AgentMessage): void {
+		if (message.role !== "toolResult" || message.toolName !== "repl") {
 			return;
 		}
-		for (const sentMessage of this._lateIpythonSentAgentMessages.get(message.toolCallId) ?? []) {
+		for (const sentMessage of this._lateReplSentAgentMessages.get(message.toolCallId) ?? []) {
 			appendSentAgentMessageToToolResult(message, message.toolCallId, sentMessage);
 		}
 	}
@@ -1484,13 +1484,13 @@ export class AgentSession {
 	 * Persist and surface an agent message that a cell sent without awaiting it, so it
 	 * still lands on that cell's tool result instead of being dropped.
 	 */
-	private _recordLateIpythonSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): void {
+	private _recordLateReplSentAgentMessage(toolCallId: string, message: KernelSentAgentMessage): void {
 		const record = () => {
-			if (this._disposed || !this._rememberLateIpythonSentAgentMessage(toolCallId, message)) {
+			if (this._disposed || !this._rememberLateReplSentAgentMessage(toolCallId, message)) {
 				return;
 			}
-			this.sessionManager.appendCustomEntry(IPYTHON_SENT_AGENT_MESSAGE_CUSTOM_ENTRY, { toolCallId, message });
-			this._emit({ type: "ipython_sent_agent_message", toolCallId, message });
+			this.sessionManager.appendCustomEntry(REPL_SENT_AGENT_MESSAGE_CUSTOM_ENTRY, { toolCallId, message });
+			this._emit({ type: "repl_sent_agent_message", toolCallId, message });
 		};
 		this._agentEventQueue = this._agentEventQueue.then(record, record);
 		this._agentEventQueue.catch(() => {});
@@ -1974,27 +1974,27 @@ export class AgentSession {
 	}
 
 	/**
-	 * Goals are pursued through the IPython goal skill, so the only tool the
-	 * model needs is ipython. Force-activate it (including into a live
+	 * Goals are pursued through the REPL goal skill, so the only tool the
+	 * model needs is repl. Force-activate it (including into a live
 	 * continuation context) so the model can always reach `goal.complete()`.
 	 */
 	private _ensureGoalRuntimeActive(context?: AgentContext): void {
 		if (!this._includeGoals) {
 			throw new Error("Goals are disabled. Enable goals before using /goal.");
 		}
-		const ipythonTool = this._toolRegistry.get("ipython");
-		if (!ipythonTool) {
-			throw new Error("Goals require the ipython tool, which is not available in this session.");
+		const replTool = this._toolRegistry.get("repl");
+		if (!replTool) {
+			throw new Error("Goals require the repl tool, which is not available in this session.");
 		}
 		const activeToolNames = new Set(this.getActiveToolNames());
-		if (!activeToolNames.has("ipython")) {
-			activeToolNames.add("ipython");
+		if (!activeToolNames.has("repl")) {
+			activeToolNames.add("repl");
 			this.setActiveToolsByName([...activeToolNames]);
 		}
 		if (context) {
 			const contextTools = [...(context.tools ?? [])];
-			if (!contextTools.some((tool) => tool.name === "ipython")) {
-				contextTools.push(ipythonTool);
+			if (!contextTools.some((tool) => tool.name === "repl")) {
+				contextTools.push(replTool);
 				context.tools = contextTools;
 			}
 		}
@@ -2060,7 +2060,7 @@ export class AgentSession {
 			return false;
 		}
 		// Usage is attributed at the assistant message's message_end, which fires
-		// before that turn's ipython cell runs. goal.complete() only arrives later
+		// before that turn's repl cell runs. goal.complete() only arrives later
 		// over the kernel host bridge, so the completing turn is always accounted
 		// while the goal is still active. Only count turns spent pursuing the goal;
 		// post-completion turns (e.g. a closing summary) must not be attributed.
@@ -2822,7 +2822,7 @@ export class AgentSession {
 	}
 
 	/**
-	 * Handle a goal.* request from the IPython kernel host bridge (the bundled
+	 * Handle a goal.* request from the REPL kernel host bridge (the bundled
 	 * goal skill). All goal state stays host-side; the kernel only sees the
 	 * serialized snake_case response.
 	 */
@@ -3176,7 +3176,7 @@ export class AgentSession {
 		}
 		const goal = this._goalWithAccountedWallClock();
 		// A turn can cross the budget and complete the goal at once: accounting
-		// runs at message_end, before the completing ipython cell executes, so a
+		// runs at message_end, before the completing repl cell executes, so a
 		// budget-limit context may already be steered. It is stale now — drop it.
 		this._clearQueuedGoalContexts();
 		this._setGoalState({
@@ -3451,7 +3451,7 @@ export class AgentSession {
 	private async _processAgentEvent(event: AgentEvent): Promise<void> {
 		let clearedDispatchEnded = false;
 		if ((event.type === "message_start" || event.type === "message_end") && event.message.role === "toolResult") {
-			this._applyLateIpythonSentAgentMessages(event.message);
+			this._applyLateReplSentAgentMessages(event.message);
 		}
 		if (event.type === "message_start" || event.type === "message_end") {
 			const cleared = this._capturingCancelledAction(event.message);
@@ -3780,7 +3780,7 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	/**
-	 * Async teardown for graceful quit/switch: await the IPython kernel's dispose
+	 * Async teardown for graceful quit/switch: await the REPL kernel's dispose
 	 * (which flushes a final namespace snapshot) before the synchronous dispose, so
 	 * the latest state reaches disk instead of racing process exit.
 	 */
@@ -3955,7 +3955,7 @@ export class AgentSession {
 		this._rlmChildCleanupFailures.clear();
 		this._deletedRlmChildIds.clear();
 		try {
-			await this._ipythonKernelProvisioner?.dispose();
+			await this._replKernelProvisioner?.dispose();
 		} catch {
 			// a failed kernel startup already cleaned up after itself
 		}
@@ -4129,7 +4129,7 @@ export class AgentSession {
 	buildSessionContext(): SessionContext {
 		const context = this.sessionManager.buildSessionContext();
 		for (const message of context.messages) {
-			this._applyLateIpythonSentAgentMessages(message);
+			this._applyLateReplSentAgentMessages(message);
 		}
 		this._mergeUnpersistedCompactionOutcomes(context.messages);
 		return context;
@@ -7069,7 +7069,7 @@ export class AgentSession {
 	}
 
 	private async _notifyKernelStateAfterCompaction(): Promise<void> {
-		const provisioner = this._ipythonKernelProvisioner;
+		const provisioner = this._replKernelProvisioner;
 		if (!provisioner?.hasRunningKernel) return;
 		const abort = new AbortController();
 		const timer = setTimeout(() => abort.abort(), KERNEL_STATE_LISTING_TIMEOUT_MS);
@@ -7088,13 +7088,13 @@ export class AgentSession {
 					? ` These names are still defined: ${names.join(", ")}.`
 					: " You have not defined any names yet.";
 		const content = [
-			"<ipython_state>",
+			"<repl_state>",
 			`Your REPL persisted through compaction; all variables, imports, and helpers you defined remain available.${detail}`,
-			"</ipython_state>",
+			"</repl_state>",
 		].join("\n");
 		const message = {
 			role: "custom" as const,
-			customType: "ipython_state",
+			customType: "repl_state",
 			content,
 			display: false,
 			timestamp: Date.now(),
@@ -7117,9 +7117,9 @@ export class AgentSession {
 	 * variables are actually available instead of assuming the REPL is the one it left.
 	 * Delivered as context before the next turn.
 	 */
-	private _onIpythonStateRestored(restore: { restoredNames: string[]; failed: string[] }): void {
+	private _onReplStateRestored(restore: { restoredNames: string[]; failed: string[] }): void {
 		const { restoredNames, failed } = restore;
-		const lines = ["<ipython_state_restored>"];
+		const lines = ["<repl_state_restored>"];
 		if (restoredNames.length > 0) {
 			lines.push(
 				`Your REPL state was revived from your previous session. These names are available again: ${restoredNames.join(", ")}.`,
@@ -7139,10 +7139,10 @@ export class AgentSession {
 		} else if (restoredNames.length > 0) {
 			lines.push("Functions and closures are not revived — redefine any you need.");
 		}
-		lines.push("</ipython_state_restored>");
+		lines.push("</repl_state_restored>");
 		void this.sendCustomMessage(
 			{
-				customType: IPYTHON_STATE_RESTORED_CUSTOM_TYPE,
+				customType: REPL_STATE_RESTORED_CUSTOM_TYPE,
 				content: lines.join("\n"),
 				display: true,
 				details: { restored: restoredNames.length > 0, failed: failed.length },
@@ -7321,7 +7321,7 @@ export class AgentSession {
 		const newEntries = this.sessionManager.getEntries();
 		this.agent.state.messages = this.sessionManager.buildSessionContext().messages;
 		this._mergeUnpersistedCompactionOutcomes(this.agent.state.messages);
-		this._restoreLateIpythonSentAgentMessages();
+		this._restoreLateReplSentAgentMessages();
 
 		const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
 			| CompactionEntry
@@ -8731,27 +8731,26 @@ export class AgentSession {
 			// kernel so the session never holds two live kernels. Gate the new kernel's
 			// startup on the old one's dispose (which flushes a final snapshot), so a
 			// reload can't restore from a snapshot the old kernel is still writing.
-			const previousDispose = this._ipythonKernelProvisioner?.dispose();
-			this._ipythonKernelSnapshotDir = this.sessionManager.getSessionArtifactDir();
+			const previousDispose = this._replKernelProvisioner?.dispose();
+			this._replKernelSnapshotDir = this.sessionManager.getSessionArtifactDir();
 			// Only surface the "revived from your previous session" notice on the first
 			// build (a genuine resume). A later rebuild (/reload) restores state silently
 			// for continuity — the conversation is unchanged, so there's nothing to flag.
-			const notifyRestore = !this._ipythonRuntimeBuilt;
-			this._ipythonKernelProvisioner = new BunReplProvisioner({
+			const notifyRestore = !this._replRuntimeBuilt;
+			this._replKernelProvisioner = new BunReplProvisioner({
 				cwd: this._cwd,
 				env: this._rlmKernelEnv(),
 				hostHandlers: this._createKernelHostHandlers(),
-				snapshotDir: this._ipythonKernelSnapshotDir,
+				snapshotDir: this._replKernelSnapshotDir,
 				shellPath: this.settingsManager.getShellPath(),
 				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				readyGate: previousDispose,
-				onRestore: notifyRestore ? (restored) => this._onIpythonStateRestored(restored) : undefined,
-				onLateSentAgentMessage: (toolCallId, message) =>
-					this._recordLateIpythonSentAgentMessage(toolCallId, message),
+				onRestore: notifyRestore ? (restored) => this._onReplStateRestored(restored) : undefined,
+				onLateSentAgentMessage: (toolCallId, message) => this._recordLateReplSentAgentMessage(toolCallId, message),
 			});
 			configuredBaseToolDefinitions = createAllToolDefinitions(this._cwd, {
-				ipython: {
-					provisioner: this._ipythonKernelProvisioner,
+				repl: {
+					provisioner: this._replKernelProvisioner,
 					cwd: this._cwd,
 					env: this._rlmKernelEnv(),
 				},
@@ -8788,11 +8787,11 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride ? Object.keys(this._baseToolsOverride) : ["ipython"];
+		const defaultActiveToolNames = this._baseToolsOverride ? Object.keys(this._baseToolsOverride) : ["repl"];
 		const baseActiveToolNames = [...(options.activeToolNames ?? defaultActiveToolNames)];
 		if (this._goalState.status === "active" && this._includeGoals) {
-			// An active goal needs ipython so the model can reach the goal skill.
-			baseActiveToolNames.push("ipython");
+			// An active goal needs repl so the model can reach the goal skill.
+			baseActiveToolNames.push("repl");
 		}
 		this._refreshToolRegistry({
 			activeToolNames: [...new Set(baseActiveToolNames)],
@@ -8804,13 +8803,13 @@ export class AgentSession {
 		// came back before the first turn, rather than a turn later when the kernel
 		// would otherwise lazily start on first use.
 		const hasSnapshot =
-			!!this._ipythonKernelSnapshotDir && existsSync(join(this._ipythonKernelSnapshotDir, "manifest.json"));
-		if ((this._prewarmIpythonKernel || hasSnapshot) && this.getActiveToolNames().includes("ipython")) {
-			this._ipythonKernelProvisioner?.prewarm();
+			!!this._replKernelSnapshotDir && existsSync(join(this._replKernelSnapshotDir, "manifest.json"));
+		if ((this._prewarmReplKernel || hasSnapshot) && this.getActiveToolNames().includes("repl")) {
+			this._replKernelProvisioner?.prewarm();
 		}
 
 		// Subsequent builds are in-process rebuilds (/reload), not a fresh resume.
-		this._ipythonRuntimeBuilt = true;
+		this._replRuntimeBuilt = true;
 	}
 
 	/**
@@ -10985,7 +10984,7 @@ export class AgentSession {
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			this._mergeUnpersistedCompactionOutcomes(this.agent.state.messages);
-			this._restoreLateIpythonSentAgentMessages();
+			this._restoreLateReplSentAgentMessages();
 			this._reloadGoalStateFromBranch();
 			this._reloadRlmMaxDepthFromBranch();
 			this._invalidateQueuedPromptPreparation();

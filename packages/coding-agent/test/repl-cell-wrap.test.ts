@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { IPythonCellComponent } from "../src/modes/interactive/components/ipython-cell.js";
+import { ReplCellComponent } from "../src/modes/interactive/components/repl-cell.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
-type CellState = ConstructorParameters<typeof IPythonCellComponent>[0];
+type CellState = ConstructorParameters<typeof ReplCellComponent>[0];
 
 function foregroundLeftOpen(line: string): boolean {
 	let fg = false;
@@ -47,14 +47,14 @@ const WRAPPING_STATE: CellState = {
 	expanded: true,
 };
 
-describe("IPythonCellComponent wrapping", () => {
+describe("ReplCellComponent wrapping", () => {
 	beforeAll(() => {
 		initTheme("dark");
 	});
 
 	it("never leaves a foreground color open at a wrapped line end", () => {
 		for (let width = 20; width <= 60; width++) {
-			const lines = new IPythonCellComponent(WRAPPING_STATE).render(width);
+			const lines = new ReplCellComponent(WRAPPING_STATE).render(width);
 			const leaks = lines.filter(foregroundLeftOpen);
 			expect(leaks, `width=${width} leaked foreground on ${leaks.length} line(s)`).toHaveLength(0);
 		}
@@ -62,7 +62,7 @@ describe("IPythonCellComponent wrapping", () => {
 
 	it("keeps every wrapped line within the available width", () => {
 		for (const width of [20, 30, 40, 50]) {
-			const lines = new IPythonCellComponent(WRAPPING_STATE).render(width);
+			const lines = new ReplCellComponent(WRAPPING_STATE).render(width);
 			expect(
 				lines.every((line) => visibleWidth(line) <= width),
 				`width=${width}`,
@@ -71,17 +71,17 @@ describe("IPythonCellComponent wrapping", () => {
 	});
 
 	it("renders the same after a resize as a fresh render at the target width", () => {
-		const resized = new IPythonCellComponent(WRAPPING_STATE);
+		const resized = new ReplCellComponent(WRAPPING_STATE);
 		resized.render(100);
 		resized.invalidate();
 		const afterResize = resized.render(34);
 
-		const fresh = new IPythonCellComponent(WRAPPING_STATE).render(34);
+		const fresh = new ReplCellComponent(WRAPPING_STATE).render(34);
 		expect(afterResize).toEqual(fresh);
 	});
 
 	it("leaves non-wrapping (wide) output untouched", () => {
-		const lines = new IPythonCellComponent(WRAPPING_STATE).render(100);
+		const lines = new ReplCellComponent(WRAPPING_STATE).render(100);
 		expect(lines.some(foregroundLeftOpen)).toBe(false);
 		expect(lines.every((line) => visibleWidth(line) <= 100)).toBe(true);
 	});

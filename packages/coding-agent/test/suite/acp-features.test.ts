@@ -84,13 +84,13 @@ async function connectAcp(harness: Harness, existing?: InProcessAgentConnection)
 }
 
 /**
- * Stand-in for the real IPython tool: the suite harness has no kernel, and this
+ * Stand-in for the real repl tool: the suite harness has no kernel, and this
  * suite is about ACP surfacing, not kernel behavior. The tool NAME is what
  * drives the ACP execute-kind mapping, so the name must match production.
  */
-const ipythonTool = {
-	name: "ipython",
-	description: "Execute a Python cell",
+const replTool = {
+	name: "repl",
+	description: "Execute a REPL cell",
 	parameters: {
 		type: "object" as const,
 		properties: { code: { type: "string" as const } },
@@ -144,24 +144,24 @@ function rematerialize(messages: AgentMessage[]): AgentMessage[] {
 }
 
 describe("ACP mode preserves prime-agent features", () => {
-	it("streams IPython execution as an execute tool call with its cell source", async () => {
-		const harness = await createHarness({ tools: [ipythonTool as never] });
+	it("streams REPL execution as an execute tool call with its cell source", async () => {
+		const harness = await createHarness({ tools: [replTool as never] });
 		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("ipython", { code: "x = 41 + 1\nprint(x)" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("repl", { code: "x = 41 + 1\nprint(x)" })], { stopReason: "toolUse" }),
 			fauxAssistantMessage("x is 42"),
 		]);
 		const fixture = await connectAcp(harness);
 
 		const result = await fixture.agent.request("session/prompt", {
 			sessionId: fixture.sessionId,
-			prompt: [{ type: "text", text: "compute 41+1 in python" }],
+			prompt: [{ type: "text", text: "compute 41+1 in the repl" }],
 		});
 		expect(result.stopReason).toBe("end_turn");
 
 		const toolCalls = fixture.updates.filter((u) => u.update?.sessionUpdate === "tool_call");
 		expect(toolCalls.length).toBeGreaterThan(0);
 		const cell = toolCalls.find((u) => u.update.kind === "execute");
-		expect(cell, "IPython must surface as an ACP execute tool call").toBeDefined();
+		expect(cell, "repl must surface as an ACP execute tool call").toBeDefined();
 		expect(cell.update.rawInput).toMatchObject({ code: "x = 41 + 1\nprint(x)" });
 
 		const done = fixture.updates.filter((u) => u.update?.sessionUpdate === "tool_call_update");

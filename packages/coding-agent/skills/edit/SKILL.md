@@ -1,22 +1,23 @@
 ---
 name: edit
-description: Replace an exact, unique string in an existing file with `await edit(path, old_str, new_str)` (also `edit.run(...)`). Use for targeted single-occurrence edits to files from the REPL instead of rewriting the whole file.
+description: Replace an exact, unique string in an existing file with `await edit(path, oldStr, newStr)` (also `edit.run(...)`). Use for targeted single-occurrence edits to files from the REPL instead of rewriting the whole file.
 ---
 
 # Edit
 
 Make a targeted edit to an existing file by replacing one exact, unique
-occurrence of a string. `old_str` must appear exactly once in the file.
+occurrence of a string. `oldStr` must appear exactly once in the file.
 
-Call directly from the kernel:
+Call directly from a REPL cell:
 
-    await edit(path="pkg/file.py", old_str=old, new_str=new)
+    await edit("pkg/file.ts", oldStr, newStr)
 
-Use exact old/new strings. If the text contains triple double quotes, use
-triple single-quoted variables (`old = '''...'''`) or build `old`/`new` from
-inspected file slices. Returns a short confirmation; raises if `old_str` is
-missing or matches more than once (widen the snippet to make it unique).
+The arguments are positional: `path` (relative to cwd, absolute, or
+`~`-prefixed), then the exact text to find, then its replacement. Build
+`oldStr`/`newStr` from inspected file slices when the text contains backticks or
+`${...}`, so a template literal does not interpolate them. Returns a short
+confirmation; throws if the file is missing, or if `oldStr` is absent or matches
+more than once (widen the snippet to make it unique).
 
-Or from a shell cell:
-
-    !edit --path pkg/file.py --old-str "..." --new-str "..."
+`edit.run(path, oldStr, newStr)` is the same function under an explicit name.
+There is no shell entry point: call it from a JS/TS cell, not a `%%bash` cell.

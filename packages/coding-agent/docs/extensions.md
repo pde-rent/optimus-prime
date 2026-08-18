@@ -691,7 +691,7 @@ Behavior guarantees:
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 pi.on("tool_call", async (event, ctx) => {
-  // event.toolName - "ipython", "bash", "edit", etc.
+  // event.toolName - "repl", "bash", "edit", etc.
   // event.toolCallId
   // event.input - tool parameters (mutable)
 
@@ -705,7 +705,7 @@ pi.on("tool_call", async (event, ctx) => {
     }
   }
 
-  if (isToolCallEventType("ipython", event)) {
+  if (isToolCallEventType("repl", event)) {
     // event.input is { code: string } - a JS/TS cell, or a %%bash cell
     console.log(`REPL cell: ${event.input.code}`);
   }
@@ -1489,10 +1489,10 @@ Manage active tools. This works for both built-in tools and dynamically register
 const active = pi.getActiveTools();
 const all = pi.getAllTools();
 // [{
-//   name: "ipython",
+//   name: "repl",
 //   description: "Execute JavaScript/TypeScript code in a persistent Bun REPL...",
 //   parameters: ..., 
-//   sourceInfo: { path: "<builtin:ipython>", source: "builtin", scope: "temporary", origin: "top-level" }
+//   sourceInfo: { path: "<builtin:repl>", source: "builtin", scope: "temporary", origin: "top-level" }
 // }, ...]
 const names = all.map(t => t.name);
 const builtinTools = all.filter((t) => t.sourceInfo.source === "builtin");
@@ -1824,10 +1824,10 @@ pi.registerTool({
 
 ### Overriding Built-in Tools
 
-Extensions can override built-in tools (`ipython` — the persistent Bun REPL, kept under its historical name — plus `bash` and `edit`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
+Extensions can override built-in tools (`repl` — the persistent Bun REPL — plus `bash` and `edit`) by registering a tool with the same name. Interactive mode displays a warning when this happens.
 
 ```bash
-# Extension's ipython tool replaces built-in ipython
+# Extension's repl tool replaces built-in repl
 prime-agent -e ./tool-override.ts
 ```
 
@@ -1846,7 +1846,7 @@ See [examples/extensions/tool-override.ts](../examples/extensions/tool-override.
 **Your implementation must match the exact result shape**, including the `details` type. The UI and session logic depend on these shapes for rendering and state tracking.
 
 Built-in tool implementations:
-- [bun-repl/tool.ts](../src/core/bun-repl/tool.ts) - the `ipython` tool (persistent Bun REPL), `BunReplToolDetails`
+- [bun-repl/tool.ts](../src/core/bun-repl/tool.ts) - the `repl` tool (persistent Bun REPL), `BunReplToolDetails`
 - [bash.ts](../src/core/tools/bash.ts) - `BashToolDetails`
 - [edit.ts](../src/core/tools/edit.ts)
 

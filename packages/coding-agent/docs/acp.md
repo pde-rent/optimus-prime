@@ -40,7 +40,7 @@ Session activity arrives as `session/update` notifications:
 | tool finishes | `tool_call_update` (`completed` / `failed`) |
 | shell output | `tool_call` plus incremental `tool_call_update` |
 
-The persistent Bun JavaScript/TypeScript REPL is Prime Agent's model-facing tool — still named `ipython` on the wire for compatibility — so a cell is a `tool_call` of kind `execute` whose `rawInput` carries the cell source (JS/TS, or a `%%bash` cell).
+The persistent Bun JavaScript/TypeScript REPL is Prime Agent's model-facing tool, named `repl` on the wire, so a cell is a `tool_call` of kind `execute` whose `rawInput` carries the cell source (JS/TS, or a `%%bash` cell).
 
 ## Prime Agent extensions
 

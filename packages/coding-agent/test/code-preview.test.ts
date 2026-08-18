@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { previewBashCommand, previewIpythonCode, previewJsCode } from "../src/core/tools/code-preview.js";
+import { previewBashCommand, previewJsCode, previewReplCode } from "../src/core/tools/code-preview.js";
 
 describe("code preview", () => {
 	it("skips bash setup and previews the real command", () => {
@@ -15,15 +15,16 @@ describe("code preview", () => {
 		});
 	});
 
-	it("still previews python project commands in bash cells", () => {
-		expect(previewBashCommand("set -e\nuv run pytest tests/test_thing.py")).toEqual({
-			language: "bash",
-			text: "pytest tests/test_thing.py",
-		});
-		expect(previewIpythonCode("%%bash\npython3 -m pytest tests")).toEqual({
-			language: "bash",
-			text: "pytest tests",
-		});
+	it("keeps the JS toolchain readable and leaves other ecosystems verbatim", () => {
+		// No per-language branches: an unrecognised runner is shown as typed rather
+		// than special-cased, so no ecosystem is privileged over another.
+		const preview = (command: string) => previewBashCommand(`set -e\n${command}`)?.text;
+		expect(preview("bun run check")).toBe("bun check");
+		expect(preview("bunx biome check .")).toBe("bunx biome check .");
+		expect(preview("cargo test --release")).toBe("cargo test --release");
+		expect(preview("go test ./...")).toBe("go test ./...");
+		expect(preview("uv run pytest tests/")).toBe("uv run pytest tests/");
+		expect(preview("python3 -m pytest tests")).toBe("python3 -m pytest tests");
 	});
 
 	it("unwraps js heredocs in bash", () => {
@@ -34,28 +35,28 @@ const text = await Bun.file(p).text();
 await Bun.write(p, text);
 JS`;
 		// `p` holds no slash, so it is not treated as a path variable (parity with the
-		// old python analyzer); the write statement itself is still the preview.
+		// upstream analyzer); the write statement itself is still the preview.
 		expect(previewBashCommand(command)).toEqual({ language: "js", text: "await Bun.write(p, text)" });
 	});
 
-	it("unwraps bash cells in ipython", () => {
+	it("unwraps bash cells in repl", () => {
 		const code = `%%bash
 set -e
 node --input-type=module <<'JS'
 const data = new Map(Object.entries({}));
 console.log(data.keys());
 JS`;
-		expect(previewIpythonCode(code)).toEqual({ language: "js", text: "data.keys()" });
+		expect(previewReplCode(code)).toEqual({ language: "js", text: "data.keys()" });
 	});
 
 	it("prefers meaningful js effects over setup assignments", () => {
 		const code = `import { readFileSync } from "node:fs";
-const p = "packages/coding-agent/src/modes/interactive/components/ipython-cell.ts";
+const p = "packages/coding-agent/src/modes/interactive/components/repl-cell.ts";
 const txt = await Bun.file(p).text();
 await Bun.write(p, txt.replace("old", "new"));`;
 		expect(previewJsCode(code)).toEqual({
 			language: "js",
-			text: "write packages/coding-agent/src/modes/interactive/components/ip…",
+			text: "write packages/coding-agent/src/modes/interactive/components/re…",
 		});
 	});
 

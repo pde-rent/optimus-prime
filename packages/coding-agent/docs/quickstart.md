@@ -71,7 +71,7 @@ Once Prime Agent starts, type a request and press Enter:
 Summarize this repository and tell me how to run its checks.
 ```
 
-Prime Agent gives the model one built-in tool, `ipython`. The name is kept for compatibility, but it executes JavaScript/TypeScript in a persistent Bun REPL. The long-lived REPL is a control environment for reading and editing files, running project commands, inspecting data, retaining JavaScript state, and invoking installed skills. It starts automatically on first use and needs no extra runtime setup beyond Bun itself.
+Prime Agent gives the model one built-in tool, `repl`. It executes JavaScript/TypeScript in a persistent Bun REPL. The long-lived REPL is a control environment for reading and editing files, running project commands, inspecting data, retaining JavaScript state, and invoking installed skills. It starts automatically on first use and needs no extra runtime setup beyond Bun itself.
 
 Prime Agent runs in your current working directory and can modify files there. Use git or another checkpointing workflow if you want easy rollback.
 

@@ -2,13 +2,13 @@
 
 Prime Agent gives each agent session a persistent JavaScript/TypeScript REPL running in a Bun child process, plus a native recursive sub-agent interface. The sandbox `rlm` object is a model-facing shim; the TypeScript host owns child execution, persistence, usage accounting, and lifecycle.
 
-The agent tool is still named `ipython` for compatibility with existing sessions, transcripts, and `--tools` filters. It no longer has anything to do with IPython, Jupyter, or Python: cells are JavaScript/TypeScript.
+The agent tool is named `repl`. Cells are JavaScript/TypeScript; there is no IPython, Jupyter, or Python involved.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    session["AgentSession · TypeScript<br/>ipython tool + host request handlers"]
+    session["AgentSession · TypeScript<br/>repl tool + host request handlers"]
     manager["BunReplManager · TypeScript<br/>execution queue + host-request dispatch"]
     repl["Bun REPL child process<br/>repl-script.ts"]
     sandbox["node:vm context<br/>sandbox globals + preloaded JS skills"]
@@ -43,14 +43,14 @@ sequenceDiagram
     participant C as Child AgentSession
     participant P as Model provider
 
-    M->>H: ipython tool call
+    M->>H: repl tool call
     H->>R: execute frame · await rlm("inspect the API")
     R->>H: hostRequest frame · rlm.run
     H->>H: check depth and resolve model
     H->>H: admit child task and update registry
     H-->>R: hostResponse frame · RlmSpawnHandle
     R-->>H: result + idle frames
-    H-->>M: ipython tool result
+    H-->>M: repl tool result
     H->>C: create child runtime and prompt
     loop Child agent loop
         C->>P: stream model request
@@ -72,7 +72,7 @@ sequenceDiagram
 | `src/core/bun-repl/cell.ts` | Cell parsing: `%%bash` versus JS, plus the `%%js` alias. |
 | `src/core/bun-repl/state-snapshot.ts` | Reads and writes the JSON namespace snapshot in the session artifact directory. |
 | `src/core/bun-repl/provisioner.ts` | Lazy startup, restore-on-first-start, and disposal of the manager. |
-| `src/core/bun-repl/tool.ts` | The `ipython` agent tool wrapper: parameter schema, output shaping, image attachments. |
+| `src/core/bun-repl/tool.ts` | The `repl` agent tool wrapper: parameter schema, output shaping, image attachments. |
 | `src/core/agent-session.ts` | RLM policy, child creation, registry, usage attribution, cancellation, goal handlers, and REPL environment (including `PRIME_AGENT_REPL_SKILLS`). |
 | `src/core/rlm-runtime.ts` | Typed request/spawn-handle validation for `rlm.run`, model discovery, list, and delete. |
 
@@ -80,7 +80,7 @@ The REPL side does not call providers or implement an agent loop.
 
 ## REPL Lifecycle
 
-The REPL is created lazily on first `ipython` use (`BunReplProvisioner.ensure()`; `prewarm()` starts it in the background). There is no runtime to bootstrap, no virtual environment, and no install step — the manager spawns `bun run repl-script.ts` (falling back to the compiled `repl-script.js` when running from `dist/`) with the session's cwd and environment.
+The REPL is created lazily on first `repl` use (`BunReplProvisioner.ensure()`; `prewarm()` starts it in the background). There is no runtime to bootstrap, no virtual environment, and no install step — the manager spawns `bun run repl-script.ts` (falling back to the compiled `repl-script.js` when running from `dist/`) with the session's cwd and environment.
 
 The child boots in this order:
 

@@ -4,8 +4,8 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditToolDetails } from "../../../core/tools/edit.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
-import type { IpythonToolDetails } from "../../../core/tools/kernel-types.js";
 import { resolveToCwd } from "../../../core/tools/path-utils.js";
+import type { ReplToolDetails } from "../../../core/tools/repl-types.js";
 import { canonicalizePath, formatPathRelativeToCwdOrAbsolute } from "../../../utils/paths.js";
 import { theme } from "../theme/theme.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
@@ -45,8 +45,8 @@ export function getToolFileChanges(
 	cwd: string,
 ): FileChangeSummary[] {
 	const changes = new Map<string, FileChangeSummary>();
-	if (toolName === "ipython") {
-		for (const display of (result.details as IpythonToolDetails | undefined)?.diffs ?? []) {
+	if (toolName === "repl") {
+		for (const display of (result.details as ReplToolDetails | undefined)?.diffs ?? []) {
 			const { diff } = generateDiffString(display.oldStr, display.newStr, 4, display.startLine ?? 1);
 			mergeFileChange(changes, { path: display.path, ...countChangedLines(diff) }, cwd);
 		}

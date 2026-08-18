@@ -9,10 +9,10 @@ import { ToolExecutionComponent } from "../../../src/modes/interactive/component
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { createHarness, type Harness } from "../harness.js";
 
-const ipythonTool: AgentTool = {
-	name: "ipython",
-	label: "ipython",
-	description: "Execute a test IPython cell",
+const replTool: AgentTool = {
+	name: "repl",
+	label: "repl",
+	description: "Execute a test REPL cell",
 	parameters: Type.Object({ code: Type.String() }),
 	execute: async () => ({
 		content: [{ type: "text", text: "ok" }],
@@ -33,16 +33,16 @@ describe("ENG-4583 latest tool expand hint", () => {
 	});
 
 	it("shows the expand or collapse hint only on the latest tool row", async () => {
-		harness = await createHarness({ tools: [ipythonTool] });
+		harness = await createHarness({ tools: [replTool] });
 		harness.setResponses([
 			fauxAssistantMessage(
 				[
-					fauxToolCall("ipython", { code: "1 + 1" }, { id: "tool-4583-a" }),
-					fauxToolCall("ipython", { code: "2 + 2" }, { id: "tool-4583-b" }),
+					fauxToolCall("repl", { code: "1 + 1" }, { id: "tool-4583-a" }),
+					fauxToolCall("repl", { code: "2 + 2" }, { id: "tool-4583-b" }),
 				],
 				{ stopReason: "toolUse" },
 			),
-			fauxAssistantMessage(fauxToolCall("ipython", { code: "3 + 3" }, { id: "tool-4583-c" }), {
+			fauxAssistantMessage(fauxToolCall("repl", { code: "3 + 3" }, { id: "tool-4583-c" }), {
 				stopReason: "toolUse",
 			}),
 			fauxAssistantMessage("done"),

@@ -5,7 +5,7 @@ import stripAnsi from "strip-ansi";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.js";
-import { IPythonCellComponent, type IPythonCellState } from "../src/modes/interactive/components/ipython-cell.js";
+import { ReplCellComponent, type ReplCellState } from "../src/modes/interactive/components/repl-cell.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
@@ -72,8 +72,8 @@ describe("marquee TUI components", () => {
 		setKeybindings(new KeybindingsManager());
 	});
 
-	test("renders ipython cells with shell magic and collapsed traceback", async () => {
-		const state: IPythonCellState = {
+	test("renders repl cells with shell magic and collapsed traceback", async () => {
+		const state: ReplCellState = {
 			code: "%%bash\necho hi",
 			content: [
 				{
@@ -88,7 +88,7 @@ describe("marquee TUI components", () => {
 			argsComplete: true,
 			showImages: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const collapsed = await renderInVirtualTerminal(component);
 		expect(collapsed).toContain("bash");
@@ -97,7 +97,7 @@ describe("marquee TUI components", () => {
 		expect(collapsed).toContain("1.2s");
 		expect(collapsed).toContain("ValueError");
 		expect(collapsed).not.toContain("ValueError: bad");
-		expect(collapsed).not.toContain("ipython");
+		expect(collapsed).not.toContain("repl");
 		expect(collapsed).toContain("Ctrl+O to expand");
 		expect(collapsed).not.toContain("traceback collapsed");
 		expect(collapsed).not.toContain('File "<stdin>"');
@@ -112,14 +112,13 @@ describe("marquee TUI components", () => {
 		}
 	});
 
-	test("renders structured ipython bash errors with traceback details collapsed", async () => {
+	test("renders structured repl bash errors with traceback details collapsed", async () => {
 		const traceback = [
-			"Traceback (most recent call last):",
-			"  Cell In[15], line 1",
-			"----> 1 get_ipython().run_cell_magic('bash', '', 'cat /tmp/missing-file\\n')",
-			"CalledProcessError: Command 'cat /tmp/missing-file' returned non-zero exit status 1.",
+			"Error: %%bash exited with status 1",
+			"    at runBash (evalmachine.<anonymous>:1:7)",
+			"    at execute (evalmachine.<anonymous>:1:1)",
 		];
-		const state: IPythonCellState = {
+		const state: ReplCellState = {
 			code: "%%bash\ncat /tmp/missing-file",
 			content: [
 				{
@@ -133,8 +132,8 @@ describe("marquee TUI components", () => {
 				stdout: "",
 				stderr: "cat: /tmp/missing-file: No such file or directory\n",
 				error: {
-					ename: "CalledProcessError",
-					evalue: "Command 'cat /tmp/missing-file' returned non-zero exit status 1.",
+					ename: "Error",
+					evalue: "%%bash exited with status 1",
 					traceback,
 				},
 			},
@@ -143,60 +142,60 @@ describe("marquee TUI components", () => {
 			executionStarted: true,
 			argsComplete: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const collapsed = stripAnsi(component.render(100).join("\n"));
 		expect(collapsed).toContain("cat /tmp/missing-file");
-		expect(collapsed).toContain("CalledProcessError · (Ctrl+O to expand)");
+		expect(collapsed).toContain("Error · (Ctrl+O to expand)");
 		expect(collapsed).not.toContain("No such file or directory");
-		expect(collapsed).not.toContain("returned non-zero exit status 1.");
+		expect(collapsed).not.toContain("exited with status 1");
 		expect(collapsed).not.toContain("traceback collapsed");
-		expect(collapsed).not.toContain("get_ipython().run_cell_magic");
-		expect(collapsed).not.toContain("Cell In[15]");
+		expect(collapsed).not.toContain("at runBash");
 
 		component.update({ ...state, expanded: true });
 		const expanded = stripAnsi(component.render(100).join("\n"));
-		expect(expanded).toContain("get_ipython().run_cell_magic");
-		expect(expanded).toContain("Cell In[15]");
+		expect(expanded).toContain("at runBash");
+		expect(expanded).toContain("%%bash exited with status 1");
 	});
 
-	test("keeps ipython stack frame locations out of collapsed traceback previews", () => {
-		const state: IPythonCellState = {
-			code: "run_job()",
+	test("keeps repl stack frame locations out of collapsed traceback previews", () => {
+		const state: ReplCellState = {
+			code: "await runJob();",
 			content: [
 				{
 					type: "text",
 					text: [
-						"Traceback (most recent call last):",
-						'  File "/tmp/internal.py", line 12, in run',
-						"    run_job()",
+						"RangeError: job budget exhausted",
+						"    at runJob (/tmp/internal.ts:12:9)",
+						"    at evalmachine.<anonymous>:1:7",
 					].join("\n"),
 				},
 			],
-			details: { status: "error", errorEname: "RuntimeError" },
+			details: { status: "error", errorEname: "RangeError" },
 			isError: true,
 			expanded: false,
 			executionStarted: true,
 			argsComplete: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const collapsed = stripAnsi(component.render(100).join("\n"));
-		expect(collapsed).toContain("RuntimeError · (Ctrl+O to expand)");
+		expect(collapsed).toContain("Ctrl+O to expand");
+		expect(collapsed).toContain("RangeError");
 		expect(collapsed).not.toContain("no output");
-		expect(collapsed).not.toContain("/tmp/internal.py");
-		expect(collapsed).not.toContain("line 12");
+		expect(collapsed).not.toContain("/tmp/internal.ts");
+		expect(collapsed).not.toContain("evalmachine");
 	});
 
-	test("caches ipython cell renders until state, width, or invalidation changes", () => {
-		const state: IPythonCellState = {
+	test("caches repl cell renders until state, width, or invalidation changes", () => {
+		const state: ReplCellState = {
 			code: "const value = 1;\nconsole.log(value);",
 			content: [{ type: "text", text: "1" }],
 			details: { status: "ok", durationMs: 15 },
 			executionStarted: true,
 			argsComplete: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const first = component.render(80);
 		expect(component.render(80)).toBe(first);
@@ -214,9 +213,9 @@ describe("marquee TUI components", () => {
 		expect(component.render(80)).toBe(afterInvalidate);
 	});
 
-	test("collapses long ipython input until tool expansion is enabled", () => {
+	test("collapses long repl input until tool expansion is enabled", () => {
 		const code = Array.from({ length: 8 }, (_, index) => `line_${index} = ${index}`).join("\n");
-		const state: IPythonCellState = {
+		const state: ReplCellState = {
 			code,
 			content: [{ type: "text", text: "done" }],
 			details: { status: "ok", durationMs: 15 },
@@ -224,7 +223,7 @@ describe("marquee TUI components", () => {
 			argsComplete: true,
 			expanded: false,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const collapsed = stripAnsi(component.render(100).join("\n"));
 		expect(collapsed).toContain("line_0 = 0");
@@ -238,10 +237,10 @@ describe("marquee TUI components", () => {
 		expect(expanded).toContain("line_7 = 7");
 	});
 
-	test("shows one expand hint when ipython input and output are both collapsed", () => {
+	test("shows one expand hint when repl input and output are both collapsed", () => {
 		const code = Array.from({ length: 8 }, (_, index) => `line_${index} = ${index}`).join("\n");
 		const output = Array.from({ length: 8 }, (_, index) => `out_${index}`).join("\n");
-		const component = new IPythonCellComponent({
+		const component = new ReplCellComponent({
 			code,
 			content: [{ type: "text", text: output }],
 			details: { status: "ok", durationMs: 15 },
@@ -255,8 +254,8 @@ describe("marquee TUI components", () => {
 		expect(collapsed.match(/to expand/g)?.length).toBe(1);
 	});
 
-	test("reflows cached ipython cells when terminal width changes", () => {
-		const state: IPythonCellState = {
+	test("reflows cached repl cells when terminal width changes", () => {
+		const state: ReplCellState = {
 			code: "result = 'this is a deliberately long line that should wrap differently by terminal width'",
 			content: [
 				{
@@ -269,7 +268,7 @@ describe("marquee TUI components", () => {
 			argsComplete: true,
 			expanded: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const narrow = component.render(36);
 		expect(component.render(36)).toBe(narrow);
@@ -286,8 +285,8 @@ describe("marquee TUI components", () => {
 		expect(component.render(80)).toBe(wide);
 	});
 
-	test("invalidates ipython cell cache when expanded state changes", () => {
-		const state: IPythonCellState = {
+	test("invalidates repl cell cache when expanded state changes", () => {
+		const state: ReplCellState = {
 			code: "raise ValueError('bad')",
 			content: [
 				{
@@ -301,7 +300,7 @@ describe("marquee TUI components", () => {
 			executionStarted: true,
 			argsComplete: true,
 		};
-		const component = new IPythonCellComponent(state);
+		const component = new ReplCellComponent(state);
 
 		const collapsed = component.render(100);
 		const collapsedText = stripAnsi(collapsed.join("\n"));
@@ -400,9 +399,9 @@ describe("marquee TUI components", () => {
 		expect(short).not.toContain("Ctrl+O to expand");
 	});
 
-	test("routes built-in ipython tool rows through the cell renderer", () => {
+	test("routes built-in repl tool rows through the cell renderer", () => {
 		const component = new ToolExecutionComponent(
-			"ipython",
+			"repl",
 			"tool-1",
 			{ code: "console.log(55)" },
 			{},
@@ -423,7 +422,7 @@ describe("marquee TUI components", () => {
 		expect(collapsed).toContain("js");
 		expect(collapsed).toContain("12ms");
 		expect(collapsed).toContain("Ctrl+O to expand");
-		expect(collapsed).not.toContain("ipython");
+		expect(collapsed).not.toContain("repl");
 		expect(collapsed).not.toContain('"code"');
 
 		component.setExpanded(true);

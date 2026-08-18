@@ -25,7 +25,7 @@ export {
 	type EditToolOptions,
 } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
-export type { IpythonToolDetails, IpythonToolInput } from "./kernel-types.js";
+export type { ReplToolDetails, ReplToolInput } from "./repl-types.js";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -43,20 +43,20 @@ import type { ToolDefinition } from "../extensions/types.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "ipython";
+export type ToolName = "repl";
 
 export interface ToolsOptions {
-	ipython?: BunReplToolOptions;
+	repl?: BunReplToolOptions;
 }
 
 export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
-		ipython: createBunReplToolDefinition(options?.ipython ?? {}),
+		repl: createBunReplToolDefinition(options?.repl ?? {}),
 	};
 }
 
 export function createAllTools(_cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
-		ipython: createBunReplTool(options?.ipython ?? {}),
+		repl: createBunReplTool(options?.repl ?? {}),
 	};
 }

@@ -75,8 +75,6 @@ export type {
 	InputEvent,
 	InputEventResult,
 	InputSource,
-	IpythonToolCallEvent,
-	IpythonToolResultEvent,
 	KeybindingsManager,
 	LoadExtensionsResult,
 	MessageEndEvent,
@@ -93,6 +91,8 @@ export type {
 	RegisteredTool,
 	ReplacedSessionContext,
 	ReplayBuiltInToolName,
+	ReplToolCallEvent,
+	ReplToolResultEvent,
 	ResolvedCommand,
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
@@ -139,7 +139,7 @@ export {
 	defineTool,
 	isBashToolResult,
 	isEditToolResult,
-	isIpythonToolResult,
+	isReplToolResult,
 	isToolCallEventType,
 } from "./types.js";
 export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.js";

@@ -1,7 +1,7 @@
 /** Runtime capabilities the REPL sandbox exposes without any install step. */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
-	"`$` — Bun's shell, pre-bound: ``await $`ls -la`.text()``",
+	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control.",
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
 	"`pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
 	"native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing",
@@ -40,7 +40,7 @@ const SIMPLIFIED_TECHNICAL_ENGLISH_PROMPT = [
 ].join("\n");
 
 const REPL_CONTROL_PROMPT = [
-	"The `ipython` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
+	"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
 	"",
 	"Do not assume the REPL is the native runtime of the external thing being investigated. A repository, package, service, dataset, paper, website, benchmark, or API may have its own environment and normal interface. Evaluate external systems through their own interface, then use the REPL to coordinate the process and analyze what comes back.",
 	"",
@@ -75,14 +75,14 @@ export interface ChildAgentDoctrineOptions {
 
 export function buildChildAgentDoctrine(options: ChildAgentDoctrineOptions): string | undefined {
 	const depth = options.depth ?? 0;
-	const hasIpython = options.activeTools === undefined || options.activeTools.includes("ipython");
+	const hasRepl = options.activeTools === undefined || options.activeTools.includes("repl");
 	const hasAgentMessage = options.installedSkills?.includes("agent_message") ?? false;
 	if (depth <= 0) return undefined;
 
 	const lines = [
 		`You are a child agent spawned by ${options.parentAgent ?? "your parent agent"}. Task prompts are labeled \`[task from parent]\`.`,
 	];
-	if (hasAgentMessage && hasIpython) {
+	if (hasAgentMessage && hasRepl) {
 		lines.push(
 			'When a task calls for an answer, reply explicitly with `await agent_message.send(message, { receiver_role: "parent" })`. Not every message or task needs a reply; continue cleanup after sending and go idle normally.',
 		);
@@ -104,7 +104,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 	const allowRecursion = options.allowRecursion ?? true;
 	const depth = options.depth ?? 0;
 	const activeTools = options.activeTools ?? [];
-	const hasIpython = options.activeTools === undefined ? true : activeTools.includes("ipython");
+	const hasRepl = options.activeTools === undefined ? true : activeTools.includes("repl");
 	const parts = [
 		"You are a general purpose agent that uses code to solve tasks.",
 		"You solve tasks by breaking down problems into sub-tasks, writing and executing code, observing results, and iterating one step at a time.",
@@ -131,7 +131,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 	}
 	if (installedSkills.length > 0) {
 		const installed = installedSkills.map((skill) => `\`${skill}\``).join(", ");
-		if (hasIpython) {
+		if (hasRepl) {
 			skillLines.push(`Installed skills (preloaded REPL bindings): ${installed}.`);
 			skillLines.push(
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
@@ -146,7 +146,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 			);
 		}
-		if (hasIpython && installedSkills.includes("edit")) {
+		if (hasRepl && installedSkills.includes("edit")) {
 			skillLines.push(
 				'For targeted existing-file edits, prefer the preloaded async `edit` skill: `await edit("pkg/file.ts", oldText, newText)`. Use exact old/new strings, built from inspected file slices when the text contains backticks or template placeholders.',
 			);
@@ -166,7 +166,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		);
 	}
 
-	if (allowRecursion && hasIpython) {
+	if (allowRecursion && hasRepl) {
 		parts.push(
 			"",
 			"A callable `rlm` is already in your global namespace. `await rlm('sub-task')` spawns a child and returns immediately after task admission with `rlm_child_id`, `name`, `session_dir`, and `model`; it never waits for or returns the child's answer.",
@@ -193,7 +193,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		);
 	}
 
-	if (hasIpython) {
+	if (hasRepl) {
 		parts.push("", REPL_CONTROL_PROMPT);
 		if (installedSkills.includes("refine")) {
 			parts.push(

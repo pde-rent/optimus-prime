@@ -1,5 +1,3 @@
-import { parse } from "yaml";
-
 type ParsedFrontmatter<T extends Record<string, unknown>> = {
 	frontmatter: T;
 	body: string;
@@ -32,7 +30,7 @@ export const parseFrontmatter = <T extends Record<string, unknown> = Record<stri
 	if (!yamlString) {
 		return { frontmatter: {} as T, body };
 	}
-	const parsed = parse(yamlString);
+	const parsed = Bun.YAML.parse(yamlString);
 	return { frontmatter: (parsed ?? {}) as T, body };
 };
 

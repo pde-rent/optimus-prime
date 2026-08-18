@@ -19,7 +19,8 @@ describe("parseFrontmatter", () => {
 
 	it("throws on invalid YAML frontmatter", () => {
 		const input = "---\nfoo: [bar\n---\nBody";
-		expect(() => parseFrontmatter<Record<string, string>>(input)).toThrow(/at line 1, column 10/);
+		// The message is the parser's own; only the refusal is contracted here.
+		expect(() => parseFrontmatter<Record<string, string>>(input)).toThrow(/YAML/i);
 	});
 
 	it("parses | multiline yaml syntax", () => {

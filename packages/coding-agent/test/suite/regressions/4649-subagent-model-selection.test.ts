@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../../../src/core/session-manager.js";
-import type { HostRequestHandlers } from "../../../src/core/tools/kernel-types.js";
+import type { HostRequestHandlers } from "../../../src/core/tools/repl-types.js";
 import { createHarness } from "../harness.js";
 
 const provider = "faux-eng-4649";

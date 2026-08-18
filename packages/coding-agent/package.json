@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/pi-coding-agent",
 	"version": "1.0.0",
-	"description": "Coding agent CLI with IPython-backed tools and session management",
+	"description": "Coding agent CLI with REPL-backed tools and session management",
 	"type": "module",
 	"piConfig": {
 		"name": "prime-agent",
@@ -58,14 +58,11 @@
 		"cli-highlight": "^2.1.11",
 		"diff": "^9.0.0",
 		"extract-zip": "^2.0.1",
-		"glob": "^13.0.1",
 		"hosted-git-info": "^9.0.2",
 		"ignore": "^7.0.5",
 		"jiti": "^2.7.0",
-		"minimatch": "^10.2.3",
 		"proper-lockfile": "^4.1.2",
-		"typebox": "^1.3.9",
-		"yaml": "^2.9.0"
+		"typebox": "^1.3.9"
 	},
 	"overrides": {
 		"rimraf": "6.1.2",

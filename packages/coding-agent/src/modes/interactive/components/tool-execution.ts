@@ -4,13 +4,13 @@ import type { ToolDefinition, ToolRenderContext, ToolRenderResultOptions } from 
 import { createBashToolDefinition } from "../../../core/tools/bash.js";
 import { createEditToolDefinition } from "../../../core/tools/edit.js";
 import { createAllToolDefinitions } from "../../../core/tools/index.js";
-import type { KernelSentAgentMessage } from "../../../core/tools/kernel-types.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
+import type { KernelSentAgentMessage } from "../../../core/tools/repl-types.js";
 import type { AgentConnectionToolDefinition } from "../../agent-connection/index.js";
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
 import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
-import { getIpythonCodeFromArgs, IPythonCellComponent } from "./ipython-cell.js";
+import { getReplCodeFromArgs, ReplCellComponent } from "./repl-cell.js";
 import { ToolPanel } from "./tool-panel.js";
 
 export interface ToolExecutionOptions {
@@ -50,8 +50,8 @@ function createReplayBuiltInToolDefinition(
 	cwd: string,
 	toolDefinition: ToolExecutionDefinition | undefined,
 ): ToolDefinition<any, any> | undefined {
-	if (toolName === "ipython") {
-		return createAllToolDefinitions(cwd).ipython;
+	if (toolName === "repl") {
+		return createAllToolDefinitions(cwd).repl;
 	}
 	switch (toolName) {
 		case "bash": {
@@ -72,7 +72,7 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 	private selfRenderContainer: Container;
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
-	private ipythonCellComponent?: IPythonCellComponent;
+	private replCellComponent?: ReplCellComponent;
 	private rendererState: any = {};
 	private imageComponents: Image[] = [];
 	private toolName: string;
@@ -162,7 +162,7 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 	}
 
 	private getRenderShell(): "default" | "self" {
-		if (this.shouldUseIpythonRenderer()) {
+		if (this.shouldUseReplRenderer()) {
 			return "self";
 		}
 		if (!this.builtInToolDefinition) {
@@ -174,8 +174,8 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 		return this.toolDefinition.renderShell ?? this.builtInToolDefinition.renderShell ?? "default";
 	}
 
-	private shouldUseIpythonRenderer(): boolean {
-		return this.toolName === "ipython" && !this.toolDefinition?.renderCall && !this.toolDefinition?.renderResult;
+	private shouldUseReplRenderer(): boolean {
+		return this.toolName === "repl" && !this.toolDefinition?.renderCall && !this.toolDefinition?.renderResult;
 	}
 
 	private isBuiltInEditTool(): boolean {
@@ -364,9 +364,9 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
 			this.selfRenderContainer.clear();
 
-			if (this.shouldUseIpythonRenderer()) {
+			if (this.shouldUseReplRenderer()) {
 				const state = {
-					code: getIpythonCodeFromArgs(this.args),
+					code: getReplCodeFromArgs(this.args),
 					content: this.result?.content,
 					details: this.result?.details,
 					isPartial: this.isPartial,
@@ -381,12 +381,12 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 					cwd: this.cwd,
 					toggleTargetId: this.toggleTargetId,
 				};
-				if (!this.ipythonCellComponent) {
-					this.ipythonCellComponent = new IPythonCellComponent(state);
+				if (!this.replCellComponent) {
+					this.replCellComponent = new ReplCellComponent(state);
 				} else {
-					this.ipythonCellComponent.update(state);
+					this.replCellComponent.update(state);
 				}
-				this.selfRenderContainer.addChild(this.ipythonCellComponent);
+				this.selfRenderContainer.addChild(this.replCellComponent);
 				hasContent = true;
 			} else {
 				hasContent = this.mountRenderers(this.selfRenderContainer, true);

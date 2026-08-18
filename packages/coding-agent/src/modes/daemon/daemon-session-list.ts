@@ -69,7 +69,7 @@ export interface SessionSummary {
 	rlmChildId?: string;
 	repliedSinceTask?: boolean;
 	rlmParentNodeId?: string;
-	/** Source of the IPython cell that spawned this subagent, for display. */
+	/** Source of the REPL cell that spawned this subagent, for display. */
 	spawnCode?: string;
 	modelFallbackMessage?: string;
 	diagnostics?: AgentSessionRuntimeDiagnostic[];

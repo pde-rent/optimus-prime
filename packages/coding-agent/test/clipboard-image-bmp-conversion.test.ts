@@ -6,6 +6,13 @@
  * instead of image/png.
  */
 import { describe, expect, test, vi } from "bun:test";
+import * as realChildProcess from "node:child_process";
+
+// Snapshot the real exports eagerly: `vi.importActual()` inside a `vi.mock()`
+// factory resolves through Bun's module registry, which by then already holds
+// the mock being defined, so it would hand back an empty namespace. Spreading
+// here (before `vi.mock` runs) also survives Bun patching the live namespace.
+const actualChildProcess = { ...realChildProcess };
 
 function createTinyBmp1x1Red24bpp(): Uint8Array {
 	// Minimal 1x1 24bpp BMP (BGR + row padding to 4 bytes)
@@ -42,21 +49,20 @@ function createTinyBmp1x1Red24bpp(): Uint8Array {
 }
 
 // Mock wl-paste to return BMP
-vi.mock("child_process", async () => {
-	const actual = await vi.importActual<typeof import("child_process")>("child_process");
-	return {
-		...actual,
-		spawnSync: vi.fn((command: string, args: string[]) => {
-			if (command === "wl-paste" && args.includes("--list-types")) {
-				return { status: 0, stdout: Buffer.from("image/bmp\n"), error: null };
-			}
-			if (command === "wl-paste" && args.includes("image/bmp")) {
-				return { status: 0, stdout: Buffer.from(createTinyBmp1x1Red24bpp()), error: null };
-			}
-			return { status: 1, stdout: Buffer.alloc(0), error: null };
-		}),
-	};
+const spawnSyncMock = vi.fn((command: string, args: string[]) => {
+	if (command === "wl-paste" && args.includes("--list-types")) {
+		return { status: 0, stdout: Buffer.from("image/bmp\n"), error: null };
+	}
+	if (command === "wl-paste" && args.includes("image/bmp")) {
+		return { status: 0, stdout: Buffer.from(createTinyBmp1x1Red24bpp()), error: null };
+	}
+	return { status: 1, stdout: Buffer.alloc(0), error: null };
 });
+
+vi.mock("child_process", () => ({
+	...actualChildProcess,
+	spawnSync: spawnSyncMock,
+}));
 
 // Mock the native clipboard (not used in Wayland path, but needs to be mocked)
 vi.mock("@mariozechner/clipboard", () => ({
@@ -75,6 +81,14 @@ describe("readClipboardImage BMP conversion", () => {
 			env: { WAYLAND_DISPLAY: "wayland-0" },
 			platform: "linux",
 		});
+
+		// Guard against a silently-inert mock: the real module would never have
+		// been asked for wl-paste output.
+		expect(spawnSyncMock).toHaveBeenCalledWith(
+			"wl-paste",
+			expect.arrayContaining(["--list-types"]),
+			expect.anything(),
+		);
 
 		expect(image).not.toBeNull();
 		expect(image!.mimeType).toBe("image/png");

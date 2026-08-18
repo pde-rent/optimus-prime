@@ -105,7 +105,7 @@ function createFakeSession(id: string, messages: AgentMessage[]): FakeSessionCon
 			refreshModelCatalog: async () => ({ models: model ? [model] : [], configuredProviders: ["openai"] }),
 		},
 		scopedModels: [],
-		getActiveToolNames: () => ["ipython"],
+		getActiveToolNames: () => ["repl"],
 		getContextUsage: () => undefined,
 		cancelRlmChildRun: (childId: string) => childId === "child-1",
 		getToolDefinition: (toolName: string) => ({
@@ -314,7 +314,7 @@ describe("InProcessAgentConnection", () => {
 					sessionName: "new name",
 					messageCount: 1,
 					leafId: "new-leaf",
-					activeToolNames: ["ipython"],
+					activeToolNames: ["repl"],
 				}),
 				messages: [userMessage("new", 2)],
 			},

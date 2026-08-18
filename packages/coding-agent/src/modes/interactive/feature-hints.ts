@@ -75,8 +75,8 @@ export const FEATURE_HINTS: readonly FeatureHintDefinition[] = [
 		getText: () => "Share traces with Prime Intellect using /traces on to train open-source LLMs.",
 	},
 	{
-		id: "persistent-ipython",
-		getText: () => "Optimus Prime keeps IPython variables and helpers between turns and compactions.",
+		id: "persistent-repl",
+		getText: () => "Optimus Prime keeps REPL variables and helpers between turns and compactions.",
 	},
 	{
 		id: "context-usage",

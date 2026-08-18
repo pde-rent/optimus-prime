@@ -2,7 +2,7 @@
 
 This page collects day-to-day usage details that do not fit on the quickstart page.
 
-Prime Agent is built around one model-facing tool: a persistent Bun JavaScript/TypeScript REPL. The tool is still named `ipython` for compatibility, but it executes JS/TS, not Python. The REPL retains JavaScript state across turns and acts as a control environment for file operations, project commands, installed JavaScript skills, MCP-backed skills, and recursive subagents. The TypeScript host remains responsible for provider calls, session state, tool execution, scheduling, and child-agent lifecycles.
+Prime Agent is built around one model-facing tool: a persistent Bun JavaScript/TypeScript REPL, named `repl`. The REPL retains JavaScript state across turns and acts as a control environment for file operations, project commands, installed JavaScript skills, MCP-backed skills, and recursive subagents. The TypeScript host remains responsible for provider calls, session state, tool execution, scheduling, and child-agent lifecycles.
 
 ## Interactive Mode
 
@@ -233,7 +233,7 @@ Use `prime-agent session export <file> [output]` to export a session to HTML.
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
-Built-in tools: `ipython` (the persistent Bun JS/TS REPL; the tool name is kept for compatibility).
+Built-in tools: `repl` (the persistent Bun JS/TS REPL).
 
 ### Resource Options
 
@@ -344,7 +344,7 @@ prime-agent --model sonnet:high "Solve this complex problem"
 prime-agent --models "claude-*,gpt-4o"
 
 # Restrict to the built-in REPL tool
-prime-agent --tools ipython -p "Review the code"
+prime-agent --tools repl -p "Review the code"
 ```
 
 ### Environment Variables
@@ -369,7 +369,7 @@ The remaining `PI_*` variables are compatibility names still read by the current
 
 ## Design Principles
 
-Prime Agent keeps the model-facing tool surface small while making the Bun REPL runtime powerful and composable. The built-in `ipython` tool provides durable state, project command execution, JavaScript skills, MCP-backed integrations, and the native `rlm` delegation API without presenting each capability as a separate model tool.
+Prime Agent keeps the model-facing tool surface small while making the Bun REPL runtime powerful and composable. The built-in `repl` tool provides durable state, project command execution, JavaScript skills, MCP-backed integrations, and the native `rlm` delegation API without presenting each capability as a separate model tool.
 
 Recursive subagents are a core capability, not an optional extension. The TypeScript host owns every parent and child agent loop so recursion uses the same provider, session, tool, skill, scheduling, usage-accounting, and recovery infrastructure. The REPL's `rlm` object is a thin host bridge rather than a separate agent implementation.
 

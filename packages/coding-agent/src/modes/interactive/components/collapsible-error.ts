@@ -27,20 +27,18 @@ function errorDetailLines(text: string): ErrorDetailLine[] {
 		.filter((line) => line.trimmed.length > 0);
 }
 
+/**
+ * True when the first line is already stack context, meaning the message is at the end.
+ *
+ * Only Python-style traces put the exception last, so only they need this: JS, Java, Go
+ * and Rust all print the message first, where the default "first line" rule is right.
+ * A `%%bash` cell can run pytest, so the markers still reach the renderer.
+ */
 function startsStackContext(line: ErrorDetailLine): boolean {
 	if (line.trimmed.startsWith("Traceback ")) {
 		return true;
 	}
-	if (line.trimmed.startsWith("File ") && line.trimmed.includes(", line ")) {
-		return true;
-	}
-	if (line.trimmed.startsWith("Cell In[") && line.trimmed.includes(", line ")) {
-		return true;
-	}
-	if (line.trimmed.startsWith("---->")) {
-		return true;
-	}
-	return false;
+	return line.trimmed.startsWith("File ") && line.trimmed.includes(", line ");
 }
 
 function isStackContextLine(line: ErrorDetailLine): boolean {

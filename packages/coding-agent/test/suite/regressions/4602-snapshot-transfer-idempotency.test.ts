@@ -522,7 +522,18 @@ describe("ENG-4602 snapshot transfer containment", () => {
 		const unhandled = vi.fn();
 		process.on("unhandledRejection", unhandled);
 		try {
-			const validationFailure = expect(validation).rejects.toThrow("stopped during snapshot transfer");
+			// `expect(validation).rejects` drains Bun's event loop synchronously, so it cannot be built
+			// before `stopWorker` is what makes `validation` settle. Attach the handler by hand instead:
+			// it still marks the rejection handled before the unhandledRejection probe can fire.
+			const validationFailure = validation.then(
+				() => {
+					throw new Error("Expected snapshot validation to reject");
+				},
+				(error: unknown) => {
+					expect(error).toBeInstanceOf(Error);
+					expect((error as Error).message).toContain("stopped during snapshot transfer");
+				},
+			);
 			await internals.stopWorker(worker, false);
 			await validationFailure;
 			await catchup;

@@ -181,7 +181,7 @@ For project-level Claude Code skills, add to `.prime/agent/settings.json`:
 
 1. At startup, Prime Agent scans skill locations and extracts names, descriptions, type, and file locations
 2. The system prompt includes visible skills in XML format per the [specification](https://agentskills.io/integrate-skills)
-3. When a task matches, the agent uses the `ipython` tool — the name is kept for compatibility, but it runs a persistent Bun JavaScript/TypeScript REPL — to load the full `SKILL.md` (models don't always do this; use prompting or `/skill:name` to force it)
+3. When a task matches, the agent uses the `repl` tool — a persistent Bun JavaScript/TypeScript REPL — to load the full `SKILL.md` (models don't always do this; use prompting or `/skill:name` to force it)
 4. The agent follows the instructions, using relative paths to reference scripts and assets
 
 This is progressive disclosure: only descriptions are always in context, full instructions load on-demand.

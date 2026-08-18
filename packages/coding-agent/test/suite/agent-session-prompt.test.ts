@@ -10,7 +10,7 @@ import type { PromptTemplate } from "../../src/core/prompt-templates.js";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.js";
 import { createTestResourceLoader } from "../utilities.js";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
-import { createDeferred, createWaitingHarness, gatedHook } from "./scheduling.js";
+import { createDeferred, createWaitingHarness, expectRejection, gatedHook } from "./scheduling.js";
 
 function gateNextAgentStart(harness: Harness): { reached: Promise<void>; release(): void } {
 	let markReached = () => {};
@@ -1165,8 +1165,8 @@ stale post-hook extension instructions`,
 
 		const delivery = harness.session.waitForAgentMessagePromptDelivery(agentMessageId);
 		const accepted = harness.session.acceptAgentMessagePrompt(agentPrompt, { expandPromptTemplates: false });
-		const acceptedRejection = expect(accepted).rejects.toThrow("cleared before delivery");
-		const deliveryRejection = expect(delivery).rejects.toThrow("cleared before delivery");
+		const acceptedRejection = expectRejection(accepted, "cleared before delivery");
+		const deliveryRejection = expectRejection(delivery, "cleared before delivery");
 		await admitted;
 
 		expect(harness.session.clearQueuedUserMessagesMatching((text) => text.includes(agentMessageId))).toEqual({
@@ -1231,7 +1231,7 @@ stale post-hook extension instructions`,
 		const prompt =
 			"Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: agentmsg_idle_cleanup\n\ncancel me";
 		const accepted = harness.session.acceptAgentMessagePrompt(prompt, { expandPromptTemplates: false });
-		const rejected = expect(accepted).rejects.toThrow("cleared before delivery");
+		const rejected = expectRejection(accepted, "cleared before delivery");
 		await Promise.all([eventQueueReached.promise, dispatchGate.reached]);
 
 		harness.session.clearQueuedUserMessagesMatching((text) => text === prompt);

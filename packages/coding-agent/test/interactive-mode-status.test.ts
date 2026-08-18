@@ -111,7 +111,7 @@ function createConnectionState(overrides: Partial<AgentConnectionState> = {}): A
 		compactionCount: 0,
 		goal: emptyGoalState(),
 		scopedModels: [],
-		activeToolNames: ["ipython"],
+		activeToolNames: ["repl"],
 		contextUsage: undefined,
 		...overrides,
 	};
@@ -205,8 +205,8 @@ describe("InteractiveMode.showStatus", () => {
 
 type RenderSessionContextHarness = {
 	pendingTools: Map<string, ToolExecutionComponent>;
-	ipythonToolComponents: Map<string, unknown>;
-	lateIpythonSentAgentMessages: Map<string, unknown[]>;
+	replToolComponents: Map<string, unknown>;
+	lateReplSentAgentMessages: Map<string, unknown[]>;
 	toolOutputExpanded: boolean;
 	chatContainer: Container;
 	editor: { addToHistory?: (text: string) => void };
@@ -253,8 +253,8 @@ function createRenderSessionContextHarness(overrides: Partial<RenderSessionConte
 	const addToHistory = vi.fn();
 	const harness: RenderSessionContextHarness = {
 		pendingTools: new Map<string, ToolExecutionComponent>(),
-		ipythonToolComponents: new Map<string, unknown>(),
-		lateIpythonSentAgentMessages: new Map<string, unknown[]>(),
+		replToolComponents: new Map<string, unknown>(),
+		lateReplSentAgentMessages: new Map<string, unknown[]>(),
 		toolOutputExpanded: false,
 		chatContainer,
 		editor: { addToHistory },
@@ -320,12 +320,12 @@ describe("InteractiveMode.renderSessionContext", () => {
 		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
 		try {
 			const chatContainer = new Container();
-			const ipythonToolComponents = new Map([["stale-tool", {}]]);
-			const lateIpythonSentAgentMessages = new Map([["stale-tool", []]]);
+			const replToolComponents = new Map([["stale-tool", {}]]);
+			const lateReplSentAgentMessages = new Map([["stale-tool", []]]);
 			const fakeThis: any = {
 				pendingTools: new Map(),
-				ipythonToolComponents,
-				lateIpythonSentAgentMessages,
+				replToolComponents,
+				lateReplSentAgentMessages,
 				toolOutputExpanded: false,
 				chatContainer,
 				footer: { invalidate: vi.fn() },
@@ -364,8 +364,8 @@ describe("InteractiveMode.renderSessionContext", () => {
 
 			const rendered = renderAll(chatContainer);
 			expect(rendered).not.toContain("\x1b_G");
-			expect(ipythonToolComponents.size).toBe(0);
-			expect(lateIpythonSentAgentMessages.size).toBe(0);
+			expect(replToolComponents.size).toBe(0);
+			expect(lateReplSentAgentMessages.size).toBe(0);
 		} finally {
 			resetCapabilitiesCache();
 		}
@@ -378,8 +378,8 @@ describe("InteractiveMode.renderSessionContext", () => {
 			const pendingTools = new Map<string, ToolExecutionComponent>();
 			const fakeThis: any = {
 				pendingTools,
-				ipythonToolComponents: new Map(),
-				lateIpythonSentAgentMessages: new Map(),
+				replToolComponents: new Map(),
+				lateReplSentAgentMessages: new Map(),
 				toolOutputExpanded: false,
 				chatContainer,
 				footer: { invalidate: vi.fn() },
@@ -1149,8 +1149,8 @@ describe("InteractiveMode pending bash components", () => {
 			agentRunFileChanges: new Map(),
 			recapContainer: new Container(),
 			renderRecap: vi.fn(),
-			ipythonToolComponents: new Map(),
-			lateIpythonSentAgentMessages: new Map(),
+			replToolComponents: new Map(),
+			lateReplSentAgentMessages: new Map(),
 			resetPendingToolState: vi.fn(),
 			resetSubagentSummary: vi.fn(),
 			setGoalAnnouncementBaseline: vi.fn(),
@@ -1735,8 +1735,8 @@ describe("InteractiveMode tool event rendering", () => {
 			pendingTools: new Map<string, ToolExecutionComponent>(),
 			pendingToolCreations: new Set<string>(),
 			startedToolCalls: new Set<string>(),
-			ipythonToolComponents: new Map(),
-			lateIpythonSentAgentMessages: new Map(),
+			replToolComponents: new Map(),
+			lateReplSentAgentMessages: new Map(),
 			loadToolDefinition: vi.fn(() => definitionPromise),
 			uiServices: {
 				settingsManager: {
@@ -1753,7 +1753,7 @@ describe("InteractiveMode tool event rendering", () => {
 				{
 					type: "toolCall",
 					id: "tool-1",
-					name: "ipython",
+					name: "repl",
 					arguments: { code: "print(1)" },
 				},
 			],
@@ -3076,7 +3076,12 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 
 			model = primeModel;
 			const userSubmission = fakeThis.defaultEditor.onSubmit?.("user");
-			await vi.advanceTimersByTimeAsync(1_250);
+			// Drive the 250ms retry cadence until every startup prompt has been
+			// attempted and the user submission is admitted behind them. Budgeting an
+			// exact advance window would be timer-engine specific: the fake clock is
+			// stepped in slices, so a timer due mid-slice fires at the slice edge and
+			// the next delay is scheduled from there, compounding a few ms per hop.
+			await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(8), { timeout: 5_000 });
 			await userSubmission;
 
 			const steer = {
@@ -4238,7 +4243,7 @@ describe("InteractiveMode.setToolsExpanded", () => {
 
 	test("toggles agent messages separately from tools", () => {
 		const toolChild = { setExpanded: vi.fn() };
-		const ipythonChild = { setExpanded: vi.fn(), setAgentMessagesExpanded: vi.fn(), setEditDiffsExpanded: vi.fn() };
+		const replChild = { setExpanded: vi.fn(), setAgentMessagesExpanded: vi.fn(), setEditDiffsExpanded: vi.fn() };
 		const messageChild = new AgentMessageComponent({
 			role: "custom",
 			customType: "agent_message",
@@ -4248,7 +4253,7 @@ describe("InteractiveMode.setToolsExpanded", () => {
 			timestamp: 123,
 		} as any);
 		const messageSetExpanded = vi.spyOn(messageChild, "setExpanded");
-		const fakeThis = createExpansionFakeThis([toolChild, ipythonChild, messageChild]);
+		const fakeThis = createExpansionFakeThis([toolChild, replChild, messageChild]);
 
 		fakeThis.toggleAgentMessageExpansion();
 
@@ -4256,15 +4261,15 @@ describe("InteractiveMode.setToolsExpanded", () => {
 		expect(fakeThis.toolOutputExpanded).toBe(false);
 		expect(messageSetExpanded).toHaveBeenCalledWith(true);
 		expect(toolChild.setExpanded).toHaveBeenCalledWith(false);
-		expect(ipythonChild.setExpanded).toHaveBeenCalledWith(false);
-		expect(ipythonChild.setAgentMessagesExpanded).toHaveBeenCalledWith(true);
+		expect(replChild.setExpanded).toHaveBeenCalledWith(false);
+		expect(replChild.setAgentMessagesExpanded).toHaveBeenCalledWith(true);
 
 		fakeThis.setToolsExpanded(true);
 
 		expect(toolChild.setExpanded).toHaveBeenCalledWith(true);
 		expect(messageSetExpanded).toHaveBeenLastCalledWith(true);
-		expect(ipythonChild.setExpanded).toHaveBeenCalledWith(true);
-		expect(ipythonChild.setAgentMessagesExpanded).toHaveBeenLastCalledWith(true);
+		expect(replChild.setExpanded).toHaveBeenCalledWith(true);
+		expect(replChild.setAgentMessagesExpanded).toHaveBeenLastCalledWith(true);
 		expect(fakeThis.agentMessagesExpanded).toBe(true);
 	});
 

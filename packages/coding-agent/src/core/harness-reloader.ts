@@ -52,6 +52,18 @@ export const HARNESS_MODULE_MANIFEST: ReadonlyArray<HarnessModuleSpec> = [
 	{ id: "rlm-max-depth", file: "rlm-max-depth.ts", wired: true },
 ];
 
+/**
+ * jiti options that make the reload actually re-read from disk.
+ *
+ * `tryNative` defaults to ON under Bun, which routes the import to Bun's native
+ * ESM registry — that registry caches by URL for the life of the process, so
+ * `moduleCache: false` alone would hand back the code loaded at process start
+ * and the reload would silently be a no-op. Forcing jiti's own loader restores
+ * the hot-swap property. Exported so the test can assert it on this exact
+ * config instead of a hand-rolled one.
+ */
+export const HARNESS_JITI_OPTIONS = { moduleCache: false, tryNative: false } as const;
+
 export interface HarnessReloadResult {
 	id: string;
 	wired: boolean;
@@ -88,7 +100,7 @@ function resolveHarnessSourcePath(baseDir: string, spec: HarnessModuleSpec): str
 export async function reloadHarnessModules(): Promise<HarnessReloadSummary> {
 	const { createJiti } = await import("jiti/static");
 	const baseDir = dirname(fileURLToPath(import.meta.url));
-	const jiti = createJiti(import.meta.url, { moduleCache: false });
+	const jiti = createJiti(import.meta.url, HARNESS_JITI_OPTIONS);
 
 	const results: HarnessReloadResult[] = [];
 	for (const spec of HARNESS_MODULE_MANIFEST) {

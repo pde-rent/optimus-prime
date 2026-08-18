@@ -4,7 +4,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-// Keep in sync with DIFF_DISPLAY_MIME in src/core/tools/kernel-types.ts.
+// Keep in sync with DIFF_DISPLAY_MIME in src/core/tools/repl-types.ts.
 const DIFF_DISPLAY_MIME = "application/vnd.prime-agent.diff+json";
 
 /** Expand a leading `~` (or `~user`, which only resolves for the current user). */
