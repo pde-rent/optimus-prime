@@ -28,14 +28,10 @@ export async function runCli(): Promise<void> {
 			// Boot a cold daemon concurrently with this process's heavy imports.
 			maybeStartDaemonEarly(process.argv.slice(2));
 		}
-		const [{ EnvHttpProxyAgent, setGlobalDispatcher }, { main }] = await Promise.all([
-			import("undici"),
-			import("./main.js"),
-		]);
-
-		// undici's 300s body/headers timeouts abort long local-LLM SSE stalls; provider
-		// SDKs enforce their own deadlines via retry.provider.timeoutMs.
-		setGlobalDispatcher(new EnvHttpProxyAgent({ bodyTimeout: 0, headersTimeout: 0 }));
+		// Bun's fetch honours HTTP_PROXY/HTTPS_PROXY/NO_PROXY natively (verified) and imposes no
+		// body or headers timeout, so the undici dispatcher this used to install is unnecessary:
+		// it existed to undo Node's 300s timeouts, which would abort long local-LLM SSE stalls.
+		const { main } = await import("./main.js");
 
 		try {
 			await main(process.argv.slice(2));
