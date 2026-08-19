@@ -6,7 +6,9 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-const actualEarendilWorksPiAi = await import("@earendil-works/pi-ai");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualEarendilWorksPiAi = { ...(await import("@earendil-works/pi-ai")) };
 vi.mock("@earendil-works/pi-ai", () => {
 	const actual = actualEarendilWorksPiAi;
 	return {

@@ -10,7 +10,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"clean": "shx rm -rf dist",
+		"clean": "rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "bun test --preload ../../scripts/test-preload.ts --isolate test/",
@@ -35,10 +35,9 @@
 		"directory": "packages/agent"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"bun": ">=1.4.0"
 	},
 	"devDependencies": {
-		"@types/node": "^24.3.0",
-		"typescript": "^7.0.2"
+		"@types/node": "^24.3.0"
 	}
 }

@@ -121,7 +121,9 @@ const spawnMock = vi.hoisted(() => {
 	};
 });
 
-const actualNodeChildProcess = await import("node:child_process");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualNodeChildProcess = { ...(await import("node:child_process")) };
 vi.mock("node:child_process", () => {
 	const original = actualNodeChildProcess as Record<string, unknown>;
 	return { ...original, spawn: spawnMock.mockSpawn as never };
@@ -133,7 +135,9 @@ describe("daemon command", () => {
 	let consoleErrorMessages: unknown[];
 
 	beforeEach(() => {
-		process.exitCode = undefined;
+		// Bun ignores `process.exitCode = undefined` (Node clears it), so resetting
+		// with undefined is a no-op and a nonzero code leaks into later tests.
+		process.exitCode = 0;
 		daemonClientMock.instances.length = 0;
 		daemonClientMock.behavior.promptSucceeds = false;
 		daemonClientMock.behavior.emitStaleAgentEndOnAttach = false;
@@ -150,7 +154,7 @@ describe("daemon command", () => {
 	});
 
 	afterEach(() => {
-		process.exitCode = undefined;
+		process.exitCode = 0;
 		vi.restoreAllMocks();
 	});
 

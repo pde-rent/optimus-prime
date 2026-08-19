@@ -20,7 +20,9 @@ const workerLaunchTestState = vi.hoisted(() => ({
 	spawned: [] as Array<{ child: ChildProcess; args: readonly string[] }>,
 }));
 
-const actualNodeChildProcess = await import("node:child_process");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualNodeChildProcess = { ...(await import("node:child_process")) };
 vi.mock("node:child_process", () => {
 	const actual = actualNodeChildProcess as Record<string, unknown> & {
 		spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
@@ -37,7 +39,9 @@ vi.mock("node:child_process", () => {
 	};
 });
 
-const actualSrcCliSubprocessLaunchJs = await import("../src/cli/subprocess-launch.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcCliSubprocessLaunchJs = { ...(await import("../src/cli/subprocess-launch.js")) };
 vi.mock("../src/cli/subprocess-launch.js", () => {
 	const actual = actualSrcCliSubprocessLaunchJs as Record<string, unknown>;
 	return {
@@ -83,7 +87,9 @@ vi.mock("../src/cli/subprocess-launch.js", () => {
 	};
 });
 
-const actualSrcCoreSessionLeaseJs = await import("../src/core/session-lease.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcCoreSessionLeaseJs = { ...(await import("../src/core/session-lease.js")) };
 vi.mock("../src/core/session-lease.js", () => {
 	const actual = actualSrcCoreSessionLeaseJs as Record<string, unknown> & {
 		getProcessStartId(pid: number): string | undefined;

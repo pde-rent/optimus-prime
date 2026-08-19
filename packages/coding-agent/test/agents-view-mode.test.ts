@@ -13,7 +13,9 @@ const modeMocks = vi.hoisted(() => ({
 	clientRequest: vi.fn<() => Promise<unknown>>(),
 }));
 
-const actualSrcConfigJs = await import("../src/config.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcConfigJs = { ...(await import("../src/config.js")) };
 vi.mock("../src/config.js", () => {
 	const actual = actualSrcConfigJs;
 	return { ...actual, appendRotatingLog: vi.fn() };
@@ -34,7 +36,11 @@ vi.mock("../src/modes/agent-connection/daemon-agent-connection.js", () => ({
 	}),
 }));
 
-const actualSrcModesInteractiveInteractiveModeJs = await import("../src/modes/interactive/interactive-mode.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcModesInteractiveInteractiveModeJs = {
+	...(await import("../src/modes/interactive/interactive-mode.js")),
+};
 vi.mock("../src/modes/interactive/interactive-mode.js", () => {
 	const actual = actualSrcModesInteractiveInteractiveModeJs;
 	return {

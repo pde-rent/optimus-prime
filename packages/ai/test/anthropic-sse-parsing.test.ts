@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import type Anthropic from "@anthropic-ai/sdk";
 import { Type } from "typebox";
 import { getModel } from "../src/models.js";
 import { streamAnthropic } from "../src/providers/anthropic.js";
@@ -68,14 +67,19 @@ const minimalAnthropicEvents = [
 	},
 ];
 
-function createFakeAnthropicClient(response: Response): Anthropic {
+/** The shape `streamAnthropic` calls into; the provider owns its own transport. */
+interface FakeAnthropicClient {
+	messages: { create: () => { asResponse: () => Promise<Response> } };
+}
+
+function createFakeAnthropicClient(response: Response): FakeAnthropicClient {
 	return {
 		messages: {
 			create: () => ({
 				asResponse: async () => response,
 			}),
 		},
-	} as unknown as Anthropic;
+	};
 }
 
 function createCacheUsageEvents(cacheCreation: {

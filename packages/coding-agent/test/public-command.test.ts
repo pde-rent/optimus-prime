@@ -49,13 +49,15 @@ describe("public command routing", () => {
 		mocks.psCalls.length = 0;
 		mocks.reapCalls.length = 0;
 		mocks.shutdownCalls.length = 0;
-		process.exitCode = undefined;
+		// Bun ignores `process.exitCode = undefined` (Node clears it), so resetting
+		// with undefined is a no-op and a nonzero code leaks into later tests.
+		process.exitCode = 0;
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
 	afterEach(() => {
-		process.exitCode = undefined;
+		process.exitCode = 0;
 		vi.restoreAllMocks();
 	});
 

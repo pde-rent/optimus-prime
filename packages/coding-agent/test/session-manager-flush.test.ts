@@ -30,7 +30,9 @@ const fsMocks = vi.hoisted(() => ({
 	renameSync: vi.fn<RenameSync>(),
 	writeFileSync: vi.fn<WriteFileSync>(),
 }));
-const actualNodeFs = await import("node:fs");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualNodeFs = { ...(await import("node:fs")) };
 vi.mock("node:fs", () => {
 	const actual = actualNodeFs;
 	fsMocks.actualWriteFileSync = actual.writeFileSync;

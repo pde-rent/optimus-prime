@@ -1,16 +1,3 @@
-import type OpenAI from "openai";
-import type {
-	Tool as OpenAITool,
-	ResponseFunctionCallOutputItemList,
-	ResponseFunctionToolCall,
-	ResponseInput,
-	ResponseInputContent,
-	ResponseInputImage,
-	ResponseInputText,
-	ResponseOutputMessage,
-	ResponseReasoningItem,
-	ResponseStreamEvent,
-} from "openai/resources/responses/responses.js";
 import { calculateCost } from "../models.js";
 import type {
 	Api,
@@ -33,6 +20,19 @@ import { iterateSse } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { classifyStreamFailure, StreamFailureError } from "../utils/stream-failure.js";
+import type {
+	Tool as OpenAITool,
+	ResponseFunctionCallOutputItemList,
+	ResponseFunctionToolCall,
+	ResponseInput,
+	ResponseInputContent,
+	ResponseInputImage,
+	ResponseInputText,
+	ResponseOutputMessage,
+	ResponseReasoningItem,
+	ResponseStatus,
+	ResponseStreamEvent,
+} from "./openai-wire-types.js";
 import { transformMessages } from "./transform-messages.js";
 
 /**
@@ -599,7 +599,7 @@ export async function processResponsesStream<TApi extends Api>(
 	}
 }
 
-function mapStopReason(status: OpenAI.Responses.ResponseStatus | undefined): StopReason {
+function mapStopReason(status: ResponseStatus | undefined): StopReason {
 	if (!status) return "stop";
 	switch (status) {
 		case "completed":

@@ -1,15 +1,3 @@
-import type OpenAI from "openai";
-import type {
-	ChatCompletionAssistantMessageParam,
-	ChatCompletionChunk,
-	ChatCompletionContentPart,
-	ChatCompletionContentPartImage,
-	ChatCompletionContentPartText,
-	ChatCompletionDeveloperMessageParam,
-	ChatCompletionMessageParam,
-	ChatCompletionSystemMessageParam,
-	ChatCompletionToolMessageParam,
-} from "openai/resources/chat/completions.js";
 import { getAnthropicCacheWriteCost, hasStandardAnthropicCachePricing } from "../cache-pricing.js";
 import { getEnvApiKey, getPrimeTeamId } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
@@ -39,6 +27,19 @@ import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { iterateOpenAIStream, openaiDefaultHeaders } from "./openai-responses-shared.js";
+import type {
+	ChatCompletionAssistantMessageParam,
+	ChatCompletionChunk,
+	ChatCompletionContentPart,
+	ChatCompletionContentPartImage,
+	ChatCompletionContentPartText,
+	ChatCompletionCreateParamsStreaming,
+	ChatCompletionDeveloperMessageParam,
+	ChatCompletionMessageParam,
+	ChatCompletionSystemMessageParam,
+	ChatCompletionTool,
+	ChatCompletionToolMessageParam,
+} from "./openai-wire-types.js";
 import { buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -99,7 +100,7 @@ type ChatCompletionTextPartWithCacheControl = ChatCompletionContentPartText & {
 	cache_control?: OpenAICompatCacheControl;
 };
 
-type ChatCompletionToolWithCacheControl = OpenAI.Chat.Completions.ChatCompletionTool & {
+type ChatCompletionToolWithCacheControl = ChatCompletionTool & {
 	cache_control?: OpenAICompatCacheControl;
 };
 
@@ -153,7 +154,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			let params = buildParams(model, context, options, compat, cacheRetention, cacheControl);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
-				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+				params = nextParams as ChatCompletionCreateParamsStreaming;
 			}
 			const response = await requestWithRetry({
 				url,
@@ -521,7 +522,7 @@ function buildParams(
 ) {
 	const messages = convertMessages(model, context, compat);
 
-	const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+	const params: ChatCompletionCreateParamsStreaming = {
 		model: model.id,
 		messages,
 		stream: true,
@@ -641,7 +642,7 @@ function getCompatCacheControl(
 
 function applyAnthropicCacheControl(
 	messages: ChatCompletionMessageParam[],
-	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+	tools: ChatCompletionTool[] | undefined,
 	cacheControl: OpenAICompatCacheControl,
 ): void {
 	addCacheControlToSystemPrompt(messages, cacheControl);
@@ -676,7 +677,7 @@ function addCacheControlToLastConversationMessage(
 }
 
 function addCacheControlToLastTool(
-	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+	tools: ChatCompletionTool[] | undefined,
 	cacheControl: OpenAICompatCacheControl,
 ): void {
 	if (!tools || tools.length === 0) {
@@ -996,10 +997,7 @@ export function convertMessages(
 	return params;
 }
 
-function convertTools(
-	tools: Tool[],
-	compat: ResolvedOpenAICompletionsCompat,
-): OpenAI.Chat.Completions.ChatCompletionTool[] {
+function convertTools(tools: Tool[], compat: ResolvedOpenAICompletionsCompat): ChatCompletionTool[] {
 	return tools.map((tool) => ({
 		type: "function",
 		function: {

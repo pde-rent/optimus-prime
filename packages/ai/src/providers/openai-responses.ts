@@ -1,4 +1,3 @@
-import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "openai/resources/responses/responses.js";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { clampThinkingLevel } from "../models.js";
 import type {
@@ -31,6 +30,7 @@ import {
 	openaiDefaultHeaders,
 	processResponsesStream,
 } from "./openai-responses-shared.js";
+import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
 import { buildBaseOptions } from "./simple-options.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);

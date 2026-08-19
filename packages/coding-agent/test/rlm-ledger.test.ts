@@ -11,7 +11,9 @@ import {
 import { tmpdir } from "node:os";
 
 const linkFailure = vi.hoisted(() => ({ code: undefined as string | undefined }));
-const actualNodeFs = await import("node:fs");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualNodeFs = { ...(await import("node:fs")) };
 vi.mock("node:fs", () => {
 	const actual = actualNodeFs;
 	return {

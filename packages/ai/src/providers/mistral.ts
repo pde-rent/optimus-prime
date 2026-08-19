@@ -1,10 +1,3 @@
-import type {
-	ChatCompletionStreamRequest,
-	ChatCompletionStreamRequestMessage,
-	CompletionEvent,
-	ContentChunk,
-	FunctionTool,
-} from "@mistralai/mistralai/models/components";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
 import type {
@@ -27,6 +20,13 @@ import { iterateSseJson, joinUrl, mergeHeaders, requestWithRetry } from "../util
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { recordStreamFailure, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import type {
+	ChatCompletionStreamRequest,
+	ChatCompletionStreamRequestMessage,
+	CompletionEvent,
+	ContentChunk,
+	FunctionTool,
+} from "./mistral-wire-types.js";
 import { buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 

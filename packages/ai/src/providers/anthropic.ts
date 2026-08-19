@@ -1,12 +1,3 @@
-import type {
-	StopReason as AnthropicStopReason,
-	Tool as AnthropicTool,
-	CacheControlEphemeral,
-	ContentBlockParam,
-	MessageCreateParamsStreaming,
-	MessageParam,
-	RawMessageStreamEvent,
-} from "@anthropic-ai/sdk/resources/messages.js";
 import { getAnthropicCacheWriteCost, hasStandardAnthropicCachePricing } from "../cache-pricing.js";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
@@ -43,6 +34,15 @@ import {
 	streamFailureMessage,
 	truncateRawPayload,
 } from "../utils/stream-failure.js";
+import type {
+	StopReason as AnthropicStopReason,
+	Tool as AnthropicTool,
+	CacheControlEphemeral,
+	ContentBlockParam,
+	MessageCreateParamsStreaming,
+	MessageParam,
+	RawMessageStreamEvent,
+} from "./anthropic-wire-types.js";
 
 import { resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";

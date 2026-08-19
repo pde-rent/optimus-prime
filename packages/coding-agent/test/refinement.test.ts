@@ -10,7 +10,9 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-const actualEarendilWorksPiAi = await import("@earendil-works/pi-ai");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualEarendilWorksPiAi = { ...(await import("@earendil-works/pi-ai")) };
 vi.mock("@earendil-works/pi-ai", () => {
 	const actual = actualEarendilWorksPiAi;
 	return {
@@ -1023,20 +1025,15 @@ describe("harness refinement", () => {
 		);
 
 		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
-		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
-			systemPrompt: expect.stringContaining("The default editable continual harness store is local"),
-		});
-		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
-			systemPrompt: expect.stringContaining("A caller may explicitly request global refinement"),
-		});
-		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
-			systemPrompt: expect.stringContaining("Always use the bare id (no prefix) in edits"),
-		});
-		expect(completeSimpleMock.mock.calls[0][1]).toMatchObject({
-			systemPrompt: expect.stringContaining(
-				"During a local refinement, global entries are read-only context: never propose update or delete edits for them",
-			),
-		});
+		// One read of the live argument: Bun's toMatchObject writes the asymmetric matcher back onto
+		// the received object, so a second stringContaining match would compare against the matcher.
+		const systemPrompt = String(completeSimpleMock.mock.calls[0][1].systemPrompt);
+		expect(systemPrompt).toContain("The default editable continual harness store is local");
+		expect(systemPrompt).toContain("A caller may explicitly request global refinement");
+		expect(systemPrompt).toContain("Always use the bare id (no prefix) in edits");
+		expect(systemPrompt).toContain(
+			"During a local refinement, global entries are read-only context: never propose update or delete edits for them",
+		);
 		// Budget is derived from the model (8192) rather than a fixed literal.
 		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({
 			maxTokens: 8192,

@@ -1,5 +1,5 @@
 import type * as NodeOs from "node:os";
-import type { Tool as OpenAITool, ResponseInput, ResponseStreamEvent } from "openai/resources/responses/responses.js";
+import type { Tool as OpenAITool, ResponseInput, ResponseStreamEvent } from "./openai-wire-types.js";
 
 // NEVER convert to top-level runtime imports - breaks browser/Vite builds
 let _os: typeof NodeOs | null = null;

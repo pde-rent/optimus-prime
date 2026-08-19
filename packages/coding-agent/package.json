@@ -34,12 +34,12 @@
 		"@earendil-works/pi-coding-agent"
 	],
 	"scripts": {
-		"clean": "shx rm -rf dist",
+		"clean": "rm -rf dist",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
-		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js && bun run copy-assets && bun run bundle",
+		"build": "tsgo -p tsconfig.build.json && chmod +x dist/cli.js && bun run copy-assets && bun run bundle",
 		"build:binary": "cd ../tui && bun run build && cd ../ai && bun run build && cd ../agent && bun run build && cd ../coding-agent && bun run build && bun build --compile ./dist/bun/cli.js --outfile dist/pi && bun run copy-binary-assets",
-		"copy-assets": "shx mkdir -p dist/modes/interactive/theme && shx cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && shx mkdir -p dist/modes/interactive/assets && shx cp src/modes/interactive/assets/*.png dist/modes/interactive/assets/ && shx mkdir -p dist/core/export-html/vendor && shx cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && shx cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/ && shx rm -rf dist/skills && shx cp -r skills dist/skills",
-		"copy-binary-assets": "shx cp package.json dist/ && shx cp README.md dist/ && shx cp CHANGELOG.md dist/ && shx mkdir -p dist/theme && shx cp src/modes/interactive/theme/*.json dist/theme/ && shx mkdir -p dist/assets && shx cp src/modes/interactive/assets/*.png dist/assets/ && shx mkdir -p dist/export-html/vendor && shx cp src/core/export-html/template.html dist/export-html/ && shx cp src/core/export-html/vendor/*.js dist/export-html/vendor/ && shx cp -r docs dist/ && shx cp -r examples dist/ && shx cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm dist/ && shx rm -rf dist/skills && shx cp -r skills dist/skills",
+		"copy-assets": "mkdir -p dist/modes/interactive/theme && cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && mkdir -p dist/modes/interactive/assets && cp src/modes/interactive/assets/*.png dist/modes/interactive/assets/ && mkdir -p dist/core/export-html/vendor && cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/ && rm -rf dist/skills && cp -r skills dist/skills",
+		"copy-binary-assets": "cp package.json dist/ && cp README.md dist/ && cp CHANGELOG.md dist/ && mkdir -p dist/theme && cp src/modes/interactive/theme/*.json dist/theme/ && mkdir -p dist/assets && cp src/modes/interactive/assets/*.png dist/assets/ && mkdir -p dist/export-html/vendor && cp src/core/export-html/template.html dist/export-html/ && cp src/core/export-html/vendor/*.js dist/export-html/vendor/ && cp -r docs dist/ && cp -r examples dist/ && cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm dist/ && rm -rf dist/skills && cp -r skills dist/skills",
 		"test": "bun test --preload ../../scripts/test-preload.ts --isolate test/",
 		"test:ci": "bun test --preload ../../scripts/test-preload.ts --isolate --path-ignore-patterns='**/daemon-supervisor-process.test.ts' test/",
 		"test:process": "bun test --preload ../../scripts/test-preload.ts --isolate test/daemon-supervisor-process.test.ts",
@@ -79,9 +79,7 @@
 		"@types/ms": "^2.1.0",
 		"@types/node": "^24.3.0",
 		"@types/proper-lockfile": "^4.1.4",
-		"esbuild": "^0.28.1",
-		"shx": "^0.4.0",
-		"typescript": "^7.0.2"
+		"esbuild": "^0.28.1"
 	},
 	"keywords": [
 		"coding-agent",
@@ -99,6 +97,6 @@
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
-		"bun": ">=1.3.14"
+		"bun": ">=1.4.0"
 	}
 }

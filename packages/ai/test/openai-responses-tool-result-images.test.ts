@@ -2,10 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ResponseFunctionCallOutputItemList } from "openai/resources/responses/responses.js";
 import { Type } from "typebox";
 import type { Api, Context, Model, StreamOptions, Tool, ToolResultMessage } from "../src/index.js";
 import { complete, getModel } from "../src/index.js";
+import type { ResponseFunctionCallOutputItemList } from "../src/providers/openai-wire-types.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
 import { resolveApiKey } from "./oauth.js";
 

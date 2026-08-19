@@ -55,7 +55,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"clean": "shx rm -rf dist",
+		"clean": "rm -rf dist",
 		"generate-models": "bun scripts/generate-models.ts",
 		"build": "tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
@@ -83,17 +83,10 @@
 		"directory": "packages/ai"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"bun": ">=1.4.0"
 	},
 	"devDependencies": {
-		"@anthropic-ai/sdk": "^0.91.1",
-		"@mistralai/mistralai": "^2.2.0",
-		"@types/node": "^24.3.0",
-		"canvas": "^3.2.0",
-		"openai": "6.47.0"
-	},
-	"peerDependencies": {
-		"openai": "6.47.0"
+		"@types/node": "^24.3.0"
 	},
 	"peerDependenciesMeta": {
 		"openai": {

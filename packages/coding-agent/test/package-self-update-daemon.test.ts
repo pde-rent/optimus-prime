@@ -102,7 +102,8 @@ const mockState = vi.hoisted(() => ({
 	createThrowSessionPaths: [] as string[],
 	daemonProbe: { reachable: true, activeSessions: [] } as MockRunningDaemonProbe,
 	daemonProbeAfterShutdown: undefined as MockRunningDaemonProbe | undefined,
-	globalPackageRoot: "",
+	/** What the mocked `bun pm bin -g` prints: the global bin dir, not node_modules. */
+	globalBinDir: "",
 	hello: { protocol: { version: 0 } } as {
 		protocol: { version: number };
 		schemaId?: string;
@@ -152,7 +153,11 @@ function useFixedOwnerHello(): void {
 	};
 }
 
+// Bun routes a "child_process" mock to "node:child_process" importers too, so the factory has to
+// carry the full surface — src/core/session-lease.ts imports execFileSync from the node: specifier.
+const actualNodeChildProcess = { ...(await import("node:child_process")) };
 vi.mock("child_process", () => ({
+	...actualNodeChildProcess,
 	spawn: vi.fn((command: string, args: string[]) => {
 		mockState.calls.push(`spawn:${command} ${args.join(" ")}`);
 		const exitCode = mockState.spawnExitCodes.shift() ?? 0;
@@ -170,12 +175,14 @@ vi.mock("child_process", () => ({
 	}),
 	spawnSync: vi.fn(() => ({
 		status: 0,
-		stdout: `${mockState.globalPackageRoot}\n`,
+		stdout: `${mockState.globalBinDir}\n`,
 		stderr: "",
 	})),
 }));
 
-const actualSrcCliDaemonUpdateRestartJs = await import("../src/cli/daemon-update-restart.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcCliDaemonUpdateRestartJs = { ...(await import("../src/cli/daemon-update-restart.js")) };
 vi.mock("../src/cli/daemon-update-restart.js", () => {
 	const original = actualSrcCliDaemonUpdateRestartJs;
 	return {
@@ -196,7 +203,9 @@ vi.mock("../src/cli/daemon-update-restart.js", () => {
 	};
 });
 
-const actualSrcModesDaemonDaemonSocketJs = await import("../src/modes/daemon/daemon-socket.js");
+// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualSrcModesDaemonDaemonSocketJs = { ...(await import("../src/modes/daemon/daemon-socket.js")) };
 vi.mock("../src/modes/daemon/daemon-socket.js", () => ({
 	...actualSrcModesDaemonDaemonSocketJs,
 	defaultDaemonSocketPath: () => mockState.socketPath,
@@ -471,8 +480,9 @@ describe("self-update daemon restart", () => {
 		tempDir = join(tmpdir(), `pi-self-update-daemon-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		agentDir = join(tempDir, "agent");
 		projectDir = join(tempDir, "project");
-		packageDir = join(tempDir, "global-prefix", "lib", "node_modules", PACKAGE_NAME);
-		mockState.globalPackageRoot = join(tempDir, "global-prefix", "lib", "node_modules");
+		const bunPrefix = join(tempDir, "bun-global");
+		packageDir = join(bunPrefix, "install", "global", "node_modules", PACKAGE_NAME);
+		mockState.globalBinDir = join(bunPrefix, "bin");
 		mockState.hello = { protocol: { version: DAEMON_PROTOCOL_VERSION }, schemaId: DAEMON_SCHEMA_ID };
 		mockState.helloCount = 0;
 		mockState.lastCoordinatorStatus = undefined;
@@ -510,8 +520,10 @@ describe("self-update daemon restart", () => {
 		originalPiPackageDir = process.env.PI_PACKAGE_DIR;
 		originalCwd = process.cwd();
 		originalExecPath = process.execPath;
-		originalExitCode = process.exitCode;
-		process.exitCode = undefined;
+		// Bun ignores `process.exitCode = undefined` (unlike Node), so the reset has
+		// to use 0 or one failing command leaks its exit code into every later test.
+		originalExitCode = process.exitCode ?? 0;
+		process.exitCode = 0;
 		process.env[ENV_AGENT_DIR] = agentDir;
 		process.env.PI_PACKAGE_DIR = packageDir;
 		process.chdir(projectDir);
@@ -519,7 +531,6 @@ describe("self-update daemon restart", () => {
 			value: join(packageDir, "dist", "cli.js"),
 			configurable: true,
 		});
-		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ npmCommand: ["npm"] }, null, 2));
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({ version: "999.0.0" })),
@@ -529,7 +540,7 @@ describe("self-update daemon restart", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		process.chdir(originalCwd);
-		process.exitCode = originalExitCode;
+		process.exitCode = originalExitCode ?? 0;
 		if (originalAgentDir === undefined) {
 			delete process.env[ENV_AGENT_DIR];
 		} else {
@@ -575,7 +586,7 @@ describe("self-update daemon restart", () => {
 		await expect(handlePackageCommand(["update", "--self"])).resolves.toBe(true);
 
 		expect(process.exitCode).toBe(SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE);
-		expect(mockState.calls.some((call) => call.startsWith("spawn:npm "))).toBe(false);
+		expect(mockState.calls.some((call) => call.startsWith("spawn:bun "))).toBe(false);
 	});
 
 	it("does not use the no-change sentinel when interactive self-update is cancelled", async () => {
@@ -598,7 +609,7 @@ describe("self-update daemon restart", () => {
 			await expect(handlePackageCommand(["update", "--self"])).resolves.toBe(true);
 
 			expect(process.exitCode).toBe(1);
-			expect(mockState.calls.some((call) => call.startsWith("spawn:npm "))).toBe(false);
+			expect(mockState.calls.some((call) => call.startsWith("spawn:bun "))).toBe(false);
 		} finally {
 			errorSpy.mockRestore();
 		}
@@ -629,7 +640,7 @@ describe("self-update daemon restart", () => {
 		await expect(handlePackageCommand(["update", "--self", "--daemon-socket", customSocketPath])).resolves.toBe(true);
 
 		expect(mockState.probeSocketPaths).toEqual([customSocketPath]);
-		expect(mockState.calls.some((call) => call.startsWith("spawn:npm "))).toBe(true);
+		expect(mockState.calls.some((call) => call.startsWith("spawn:bun "))).toBe(true);
 		expect(mockState.calls.some((call) => call.startsWith("launch-coordinator:"))).toBe(false);
 	});
 
@@ -884,8 +895,8 @@ describe("self-update daemon restart", () => {
 		try {
 			await expect(performUpdateAndRunCoordinator()).resolves.toBeUndefined();
 
-			expect(process.exitCode).toBeUndefined();
-			const spawnIndex = mockState.calls.findIndex((call) => call.startsWith("spawn:npm "));
+			expect(process.exitCode).toBe(0);
+			const spawnIndex = mockState.calls.findIndex((call) => call.startsWith("spawn:bun "));
 			const launchIndex = mockState.calls.indexOf(`launch-coordinator:${mockState.socketPath}`);
 			const fenceIndex = mockState.calls.indexOf("persist-daemon-startup-fence");
 			const prepareIndex = mockState.calls.indexOf("daemon-request:prepare_update_restart");
