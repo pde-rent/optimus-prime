@@ -327,6 +327,14 @@ export function buildSubagentGuidance(
 		"# Delegating to sub-agents",
 		"",
 		"Delegate parallel context-heavy research or independent implementation. Do a single known lookup, edit, or command inline instead.",
+		// Fan-out buys width, never depth. Three children on one narrow problem cost roughly
+		// three times the tokens for no speedup, because the work does not divide; the measured
+		// equal-budget comparisons put a cohort behind one agent given the same spend, and a
+		// separate critic behind the same model critiquing its own work in context.
+		"Spawn children only when the task splits into independent units that do not share state — separate files, modules, or sources. Never spawn to get more opinions on one problem: another pass with more context beats a cohort on both tokens and wall-clock.",
+		// Brief authoring is serialized in this agent's own token stream, so it is the fan-out
+		// latency bottleneck long before the children are.
+		"Keep each child's brief short and specific. Long briefs are written one token at a time here, so they delay every child that is waiting on one.",
 		// A page read lands in the parent's history and is then re-sent every
 		// remaining turn, so the cost is the size times the turns left, not once.
 		"Delegate a read when the source is large and you need a conclusion rather than the text: a long article, a full build log, a wide search sweep. Have the child report the conclusion with its sources. Read inline when you need the actual bytes, such as a file you are about to edit.",
