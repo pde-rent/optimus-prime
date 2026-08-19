@@ -349,7 +349,7 @@ describe("DefaultPackageManager git update", () => {
 
 			createCommit(remoteDir, "extension.ts", "// v2", "Second commit");
 
-			const projectGitDir = join(tempDir, ".prime", "agent", "git", "github.com", "test", "extension");
+			const projectGitDir = join(tempDir, ".optimus", "agent", "git", "github.com", "test", "extension");
 			expect(existsSync(projectGitDir)).toBe(false);
 
 			await packageManager.update(gitSource);

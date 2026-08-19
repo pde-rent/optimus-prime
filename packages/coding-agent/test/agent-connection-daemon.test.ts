@@ -1149,11 +1149,14 @@ describe("DaemonAgentConnection", () => {
 
 		expect(fakeClient.reconnectCount).toBe(0);
 		expect(closedEvents).toHaveLength(1);
+		// Captured before `toMatchObject`: bun writes the asymmetric matcher into the
+		// received object, so reading `.error` afterwards yields an ExpectStringContaining
+		// rather than the message.
+		const closedError = closedEvents[0]?.type === "closed" ? closedEvents[0].error : undefined;
 		expect(closedEvents[0]).toMatchObject({
 			type: "closed",
 			error: expect.stringContaining("The Optimus Prime daemon shut down while this window was attached."),
 		});
-		const closedError = closedEvents[0]?.type === "closed" ? closedEvents[0].error : undefined;
 		expect(closedError).toContain("Session ID: session-current.");
 		expect(closedError).toContain("Session file: /tmp/session-current.jsonl.");
 		expect(closedError).toContain("Diagnostic log:");

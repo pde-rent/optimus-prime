@@ -106,7 +106,7 @@ Prompt content.`,
 
 		it("should prefer project resources over user on name collisions", async () => {
 			const userPromptsDir = join(agentDir, "prompts");
-			const projectPromptsDir = join(cwd, ".prime", "agent", "prompts");
+			const projectPromptsDir = join(cwd, ".optimus", "agent", "prompts");
 			mkdirSync(userPromptsDir, { recursive: true });
 			mkdirSync(projectPromptsDir, { recursive: true });
 			const userPromptPath = join(userPromptsDir, "commit.md");
@@ -115,7 +115,7 @@ Prompt content.`,
 			writeFileSync(projectPromptPath, "Project prompt");
 
 			const userSkillDir = join(agentDir, "skills", "collision-skill");
-			const projectSkillDir = join(cwd, ".prime", "agent", "skills", "collision-skill");
+			const projectSkillDir = join(cwd, ".optimus", "agent", "skills", "collision-skill");
 			mkdirSync(userSkillDir, { recursive: true });
 			mkdirSync(projectSkillDir, { recursive: true });
 			const userSkillPath = join(userSkillDir, "SKILL.md");
@@ -142,9 +142,9 @@ Project skill`,
 			) as { name: string; vars?: Record<string, string> };
 			baseTheme.name = "collision-theme";
 			const userThemePath = join(agentDir, "themes", "collision.json");
-			const projectThemePath = join(cwd, ".prime", "agent", "themes", "collision.json");
+			const projectThemePath = join(cwd, ".optimus", "agent", "themes", "collision.json");
 			mkdirSync(join(agentDir, "themes"), { recursive: true });
-			mkdirSync(join(cwd, ".prime", "agent", "themes"), { recursive: true });
+			mkdirSync(join(cwd, ".optimus", "agent", "themes"), { recursive: true });
 			writeFileSync(userThemePath, JSON.stringify(baseTheme, null, 2));
 			if (baseTheme.vars) {
 				baseTheme.vars.accent = "#ff00ff";
@@ -178,9 +178,9 @@ Project skill`,
 			);
 
 			mkdirSync(agentDir, { recursive: true });
-			mkdirSync(join(cwd, ".prime", "agent"), { recursive: true });
+			mkdirSync(join(cwd, ".optimus", "agent"), { recursive: true });
 			symlinkSync(sharedExtDir, join(agentDir, "extensions"), "dir");
-			symlinkSync(sharedExtDir, join(cwd, ".prime", "agent", "extensions"), "dir");
+			symlinkSync(sharedExtDir, join(cwd, ".optimus", "agent", "extensions"), "dir");
 
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
@@ -191,12 +191,12 @@ Project skill`,
 
 			// mergePaths processes project paths before user paths, so the project
 			// alias is the canonical survivor.
-			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".prime", "agent", "extensions", "shared.ts"));
+			expect(extensionsResult.extensions[0].path).toBe(join(cwd, ".optimus", "agent", "extensions", "shared.ts"));
 		});
 
 		it("should keep both extensions loaded when command names collide", async () => {
 			const userExtDir = join(agentDir, "extensions");
-			const projectExtDir = join(cwd, ".prime", "agent", "extensions");
+			const projectExtDir = join(cwd, ".optimus", "agent", "extensions");
 			mkdirSync(userExtDir, { recursive: true });
 			mkdirSync(projectExtDir, { recursive: true });
 
@@ -326,7 +326,7 @@ Content`,
 		});
 
 		it("should discover SYSTEM.md from cwd/.pi", async () => {
-			const piDir = join(cwd, ".prime", "agent");
+			const piDir = join(cwd, ".optimus", "agent");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "SYSTEM.md"), "You are a helpful assistant.");
 
@@ -337,7 +337,7 @@ Content`,
 		});
 
 		it("should discover APPEND_SYSTEM.md", async () => {
-			const piDir = join(cwd, ".prime", "agent");
+			const piDir = join(cwd, ".optimus", "agent");
 			mkdirSync(piDir, { recursive: true });
 			writeFileSync(join(piDir, "APPEND_SYSTEM.md"), "Additional instructions.");
 
@@ -549,7 +549,7 @@ Content`,
 		});
 
 		it("should let a project skill override the bundled websearch skill", async () => {
-			const projectSkillDir = join(cwd, ".prime", "agent", "skills", "websearch");
+			const projectSkillDir = join(cwd, ".optimus", "agent", "skills", "websearch");
 			mkdirSync(projectSkillDir, { recursive: true });
 			writeFileSync(
 				join(projectSkillDir, "SKILL.md"),

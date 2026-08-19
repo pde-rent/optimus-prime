@@ -2,7 +2,12 @@
  * System prompt construction and project context loading
  */
 
-import { buildChildAgentDoctrine, buildRlmPrompt, buildSubagentGuidance } from "./prompts/index.js";
+import {
+	buildChildAgentDoctrine,
+	buildRlmPrompt,
+	buildSubagentGuidance,
+	CODE_CHANGING_TOOLS,
+} from "./prompts/index.js";
 import { formatHarnessStateForPrompt, type HarnessState, REFINE_SKILL_NAME } from "./refinement/index.js";
 import { formatSkillsForPrompt, getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 
@@ -34,6 +39,15 @@ export interface BuildSystemPromptOptions {
 	/** Global harness state to inject as compact persistent context. */
 	harnessState?: HarnessState;
 }
+
+/**
+ * A repository's own rules outrank the general guidance above them, and saying so
+ * once here is cheaper and less brittle than hedging every general instruction.
+ * It also gives a project a documented way to switch a default off -- this file's own
+ * AGENTS.md forbids commands the verification guidance would otherwise invite.
+ */
+const PROJECT_CONTEXT_PRECEDENCE =
+	"Project-specific instructions and guidelines. Where these conflict with the general guidance above, these win.\n\n";
 
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
@@ -75,7 +89,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		// Append project context files
 		if (contextFiles.length > 0) {
 			prompt += "\n\n# Project Context\n\n";
-			prompt += "Project-specific instructions and guidelines:\n\n";
+			prompt += PROJECT_CONTEXT_PRECEDENCE;
 			for (const { path: filePath, content } of contextFiles) {
 				prompt += `## ${filePath}\n\n${content}\n\n`;
 			}
@@ -117,7 +131,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		cwd: promptCwd,
 		messagesPath: promptMessagesPath,
 		installedSkills: visibleJsSkillBindings,
-		activeTools: tools.filter((name) => name === "repl" || name === "bash" || name === "edit"),
+		activeTools: tools.filter((name) => CODE_CHANGING_TOOLS.includes(name)),
 		allowRecursion,
 		depth: options.rlmDepth,
 		parentAgent: options.rlmParentAgent,
@@ -147,7 +161,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	// Append project context files
 	if (contextFiles.length > 0) {
 		prompt += "\n\n# Project Context\n\n";
-		prompt += "Project-specific instructions and guidelines:\n\n";
+		prompt += PROJECT_CONTEXT_PRECEDENCE;
 		for (const { path: filePath, content } of contextFiles) {
 			prompt += `## ${filePath}\n\n${content}\n\n`;
 		}

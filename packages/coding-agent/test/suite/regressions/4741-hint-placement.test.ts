@@ -104,8 +104,13 @@ describe("ENG-4741 hint placement", () => {
 			const subagentGraphContainer = new Container();
 			const widgetContainerBelow = new Container();
 			const promptDock = new Container();
+			const chatContainer = new Container();
 			const enterFullscreen = vi.fn();
 			const mode = Object.assign(Object.create(InteractiveMode.prototype), {
+				// `applyFullscreen` invalidates the transcript; without it the fake throws before
+				// reaching the assertion. `settingsManager` is a getter over `uiServices`, so it
+				// is supplied there rather than assigned directly.
+				chatContainer,
 				headerContainer,
 				mainViewContainer,
 				widgetContainerAbove,

@@ -483,7 +483,11 @@ describe("ENG-4531 agent message UI", () => {
 		const expanded = render(component);
 		expect(expanded).toContain("to collapse");
 		const expandedLines = expanded.split("\n");
-		expect(expandedLines[1]?.trimEnd()).toMatch(/^ ◆ Agent message received · from Planner \(.*to collapse\)$/);
+		// A collapsible block now carries a chevron; the gutter alignment this test guards is
+		// what follows it.
+		expect(expandedLines[1]?.trimEnd()).toMatch(
+			/^ ▾ ◆ Agent message received · from Planner \(.*to collapse\)$/,
+		);
 		expect(expandedLines.slice(2)).toEqual([
 			" ╰─ Reply to your parent with exactly: hi",
 			"    Then wait for more work.",

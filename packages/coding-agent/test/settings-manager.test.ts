@@ -14,7 +14,7 @@ describe("SettingsManager", () => {
 			rmSync(testDir, { recursive: true });
 		}
 		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(projectDir, ".prime", "agent"), { recursive: true });
+		mkdirSync(join(projectDir, ".optimus", "agent"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -293,7 +293,7 @@ describe("SettingsManager", () => {
 	describe("error tracking", () => {
 		it("should collect and clear load errors via drainErrors", () => {
 			const globalSettingsPath = join(agentDir, "settings.json");
-			const projectSettingsPath = join(projectDir, ".prime", "agent", "settings.json");
+			const projectSettingsPath = join(projectDir, ".optimus", "agent", "settings.json");
 			writeFileSync(globalSettingsPath, "{ invalid global json");
 			writeFileSync(projectSettingsPath, "{ invalid project json");
 
@@ -324,7 +324,7 @@ describe("SettingsManager", () => {
 		});
 
 		it("should report a new project error when saving after the load error was drained", async () => {
-			const settingsPath = join(projectDir, ".prime", "agent", "settings.json");
+			const settingsPath = join(projectDir, ".optimus", "agent", "settings.json");
 			const invalidSettings = "{ invalid project json";
 			writeFileSync(settingsPath, invalidSettings);
 
@@ -343,7 +343,7 @@ describe("SettingsManager", () => {
 
 		it("drains only the requested scope", () => {
 			writeFileSync(join(agentDir, "settings.json"), "{ invalid global json");
-			writeFileSync(join(projectDir, ".prime", "agent", "settings.json"), "{ invalid project json");
+			writeFileSync(join(projectDir, ".optimus", "agent", "settings.json"), "{ invalid project json");
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			expect(manager.drainErrors("global").map((entry) => entry.scope)).toEqual(["global"]);
@@ -356,11 +356,11 @@ describe("SettingsManager", () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
 
-			rmSync(join(projectDir, ".prime", "agent"), { recursive: true });
+			rmSync(join(projectDir, ".optimus", "agent"), { recursive: true });
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			expect(existsSync(join(projectDir, ".prime", "agent"))).toBe(false);
+			expect(existsSync(join(projectDir, ".optimus", "agent"))).toBe(false);
 
 			expect(manager.getTheme()).toBe("dark");
 		});
@@ -369,18 +369,18 @@ describe("SettingsManager", () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
 
-			rmSync(join(projectDir, ".prime", "agent"), { recursive: true });
+			rmSync(join(projectDir, ".optimus", "agent"), { recursive: true });
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 
-			expect(existsSync(join(projectDir, ".prime", "agent"))).toBe(false);
+			expect(existsSync(join(projectDir, ".optimus", "agent"))).toBe(false);
 
 			manager.setProjectPackages([{ source: "npm:test-pkg" }]);
 			await manager.flush();
 
-			expect(existsSync(join(projectDir, ".prime", "agent"))).toBe(true);
+			expect(existsSync(join(projectDir, ".optimus", "agent"))).toBe(true);
 
-			expect(existsSync(join(projectDir, ".prime", "agent", "settings.json"))).toBe(true);
+			expect(existsSync(join(projectDir, ".optimus", "agent", "settings.json"))).toBe(true);
 		});
 	});
 
@@ -433,7 +433,7 @@ describe("SettingsManager", () => {
 		it("should return project sessionDir, overriding global", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ sessionDir: "/global/sessions" }));
 			writeFileSync(
-				join(projectDir, ".prime", "agent", "settings.json"),
+				join(projectDir, ".optimus", "agent", "settings.json"),
 				JSON.stringify({ sessionDir: "./sessions" }),
 			);
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -465,7 +465,7 @@ describe("SettingsManager", () => {
 				}),
 			);
 			writeFileSync(
-				join(projectDir, ".prime", "agent", "settings.json"),
+				join(projectDir, ".optimus", "agent", "settings.json"),
 				JSON.stringify({
 					mcpServers: {
 						shared: { type: "http", url: "https://project.shared/mcp" },
@@ -491,7 +491,7 @@ describe("SettingsManager", () => {
 		it("reads and writes the global daemon policy without project overrides", async () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ idleEvictionMinutes: 60 }));
 			writeFileSync(
-				join(projectDir, ".prime", "agent", "settings.json"),
+				join(projectDir, ".optimus", "agent", "settings.json"),
 				JSON.stringify({ idleEvictionMinutes: 30 }),
 			);
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -510,7 +510,7 @@ describe("SettingsManager", () => {
 				JSON.stringify({ telemetry: { enabled: false, noticeShown: false } }),
 			);
 			writeFileSync(
-				join(projectDir, ".prime", "agent", "settings.json"),
+				join(projectDir, ".optimus", "agent", "settings.json"),
 				JSON.stringify({ telemetry: { enabled: true, noticeShown: true } }),
 			);
 
@@ -523,7 +523,7 @@ describe("SettingsManager", () => {
 		it("allows project settings to further disable globally enabled telemetry", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ telemetry: { enabled: true } }));
 			writeFileSync(
-				join(projectDir, ".prime", "agent", "settings.json"),
+				join(projectDir, ".optimus", "agent", "settings.json"),
 				JSON.stringify({ telemetry: { enabled: false } }),
 			);
 

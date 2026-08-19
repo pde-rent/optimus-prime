@@ -135,7 +135,7 @@ Content`,
 		});
 
 		it("should resolve project paths relative to .pi", async () => {
-			const extDir = join(tempDir, ".prime", "agent", "extensions");
+			const extDir = join(tempDir, ".optimus", "agent", "extensions");
 			mkdirSync(extDir, { recursive: true });
 			const extPath = join(extDir, "project-ext.ts");
 			writeFileSync(extPath, "export default function() {}");
@@ -187,15 +187,15 @@ Content`,
 				writeFileSync(join(sharedThemesDir, "shared.json"), JSON.stringify({ name: "shared-theme" }));
 
 				mkdirSync(join(agentDir), { recursive: true });
-				mkdirSync(join(tempDir, ".prime", "agent"), { recursive: true });
+				mkdirSync(join(tempDir, ".optimus", "agent"), { recursive: true });
 				symlinkSync(sharedExtensionsDir, join(agentDir, "extensions"), "dir");
 				symlinkSync(sharedSkillsDir, join(agentDir, "skills"), "dir");
 				symlinkSync(sharedPromptsDir, join(agentDir, "prompts"), "dir");
 				symlinkSync(sharedThemesDir, join(agentDir, "themes"), "dir");
-				symlinkSync(sharedExtensionsDir, join(tempDir, ".prime", "agent", "extensions"), "dir");
-				symlinkSync(sharedSkillsDir, join(tempDir, ".prime", "agent", "skills"), "dir");
-				symlinkSync(sharedPromptsDir, join(tempDir, ".prime", "agent", "prompts"), "dir");
-				symlinkSync(sharedThemesDir, join(tempDir, ".prime", "agent", "themes"), "dir");
+				symlinkSync(sharedExtensionsDir, join(tempDir, ".optimus", "agent", "extensions"), "dir");
+				symlinkSync(sharedSkillsDir, join(tempDir, ".optimus", "agent", "skills"), "dir");
+				symlinkSync(sharedPromptsDir, join(tempDir, ".optimus", "agent", "prompts"), "dir");
+				symlinkSync(sharedThemesDir, join(tempDir, ".optimus", "agent", "themes"), "dir");
 
 				const result = await packageManager.resolve();
 
@@ -225,7 +225,7 @@ Content`,
 		});
 
 		it("should auto-discover project prompts with overrides", async () => {
-			const promptsDir = join(tempDir, ".prime", "agent", "prompts");
+			const promptsDir = join(tempDir, ".optimus", "agent", "prompts");
 			mkdirSync(promptsDir, { recursive: true });
 			const promptPath = join(promptsDir, "is.md");
 			writeFileSync(promptPath, "Is prompt");
@@ -348,7 +348,7 @@ Content`,
 
 			try {
 				const cwd = join(tempDir, "scratch", "nested");
-				const localAgentDir = join(tempDir, ".prime", "agent");
+				const localAgentDir = join(tempDir, ".optimus", "agent");
 				const localSettingsManager = SettingsManager.inMemory();
 				mkdirSync(cwd, { recursive: true });
 				mkdirSync(localAgentDir, { recursive: true });
@@ -432,7 +432,7 @@ Content`,
 		it("should not apply parent .gitignore to .pi auto-discovery", async () => {
 			writeFileSync(join(tempDir, ".gitignore"), ".optimus/agent\n");
 
-			const skillDir = join(tempDir, ".prime", "agent", "skills", "auto-skill");
+			const skillDir = join(tempDir, ".optimus", "agent", "skills", "auto-skill");
 			mkdirSync(skillDir, { recursive: true });
 			const skillPath = join(skillDir, "SKILL.md");
 			writeFileSync(skillPath, "---\nname: auto-skill\ndescription: Auto\n---\nContent");
@@ -638,7 +638,7 @@ Content`,
 
 		for (const managerCase of managerCases) {
 			describe(managerCase.label, () => {
-				const projectRoot = () => join(tempDir, ".prime", "agent", "npm");
+				const projectRoot = () => join(tempDir, ".optimus", "agent", "npm");
 
 				it("maps global installs and uninstalls", async () => {
 					const manager = makeManager(managerCase.npmCommand);
@@ -818,7 +818,7 @@ Content`,
 
 		it("should update git package dependencies without dev dependencies", async () => {
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".prime", "agent", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".optimus", "agent", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -854,7 +854,7 @@ Content`,
 			});
 
 			const source = "git:github.com/user/repo";
-			const targetDir = join(tempDir, ".prime", "agent", "git", "github.com", "user", "repo");
+			const targetDir = join(tempDir, ".optimus", "agent", "git", "github.com", "user", "repo");
 			mkdirSync(targetDir, { recursive: true });
 			writeFileSync(join(targetDir, "package.json"), JSON.stringify({ name: "repo", version: "1.0.0" }));
 			settingsManager.setProjectPackages([source]);
@@ -1004,7 +1004,7 @@ Content`,
 			expect(added).toBe(true);
 
 			const settings = settingsManager.getProjectSettings();
-			const rel = relative(join(tempDir, ".prime", "agent"), projectPkgDir);
+			const rel = relative(join(tempDir, ".optimus", "agent"), projectPkgDir);
 			const expected = rel.startsWith(".") ? rel : `./${rel}`;
 			expect(settings.packages?.[0]).toBe(expected);
 		});
@@ -1760,7 +1760,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 
 	describe("offline mode and network timeouts", () => {
 		it("should update project npm packages using @latest when newer version is available", async () => {
-			const installedPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -1777,13 +1777,13 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			);
 			expect(runCommandSpy).toHaveBeenCalledWith(
 				"bun",
-				["add", "example@latest", "--cwd", join(tempDir, ".prime", "agent", "npm")],
+				["add", "example@latest", "--cwd", join(tempDir, ".optimus", "agent", "npm")],
 				undefined,
 			);
 		});
 
 		it("should skip project npm update when installed version matches latest", async () => {
-			const installedPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.2.3" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -1807,8 +1807,8 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			const userOldPath = join(agentDir, "node_modules", "user-old");
 			const userCurrentPath = join(agentDir, "node_modules", "user-current");
 			const userUnknownPath = join(agentDir, "node_modules", "user-unknown");
-			const projectOldPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "project-old");
-			const projectCurrentPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "project-current");
+			const projectOldPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "project-old");
+			const projectCurrentPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "project-current");
 			const installPaths = [userOldPath, userCurrentPath, userUnknownPath, projectOldPath, projectCurrentPath];
 			for (const installPath of installPaths) {
 				mkdirSync(installPath, { recursive: true });
@@ -1902,7 +1902,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(runCommandSpy).toHaveBeenNthCalledWith(
 				2,
 				"bun",
-				["add", "project-old@latest", "project-missing@latest", "--cwd", join(tempDir, ".prime", "agent", "npm")],
+				["add", "project-old@latest", "project-missing@latest", "--cwd", join(tempDir, ".optimus", "agent", "npm")],
 				undefined,
 			);
 			expect(updateGitSpy).toHaveBeenCalledTimes(3);
@@ -1955,7 +1955,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should not run npm view during resolve for installed unpinned packages", async () => {
-			const installedPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(join(installedPath, "extensions"), { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			writeFileSync(join(installedPath, "extensions", "index.ts"), "export default function() {};");
@@ -1969,7 +1969,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should reinstall pinned npm packages when installed version does not match", async () => {
-			const installedPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example@2.0.0"]);
@@ -1992,7 +1992,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should report updates for installed unpinned npm packages", async () => {
-			const installedPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(installedPath, { recursive: true });
 			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			settingsManager.setProjectPackages(["npm:example"]);
@@ -2011,7 +2011,7 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 		});
 
 		it("should skip pinned packages when checking for updates", async () => {
-			const installedNpmPath = join(tempDir, ".prime", "agent", "npm", "node_modules", "example");
+			const installedNpmPath = join(tempDir, ".optimus", "agent", "npm", "node_modules", "example");
 			mkdirSync(installedNpmPath, { recursive: true });
 			writeFileSync(join(installedNpmPath, "package.json"), JSON.stringify({ name: "example", version: "1.0.0" }));
 			const parsedGitSource = (packageManager as any).parseSource("git:github.com/example/repo@v1");

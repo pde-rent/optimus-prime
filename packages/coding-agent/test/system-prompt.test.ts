@@ -53,6 +53,47 @@ function harnessEntry(kind: RefinementKind, id: string, title: string, path: str
 }
 
 describe("buildRlmPrompt", () => {
+	const CODE_CRAFT_MARKER = "Before adding code, take the cheapest option";
+	const VERIFICATION_MARKER = "exercise the path you changed and read the diff";
+
+	test("omits code craft and verification without a code-changing tool", () => {
+		for (const activeTools of [[], ["websearch"]]) {
+			const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools, allowRecursion: false });
+			expect(prompt).not.toContain(CODE_CRAFT_MARKER);
+			expect(prompt).not.toContain(VERIFICATION_MARKER);
+		}
+	});
+
+	test("includes code craft for bash-only and edit-only sessions", () => {
+		// Guards the shared CODE_CHANGING_TOOLS set: `repl` is the default, so a
+		// regression here would otherwise stay invisible.
+		for (const activeTools of [["bash"], ["edit"]]) {
+			const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools, allowRecursion: false });
+			expect(prompt).toContain(CODE_CRAFT_MARKER);
+			expect(prompt).toContain(VERIFICATION_MARKER);
+		}
+	});
+
+	test("applies code craft to child agents", () => {
+		// Unlike the progress and output-shape sections, which are root-only: a child
+		// writes code the parent merges.
+		const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools: ["repl"], depth: 1, parentAgent: "root" });
+		expect(prompt).toContain(CODE_CRAFT_MARKER);
+		expect(prompt).toContain(VERIFICATION_MARKER);
+	});
+
+	test("keeps code craft inside the cacheable prefix", () => {
+		const prompt = buildRlmPrompt({
+			cwd: "/repo",
+			messagesPath: "/repo/.pi/sessions/session.jsonl",
+			activeTools: ["repl"],
+			allowRecursion: false,
+		});
+		// Everything before the first per-session line is shared by every sibling agent.
+		expect(prompt.indexOf(CODE_CRAFT_MARKER)).toBeLessThan(prompt.lastIndexOf("Conversation log:"));
+		expect(prompt.indexOf(VERIFICATION_MARKER)).toBeLessThan(prompt.lastIndexOf("Conversation log:"));
+	});
+
 	test("builds the rlm prompt without recursion", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
@@ -84,6 +125,10 @@ describe("buildRlmPrompt", () => {
 				"Keep necessary technical terms, names, commands, code, paths, and exact quoted text unchanged. State uncertainty directly.",
 				"Treat this as clarity guidance, not a claim of formal ASD-STE100 compliance. Preserve a user-requested format, tone, terminology, and necessary precision.",
 				"",
+				"Before adding code, take the cheapest option that fully solves the stated task: reuse what this codebase already has, then the standard library or an installed dependency, then new code. Read the code the task touches and trace the real flow before choosing; the smallest change in the wrong place is a second bug. This is a bar on inventing extra structure, never a licence to under-build what was asked for.\nConsolidate aggressively. When the same logic would live in more than one place, make it one unit -- one function, one module, one class, one table, one test -- and use genericity or polymorphism to collapse near-identical variants into it. Less code is less to read, less to audit, and less to keep true. The limit is comprehension, not line count: a consolidation a peer cannot follow, review, and test is not one.\nAdd no abstraction, dependency, file, or config nobody asked for, and match the idiom of the code you edit. Collapsing duplication you are already touching is in scope; rewriting code the task never reaches is not.\nFix root causes: when a bug sits in a shared function, fix it once there rather than patching the single path the report named. Know the blast radius before you widen it -- changing a shared function, signature, schema, or default changes every caller, so enumerate them first and say what breaks. Prefer the local fix when the shared one would reach code the task never asked you to touch.\nNever trade away input validation at trust boundaries, error handling that prevents data loss, security, or anything explicitly requested. When two options are the same size, take the edge-case-correct one.\nNon-trivial logic leaves one runnable check behind, in whatever form this repository already uses for tests and with no new framework or fixtures added for it. Trivial changes need none.",
+				"",
+				"Before reporting work as done, exercise the path you changed and read the diff you actually produced. A successful build, a clean type check, and your own summary are not evidence that behaviour is correct. When running the real path is destructive or unavailable, state plainly what you did and did not verify. When a check fails unexpectedly, question your observation method once, then trust the failure.",
+				"",
 				"Working directory: /repo",
 				"Recursive agent depth: 0",
 				`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
@@ -106,7 +151,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 				"",
-				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
+				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages).",
 				"",
 				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 				"",
@@ -324,6 +369,31 @@ describe("buildRlmPrompt", () => {
 });
 
 describe("buildSystemPrompt", () => {
+	test("a custom prompt replaces the built-in guidance, code craft included", () => {
+		// Documented contract, not an oversight: customPrompt already drops every other
+		// built-in section, so it drops these two the same way.
+		const prompt = buildSystemPrompt({
+			customPrompt: "You are a narrow tool.",
+			cwd: "/repo",
+			selectedTools: ["repl"],
+		});
+		expect(prompt).not.toContain("Before adding code, take the cheapest option");
+	});
+
+	test("tells the model that project context outranks the general guidance", () => {
+		// The precedence line is how a repository switches a default off -- this repo's
+		// own AGENTS.md forbids commands the verification guidance would otherwise invite.
+		const prompt = buildSystemPrompt({
+			cwd: "/repo",
+			selectedTools: ["repl"],
+			contextFiles: [{ path: "AGENTS.md", content: "Never run the test suite." }],
+		});
+		expect(prompt).toContain("Where these conflict with the general guidance above, these win.");
+		expect(prompt.indexOf("Before adding code, take the cheapest option")).toBeLessThan(
+			prompt.indexOf("Where these conflict with the general guidance above"),
+		);
+	});
+
 	test("injects compact global harness context and refine guidance by default", () => {
 		const harnessState: HarnessState = {
 			schema: 1,

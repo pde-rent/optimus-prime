@@ -55,6 +55,65 @@ const SIMPLIFIED_TECHNICAL_ENGLISH_PROMPT = [
 	"Treat this as clarity guidance, not a claim of formal ASD-STE100 compliance. Preserve a user-requested format, tone, terminology, and necessary precision.",
 ].join("\n");
 
+/**
+ * Code craft, applied whenever the agent can change code.
+ *
+ * Writing code is nearly free for a model, which makes over-building the default
+ * failure mode rather than an occasional one: an abstraction, a dependency and a
+ * layer each cost nothing to emit and are paid for by every later reader. This is
+ * the counterweight.
+ *
+ * The bar is on *unrequested* structure, and only that. Consolidating logic that
+ * already exists is the opposite thing and is encouraged outright: one generic
+ * implementation is less to read, less to audit and less to keep true than several
+ * near-identical ones. What bounds it is whether a peer can follow, review and test
+ * the result -- not a file count, and not a line count.
+ *
+ * Earlier drafts also said "prefer deletion", "fewest files" and "flatten anything
+ * deeper than three layers"; all three were cut. Not because more code is better,
+ * but because each was an instruction to go and restructure code the task never
+ * named, which is a different act from collapsing duplication already in hand.
+ *
+ * The order of preference and the never-traded-away list are adapted from ponytail
+ * (https://github.com/DietrichGebert/ponytail), built in here rather than installed.
+ */
+/**
+ * Tools through which the agent can change code. `system-prompt.ts` filters the
+ * active tool list against this same set, so the fact lives here only.
+ *
+ * Gating on it is close to a formality: `repl` alone qualifies and is the default
+ * tool, so in practice every session pays for the two sections below. That is the
+ * honest trade -- tool presence cannot tell a code task from a research one -- and
+ * it is why the text is kept short rather than why it is kept out.
+ */
+export const CODE_CHANGING_TOOLS: readonly string[] = ["repl", "bash", "edit"];
+
+const CODE_CRAFT_PROMPT = [
+	"Before adding code, take the cheapest option that fully solves the stated task: reuse what this codebase already has, then the standard library or an installed dependency, then new code. Read the code the task touches and trace the real flow before choosing; the smallest change in the wrong place is a second bug. This is a bar on inventing extra structure, never a licence to under-build what was asked for.",
+	"Consolidate aggressively. When the same logic would live in more than one place, make it one unit -- one function, one module, one class, one table, one test -- and use genericity or polymorphism to collapse near-identical variants into it. Less code is less to read, less to audit, and less to keep true. The limit is comprehension, not line count: a consolidation a peer cannot follow, review, and test is not one.",
+	"Add no abstraction, dependency, file, or config nobody asked for, and match the idiom of the code you edit. Collapsing duplication you are already touching is in scope; rewriting code the task never reaches is not.",
+	"Fix root causes: when a bug sits in a shared function, fix it once there rather than patching the single path the report named. Know the blast radius before you widen it -- changing a shared function, signature, schema, or default changes every caller, so enumerate them first and say what breaks. Prefer the local fix when the shared one would reach code the task never asked you to touch.",
+	"Never trade away input validation at trust boundaries, error handling that prevents data loss, security, or anything explicitly requested. When two options are the same size, take the edge-case-correct one.",
+	"Non-trivial logic leaves one runnable check behind, in whatever form this repository already uses for tests and with no new framework or fixtures added for it. Trivial changes need none.",
+].join("\n");
+
+/**
+ * Verification, applied alongside code craft.
+ *
+ * The cheap signals are the misleading ones. A build succeeding, a type check
+ * passing and a summary written by the agent that did the work all correlate with
+ * correctness without establishing it, and each is far easier to obtain than
+ * exercising the path that changed. Naming them is what stops them being treated as
+ * evidence. The destructive-path carve-out is load-bearing: "run the real thing" is
+ * not safe advice when the real thing deploys, trades, or deletes.
+ *
+ * Adapted from pstack's prove-it-works principle
+ * (https://github.com/cursor/plugins/tree/main/pstack).
+ */
+const VERIFICATION_PROMPT = [
+	"Before reporting work as done, exercise the path you changed and read the diff you actually produced. A successful build, a clean type check, and your own summary are not evidence that behaviour is correct. When running the real path is destructive or unavailable, state plainly what you did and did not verify. When a check fails unexpectedly, question your observation method once, then trust the failure.",
+].join("\n");
+
 const REPL_CONTROL_PROMPT = [
 	"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
 	"",
@@ -70,7 +129,7 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 	"",
-	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
+	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages).",
 	"",
 	"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 	"",
@@ -121,6 +180,8 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 	const depth = options.depth ?? 0;
 	const activeTools = options.activeTools ?? [];
 	const hasRepl = options.activeTools === undefined ? true : activeTools.includes("repl");
+	const canChangeCode =
+		options.activeTools === undefined || activeTools.some((tool) => CODE_CHANGING_TOOLS.includes(tool));
 	const parts = [
 		"You are a general purpose agent that uses code to solve tasks.",
 		"You solve tasks by breaking down problems into sub-tasks, writing and executing code, observing results, and iterating one step at a time.",
@@ -133,6 +194,12 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		...(depth === 0 ? [OUTPUT_FORM_PROMPT, ""] : []),
 		SIMPLIFIED_TECHNICAL_ENGLISH_PROMPT,
 		"",
+		// Applied at every depth, unlike the progress and output-shape sections: a child
+		// writes code the parent merges, and a parent can review a child's artifacts but
+		// not its reasoning. Both constants are literal, so they sit inside the shared
+		// cacheable prefix ahead of the first per-session line and a wide fan-out pays
+		// one cache write rather than one per child.
+		...(canChangeCode ? [CODE_CRAFT_PROMPT, "", VERIFICATION_PROMPT, ""] : []),
 		`Working directory: ${cwd}`,
 		`Recursive agent depth: ${depth}`,
 		// One capability per line. Joined with commas these ran together into a single paragraph

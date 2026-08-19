@@ -403,7 +403,8 @@ export async function showDeprecationWarnings(warnings: string[]): Promise<void>
 }
 
 /** Config directory used before the app was renamed from optimus to optimus. */
-const RENAMED_CONFIG_DIR_NAME = ".optimus/agent";
+// Literal on purpose: this is the *old* directory, so it must not track the app name.
+const RENAMED_CONFIG_DIR_NAME = ".prime/agent";
 
 /**
  * Move the pre-rename config directory to the current one.

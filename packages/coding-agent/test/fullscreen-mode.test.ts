@@ -15,7 +15,7 @@ describe("fullscreen mode settings", () => {
 			rmSync(testDir, { recursive: true });
 		}
 		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(projectDir, ".prime", "agent"), { recursive: true });
+		mkdirSync(join(projectDir, ".optimus", "agent"), { recursive: true });
 		savedEnv = process.env.PI_FULLSCREEN;
 		savedTermProgram = process.env.TERM_PROGRAM;
 		delete process.env.PI_FULLSCREEN;

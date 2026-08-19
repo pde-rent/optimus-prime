@@ -293,9 +293,33 @@ describe("extensions discovery", () => {
 	});
 
 	it("resolves dependencies from extension's own node_modules", async () => {
-		const extPath = path.resolve(__dirname, "../examples/extensions/with-deps");
+		// The fixture is built here rather than committed: it needs a node_modules directory,
+		// and the example workspaces that used to provide one were removed along with their
+		// dependencies. This keeps the behaviour under test without shipping an install.
+		const extDir = path.join(tempDir, "with-deps");
+		const depDir = path.join(extDir, "node_modules", "duration-lib");
+		fs.mkdirSync(depDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(depDir, "package.json"),
+			JSON.stringify({ name: "duration-lib", version: "1.0.0", main: "index.js", type: "module" }),
+		);
+		fs.writeFileSync(path.join(depDir, "index.js"), "export const parse = (text) => Number.parseInt(text, 10);\n");
+		fs.writeFileSync(
+			path.join(extDir, "package.json"),
+			JSON.stringify({ name: "with-deps", version: "1.0.0", type: "module" }),
+		);
+		fs.writeFileSync(
+			path.join(extDir, "index.ts"),
+			[
+				'import { parse } from "duration-lib";',
+				"export default function (pi) {",
+				'	pi.registerTool({ name: "parse_duration", description: "parse", parameters: {}, execute: async () => String(parse("5")) });',
+				"}",
+				"",
+			].join("\n"),
+		);
 
-		const result = await discoverAndLoadExtensions([extPath], tempDir, tempDir);
+		const result = await discoverAndLoadExtensions([extDir], tempDir, tempDir);
 
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);

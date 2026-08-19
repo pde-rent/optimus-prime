@@ -9,6 +9,9 @@
 - Removed a system prompt paragraph referring to an async `bash()` kernel helper and managed jobs that do not exist in the runtime.
 - Changed RLM guidance to orchestrate independent workers in parallel, use available async shell helpers safely, end the turn instead of sleeping, polling, or blocking on long awaits, provide proactive outcome-focused progress updates from root agents, and use simplified technical English for user-facing prose.
 - Fixed new top-level daemon sessions inheriting an RLM child depth from the supervisor process.
+- Added built-in code craft and verification guidance to the default system prompt: a reuse-first order of preference before adding code, aggressive consolidation of duplicated logic into one generic unit bounded by whether a peer can review and test it, a blast-radius check before widening a shared change, a list of things never traded away, and proof against the real path rather than a clean build or a self-report.
+- Added an explicit precedence line to the project context block, so `AGENTS.md` and `CLAUDE.md` rules now state that they outrank the general guidance above them.
+- Removed a duplicated dependency-preference sentence from the REPL guidance, now covered once by the code craft section.
 
 ## [0.7.3] - 2026-08-17
 

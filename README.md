@@ -197,3 +197,20 @@ This project stands on two upstreams and keeps both copyright notices in
   extension system.
 
 Optimus Prime is an independent hard fork. Neither project endorses it, and bugs here are ours.
+
+### Design influences
+
+No code was taken from these. They shaped decisions, and several are credited in the
+source at the point they influenced:
+
+| Project | What it shaped | Where it lives |
+| --- | --- | --- |
+| **[ponytail](https://github.com/DietrichGebert/ponytail)** (Dietrich Gebert) | The reuse-first order of preference before adding code, the list of things never traded away (validation at trust boundaries, error handling against data loss, security), and leaving one runnable check behind for non-trivial logic. | `CODE_CRAFT_PROMPT`, built in rather than installed |
+| **[pstack](https://github.com/cursor/plugins/tree/main/pstack)** (poteto, via cursor/plugins) | Verification against the real thing rather than a proxy — a green build, a clean type check and the agent's own summary are not evidence. Also the blast-radius check before widening a shared change. | `VERIFICATION_PROMPT` |
+| **[Mem0](https://github.com/mem0ai/mem0)** | The baseline the continual harness memory was measured against: extract-and-consolidate, retrieve-similar-before-writing, and scoped recall. Its per-query cost is what motivated keeping retrieval lexical and deterministic here. | `rlm.harness.search_memory`, harness refinement |
+| **[Zep / Graphiti](https://github.com/getzep/graphiti)** | Bi-temporal fact validity and explicit invalidation. Evaluated and deliberately not adopted — recorded as a known gap rather than implemented. | Noted limitation, not shipped |
+| **[Letta / MemGPT](https://github.com/letta-ai/letta)** | Agent-managed memory tiers, where the model curates its own state through tools. | The `rlm.harness` CRUD surface |
+
+Both prompt sections above are always-on defaults rather than plugins, so there is nothing
+to install and nothing that can drift out of sync with the runtime. A repository overrides
+any of it from its own `AGENTS.md` or `CLAUDE.md`, which are declared to win on conflict.

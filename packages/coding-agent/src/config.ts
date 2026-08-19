@@ -443,7 +443,8 @@ export const ENV_LEGACY_SESSION_DIR = `${envPrefix}_CODING_AGENT_SESSION_DIR`;
  * The prefix is derived from the app name, so renaming it silently moved every variable. Both
  * spellings are read, newest first, so an existing shell profile keeps working.
  */
-const RENAMED_ENV_PREFIX = "OPTIMUS";
+// Literal on purpose: this is the *old* prefix, so it must not track the app name.
+const RENAMED_ENV_PREFIX = "PRIME_AGENT";
 export const ENV_AGENT_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_SESSION_DIR`;
 export const ENV_LEGACY_SESSION_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_CODING_AGENT_SESSION_DIR`;

@@ -69,7 +69,7 @@ interface PresetsConfig {
  */
 function loadPresets(cwd: string): PresetsConfig {
 	const globalPath = join(getAgentDir(), "presets.json");
-	const projectPath = join(cwd, ".prime", "agent", "presets.json");
+	const projectPath = join(cwd, ".optimus", "agent", "presets.json");
 
 	let globalPresets: PresetsConfig = {};
 	let projectPresets: PresetsConfig = {};

@@ -146,6 +146,21 @@ REPL state persistence is best effort: the namespace is snapshotted as JSON into
 
 See [Long-Running and Background Agents](long-running-agents.md) for these lifecycle features.
 
+### 5. Code discipline is built in, not installed
+
+The default system prompt carries two always-on sections for any session with a code-changing tool (`repl`, `bash`, or `edit`), at every recursion depth:
+
+- **Code craft** — take the cheapest option that fully solves the task (reuse what the codebase has, then the standard library or an installed dependency, then new code); **consolidate aggressively**, collapsing the same logic into one unit — one function, module, class, table or test — and reaching for genericity or polymorphism to fold near-identical variants together; add no abstraction, dependency, file, or config nobody asked for; fix root causes at the shared function, but enumerate the blast radius before widening a change and prefer the local fix when the shared one reaches untouched code; never trade away input validation at trust boundaries, error handling that prevents data loss, security, or anything explicitly requested; leave one runnable check behind for non-trivial logic, in whatever form the repository already uses.
+
+  Less code is less to read, less to audit, and less to keep true, so consolidation is treated as a positive good rather than a tolerated one. What bounds it is comprehension, not line count: a consolidation a peer cannot follow, review, and test is not a consolidation. The bar on *unrequested* structure is a separate rule and does not argue for duplication — collapsing duplication already in hand is in scope, rewriting code the task never reaches is not.
+- **Verification** — exercise the path you changed and read the diff you produced. A successful build, a clean type check, and the agent's own summary are not evidence that behaviour is correct. Where running the real path is destructive or unavailable, the agent states what it did and did not verify.
+
+This is deliberately a bar on *unrequested* structure, never a licence to under-build. It is not a plugin or a skill: there is nothing to install and nothing that can drift out of sync with the runtime.
+
+Both sections are literal constants placed ahead of the first per-session line, so they sit inside the shared cacheable prefix and a wide subagent fan-out pays one cache write rather than one per child.
+
+To override any of it for a repository, say so in `AGENTS.md` or `CLAUDE.md`: project context is appended after this guidance and is explicitly declared to win on conflict.
+
 ## Host Bridge
 
 JavaScript skills use typed host requests for capabilities whose authoritative state belongs outside the REPL. For example, the `goal`, `agent_message`, and `compact` skills call the host through their skill context (`ctx.hostRequest(type, payload)`, the same channel as `rlm.host_request(type, payload)`); the TypeScript host validates the request and owns the state transition. Harness state is host-owned as well: there is no REPL-side harness object, and `/refine` and the `refine` skill are the interface to it.
