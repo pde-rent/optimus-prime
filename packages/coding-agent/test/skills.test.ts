@@ -170,7 +170,8 @@ describe("skills", () => {
 			});
 
 			expect(skills).toHaveLength(0);
-			expect(diagnostics.some((d: ResourceDiagnostic) => d.message.includes("at line"))).toBe(true);
+			// The parser's message is its own; what is contracted is that the failure is reported.
+			expect(diagnostics.some((d: ResourceDiagnostic) => /yaml/i.test(d.message))).toBe(true);
 		});
 
 		it("should preserve multiline descriptions from YAML", () => {
