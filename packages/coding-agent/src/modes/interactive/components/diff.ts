@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import * as Diff from "diff";
+import * as Diff from "../../../utils/diff.js";
 import { highlightCode, theme } from "../theme/theme.js";
 
 /**
