@@ -863,11 +863,25 @@ export class SettingsManager {
 		this.save();
 	}
 
+	/**
+	 * Telemetry is opt-in in this fork.
+	 *
+	 * Upstream defaults it on and posts to its own analytics endpoint. That is a reasonable
+	 * default for the project that runs the endpoint and the wrong one for a fork: whoever runs
+	 * this build is not whoever runs that server, so consent cannot be assumed on their behalf.
+	 *
+	 * Any scope that says `false` wins, so an opt-out is never overridden by a broader scope;
+	 * otherwise one explicit `true` is enough to enable it. Point
+	 * PRIME_AGENT_TELEMETRY_ENDPOINT at something you control before turning it on.
+	 */
 	getTelemetryEnabled(): boolean {
-		const globalEnabled = this.globalSettings.telemetry?.enabled ?? true;
-		const projectEnabled = this.projectSettings.telemetry?.enabled ?? true;
-		const runtimeEnabled = this.runtimeOverrides.telemetry?.enabled ?? true;
-		return globalEnabled && projectEnabled && runtimeEnabled;
+		const scopes = [
+			this.globalSettings.telemetry?.enabled,
+			this.projectSettings.telemetry?.enabled,
+			this.runtimeOverrides.telemetry?.enabled,
+		];
+		if (scopes.some((value) => value === false)) return false;
+		return scopes.some((value) => value === true);
 	}
 
 	private getOrCreateGlobalTelemetrySettings(): TelemetrySettings {

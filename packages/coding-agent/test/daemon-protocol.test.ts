@@ -16,7 +16,6 @@ import {
 	DAEMON_SCHEMA_REVISION,
 	type DaemonCommand,
 	type DaemonOutbound,
-	getDaemonCommandCompatibilities,
 	isDaemonCommandEnvelope,
 	isDaemonMutatingCommand,
 	salvageDaemonCommandId,
@@ -96,29 +95,6 @@ describe("daemon protocol helpers", () => {
 	it("schema-gates the RLM max depth commands at their introducing revision", () => {
 		expect(DAEMON_COMMAND_COMPATIBILITY.get_rlm_max_depth_status).toEqual({ minProtocol: 7, minSchemaRevision: 11 });
 		expect(DAEMON_COMMAND_COMPATIBILITY.set_rlm_max_depth).toEqual({ minProtocol: 7, minSchemaRevision: 11 });
-	});
-
-	it("schema-gates session commands that carry the telemetry policy", () => {
-		expect(getDaemonCommandCompatibilities({ type: "create", config: { cwd: "/tmp" } })).toEqual([
-			{ minProtocol: 7 },
-		]);
-		expect(
-			getDaemonCommandCompatibilities({ type: "create", config: { cwd: "/tmp", telemetryDisabled: true } }),
-		).toEqual([{ minProtocol: 7, minSchemaRevision: 14 }, { minProtocol: 7 }]);
-		expect(getDaemonCommandCompatibilities({ type: "attach", activeSessionId: "active-1" })).toEqual([
-			{ minProtocol: 7 },
-		]);
-		expect(
-			getDaemonCommandCompatibilities({ type: "attach", activeSessionId: "active-1", telemetryDisabled: true }),
-		).toEqual([{ minProtocol: 7, minSchemaRevision: 14 }, { minProtocol: 7 }]);
-		expect(
-			getDaemonCommandCompatibilities({
-				type: "reattach",
-				activeSessionId: "active-1",
-				targetActiveSessionId: "active-2",
-				telemetryDisabled: true,
-			}),
-		).toEqual([{ minProtocol: 7, minSchemaRevision: 14 }, { minProtocol: 7 }]);
 	});
 
 	it("version- and capability-gates prompt admission cancellation", () => {

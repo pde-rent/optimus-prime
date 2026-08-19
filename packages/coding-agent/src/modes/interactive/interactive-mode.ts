@@ -120,11 +120,6 @@ import {
 	parseSlashCommand,
 	resolveBuiltinSlashCommandName,
 } from "../../core/slash-commands.js";
-import {
-	captureAgentCommandUsed,
-	captureOnboardingCompleted,
-	type TelemetryOnboardingOutcome,
-} from "../../core/telemetry.js";
 import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
 import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
 import { OPTIMUS_LOGO, OPTIMUS_LOGO_META_MAX_ROWS } from "../../themes/optimus-logo.js";
@@ -242,12 +237,7 @@ import type {
 	InteractiveModeLocalToolRendererDefinition,
 	InteractiveModeUiServices,
 } from "./interactive-mode-services.js";
-import {
-	isOnboardingModelReady,
-	type OnboardingStartupState,
-	shouldRunOnboarding,
-	shouldRunPrimeCliOnboardingSplash,
-} from "./onboarding.js";
+import { type OnboardingStartupState, shouldRunOnboarding, shouldRunPrimeCliOnboardingSplash } from "./onboarding.js";
 import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
 import { QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
@@ -1797,32 +1787,11 @@ export class InteractiveMode {
 			return false;
 		}
 
-		const startedAt = Date.now();
 		const showPrimeCliSplash = this.shouldRunPrimeCliOnboardingSplash();
-		let outcome: TelemetryOnboardingOutcome = "aborted";
-		try {
-			this.markOnboardingShown();
-			await this.settingsManager.flush();
-			await this.runOnboardingFlow(showPrimeCliSplash);
-			outcome = isOnboardingModelReady(this.getOnboardingState()) ? "success" : "aborted";
-			return true;
-		} catch (error) {
-			outcome = "error";
-			throw error;
-		} finally {
-			const model = this.getCurrentModel();
-			const authStatus = model ? this.modelRegistry.getProviderAuthStatus(model.provider) : undefined;
-			const storedCredential = model ? this.modelRegistry.authStorage.get(model.provider) : undefined;
-			void captureOnboardingCompleted({
-				agentDir: getAgentDir(),
-				settingsManager: this.settingsManager,
-				durationMs: Date.now() - startedAt,
-				outcome,
-				provider: model?.provider,
-				authSource: authStatus?.source,
-				storedCredentialType: storedCredential?.type,
-			}).catch(() => {});
-		}
+		this.markOnboardingShown();
+		await this.settingsManager.flush();
+		await this.runOnboardingFlow(showPrimeCliSplash);
+		return true;
 	}
 
 	private async showOnboardingModelSelection(splash: OnboardingSplashHandle): Promise<void> {
@@ -4660,11 +4629,6 @@ export class InteractiveMode {
 					return;
 				}
 				if (commandName) {
-					void captureAgentCommandUsed({
-						agentDir: getAgentDir(),
-						settingsManager: this.settingsManager,
-						commandName,
-					}).catch(() => {});
 				}
 
 				if (commandName === "btw") {

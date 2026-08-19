@@ -162,10 +162,4 @@ describe("mergeAgentSessionRuntimeConfig", () => {
 		expect(mergeAgentSessionRuntimeConfig(base, { executionMode: "rpc" }).executionMode).toBe("rpc");
 		expect(mergeAgentSessionRuntimeConfig(base).executionMode).toBe("interactive");
 	});
-
-	it("keeps the daemon telemetry opt-out monotonic across config merges", () => {
-		expect(mergeAgentSessionRuntimeConfig({ telemetryDisabled: true }, {}).telemetryDisabled).toBe(true);
-		expect(mergeAgentSessionRuntimeConfig({}, { telemetryDisabled: true }).telemetryDisabled).toBe(true);
-		expect(mergeAgentSessionRuntimeConfig({}, {}).telemetryDisabled).toBeUndefined();
-	});
 });

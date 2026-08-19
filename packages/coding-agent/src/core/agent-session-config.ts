@@ -36,7 +36,6 @@ export interface AgentSessionRuntimeConfig {
 	 */
 	serializedRefine?: boolean;
 	executionMode?: AgentExecutionMode;
-	telemetryDisabled?: true;
 	/**
 	 * Initial goal to seed when creating a new top-level session (rlmDepth 0).
 	 * Ignored for subagent sessions and when the branch already has a persisted
@@ -82,7 +81,6 @@ export function mergeAgentSessionRuntimeConfig(
 				: undefined,
 		serializedRefine: override.serializedRefine ?? base.serializedRefine,
 		executionMode: override.executionMode ?? base.executionMode,
-		telemetryDisabled: base.telemetryDisabled || override.telemetryDisabled ? true : undefined,
 		initialGoal: override.initialGoal ?? base.initialGoal,
 	};
 }
@@ -101,7 +99,6 @@ function cloneAgentSessionRuntimeConfig(config: AgentSessionRuntimeConfig): Agen
 		extensionFlagValues: config.extensionFlagValues ? { ...config.extensionFlagValues } : undefined,
 		serializedRefine: config.serializedRefine,
 		executionMode: config.executionMode,
-		telemetryDisabled: config.telemetryDisabled,
 		initialGoal: config.initialGoal ? { ...config.initialGoal } : undefined,
 	};
 }
