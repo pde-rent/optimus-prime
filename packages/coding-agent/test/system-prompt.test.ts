@@ -58,7 +58,12 @@ describe("buildRlmPrompt", () => {
 
 	test("omits code craft and verification without a code-changing tool", () => {
 		for (const activeTools of [[], ["websearch"]]) {
-			const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools, allowRecursion: false });
+			const prompt = buildRlmPrompt({
+				cwd: "/repo",
+				messagesPath: "/repo/session.jsonl",
+				activeTools,
+				allowRecursion: false,
+			});
 			expect(prompt).not.toContain(CODE_CRAFT_MARKER);
 			expect(prompt).not.toContain(VERIFICATION_MARKER);
 		}
@@ -68,7 +73,12 @@ describe("buildRlmPrompt", () => {
 		// Guards the shared CODE_CHANGING_TOOLS set: `repl` is the default, so a
 		// regression here would otherwise stay invisible.
 		for (const activeTools of [["bash"], ["edit"]]) {
-			const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools, allowRecursion: false });
+			const prompt = buildRlmPrompt({
+				cwd: "/repo",
+				messagesPath: "/repo/session.jsonl",
+				activeTools,
+				allowRecursion: false,
+			});
 			expect(prompt).toContain(CODE_CRAFT_MARKER);
 			expect(prompt).toContain(VERIFICATION_MARKER);
 		}
@@ -77,7 +87,13 @@ describe("buildRlmPrompt", () => {
 	test("applies code craft to child agents", () => {
 		// Unlike the progress and output-shape sections, which are root-only: a child
 		// writes code the parent merges.
-		const prompt = buildRlmPrompt({ cwd: "/repo", messagesPath: "/repo/session.jsonl", activeTools: ["repl"], depth: 1, parentAgent: "root" });
+		const prompt = buildRlmPrompt({
+			cwd: "/repo",
+			messagesPath: "/repo/session.jsonl",
+			activeTools: ["repl"],
+			depth: 1,
+			parentAgent: "root",
+		});
 		expect(prompt).toContain(CODE_CRAFT_MARKER);
 		expect(prompt).toContain(VERIFICATION_MARKER);
 	});
@@ -354,7 +370,10 @@ describe("buildRlmPrompt", () => {
 		});
 
 		expect(withEdit).toContain('await edit("pkg/file.ts", oldText, newText)');
-		expect(withEdit).toContain("built from inspected file slices");
+		expect(withEdit).toContain("from inspected file slices");
+		// Both entry points are advertised: the string replace and the line-addressed patch.
+		expect(withEdit).toContain('await edit.src("pkg/file.ts")');
+		expect(withEdit).toContain("never shift between hunks in one call");
 
 		const withoutEdit = buildRlmPrompt({
 			cwd: "/repo",

@@ -1,23 +1,60 @@
 ---
 name: edit
-description: Replace an exact, unique string in an existing file with `await edit(path, oldStr, newStr)` (also `edit.run(...)`). Use for targeted single-occurrence edits to files from the REPL instead of rewriting the whole file.
+description: Edit an existing file two ways — `await edit(path, oldStr, newStr)` replaces a unique string, and `await edit.patch(path, tag, hunks)` replaces lines by number against a tag from `await edit.src(path)`. Prefer patch for anything larger than a line or two, and for pure insertions.
 ---
 
 # Edit
 
-Make a targeted edit to an existing file by replacing one exact, unique
-occurrence of a string. `oldStr` must appear exactly once in the file.
+Two entry points, for the two things you know when you want to change a file.
 
-Call directly from a REPL cell:
+## `await edit(path, oldStr, newStr)`
+
+Replace one exact, unique occurrence. Needs no prior read. `oldStr` must appear
+exactly once; widen the snippet if it does not. Best when you know the text but
+not the line, and when the hunk is small.
 
     await edit("pkg/file.ts", oldStr, newStr)
 
-The arguments are positional: `path` (relative to cwd, absolute, or
-`~`-prefixed), then the exact text to find, then its replacement. Build
-`oldStr`/`newStr` from inspected file slices when the text contains backticks or
-`${...}`, so a template literal does not interpolate them. Returns a short
-confirmation; throws if the file is missing, or if `oldStr` is absent or matches
-more than once (widen the snippet to make it unique).
+## `await edit.src(path, from?, to?)` then `await edit.patch(path, tag, hunks)`
 
-`edit.run(path, oldStr, newStr)` is the same function under an explicit name.
-There is no shell entry point: call it from a JS/TS cell, not a `%%bash` cell.
+`edit.src` prints the file with line numbers behind a header:
+
+    [pkg/file.ts#3F38]
+    1:function greet(name) {
+    2:  const msg = 'hi ' + name;
+
+`3F38` is a tag: a short hash of the whole file. Pass it back to `edit.patch`,
+which refuses the edit if the file no longer hashes to it. That is what makes
+line numbers safe — a stale anchor is rejected instead of silently corrupting
+code, and the rejection tells you the current tag and the text now sitting at
+each anchor, so you can usually retry without re-reading.
+
+    const tag = "3F38";
+    await edit.patch("pkg/file.ts", tag, [
+      { at: [2, 3], text: "  console.log(`hi ${name}`);" },  // replace lines 2-3
+      { after: 4, text: "greet('there');" },                  // insert after line 4
+      { at: [9, 9] },                                         // delete line 9
+    ]);
+
+- `{ at: [a, b], text }` replaces original lines `a` through `b`, inclusive.
+- `{ at: [a, b] }` with no text deletes them.
+- `{ after: n, text }` inserts after line `n`; `after: 0` inserts at the head.
+
+Every number indexes the tagged snapshot, so numbers **never shift between hunks
+in the same call** — describe every change against what `edit.src` printed. Hunks
+may not overlap, and the whole call is rejected if any hunk is invalid.
+
+`edit.patch` returns the new tag, so a chain of edits needs one read, not one per
+edit. A range windowed with `from`/`to` still returns the whole-file tag.
+
+## Rules
+
+- Keep ranges tight: name only the lines you are changing. Never widen a range
+  over lines you intend to keep — they would be deleted and retyped.
+- Use `after:` for pure insertion rather than replacing a line with itself plus
+  more, which costs twice the tokens and risks dropping the line you retyped.
+- A patch that changes nothing is an error, not a warning. It means the anchor is
+  wrong, so re-read rather than widening the payload.
+- The tag ignores trailing whitespace, so a formatter run does not invalidate it.
+  Any other change does.
+- There is no shell entry point: call these from a JS/TS cell, not a `%%bash` cell.

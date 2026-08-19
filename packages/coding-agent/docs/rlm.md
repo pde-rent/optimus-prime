@@ -146,7 +146,40 @@ REPL state persistence is best effort: the namespace is snapshotted as JSON into
 
 See [Long-Running and Background Agents](long-running-agents.md) for these lifecycle features.
 
-### 5. Code discipline is built in, not installed
+### 5. Edits are anchored to the file the model actually read
+
+`edit(path, oldStr, newStr)` replaces one unique string and needs no prior read. It
+must quote the old text, though, which is most of its cost on a large hunk, and it
+cannot express a pure insertion without retyping an anchor twice.
+
+`edit.src(path)` prints the file behind a header — `[path#3F38]` followed by `N:text`
+rows — where the tag is a short hash of the whole file. `edit.patch(path, tag, hunks)`
+then edits by line number and refuses the call if the file no longer hashes to that
+tag. That is what makes line numbers safe: a file changed by a formatter, another
+agent, or an earlier edit is rejected instead of silently corrupted, and the rejection
+carries the current tag plus the text now at each anchor, so a retry usually needs no
+re-read.
+
+```js
+const tag = "3F38";                       // from the [path#TAG] header
+await edit.patch("pkg/file.ts", tag, [
+  { at: [2, 3], text: "  console.log(`hi ${name}`);" },  // replace lines 2-3
+  { after: 4, text: "greet('there');" },                  // insert after line 4
+  { at: [9, 9] },                                         // delete line 9
+]);
+```
+
+Every number indexes the tagged snapshot, so numbers never shift between hunks in one
+call. Hunks may not overlap, the whole call is rejected if any hunk is invalid, and a
+patch that produces no change is an error rather than a warning — a no-op means the
+anchor is wrong, and models respond to a silent no-op by widening the payload.
+
+The tag idea is adapted from [oh-my-pi](https://github.com/can1357/oh-my-pi)'s
+hashline. Theirs is a text patch language with a tokenizer, parser and grammar, plus
+registers, moves and tree-sitter block resolution; none of that applies here, because
+a REPL passes arguments rather than a document to parse.
+
+### 6. Code discipline is built in, not installed
 
 The default system prompt carries two always-on sections for any session with a code-changing tool (`repl`, `bash`, or `edit`), at every recursion depth:
 

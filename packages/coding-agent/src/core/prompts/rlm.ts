@@ -236,7 +236,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		}
 		if (hasRepl && installedSkills.includes("edit")) {
 			skillLines.push(
-				'For targeted existing-file edits, prefer the preloaded async `edit` skill: `await edit("pkg/file.ts", oldText, newText)`. Use exact old/new strings, built from inspected file slices when the text contains backticks or template placeholders.',
+				'For targeted existing-file edits, prefer the preloaded async `edit` skill. `await edit("pkg/file.ts", oldText, newText)` replaces one unique string; build the strings from inspected file slices when the text contains backticks or template placeholders. For anything longer than a line or two, and for pure insertions, read with `await edit.src("pkg/file.ts")` -- which prints `[path#TAG]` then `N:text` -- and edit by line with `await edit.patch("pkg/file.ts", TAG, [{ at: [2, 3], text }, { after: 4, text }])`. Numbers index the tagged snapshot and never shift between hunks in one call, the tag is rejected if the file moved underneath it, and `edit.patch` returns the next tag so a chain of edits needs one read.',
 			);
 		}
 	}
