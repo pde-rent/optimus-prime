@@ -44,7 +44,6 @@
 		"test": "bun test --preload ../../scripts/test-preload.ts --isolate test/",
 		"test:ci": "bun test --preload ../../scripts/test-preload.ts --isolate --path-ignore-patterns='**/daemon-supervisor-process.test.ts' test/",
 		"test:process": "bun test --preload ../../scripts/test-preload.ts --isolate test/daemon-supervisor-process.test.ts",
-		"test:process-stress": "PI_TEST_TAGS=process-stress bun test --preload ../../scripts/test-preload.ts --isolate test/daemon-supervisor-process.test.ts",
 		"postinstall": "bun postinstall.cjs",
 		"prepublishOnly": "bun run clean && bun run build",
 		"bundle": "bun scripts/bundle.mjs"
