@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-Do not report security vulnerabilities through public Issues, Discussions, or pull requests.
+Do not report security vulnerabilities through public issues or pull requests.
 
 Report privately through [GitHub security advisories](https://github.com/pde-rent/optimus-prime/security/advisories/new) on this repository.
 
@@ -22,4 +22,4 @@ Maintainers will assess the report, determine its scope, and coordinate remediat
 
 Security fixes are generally prepared against the default branch and released on a schedule chosen by the maintainers. We do not guarantee fixes for older versions.
 
-For ordinary bugs, feature requests, and support questions, use [GitHub Discussions](https://github.com/PrimeIntellect-ai/optimus/discussions).
+For ordinary bugs and feature requests, open an [issue](https://github.com/pde-rent/optimus-prime/issues).

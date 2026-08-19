@@ -1,43 +1,37 @@
-# Contributing to Optimus Prime
+# Contributing
 
-Thanks for your interest in contributing to Optimus Prime! Optimus Prime is developed in public, and we welcome bug reports, feature requests, questions, and other feedback. To keep the project maintainable, public contributions begin in [GitHub Discussions](https://github.com/PrimeIntellect-ai/optimus/discussions).
+Optimus Prime runs on your machine and executes code with your permissions, so changes are
+reviewed with that in mind.
 
-With the influx of agent-generated contributions, we do not review unsolicited pull requests or use public Issues as the initial intake queue. While we are open to contributions by agents, you are responsible for your code and must understand how it interacts with the entire project.
+## Before a pull request
 
-## Start with a Discussion
+Open an [issue](https://github.com/pde-rent/optimus-prime/issues) first for anything beyond a
+small fix, so the approach can be agreed before the work. Include what you are trying to do,
+what you tried, and how to reproduce a bug. Never paste API keys, tokens or private prompts.
 
-Choose the category that best matches what you want to share:
+Security vulnerabilities go through [SECURITY.md](SECURITY.md), not a public issue.
 
-- [General discussion or question](https://github.com/PrimeIntellect-ai/optimus/discussions/categories/general)
-- [Bug report](https://github.com/PrimeIntellect-ai/optimus/discussions/categories/bug-reports)
-- [Feature request](https://github.com/PrimeIntellect-ai/optimus/discussions/categories/feature-requests)
+## The bar
 
-Search existing Discussions before creating a new one. Include enough detail for someone else to understand and reproduce the problem, but do not share API keys, tokens, private prompts, or other sensitive information.
+1. One focused change. No drive-by refactors or dependency bumps.
+2. A new dependency needs a reason that survives the question "why not write it?" — see the
+   supply-chain section of the [README](README.md).
+3. Behavioural changes come with a test.
+4. `bun run check` and the affected suites pass locally. Say in the PR what you ran.
+5. Comments explain constraints the code cannot show, not what the code already says.
 
-For security vulnerabilities, follow [SECURITY.md](SECURITY.md) instead of posting publicly.
+## Setup
 
-## Issues
+```sh
+bun install && bun run build
+bun run check
+```
 
-GitHub Issues track work that maintainers have accepted and intend to investigate or implement. A maintainer may create an Issue from a Discussion when the scope is clear and the work fits the roadmap. An existing Issue does not automatically mean that an external pull request is wanted. Wait for a maintainer to invite implementation before starting substantial work.
+Per-package suites run from the package directory and need the preload:
 
-Issues opened by unapproved contributors are automatically closed and redirected to Discussions. To contribute, share interest in Discussions or corresponding issues, and maintainers can invite implementation for requested work.
+```sh
+cd packages/coding-agent
+bun test --preload ../../scripts/test-preload.ts --isolate test/bun-repl.test.ts
+```
 
-## Pull Requests and Trusted Contributors
-
-Optimus Prime runs on user machines and can execute code with the user's permissions. We therefore limit pull requests to maintainers and trusted contributors who have been explicitly vouched for. Maintainers may vouch for someone after they have consistently demonstrated a useful understanding of the project through Discussions, issue investigation, testing, documentation, or other collaboration. There is no separate application process and no guarantee that participation will result in approval.
-
-Pull requests from unvouched contributors are automatically closed. If you are interested in contributing code, begin with a Discussion and work with the maintainers on the problem first.
-
-## Preparing an Approved Pull Request
-
-If a maintainer has invited a pull request:
-
-1. Keep the change focused on the accepted Issue or Discussion.
-2. Follow the repository's development rules and existing conventions.
-3. Add or update tests for behavioral changes.
-4. Run the relevant checks locally and describe the validation in the pull request.
-5. Avoid unrelated refactors or dependency changes.
-
-Development setup and commands are documented in the [development guide](packages/coding-agent/docs/development.md).
-
-Maintainers may close a pull request that changes scope, cannot be validated safely, or no longer fits the project roadmap.
+More in the [development guide](packages/coding-agent/docs/development.md).

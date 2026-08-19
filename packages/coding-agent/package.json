@@ -86,7 +86,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/PrimeIntellect-ai/optimus.git",
+		"url": "git+https://github.com/pde-rent/optimus-prime.git",
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
