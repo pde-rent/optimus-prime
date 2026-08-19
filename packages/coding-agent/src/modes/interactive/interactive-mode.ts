@@ -217,7 +217,7 @@ import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
 import { FeatureHintDeck } from "./feature-hints.js";
 import { scopeHeartbeatsToSession } from "./heartbeat-scope.js";
-import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionRowColor, playIgnitionSound } from "./ignition.js";
+import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionCellColor, playIgnitionSound } from "./ignition.js";
 import {
 	collectMarkedImages,
 	evictImagesToBudget,
@@ -420,6 +420,9 @@ export interface BrandSplashHeaderOptions {
 	getIgnitionElapsedMs?: () => number | undefined;
 }
 
+/** Blank columns between the art's ink and the metadata text. */
+const META_BLOCK_GUTTER = 1;
+
 export class BrandSplashHeader implements Component {
 	private readonly logoRaw: string[];
 	private readonly logoCanvasWidth: number;
@@ -468,26 +471,49 @@ export class BrandSplashHeader implements Component {
 					? truncatePathMiddle(entry.value, valueWidth)
 					: truncateToWidth(entry.value, valueWidth),
 		}));
-		const width = rows.reduce((max, row) => Math.max(max, labelWidth + visibleWidth(row.value)), visibleWidth(brand));
-		const pad = (text: string) => " ".repeat(Math.max(0, width - visibleWidth(text)));
+		const textWidth = rows.reduce(
+			(max, row) => Math.max(max, labelWidth + visibleWidth(row.value)),
+			visibleWidth(brand),
+		);
+		// One column of the block is blank so the text does not sit flush against the art's ink, and
+		// the block is one row taller than its text so the brand line has clear space above it.
+		const width = textWidth + META_BLOCK_GUTTER;
+		const gutter = " ".repeat(META_BLOCK_GUTTER);
+		const pad = (text: string) => " ".repeat(Math.max(0, width - META_BLOCK_GUTTER - visibleWidth(text)));
 		return {
 			width,
 			lines: [
-				theme.fg("text", brand) + pad(brand),
+				" ".repeat(width),
+				gutter + theme.fg("text", brand) + pad(brand),
 				...rows.map(
-					(row) => theme.fg("dim", row.label) + theme.fg("muted", row.value) + pad(row.label + row.value),
+					(row) => gutter + theme.fg("dim", row.label) + theme.fg("muted", row.value) + pad(row.label + row.value),
 				),
 			],
 		};
 	}
 
-	/** Theme colour normally; the ignition ramp while the scan is running. */
+	/**
+	 * Theme colour normally; the ignition colour on the handful of cells the eyes and their beams
+	 * cover. Painted per cell rather than per row, so the rest of the mark is untouched.
+	 */
 	private paintArt(line: string, row: number): string {
 		const elapsed = this.options.getIgnitionElapsedMs?.();
 		if (elapsed === undefined) return theme.fg("text", line);
-		const color = ignitionRowColor(row, this.logoRaw.length, elapsed);
-		if (!color) return theme.fg("text", line);
-		return `${fgAnsiFor(color, theme.colorMode)}${line}\x1b[39m`;
+		const cells = [...line];
+		let painted = "";
+		let lit = false;
+		for (let col = 0; col < cells.length; col++) {
+			const color = ignitionCellColor(row, col, elapsed);
+			if (!color) {
+				painted += cells[col];
+				continue;
+			}
+			lit = true;
+			painted += `${fgAnsiFor(color, theme.colorMode)}${cells[col]}\x1b[39m`;
+		}
+		// Wrapping an already-coloured string in the theme colour would reset the eyes back to it at
+		// the first escape, so a lit row is emitted as-is and only unlit rows take the theme colour.
+		return lit ? painted : theme.fg("text", line);
 	}
 
 	render(width: number): string[] {

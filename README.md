@@ -230,9 +230,11 @@ exist that the runtime quietly ignores.
 Commands answer to the names other CLIs use for them: `/exit`, `/config`, `/cost`, `/connect`,
 `/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`.
 
-Opening a new session lights the brand mark under a red scan and plays a five-second sting. It
-never gates input — the prompt is live from the first frame and the first keystroke ends it — and
-`"ignition": false` in settings, or `quietStartup`, turns it off.
+Opening a new session blinks the mark's eyes green and plays a five-second sting. It never gates
+input — the prompt is live from the first frame and the first keystroke ends it — and
+`"ignition": false` in settings, or `quietStartup`, turns it off. Playback shells out to whatever
+the platform already has: `afplay` on macOS, PowerShell on Windows, `ffplay`/`mpv`/`gst-play`/`cvlc`
+on Linux. No player, no sound, same startup time.
 
 ## Skills
 
