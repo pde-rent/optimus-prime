@@ -1,48 +1,112 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
+import { ENV_AGENT_DIR } from "../src/config.js";
+import { DaemonClient } from "../src/modes/daemon/daemon-client.js";
 import { RpcClient } from "../src/modes/rpc/rpc-client.js";
+import { FAUX_SCRIPT_ENV, type RpcFauxScriptStep } from "./fixtures/rpc-faux-provider-extension.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const fauxExtensionPath = join(__dirname, "fixtures", "rpc-faux-provider-extension.ts");
 
-describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_TOKEN)("RPC mode", () => {
-	let client: RpcClient;
-	let sessionDir: string;
+interface StartOptions {
+	script?: RpcFauxScriptStep[];
+	settings?: Record<string, unknown>;
+}
 
-	beforeEach(() => {
-		sessionDir = join(tmpdir(), `pi-rpc-test-${Date.now()}`);
+describe("RPC mode", () => {
+	let client: RpcClient | undefined;
+	let sessionDir: string | undefined;
+	let daemonSocket: string | undefined;
+
+	/**
+	 * The RPC client drives a real CLI subprocess, so its provider is scripted
+	 * through the child's environment instead of an in-process faux registration.
+	 * Each client also gets a private daemon socket: RPC mode is daemon-backed,
+	 * and the default socket is shared machine-wide.
+	 */
+	async function startClient({ script = [], settings }: StartOptions = {}): Promise<RpcClient> {
+		const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		sessionDir = join(tmpdir(), `pi-rpc-${runId}`);
+		daemonSocket = join(tmpdir(), `pi-rpc-${runId}.sock`);
+		mkdirSync(sessionDir, { recursive: true });
+		if (settings) {
+			writeFileSync(join(sessionDir, "settings.json"), JSON.stringify(settings));
+		}
 		client = new RpcClient({
 			cliPath: join(__dirname, "..", "dist", "cli.js"),
 			cwd: join(__dirname, ".."),
-			env: { PI_CODING_AGENT_DIR: sessionDir },
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			env: {
+				[ENV_AGENT_DIR]: sessionDir,
+				[FAUX_SCRIPT_ENV]: JSON.stringify(script),
+				PI_SKIP_VERSION_CHECK: "1",
+			},
+			provider: "faux",
+			model: "faux",
+			args: ["--daemon-socket", daemonSocket, "--extension", fauxExtensionPath],
 		});
-	});
+		await client.start();
+		return client;
+	}
+
+	async function stopDaemon(socketPath: string): Promise<void> {
+		const daemon = new DaemonClient(socketPath);
+		try {
+			await daemon.connect(1000);
+			await daemon.request({ type: "shutdown" }, 5000);
+		} catch {
+			// The daemon may already be gone; nothing left to shut down.
+		} finally {
+			daemon.close();
+		}
+		// The shutdown reply precedes process exit; the exiting daemon and its
+		// workers keep writing into the agent dir until the socket is unlinked,
+		// which would recreate the directory the cleanup below removes.
+		for (let attempt = 0; attempt < 100 && existsSync(socketPath); attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		}
+	}
+
+	function readSessionEntries() {
+		const sessionsPath = join(sessionDir!, "sessions");
+		expect(existsSync(sessionsPath)).toBe(true);
+		const sessionFiles = readdirSync(sessionsPath).filter((file) => file.endsWith(".jsonl"));
+		expect(sessionFiles.length).toBe(1);
+		return readFileSync(join(sessionsPath, sessionFiles[0]), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+	}
 
 	afterEach(async () => {
-		await client.stop();
-		if (sessionDir && existsSync(sessionDir)) {
-			rmSync(sessionDir, { recursive: true });
+		await client?.stop();
+		client = undefined;
+		if (daemonSocket) {
+			await stopDaemon(daemonSocket);
+			daemonSocket = undefined;
 		}
+		if (sessionDir && existsSync(sessionDir)) {
+			rmSync(sessionDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+		}
+		sessionDir = undefined;
 	});
 
 	test("should get state", async () => {
-		await client.start();
+		const client = await startClient();
 		const state = await client.getState();
 
 		expect(state.model).toBeDefined();
-		expect(state.model?.provider).toBe("anthropic");
-		expect(state.model?.id).toBe("claude-sonnet-4-5");
+		expect(state.model?.provider).toBe("faux");
+		expect(state.model?.id).toBe("faux");
 		expect(state.isStreaming).toBe(false);
 		expect(state.messageCount).toBe(0);
 	}, 30000);
 
 	test("should save messages to session file", async () => {
-		await client.start();
+		const client = await startClient({ script: ["hello"] });
 
 		const events = await client.promptAndWait("Reply with just the word 'hello'");
 
@@ -52,22 +116,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 		// Wait for file writes
 		await new Promise((resolve) => setTimeout(resolve, 200));
 
-		const sessionsPath = join(sessionDir, "sessions");
-		expect(existsSync(sessionsPath)).toBe(true);
-
-		const sessionDirs = readdirSync(sessionsPath);
-		expect(sessionDirs.length).toBeGreaterThan(0);
-
-		const cwdSessionDir = join(sessionsPath, sessionDirs[0]);
-		const sessionFiles = readdirSync(cwdSessionDir).filter((f) => f.endsWith(".jsonl"));
-		expect(sessionFiles.length).toBe(1);
-
-		const sessionContent = readFileSync(join(cwdSessionDir, sessionFiles[0]), "utf8");
-		const entries = sessionContent
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-
+		const entries = readSessionEntries();
 		expect(entries[0].type).toBe("session");
 
 		const messages = entries.filter((e: { type: string }) => e.type === "message");
@@ -79,34 +128,33 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should handle manual compaction", async () => {
-		await client.start();
+		// The default 20k keepRecentTokens window would leave nothing to
+		// summarize in a two-turn session, so shrink the retained window.
+		const client = await startClient({
+			// Compaction summarizes each turn prefix before the final summary, so
+			// queue the same summary for every summarization call it makes.
+			script: ["Hi there.", "Hello again.", ...Array(6).fill("Summary: the user said hello.")],
+			settings: { compaction: { keepRecentTokens: 1 } },
+		});
 
 		await client.promptAndWait("Say hello");
+		await client.promptAndWait("Say hello again");
 
 		const result = await client.compact();
-		expect(result.summary).toBeDefined();
+		expect(result.summary).toContain("the user said hello");
 		expect(result.tokensBefore).toBeGreaterThan(0);
 
 		// Wait for file writes
 		await new Promise((resolve) => setTimeout(resolve, 200));
 
-		const sessionsPath = join(sessionDir, "sessions");
-		const sessionDirs = readdirSync(sessionsPath);
-		const cwdSessionDir = join(sessionsPath, sessionDirs[0]);
-		const sessionFiles = readdirSync(cwdSessionDir).filter((f) => f.endsWith(".jsonl"));
-		const sessionContent = readFileSync(join(cwdSessionDir, sessionFiles[0]), "utf8");
-		const entries = sessionContent
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-
+		const entries = readSessionEntries();
 		const compactionEntries = entries.filter((e: { type: string }) => e.type === "compaction");
 		expect(compactionEntries.length).toBe(1);
 		expect(compactionEntries[0].summary).toBeDefined();
 	}, 120000);
 
 	test("should execute bash command", async () => {
-		await client.start();
+		const client = await startClient();
 
 		const result = await client.bash("echo hello");
 		expect(result.output.trim()).toBe("hello");
@@ -115,7 +163,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 30000);
 
 	test("should add bash output to context", async () => {
-		await client.start();
+		const client = await startClient({ script: ["Hi."] });
 
 		await client.promptAndWait("Say hi");
 
@@ -125,16 +173,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 		// Wait for file writes
 		await new Promise((resolve) => setTimeout(resolve, 200));
 
-		const sessionsPath = join(sessionDir, "sessions");
-		const sessionDirs = readdirSync(sessionsPath);
-		const cwdSessionDir = join(sessionsPath, sessionDirs[0]);
-		const sessionFiles = readdirSync(cwdSessionDir).filter((f) => f.endsWith(".jsonl"));
-		const sessionContent = readFileSync(join(cwdSessionDir, sessionFiles[0]), "utf8");
-		const entries = sessionContent
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-
+		const entries = readSessionEntries();
 		const bashMessages = entries.filter(
 			(e: { type: string; message?: { role: string } }) =>
 				e.type === "message" && e.message?.role === "bashExecution",
@@ -144,7 +183,10 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should include bash output in LLM context", async () => {
-		await client.start();
+		// The faux provider replies with whatever `unique-<n>` token it finds in
+		// the context it was handed, so the assertion below only passes when the
+		// bash output really reached the model request.
+		const client = await startClient({ script: [{ echoContextMatch: "unique-[0-9]+" }] });
 
 		const uniqueValue = `unique-${Date.now()}`;
 		await client.bash(`echo ${uniqueValue}`);
@@ -165,7 +207,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should set and get thinking level", async () => {
-		await client.start();
+		const client = await startClient();
 
 		await client.setThinkingLevel("high");
 
@@ -174,7 +216,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 30000);
 
 	test("should cycle thinking level", async () => {
-		await client.start();
+		const client = await startClient();
 
 		const initialState = await client.getState();
 		const initialLevel = initialState.thinkingLevel;
@@ -188,10 +230,11 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 30000);
 
 	test("should get available models", async () => {
-		await client.start();
+		const client = await startClient();
 
 		const models = await client.getAvailableModels();
 		expect(models.length).toBeGreaterThan(0);
+		expect(models.some((model) => model.provider === "faux" && model.id === "faux")).toBe(true);
 
 		for (const model of models) {
 			expect(model.provider).toBeDefined();
@@ -202,7 +245,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 30000);
 
 	test("should get session stats", async () => {
-		await client.start();
+		const client = await startClient({ script: ["Hi."] });
 
 		await client.promptAndWait("Hello");
 
@@ -214,7 +257,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should create new session", async () => {
-		await client.start();
+		const client = await startClient({ script: ["Hi."] });
 
 		await client.promptAndWait("Hello");
 
@@ -228,7 +271,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should export to HTML", async () => {
-		await client.start();
+		const client = await startClient({ script: ["Hi."] });
 
 		await client.promptAndWait("Hello");
 
@@ -236,10 +279,11 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 		expect(result.path).toBeDefined();
 		expect(result.path.endsWith(".html")).toBe(true);
 		expect(existsSync(result.path)).toBe(true);
+		rmSync(result.path, { force: true });
 	}, 90000);
 
 	test("should get last assistant text", async () => {
-		await client.start();
+		const client = await startClient({ script: ["test123"] });
 
 		let text = await client.getLastAssistantText();
 		expect(text).toBeUndefined();
@@ -251,7 +295,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 	}, 90000);
 
 	test("should set and get session name", async () => {
-		await client.start();
+		const client = await startClient({ script: ["ok"] });
 
 		let state = await client.getState();
 		expect(state.sessionName).toBeUndefined();
@@ -267,16 +311,7 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_OAUTH_T
 		// Wait for file writes
 		await new Promise((resolve) => setTimeout(resolve, 200));
 
-		const sessionsPath = join(sessionDir, "sessions");
-		const sessionDirs = readdirSync(sessionsPath);
-		const cwdSessionDir = join(sessionsPath, sessionDirs[0]);
-		const sessionFiles = readdirSync(cwdSessionDir).filter((f) => f.endsWith(".jsonl"));
-		const sessionContent = readFileSync(join(cwdSessionDir, sessionFiles[0]), "utf8");
-		const entries = sessionContent
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
-
+		const entries = readSessionEntries();
 		const sessionInfoEntries = entries.filter((e: { type: string }) => e.type === "session_info");
 		expect(sessionInfoEntries.length).toBe(1);
 		expect(sessionInfoEntries[0].name).toBe("my-test-session");

@@ -2,126 +2,70 @@
  * Tests for compaction extension events (before_compact / compact).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Agent } from "@earendil-works/pi-agent-core";
-import { getModel } from "@earendil-works/pi-ai";
-import { AgentSession } from "../src/core/agent-session.js";
-import { AuthStorage } from "../src/core/auth-storage.js";
-import {
-	createExtensionRuntime,
-	type Extension,
-	type SessionBeforeCompactEvent,
-	type SessionCompactEvent,
-	type SessionEvent,
+import { afterEach, describe, expect, it } from "bun:test";
+import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import type {
+	ExtensionFactory,
+	SessionBeforeCompactEvent,
+	SessionCompactEvent,
+	SessionEvent,
 } from "../src/core/extensions/index.js";
-import { ModelRegistry } from "../src/core/model-registry.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { SettingsManager } from "../src/core/settings-manager.js";
-import { createSyntheticSourceInfo } from "../src/core/source-info.js";
-import { createBunReplTool } from "../src/core/tools/index.js";
-import { createTestResourceLoader } from "./utilities.js";
+import { createHarness, type Harness } from "./suite/harness.js";
 
-const API_KEY = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
+const SUMMARY_TEXT = "scripted compaction summary";
 
-describe.skipIf(!API_KEY)("Compaction extensions", () => {
-	let session: AgentSession;
-	let tempDir: string;
-	let capturedEvents: SessionEvent[];
+/**
+ * Compaction can issue a second summarization call for a split turn prefix, so
+ * queue spare summary steps beyond the scripted turn replies.
+ */
+function responses(turnCount: number): FauxResponseStep[] {
+	return [
+		...Array.from({ length: turnCount }, (_, index) => fauxAssistantMessage(`turn reply ${index + 1}`)),
+		...Array.from({ length: 3 }, () => fauxAssistantMessage(SUMMARY_TEXT)),
+	];
+}
 
-	beforeEach(() => {
-		tempDir = join(tmpdir(), `pi-compaction-extensions-test-${Date.now()}`);
-		mkdirSync(tempDir, { recursive: true });
+describe("Compaction extensions", () => {
+	const harnesses: Harness[] = [];
+	let capturedEvents: SessionEvent[] = [];
+
+	afterEach(() => {
 		capturedEvents = [];
-	});
-
-	afterEach(async () => {
-		if (session) {
-			session.dispose();
-		}
-		if (tempDir && existsSync(tempDir)) {
-			rmSync(tempDir, { recursive: true });
+		while (harnesses.length > 0) {
+			harnesses.pop()?.cleanup();
 		}
 	});
 
-	function createExtension(
-		onBeforeCompact?: (event: SessionBeforeCompactEvent) => { cancel?: boolean; compaction?: any } | undefined,
+	function capturingExtension(
+		onBeforeCompact?: (event: SessionBeforeCompactEvent) => { cancel?: boolean; compaction?: unknown } | undefined,
 		onCompact?: (event: SessionCompactEvent) => void,
-	): Extension {
-		const handlers = new Map<string, ((event: any, ctx: any) => Promise<any>)[]>();
-
-		handlers.set("session_before_compact", [
-			async (event: SessionBeforeCompactEvent) => {
-				capturedEvents.push(event);
-				if (onBeforeCompact) {
-					return onBeforeCompact(event);
-				}
-				return undefined;
-			},
-		]);
-
-		handlers.set("session_compact", [
-			async (event: SessionCompactEvent) => {
-				capturedEvents.push(event);
-				if (onCompact) {
-					onCompact(event);
-				}
-				return undefined;
-			},
-		]);
-
-		return {
-			path: "test-extension",
-			resolvedPath: "/test/test-extension.ts",
-			sourceInfo: createSyntheticSourceInfo("<test:test-extension>", { source: "test" }),
-			handlers,
-			tools: new Map(),
-			messageRenderers: new Map(),
-			commands: new Map(),
-			flags: new Map(),
-			shortcuts: new Map(),
+	): ExtensionFactory {
+		return (pi) => {
+			pi.on("session_before_compact", async (event) => {
+				capturedEvents.push(event as SessionEvent);
+				return onBeforeCompact?.(event as SessionBeforeCompactEvent) as never;
+			});
+			pi.on("session_compact", async (event) => {
+				capturedEvents.push(event as SessionEvent);
+				onCompact?.(event as SessionCompactEvent);
+			});
 		};
 	}
 
-	function createSession(extensions: Extension[]) {
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
-		const agent = new Agent({
-			getApiKey: () => API_KEY,
-			initialState: {
-				model,
-				systemPrompt: "You are a helpful assistant. Be concise.",
-				tools: [createBunReplTool()],
-			},
+	async function createSession(extensionFactories: ExtensionFactory[], turnCount: number): Promise<Harness> {
+		const harness = await createHarness({
+			systemPrompt: "You are a helpful assistant. Be concise.",
+			settings: { compaction: { keepRecentTokens: 1 } },
+			extensionFactories,
 		});
-
-		const sessionManager = SessionManager.create(tempDir);
-		const settingsManager = SettingsManager.create(tempDir, tempDir);
-		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-		const modelRegistry = ModelRegistry.create(authStorage);
-
-		const runtime = createExtensionRuntime();
-		const resourceLoader = {
-			...createTestResourceLoader(),
-			getExtensions: () => ({ extensions, errors: [], runtime }),
-		};
-
-		session = new AgentSession({
-			agent,
-			sessionManager,
-			settingsManager,
-			cwd: tempDir,
-			modelRegistry,
-			resourceLoader,
-		});
-
-		return session;
+		harnesses.push(harness);
+		harness.setResponses(responses(turnCount));
+		return harness;
 	}
 
 	it("should emit before_compact and compact events", async () => {
-		const extension = createExtension();
-		createSession([extension]);
+		const harness = await createSession([capturingExtension()], 2);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -150,14 +94,14 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		const afterEvent = compactEvents[0];
 		expect(afterEvent.compactionEntry).toBeDefined();
-		expect(afterEvent.compactionEntry.summary.length).toBeGreaterThan(0);
+		expect(afterEvent.compactionEntry.summary).toContain(SUMMARY_TEXT);
 		expect(afterEvent.compactionEntry.tokensBefore).toBeGreaterThanOrEqual(0);
 		expect(afterEvent.fromExtension).toBe(false);
-	}, 120000);
+	});
 
 	it("should allow extensions to cancel compaction", async () => {
-		const extension = createExtension(() => ({ cancel: true }));
-		createSession([extension]);
+		const harness = await createSession([capturingExtension(() => ({ cancel: true }))], 1);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -166,24 +110,24 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		const compactEvents = capturedEvents.filter((e) => e.type === "session_compact");
 		expect(compactEvents.length).toBe(0);
-	}, 120000);
+	});
 
 	it("should allow extensions to provide custom compaction", async () => {
 		const customSummary = "Custom summary from extension";
 
-		const extension = createExtension((event) => {
-			if (event.type === "session_before_compact") {
-				return {
+		const harness = await createSession(
+			[
+				capturingExtension((event) => ({
 					compaction: {
 						summary: customSummary,
 						firstKeptEntryId: event.preparation.firstKeptEntryId,
 						tokensBefore: event.preparation.tokensBefore,
 					},
-				};
-			}
-			return undefined;
-		});
-		createSession([extension]);
+				})),
+			],
+			2,
+		);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -195,19 +139,17 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		expect(result.summary).toBe(customSummary);
 
-		const compactEvents = capturedEvents.filter((e) => e.type === "session_compact");
+		const compactEvents = capturedEvents.filter((e): e is SessionCompactEvent => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
 
 		const afterEvent = compactEvents[0];
-		if (afterEvent.type === "session_compact") {
-			expect(afterEvent.compactionEntry.summary).toBe(customSummary);
-			expect(afterEvent.fromExtension).toBe(true);
-		}
-	}, 120000);
+		expect(afterEvent.compactionEntry.summary).toBe(customSummary);
+		expect(afterEvent.fromExtension).toBe(true);
+	});
 
 	it("should include entries in compact event after compaction is saved", async () => {
-		const extension = createExtension();
-		createSession([extension]);
+		const harness = await createSession([capturingExtension()], 1);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -217,128 +159,66 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 		const compactEvents = capturedEvents.filter((e) => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
 
-		const afterEvent = compactEvents[0];
-		if (afterEvent.type === "session_compact") {
-			// sessionManager is now on ctx, use session.sessionManager directly
-			const entries = session.sessionManager.getEntries();
-			const hasCompactionEntry = entries.some((e: { type: string }) => e.type === "compaction");
-			expect(hasCompactionEntry).toBe(true);
-		}
-	}, 120000);
+		// sessionManager is now on ctx, use session.sessionManager directly
+		const entries = session.sessionManager.getEntries();
+		const hasCompactionEntry = entries.some((e: { type: string }) => e.type === "compaction");
+		expect(hasCompactionEntry).toBe(true);
+	});
 
 	it("should continue with default compaction if extension throws error", async () => {
-		const throwingExtension: Extension = {
-			path: "throwing-extension",
-			resolvedPath: "/test/throwing-extension.ts",
-			sourceInfo: createSyntheticSourceInfo("<test:throwing-extension>", { source: "test" }),
-			handlers: new Map<string, ((event: any, ctx: any) => Promise<any>)[]>([
-				[
-					"session_before_compact",
-					[
-						async (event: SessionBeforeCompactEvent) => {
-							capturedEvents.push(event);
-							throw new Error("Extension intentionally throws");
-						},
-					],
-				],
-				[
-					"session_compact",
-					[
-						async (event: SessionCompactEvent) => {
-							capturedEvents.push(event);
-							return undefined;
-						},
-					],
-				],
-			]),
-			tools: new Map(),
-			messageRenderers: new Map(),
-			commands: new Map(),
-			flags: new Map(),
-			shortcuts: new Map(),
-		};
-
-		createSession([throwingExtension]);
+		const harness = await createSession(
+			[
+				(pi) => {
+					pi.on("session_before_compact", async (event) => {
+						capturedEvents.push(event as SessionEvent);
+						throw new Error("Extension intentionally throws");
+					});
+					pi.on("session_compact", async (event) => {
+						capturedEvents.push(event as SessionEvent);
+					});
+				},
+			],
+			1,
+		);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
 
 		const result = await session.compact();
 
-		expect(result.summary).toBeDefined();
-		expect(result.summary.length).toBeGreaterThan(0);
+		expect(result.summary).toContain(SUMMARY_TEXT);
 
 		const compactEvents = capturedEvents.filter((e): e is SessionCompactEvent => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
 		expect(compactEvents[0].fromExtension).toBe(false);
-	}, 120000);
+	});
 
 	it("should call multiple extensions in order", async () => {
 		const callOrder: string[] = [];
 
-		const extension1: Extension = {
-			path: "extension1",
-			resolvedPath: "/test/extension1.ts",
-			sourceInfo: createSyntheticSourceInfo("<test:extension1>", { source: "test" }),
-			handlers: new Map<string, ((event: any, ctx: any) => Promise<any>)[]>([
-				[
-					"session_before_compact",
-					[
-						async () => {
-							callOrder.push("extension1-before");
-							return undefined;
-						},
-					],
-				],
-				[
-					"session_compact",
-					[
-						async () => {
-							callOrder.push("extension1-after");
-							return undefined;
-						},
-					],
-				],
-			]),
-			tools: new Map(),
-			messageRenderers: new Map(),
-			commands: new Map(),
-			flags: new Map(),
-			shortcuts: new Map(),
-		};
-
-		const extension2: Extension = {
-			path: "extension2",
-			resolvedPath: "/test/extension2.ts",
-			sourceInfo: createSyntheticSourceInfo("<test:extension2>", { source: "test" }),
-			handlers: new Map<string, ((event: any, ctx: any) => Promise<any>)[]>([
-				[
-					"session_before_compact",
-					[
-						async () => {
-							callOrder.push("extension2-before");
-							return undefined;
-						},
-					],
-				],
-				[
-					"session_compact",
-					[
-						async () => {
-							callOrder.push("extension2-after");
-							return undefined;
-						},
-					],
-				],
-			]),
-			tools: new Map(),
-			messageRenderers: new Map(),
-			commands: new Map(),
-			flags: new Map(),
-			shortcuts: new Map(),
-		};
-
-		createSession([extension1, extension2]);
+		const harness = await createSession(
+			[
+				(pi) => {
+					pi.on("session_before_compact", async () => {
+						callOrder.push("extension1-before");
+					});
+					pi.on("session_compact", async () => {
+						callOrder.push("extension1-after");
+					});
+				},
+				(pi) => {
+					pi.on("session_before_compact", async () => {
+						callOrder.push("extension2-before");
+					});
+					pi.on("session_compact", async () => {
+						callOrder.push("extension2-after");
+					});
+				},
+			],
+			1,
+		);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -346,16 +226,21 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 		await session.compact();
 
 		expect(callOrder).toEqual(["extension1-before", "extension2-before", "extension1-after", "extension2-after"]);
-	}, 120000);
+	});
 
 	it("should pass correct data in before_compact event", async () => {
-		let capturedBeforeEvent: SessionBeforeCompactEvent | null = null;
+		let capturedBeforeEvent: SessionBeforeCompactEvent | undefined;
 
-		const extension = createExtension((event) => {
-			capturedBeforeEvent = event;
-			return undefined;
-		});
-		createSession([extension]);
+		const harness = await createSession(
+			[
+				capturingExtension((event) => {
+					capturedBeforeEvent = event;
+					return undefined;
+				}),
+			],
+			2,
+		);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -365,7 +250,7 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		await session.compact();
 
-		expect(capturedBeforeEvent).not.toBeNull();
+		expect(capturedBeforeEvent).toBeDefined();
 		const event = capturedBeforeEvent!;
 		expect(typeof event.preparation.isSplitTurn).toBe("boolean");
 		expect(event.preparation.firstKeptEntryId).toBeDefined();
@@ -385,24 +270,24 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 		const entries = session.sessionManager.getEntries();
 		expect(Array.isArray(entries)).toBe(true);
 		expect(entries.length).toBeGreaterThan(0);
-	}, 120000);
+	});
 
 	it("should use extension compaction even with different values", async () => {
 		const customSummary = "Custom summary with modified values";
 
-		const extension = createExtension((event) => {
-			if (event.type === "session_before_compact") {
-				return {
+		const harness = await createSession(
+			[
+				capturingExtension((event) => ({
 					compaction: {
 						summary: customSummary,
 						firstKeptEntryId: event.preparation.firstKeptEntryId,
 						tokensBefore: 999,
 					},
-				};
-			}
-			return undefined;
-		});
-		createSession([extension]);
+				})),
+			],
+			1,
+		);
+		const { session } = harness;
 
 		await session.prompt("What is 2+2? Reply with just the number.");
 		await session.agent.waitForIdle();
@@ -411,5 +296,5 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		expect(result.summary).toBe(customSummary);
 		expect(result.tokensBefore).toBe(999);
-	}, 120000);
+	});
 });

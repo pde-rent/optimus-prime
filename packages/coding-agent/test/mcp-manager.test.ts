@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import type { AuthStorage } from "../src/core/auth-storage.js";
 import { McpManager } from "../src/core/mcp/mcp-manager.js";
 import type { McpServerConfig } from "../src/core/settings-manager.js";
 
-// biome-ignore lint/suspicious/noExplicitAny: only the two members the manager touches
-const authStorage = { get: () => undefined, getApiKey: async () => undefined } as any;
+/** Only the two members the manager touches; the rest of AuthStorage is irrelevant here. */
+const authStorage = { get: () => undefined, getApiKey: async () => undefined } as unknown as AuthStorage;
 
 function manager(servers: Record<string, McpServerConfig>) {
 	return new McpManager({ authStorage, getUserServers: () => servers });

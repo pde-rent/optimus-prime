@@ -73,4 +73,32 @@ declare namespace Bun {
 		parse(input: string): unknown;
 		stringify(value: unknown, replacer?: unknown, space?: string | number): string;
 	};
+
+	/**
+	 * Only the surface the tests use: a port-0 listener with a fetch handler, and a stop.
+	 * `port` is readable because callers build a URL from it.
+	 */
+	interface Server {
+		readonly port: number;
+		readonly hostname: string;
+		readonly url: URL;
+		stop(closeActiveConnections?: boolean): void;
+	}
+
+	interface ServeOptions {
+		port?: number;
+		hostname?: string;
+		fetch(request: Request): Response | Promise<Response>;
+	}
+
+	function serve(options: ServeOptions): Server;
+
+	/** Absolute path of an executable on PATH, or null. Synchronous, unlike probing via spawn. */
+	function which(command: string, options?: { PATH?: string; cwd?: string }): string | null;
+}
+
+/** `import type { Server } from "bun"` resolves to the same declarations as the global namespace. */
+declare module "bun" {
+	export type Server = Bun.Server;
+	export type ServeOptions = Bun.ServeOptions;
 }

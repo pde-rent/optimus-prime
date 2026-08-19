@@ -7,8 +7,13 @@ afterEach(() => {
 	for (const server of servers.splice(0)) server.stop(true);
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: test fixtures speak raw JSON-RPC
+/**
+ * Test fixtures speak raw JSON-RPC and reach into whatever the case under test sent, so this is
+ * deliberately unconstrained rather than a partial shape every fixture would have to narrow.
+ */
+// biome-ignore-start lint/suspicious/noExplicitAny: raw JSON-RPC fixture bodies
 type Body = any;
+// biome-ignore-end lint/suspicious/noExplicitAny: raw JSON-RPC fixture bodies
 
 function serve(handler: (request: Request, body: Body) => Response | Promise<Response>): string {
 	const server = Bun.serve({

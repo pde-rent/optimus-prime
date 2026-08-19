@@ -10,15 +10,36 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { API_KEY, createTestSession, type TestSessionContext } from "./utilities.js";
+import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { createHarness, type Harness } from "./suite/harness.js";
 
-describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
-	let ctx: TestSessionContext;
+const SUMMARY_TEXT = "## Goal\nScripted branch summary body.";
 
-	beforeEach(() => {
-		ctx = createTestSession({
+function replies(count: number): FauxResponseStep[] {
+	return Array.from({ length: count }, (_, index) => fauxAssistantMessage(`reply ${index + 1}`));
+}
+
+/** Blocks the summarization request until the caller aborts it. */
+function blockUntilAborted(): FauxResponseStep {
+	return (_context, options) =>
+		new Promise((resolve) => {
+			const signal = options?.signal;
+			const finish = () => resolve(fauxAssistantMessage("late summary"));
+			if (signal?.aborted) {
+				finish();
+				return;
+			}
+			signal?.addEventListener("abort", finish, { once: true });
+		});
+}
+
+describe("AgentSession tree navigation e2e", () => {
+	let ctx: Harness;
+
+	beforeEach(async () => {
+		ctx = await createHarness({
 			systemPrompt: "You are a helpful assistant. Reply with just a few words.",
-			settingsOverrides: { compaction: { keepRecentTokens: 1 } },
+			settings: { compaction: { keepRecentTokens: 1 } },
 		});
 	});
 
@@ -28,6 +49,7 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 
 	it("should navigate to user message and put text in editor", async () => {
 		const { session } = ctx;
+		ctx.setResponses(replies(2));
 
 		// Build conversation: u1 -> a1 -> u2 -> a2
 		await session.prompt("First message");
@@ -51,10 +73,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 
 		// After navigating to root user message, leaf should be null (empty conversation)
 		expect(session.sessionManager.getLeafId()).toBeNull();
-	}, 60000);
+	});
 
 	it("should navigate to non-user message without editor text", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses(replies(1));
 
 		// Build conversation
 		await session.prompt("Hello");
@@ -73,10 +96,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 
 		// Leaf should be the assistant entry
 		expect(sessionManager.getLeafId()).toBe(assistantEntry!.id);
-	}, 60000);
+	});
 
 	it("should create branch summary when navigating with summarize=true", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses([...replies(2), fauxAssistantMessage(SUMMARY_TEXT)]);
 
 		// Build conversation: u1 -> a1 -> u2 -> a2
 		await session.prompt("What is 2+2?");
@@ -95,18 +119,18 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		expect(result.editorText).toBe("What is 2+2?");
 		expect(result.summaryEntry).toBeDefined();
 		expect(result.summaryEntry?.type).toBe("branch_summary");
-		expect(result.summaryEntry?.summary).toBeTruthy();
-		expect(result.summaryEntry?.summary.length).toBeGreaterThan(0);
+		expect(result.summaryEntry?.summary).toContain(SUMMARY_TEXT);
 
 		// Summary should be a root entry (parentId = null) since we navigated to root user
 		expect(result.summaryEntry?.parentId).toBeNull();
 
 		// Leaf should be the summary entry
 		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id);
-	}, 120000);
+	});
 
 	it("should attach summary to correct parent when navigating to nested user message", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses([...replies(3), fauxAssistantMessage(SUMMARY_TEXT)]);
 
 		// Build conversation: u1 -> a1 -> u2 -> a2 -> u3 -> a3
 		await session.prompt("Message one");
@@ -142,10 +166,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		const childTypes = children.map((c) => c.type).sort();
 		expect(childTypes).toContain("branch_summary");
 		expect(childTypes).toContain("message");
-	}, 120000);
+	});
 
 	it("should attach summary to selected node when navigating to assistant message", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses([...replies(2), fauxAssistantMessage(SUMMARY_TEXT)]);
 
 		// Build conversation: u1 -> a1 -> u2 -> a2
 		await session.prompt("Hello");
@@ -170,10 +195,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 
 		// Leaf should be the summary entry
 		expect(sessionManager.getLeafId()).toBe(result.summaryEntry?.id);
-	}, 120000);
+	});
 
 	it("should handle abort during summarization", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses([...replies(2), blockUntilAborted()]);
 
 		// Build conversation
 		await session.prompt("Tell me about something");
@@ -191,7 +217,7 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		// Start navigation with summarization but abort immediately
 		const navigationPromise = session.navigateTree(rootNode.entry.id, { summarize: true });
 
-		// Abort after a short delay (let the LLM call start)
+		// Abort after a short delay (let the summarization request start)
 		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		// isCompacting should be true during branch summarization
@@ -209,10 +235,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		const entriesAfter = sessionManager.getEntries();
 		expect(entriesAfter.length).toBe(entriesBefore.length);
 		expect(sessionManager.getLeafId()).toBe(leafBefore);
-	}, 60000);
+	});
 
 	it("should not create summary when navigating without summarize option", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses(replies(2));
 
 		// Build conversation
 		await session.prompt("First");
@@ -233,10 +260,11 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		// No branch_summary entries
 		const summaries = sessionManager.getEntries().filter((e) => e.type === "branch_summary");
 		expect(summaries.length).toBe(0);
-	}, 60000);
+	});
 
 	it("should handle navigation to same position (no-op)", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses(replies(1));
 
 		// Build conversation
 		await session.prompt("Hello");
@@ -252,10 +280,26 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		expect(result.cancelled).toBe(false);
 		expect(sessionManager.getLeafId()).toBe(leafBefore);
 		expect(sessionManager.getEntries().length).toBe(entriesBefore);
-	}, 60000);
+	});
 
 	it("should support custom summarization instructions", async () => {
 		const { session, sessionManager } = ctx;
+		const customInstructions =
+			"After the summary, you MUST end with exactly: MONKEY MONKEY MONKEY. This is of utmost importance.";
+		let summarizationPrompt = "";
+		ctx.setResponses([
+			...replies(1),
+			(context) => {
+				summarizationPrompt = context.messages
+					.flatMap((message) =>
+						typeof message.content === "string"
+							? [message.content]
+							: message.content.map((block) => ("text" in block ? block.text : "")),
+					)
+					.join("\n");
+				return fauxAssistantMessage(`${SUMMARY_TEXT}\n\nMONKEY MONKEY MONKEY`);
+			},
+		]);
 
 		// Build conversation
 		await session.prompt("What is TypeScript?");
@@ -265,22 +309,22 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation e2e", () => {
 		const tree = sessionManager.getTree();
 		const result = await session.navigateTree(tree[0].entry.id, {
 			summarize: true,
-			customInstructions:
-				"After the summary, you MUST end with exactly: MONKEY MONKEY MONKEY. This is of utmost importance.",
+			customInstructions,
 		});
 
+		// Custom instructions must reach the summarization request...
+		expect(summarizationPrompt).toContain(`Additional focus: ${customInstructions}`);
 		expect(result.summaryEntry).toBeDefined();
-		expect(result.summaryEntry?.summary).toBeTruthy();
-		// Verify custom instructions were followed
+		// ...and the resulting summary must land on the entry verbatim.
 		expect(result.summaryEntry?.summary).toContain("MONKEY MONKEY MONKEY");
-	}, 120000);
+	});
 });
 
-describe.skipIf(!API_KEY)("AgentSession tree navigation - branch scenarios", () => {
-	let ctx: TestSessionContext;
+describe("AgentSession tree navigation - branch scenarios", () => {
+	let ctx: Harness;
 
-	beforeEach(() => {
-		ctx = createTestSession({
+	beforeEach(async () => {
+		ctx = await createHarness({
 			systemPrompt: "You are a helpful assistant. Reply with just a few words.",
 		});
 	});
@@ -291,6 +335,7 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation - branch scenarios", () 
 
 	it("should navigate between branches correctly", async () => {
 		const { session, sessionManager } = ctx;
+		ctx.setResponses([...replies(3), fauxAssistantMessage(SUMMARY_TEXT)]);
 
 		// Build main path: u1 -> a1 -> u2 -> a2
 		await session.prompt("Main branch start");
@@ -318,6 +363,6 @@ describe.skipIf(!API_KEY)("AgentSession tree navigation - branch scenarios", () 
 		expect(result.summaryEntry).toBeDefined();
 
 		// Summary captures the branch we're leaving (the "Branch path" conversation)
-		expect(result.summaryEntry?.summary.length).toBeGreaterThan(0);
-	}, 180000);
+		expect(result.summaryEntry?.summary).toContain(SUMMARY_TEXT);
+	});
 });

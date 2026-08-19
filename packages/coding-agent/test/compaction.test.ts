@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import { getModel } from "@earendil-works/pi-ai";
+import { type FauxProviderRegistration, fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai";
 import { readFileSync } from "fs";
 import { join } from "path";
 import {
@@ -549,39 +549,44 @@ describe("Large session fixture", () => {
 });
 
 // ============================================================================
-// LLM integration tests (skipped without API key)
+// Summarization tests (scripted provider, no network)
 // ============================================================================
 
-describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("LLM summarization", () => {
+describe("LLM summarization", () => {
+	const SUMMARY_TEXT = "scripted summary of the large session";
+	let faux: FauxProviderRegistration;
+
+	beforeEach(() => {
+		faux = registerFauxProvider();
+		// A split turn issues a second summarization call for the turn prefix.
+		faux.setResponses([fauxAssistantMessage(SUMMARY_TEXT), fauxAssistantMessage(SUMMARY_TEXT)]);
+	});
+
+	afterEach(() => {
+		faux.unregister();
+	});
+
 	it("should generate a compaction result for the large session", async () => {
 		const entries = loadLargeSessionEntries();
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 
 		const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
 		expect(preparation).toBeDefined();
 
-		const compactionResult = await compact(preparation!, model, process.env.ANTHROPIC_OAUTH_TOKEN!);
+		const compactionResult = await compact(preparation!, faux.getModel(), "faux-key");
 
-		expect(compactionResult.summary.length).toBeGreaterThan(100);
+		expect(compactionResult.summary).toContain(SUMMARY_TEXT);
 		expect(compactionResult.firstKeptEntryId).toBeTruthy();
 		expect(compactionResult.tokensBefore).toBeGreaterThan(0);
-
-		console.log("Summary length:", compactionResult.summary.length);
-		console.log("First kept entry ID:", compactionResult.firstKeptEntryId);
-		console.log("Tokens before:", compactionResult.tokensBefore);
-		console.log("\n--- SUMMARY ---\n");
-		console.log(compactionResult.summary);
-	}, 60000);
+	});
 
 	it("should produce valid session after compaction", async () => {
 		const entries = loadLargeSessionEntries();
 		const loaded = buildSessionContext(entries);
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 
 		const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
 		expect(preparation).toBeDefined();
 
-		const compactionResult = await compact(preparation!, model, process.env.ANTHROPIC_OAUTH_TOKEN!);
+		const compactionResult = await compact(preparation!, faux.getModel(), "faux-key");
 
 		// Simulate appending compaction to entries by creating a proper entry
 		const lastEntry = entries[entries.length - 1];
@@ -600,8 +605,5 @@ describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("LLM summarization", () => {
 		expect(reloaded.messages.length).toBeLessThan(loaded.messages.length);
 		expect(reloaded.messages[0].role).toBe("compactionSummary");
 		expect((reloaded.messages[0] as any).summary).toContain(compactionResult.summary);
-
-		console.log("Original messages:", loaded.messages.length);
-		console.log("After compaction:", reloaded.messages.length);
-	}, 60000);
+	});
 });
