@@ -4,10 +4,12 @@
 	"description": "Coding agent CLI with REPL-backed tools and session management",
 	"type": "module",
 	"piConfig": {
-		"name": "prime-agent",
-		"configDir": ".prime/agent"
+		"name": "optimus",
+		"configDir": ".optimus/agent"
 	},
 	"bin": {
+		"optimus": "dist/bundle/cli.js",
+		"optimus-prime": "dist/bundle/cli.js",
 		"pi": "dist/bundle/cli.js"
 	},
 	"main": "./dist/index.js",
@@ -84,7 +86,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/PrimeIntellect-ai/prime-agent.git",
+		"url": "git+https://github.com/PrimeIntellect-ai/optimus.git",
 		"directory": "packages/coding-agent"
 	},
 	"engines": {

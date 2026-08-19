@@ -63,7 +63,7 @@ const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh
 const REMOVED_BUILTIN_TOOL_NAMES = new Set(["read", "write", "grep", "find", "ls"]);
 const BUILTIN_TOOL_NAMES = ["repl"];
 
-export const INTERNAL_RUNTIME_COMMAND_MARKER = "\0prime-agent-runtime-command";
+export const INTERNAL_RUNTIME_COMMAND_MARKER = "\0optimus-runtime-command";
 
 export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);

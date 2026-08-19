@@ -15,7 +15,7 @@ interface OnboardingSplashHandle {
 }
 
 interface InteractiveOnboardingHarness {
-	runOnboardingFlow(showPrimeCliSplash?: boolean): Promise<void>;
+	runOnboardingFlow(showOptimusCliSplash?: boolean): Promise<void>;
 	uiServices: {
 		modelRegistry: ModelRegistry;
 	};

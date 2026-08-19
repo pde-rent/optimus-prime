@@ -1,5 +1,5 @@
 /**
- * Prime Agent session-to-session messaging skill.
+ * Optimus Prime session-to-session messaging skill.
  *
  * All routing and sender identity live in the host. These functions only call
  * the host bridge exposed inside the REPL.

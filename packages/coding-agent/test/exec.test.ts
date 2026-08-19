@@ -16,7 +16,7 @@ async function waitForFile(path: string): Promise<void> {
 
 describe.skipIf(process.platform === "win32")("execCommand", () => {
 	it("force kills a process that ignores SIGTERM and cleans up the fallback timer", async () => {
-		const testDir = mkdtempSync(join(tmpdir(), "prime-agent-exec-test-"));
+		const testDir = mkdtempSync(join(tmpdir(), "optimus-exec-test-"));
 		const readyFile = join(testDir, "ready");
 		const controller = new AbortController();
 		let resultPromise: Promise<Awaited<ReturnType<typeof execCommand>>> | undefined;

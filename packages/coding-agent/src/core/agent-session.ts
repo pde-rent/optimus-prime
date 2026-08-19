@@ -8016,7 +8016,7 @@ export class AgentSession {
 			if (targetScope === "global") {
 				appendGlobalRefinement(globalHarnessStateDir, result);
 			}
-			this.sessionManager.appendCustomEntry("prime-agent.refinement", result);
+			this.sessionManager.appendCustomEntry("optimus.refinement", result);
 			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 			this.agent.state.systemPrompt = this._baseSystemPrompt;
 			try {
@@ -9025,13 +9025,13 @@ export class AgentSession {
 			entry: skill.entryPath,
 		}));
 		if (specs.length > 0) {
-			env.PRIME_AGENT_REPL_SKILLS = JSON.stringify(specs);
+			env.OPTIMUS_REPL_SKILLS = JSON.stringify(specs);
 		}
 	}
 
 	private _addWebsearchKeyEnv(env: Record<string, string>): void {
 		if (this._agentDir) {
-			env.PRIME_AGENT_CODING_AGENT_DIR = this._agentDir;
+			env.OPTIMUS_CODING_AGENT_DIR = this._agentDir;
 		}
 
 		if (process.env[SERPER_ENV_VAR]?.trim()) {
@@ -9089,7 +9089,7 @@ export class AgentSession {
 	}
 
 	private _createEphemeralRlmSessionDir(): string {
-		this._rlmSessionDir = mkdtempSync(join(tmpdir(), "prime-agent-rlm-"));
+		this._rlmSessionDir = mkdtempSync(join(tmpdir(), "optimus-rlm-"));
 		return this._rlmSessionDir;
 	}
 

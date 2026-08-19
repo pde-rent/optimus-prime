@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { appendFileSync, chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	chmodSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -35,6 +44,7 @@ const {
 	formatHarnessStateForPrompt,
 	getGlobalHarnessStateDir,
 	getHarnessStatePath,
+	isHarnessStateWritable,
 	getLocalHarnessStateDir,
 	getRefinementHistory,
 	getRefinementHistoryPath,
@@ -62,7 +72,7 @@ afterEach(() => {
 });
 
 function makeTempDir(): string {
-	tempDir = mkdtempSync(join(tmpdir(), "prime-agent-refinement-test-"));
+	tempDir = mkdtempSync(join(tmpdir(), "optimus-refinement-test-"));
 	return tempDir;
 }
 
@@ -227,6 +237,63 @@ describe("harness refinement", () => {
 		chmodSync(statePath, 0o600);
 		saveHarnessState(harnessStateDir, state);
 		expect(statSync(statePath).mode & 0o777).toBe(0o600);
+	});
+
+	it("moves a corrupt state file aside instead of overwriting it", () => {
+		const harnessStateDir = makeTempDir();
+		const state = loadHarnessState(harnessStateDir);
+		seedEntry(state, "memory");
+		const statePath = saveHarnessState(harnessStateDir, state);
+		const corrupted = readFileSync(statePath, "utf8").slice(0, 40);
+		writeFileSync(statePath, corrupted);
+
+		const reloaded = loadHarnessState(harnessStateDir);
+		expect(reloaded.entries.memory.memory_entry).toBeUndefined();
+
+		// The unreadable bytes survive under a quarantine name, and the store is
+		// writable again, so the session continues on an empty state.
+		const backups = readdirSync(harnessStateDir).filter((name) => name.includes(".corrupt-"));
+		expect(backups).toHaveLength(1);
+		expect(readFileSync(join(harnessStateDir, backups[0]), "utf8")).toBe(corrupted);
+		expect(isHarnessStateWritable(harnessStateDir)).toBe(true);
+	});
+
+	it("suppresses writes when a corrupt state file cannot be moved aside", () => {
+		const harnessStateDir = makeTempDir();
+		const statePath = getHarnessStatePath(harnessStateDir);
+		const precious = '{"schema":1,"entries":{"memory":{"a":{"id":"a"';
+		writeFileSync(statePath, precious);
+		chmodSync(harnessStateDir, 0o500);
+		try {
+			const state = loadHarnessState(harnessStateDir);
+			expect(isHarnessStateWritable(harnessStateDir)).toBe(false);
+			saveHarnessState(harnessStateDir, state);
+		} finally {
+			chmodSync(harnessStateDir, 0o700);
+		}
+		expect(readFileSync(statePath, "utf8")).toBe(precious);
+	});
+
+	it("coerces a malformed entry rather than throwing while building the prompt", () => {
+		const harnessStateDir = makeTempDir();
+		writeFileSync(
+			getHarnessStatePath(harnessStateDir),
+			JSON.stringify({
+				schema: 1,
+				entries: {
+					prompt: { p1: { id: "p1", kind: "prompt", title: "Note", path: "x" } },
+					memory: {},
+					skill: {},
+					subagent: {},
+				},
+				refinements: [],
+			}),
+		);
+
+		const state = loadHarnessState(harnessStateDir, "global");
+		expect(state.entries.prompt.p1.content).toBe("");
+		expect(state.entries.prompt.p1.version).toBe(1);
+		expect(() => formatHarnessStateForPrompt(state)).not.toThrow();
 	});
 
 	it("applies create, update, and delete for every editable harness kind", () => {
@@ -719,7 +786,7 @@ describe("harness refinement", () => {
 			},
 			{
 				type: "custom",
-				customType: "prime-agent.refinement",
+				customType: "optimus.refinement",
 				data: result,
 				id: "custom_2",
 				parentId: "custom_1",
@@ -727,7 +794,7 @@ describe("harness refinement", () => {
 			},
 			{
 				type: "custom",
-				customType: "prime-agent.refinement",
+				customType: "optimus.refinement",
 				data: { id: "malformed" },
 				id: "custom_malformed",
 				parentId: "custom_2",

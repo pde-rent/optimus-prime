@@ -8,8 +8,8 @@
  *
  * Two upstreams, and they behave differently:
  *
- * - `prime-agent` shares history with us, so its changes arrive via `git merge`.
- * - `pi` does NOT. prime-agent *vendors* pi's source — `packages/coding-agent` is a copy of
+ * - `optimus` shares history with us, so its changes arrive via `git merge`.
+ * - `pi` does NOT. optimus *vendors* pi's source — `packages/coding-agent` is a copy of
  *   `@earendil-works/pi-coding-agent`. Nothing propagates on its own; every pi fix that matters
  *   has to be reimplemented by hand against our tree.
  *
@@ -29,7 +29,7 @@ interface Ledger {
 }
 
 const UPSTREAMS = [
-	{ remote: "prime-agent", branch: "main", mergeable: true },
+	{ remote: "optimus", branch: "main", mergeable: true },
 	{ remote: "pi", branch: "main", mergeable: false },
 ] as const;
 

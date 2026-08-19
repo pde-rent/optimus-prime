@@ -1,20 +1,20 @@
-# Prime Agent Documentation
+# Optimus Prime Documentation
 
-Prime Agent is an RLM-native coding and research harness built around a persistent Bun JavaScript/TypeScript REPL, recursive subagents, durable sessions, and a multi-process local runtime. It began as a hard fork of pi-mono, but Prime Agent is now the product, CLI, install source, and development repository.
+Optimus Prime is an RLM-native coding and research harness built around a persistent Bun JavaScript/TypeScript REPL, recursive subagents, durable sessions, and a multi-process local runtime. It began as a hard fork of pi-mono, but Optimus Prime is now the product, CLI, install source, and development repository.
 
 ## Quick Start
 
 Install the latest stable release on Linux or macOS:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh
 ```
 
 Then run it in a project directory:
 
 ```bash
 cd /path/to/project
-prime-agent
+optimus
 ```
 
 Authenticate with `/login` for subscription or stored API-key providers, or set an environment variable such as `ANTHROPIC_API_KEY` before launch. See the [Quickstart](quickstart.md) for the complete first-run flow.
@@ -24,7 +24,7 @@ Public releases are currently installed from versioned release artifacts. The in
 ## Start Here
 
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
-- [Using Prime Agent](usage.md) - interactive mode, RLM subagents, slash commands, context files, and CLI reference.
+- [Using Optimus Prime](usage.md) - interactive mode, RLM subagents, slash commands, context files, and CLI reference.
 - [Architecture overview](architecture.md) - client, daemon, worker, session, REPL, provider, and storage boundaries.
 - [RLM programming model](rlm.md) - programmatic execution, native subagents, JavaScript skills, and durable state.
 - [Long-running and background agents](long-running-agents.md) - daemon workers, messaging, heartbeats, goals, schedules, and autonomous mode.
@@ -37,17 +37,17 @@ Public releases are currently installed from versioned release artifacts. The in
 ## Customization
 
 - [Extensions](extensions.md) - TypeScript modules for tools, commands, events, and custom UI.
-- [Skills](skills.md) - markdown and JavaScript-backed skills, including how to ask Prime Agent to create them.
+- [Skills](skills.md) - markdown and JavaScript-backed skills, including how to ask Optimus Prime to create them.
 - [MCP integrations](mcp-integrations.md) - use MCP servers through JavaScript skills without expanding the model's tool surface.
 - [Prompt templates](prompt-templates.md) - reusable prompts that expand from slash commands.
 - [Themes](themes.md) - built-in and custom terminal themes.
-- [Prime Agent packages](packages.md) - bundle and share extensions, skills, prompts, and themes.
+- [Optimus Prime packages](packages.md) - bundle and share extensions, skills, prompts, and themes.
 - [Custom models](models.md) - add model entries for supported provider APIs.
 - [Custom providers](custom-provider.md) - implement custom APIs and OAuth flows.
 
 ## Programmatic Usage
 
-- [SDK](sdk.md) - embed Prime Agent in Node.js applications.
+- [SDK](sdk.md) - embed Optimus Prime in Node.js applications.
 - [RPC mode](rpc.md) - integrate over stdin/stdout JSONL.
 - [JSON event stream mode](json.md) - print mode with structured events.
 - [TUI components](tui.md) - build custom terminal UI for extensions.

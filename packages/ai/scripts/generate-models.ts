@@ -379,7 +379,7 @@ function getOptionalBoolean(value: unknown): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
-function readPrimeCliConfig(): Record<string, unknown> {
+function readOptimusCliConfig(): Record<string, unknown> {
 	try {
 		const parsed = JSON.parse(readFileSync(join(homedir(), ".prime", "config.json"), "utf8"));
 		return isRecord(parsed) ? parsed : {};
@@ -641,7 +641,7 @@ function getPrimeInferenceOpenRouterMetadata(
 }
 
 async function fetchPrimeInferenceModels(): Promise<Model<"openai-completions">[]> {
-	const primeConfig = readPrimeCliConfig();
+	const primeConfig = readOptimusCliConfig();
 	const apiKey = getPrimeInferenceConfigValue("PRIME_API_KEY", primeConfig, ["api_key", "apiKey"]);
 	const teamId = getPrimeInferenceConfigValue("PRIME_TEAM_ID", primeConfig, ["team_id", "teamId", "teamID"]);
 	let catalog: PrimeInferenceCatalogEntry[] = [];

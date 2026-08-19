@@ -311,7 +311,7 @@ interface ResourceAccumulator {
  *   2  user + settings entry (source: "local", scope: "user")
  *   3  user + auto-discovered (source: "auto", scope: "user")
  *   4  package resource (origin: "package")
- *   5  built-in resource shipped with prime-agent (source: "builtin")
+ *   5  built-in resource shipped with optimus (source: "builtin")
  */
 function resourcePrecedenceRank(m: PathMetadata): number {
 	if (m.source === "builtin") return 5;

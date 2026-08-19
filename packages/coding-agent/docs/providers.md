@@ -1,6 +1,6 @@
 # Providers
 
-Prime Agent supports subscription-based providers via OAuth and API key providers via environment variables or the auth file. Its built-in model catalog is updated with each Prime Agent release.
+Optimus Prime supports subscription-based providers via OAuth and API key providers via environment variables or the auth file. Its built-in model catalog is updated with each Optimus Prime release.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ Use `/login` in interactive mode, then select a provider:
 - Claude Pro/Max
 - GitHub Copilot
 
-Use `/logout` to clear credentials. Tokens are stored in `~/.prime/agent/auth.json` and auto-refresh when expired.
+Use `/logout` to clear credentials. Tokens are stored in `~/.optimus/agent/auth.json` and auto-refresh when expired.
 
 ### OpenAI Codex
 
@@ -43,7 +43,7 @@ Use `/login` in interactive mode and select a provider to store an API key in `a
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-prime-agent
+optimus
 ```
 
 | Provider | Environment Variable | `auth.json` key |
@@ -79,7 +79,7 @@ Reference for environment variables and `auth.json` keys: [`env-api-keys.ts`](..
 
 #### Auth File
 
-Store credentials in `~/.prime/agent/auth.json`:
+Store credentials in `~/.optimus/agent/auth.json`:
 
 ```json
 {
@@ -148,7 +148,7 @@ export AZURE_OPENAI_DEPLOYMENT_NAME_MAP=gpt-4=my-gpt4,gpt-4o=my-gpt4o
 export CLOUDFLARE_API_KEY=...           # or use /login
 export CLOUDFLARE_ACCOUNT_ID=...
 export CLOUDFLARE_GATEWAY_ID=...        # create at dash.cloudflare.com → AI → AI Gateway
-prime-agent --provider cloudflare-ai-gateway --model "claude-sonnet-4-5"
+optimus --provider cloudflare-ai-gateway --model "claude-sonnet-4-5"
 ```
 
 Routes to OpenAI, Anthropic, and Workers AI through Cloudflare AI Gateway. Workers AI uses the Unified API (`/compat`) and prefixed model IDs (`workers-ai/@cf/...`). OpenAI uses the OpenAI passthrough route (`/openai`) with native OpenAI model IDs such as `gpt-5.1`. Anthropic uses the Anthropic passthrough route (`/anthropic`) with native Anthropic model IDs such as `claude-sonnet-4-5`.
@@ -162,7 +162,7 @@ AI Gateway authentication uses `CLOUDFLARE_API_KEY` as `cf-aig-authorization`. U
 | Stored BYOK | Cloudflare token only | Cloudflare injects provider keys stored in the AI Gateway dashboard |
 | Inline BYOK | Cloudflare token plus upstream `Authorization` header | The request supplies the upstream provider key |
 
-For normal Prime Agent usage, prefer unified billing or stored BYOK. Inline BYOK requires configuring an additional upstream `Authorization` header for the Cloudflare AI Gateway provider, for example via a `models.json` provider/model override.
+For normal Optimus Prime usage, prefer unified billing or stored BYOK. Inline BYOK requires configuring an additional upstream `Authorization` header for the Cloudflare AI Gateway provider, for example via a `models.json` provider/model override.
 
 ### Cloudflare Workers AI
 
@@ -171,10 +171,10 @@ For normal Prime Agent usage, prefer unified billing or stored BYOK. Inline BYOK
 ```bash
 export CLOUDFLARE_API_KEY=...           # or use /login
 export CLOUDFLARE_ACCOUNT_ID=...
-prime-agent --provider cloudflare-workers-ai --model "@cf/moonshotai/kimi-k2.6"
+optimus --provider cloudflare-workers-ai --model "@cf/moonshotai/kimi-k2.6"
 ```
 
-Prime Agent automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
+Optimus Prime automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
 
 ## Custom Providers
 

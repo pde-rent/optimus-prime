@@ -168,8 +168,8 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
-	bundledSkills?: BundledSkillsSettings; // Configure built-in skills shipped with Prime Agent
-	enableBuiltinSkills?: boolean; // default: true - load built-in skills shipped with prime-agent
+	bundledSkills?: BundledSkillsSettings; // Configure built-in skills shipped with Optimus Prime
+	enableBuiltinSkills?: boolean; // default: true - load built-in skills shipped with optimus
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -872,7 +872,7 @@ export class SettingsManager {
 	 *
 	 * Any scope that says `false` wins, so an opt-out is never overridden by a broader scope;
 	 * otherwise one explicit `true` is enough to enable it. Point
-	 * PRIME_AGENT_TELEMETRY_ENDPOINT at something you control before turning it on.
+	 * OPTIMUS_TELEMETRY_ENDPOINT at something you control before turning it on.
 	 */
 	getTelemetryEnabled(): boolean {
 		const scopes = [

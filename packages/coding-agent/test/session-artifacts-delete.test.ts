@@ -8,7 +8,7 @@ let root = "";
 
 describe("deleteSessionFile removes the session artifact directory", () => {
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "prime-agent-session-delete-"));
+		root = mkdtempSync(join(tmpdir(), "optimus-session-delete-"));
 	});
 
 	afterEach(() => {

@@ -1,7 +1,7 @@
 import { isTruthyEnvVar } from "./utils/shared.js";
 import { ensureTool } from "./utils/tools-manager.js";
 
-const bootstrapTools = isTruthyEnvVar(process.env.PRIME_AGENT_BOOTSTRAP_TOOLS_ON_INSTALL);
+const bootstrapTools = isTruthyEnvVar(process.env.OPTIMUS_BOOTSTRAP_TOOLS_ON_INSTALL);
 
 if (!bootstrapTools) {
 	process.exit(0);
@@ -20,5 +20,5 @@ try {
 		await Promise.all([ensureTool("fd", true), ensureTool("rg", true)]);
 	}
 } catch (error) {
-	console.error(`prime-agent: postinstall setup skipped: ${oneLine(errorMessage(error))}`);
+	console.error(`optimus: postinstall setup skipped: ${oneLine(errorMessage(error))}`);
 }

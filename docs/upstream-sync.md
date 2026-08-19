@@ -8,11 +8,11 @@ its own, so this is a standing routine, not a one-off.
 
 | upstream | remote | relationship | how changes arrive |
 |---|---|---|---|
-| PrimeIntellect-ai/prime-agent | `prime-agent` | shares our history | `git merge prime-agent/main`, then resolve |
+| PrimeIntellect-ai/optimus | `optimus` | shares our history | `git merge optimus/main`, then resolve |
 | earendil-works/pi | `pi` | **no shared history** | hand-port only |
 
-The second one is the trap. prime-agent **vendors** pi's source — `packages/coding-agent` *is* a
-copy of `@earendil-works/pi-coding-agent`. A pi fix reaches us only when prime-agent re-vendors
+The second one is the trap. optimus **vendors** pi's source — `packages/coding-agent` *is* a
+copy of `@earendil-works/pi-coding-agent`. A pi fix reaches us only when optimus re-vendors
 it, or when we port it ourselves. pi has also moved 0.7.2 → 0.84.2 and restructured, so a growing
 share of its commits land in files we do not have.
 
@@ -56,10 +56,10 @@ Security and data-loss fixes are triaged first and ported even when awkward.
   ones both bump the same schema version. Merge order is part of the port.
 - **A fix in deleted code is still a signal.** We inherited the logic, so we usually inherited
   the bug.
-- **Keep the merge base.** The shared history with prime-agent is what makes its fixes a merge
+- **Keep the merge base.** The shared history with optimus is what makes its fixes a merge
   instead of a manual reapplication. Do not squash it away for tidiness.
 - **Watch for recurring conflicts.** If the same file conflicts every sync, that is a standing
   divergence to resolve at the source, not to re-resolve monthly. The trimmed provider catalogue
   was one of these.
-- **prime-agent closed its issue tracker** on 2026-08-15 and moved to Discussions. The
+- **optimus closed its issue tracker** on 2026-08-15 and moved to Discussions. The
   substantive bug reports are in the closed pile; search it, not just the open list.

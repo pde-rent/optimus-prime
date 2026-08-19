@@ -1,6 +1,6 @@
 # Termux (Android) Setup
 
-Prime Agent runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
+Optimus Prime runs on Android via [Termux](https://termux.dev/), a terminal emulator and Linux environment for Android.
 
 ## Prerequisites
 
@@ -16,18 +16,18 @@ pkg update && pkg upgrade
 # Install dependencies
 pkg install termux-api git ripgrep
 
-# Prime Agent needs Bun (>= 1.3.0) for both the build and the agent's REPL.
+# Optimus Prime needs Bun (>= 1.3.0) for both the build and the agent's REPL.
 # Install it from your Termux repository if it provides a `bun` package, or
 # follow https://bun.sh/docs/installation. Verify with:
 bun --version
 
-# Clone and install Prime Agent from source
-git clone https://github.com/PrimeIntellect-ai/prime-agent.git
-cd prime-agent
+# Clone and install Optimus Prime from source
+git clone https://github.com/PrimeIntellect-ai/optimus.git
+cd optimus
 bun install
 
-# Run Prime Agent
-./prime-agent.sh
+# Run Optimus Prime
+./optimus.sh
 ```
 
 ## Clipboard Support
@@ -38,7 +38,7 @@ Image clipboard is not supported on Termux (the `ctrl+v` image paste feature wil
 
 ## Example AGENTS.md for Termux
 
-Create `~/.prime/agent/AGENTS.md` to help the agent understand the Termux environment:
+Create `~/.optimus/agent/AGENTS.md` to help the agent understand the Termux environment:
 
 ```markdown
 # Agent Environment: Termux on Android
@@ -131,4 +131,4 @@ rm -rf ~/.bun/install/cache node_modules
 bun install
 ```
 
-If `bun` itself is missing or fails to start, Prime Agent cannot run: the agent's REPL is a Bun child process and there is no fallback interpreter.
+If `bun` itself is missing or fails to start, Optimus Prime cannot run: the agent's REPL is a Bun child process and there is no fallback interpreter.

@@ -3,18 +3,18 @@ import type { OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import { getAuthPath } from "../../config.js";
 import type { ModelRegistry } from "../../core/model-registry.js";
 import {
-	checkPrimeAgentTracesAccess,
+	checkOptimusTracesAccess,
 	checkPrimeInferenceAccess,
 	fetchPrimeTeams,
-	loadPrimeCliConfig,
-	loginPrimeAgentTraces,
+	loadOptimusCliConfig,
+	loginOptimusTraces,
 	loginPrimeInference,
-	PRIME_AGENT_TRACES_PROVIDER_ID,
-	PRIME_AGENT_TRACES_PROVIDER_NAME,
+	OPTIMUS_TRACES_PROVIDER_ID,
+	OPTIMUS_TRACES_PROVIDER_NAME,
 	PRIME_INFERENCE_PROVIDER_ID,
 	PRIME_INFERENCE_PROVIDER_NAME,
 	type PrimeTeam,
-	resolvePrimeAgentTracesBaseUrl,
+	resolveOptimusTracesBaseUrl,
 } from "../../core/prime-inference-auth.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.js";
 import { SERPER_CREDENTIAL_ID, SERPER_CREDENTIAL_NAME } from "../../core/websearch-credential.js";
@@ -353,11 +353,11 @@ export class ProviderAuthFlows {
 	}
 
 	private getPrimeInferenceDefaultTeamStatus(): string {
-		const configPath = this.host.modelRegistry.authStorage.getPrimeCliConfigPath();
+		const configPath = this.host.modelRegistry.authStorage.getOptimusCliConfigPath();
 		if (configPath) {
-			let config: ReturnType<typeof loadPrimeCliConfig>;
+			let config: ReturnType<typeof loadOptimusCliConfig>;
 			try {
-				config = loadPrimeCliConfig(configPath);
+				config = loadOptimusCliConfig(configPath);
 			} catch {
 				return "Using personal account.";
 			}
@@ -383,7 +383,7 @@ export class ProviderAuthFlows {
 
 	private async selectPrimeInferenceTeam(apiKey: string, dialog: LoginDialogComponent): Promise<string | undefined> {
 		try {
-			const config = loadPrimeCliConfig(this.host.modelRegistry.authStorage.getPrimeCliConfigPath());
+			const config = loadOptimusCliConfig(this.host.modelRegistry.authStorage.getOptimusCliConfigPath());
 			if (config.teamIdFromEnv) {
 				this.host.modelRegistry.authStorage.reload();
 				return "Using team from PRIME_TEAM_ID.";
@@ -431,20 +431,20 @@ export class ProviderAuthFlows {
 			"api_key",
 			teamStatus,
 			"provider",
-			this.host.modelRegistry.authStorage.getPrimeCliConfigPath() ?? getAuthPath(),
+			this.host.modelRegistry.authStorage.getOptimusCliConfigPath() ?? getAuthPath(),
 		);
 	}
 
-	private async completePrimeAgentTracesLogin(apiKey: string, closeDialog: () => void): Promise<AuthenticationResult> {
-		this.host.modelRegistry.authStorage.set(PRIME_AGENT_TRACES_PROVIDER_ID, {
+	private async completeOptimusTracesLogin(apiKey: string, closeDialog: () => void): Promise<AuthenticationResult> {
+		this.host.modelRegistry.authStorage.set(OPTIMUS_TRACES_PROVIDER_ID, {
 			type: "api_key",
 			key: apiKey,
 		});
 
 		closeDialog();
 		return await this.completeProviderAuthentication(
-			PRIME_AGENT_TRACES_PROVIDER_ID,
-			PRIME_AGENT_TRACES_PROVIDER_NAME,
+			OPTIMUS_TRACES_PROVIDER_ID,
+			OPTIMUS_TRACES_PROVIDER_NAME,
 			"api_key",
 		);
 	}
@@ -504,7 +504,7 @@ export class ProviderAuthFlows {
 					signal: browserAbort.signal,
 				},
 				{
-					configPath: this.host.modelRegistry.authStorage.getPrimeCliConfigPath(),
+					configPath: this.host.modelRegistry.authStorage.getOptimusCliConfigPath(),
 				},
 			);
 			// When the browser challenge cannot start or breaks down, keep the dialog
@@ -540,7 +540,7 @@ export class ProviderAuthFlows {
 			if (result.source === "manual") {
 				browserAbort.abort();
 				dialog.showProgress("Checking Prime Inference access...");
-				const config = loadPrimeCliConfig(this.host.modelRegistry.authStorage.getPrimeCliConfigPath());
+				const config = loadOptimusCliConfig(this.host.modelRegistry.authStorage.getOptimusCliConfigPath());
 				const access = await checkPrimeInferenceAccess(result.apiKey, config.baseUrl, { signal: dialog.signal });
 				if (dialog.signal.aborted) {
 					closeDialog();
@@ -566,12 +566,12 @@ export class ProviderAuthFlows {
 		}
 	}
 
-	async runPrimeAgentTracesLogin(): Promise<AuthenticationResult> {
+	async runOptimusTracesLogin(): Promise<AuthenticationResult> {
 		const dialog = new LoginDialogComponent(
 			this.host.ui,
-			PRIME_AGENT_TRACES_PROVIDER_ID,
+			OPTIMUS_TRACES_PROVIDER_ID,
 			(_success, _message) => {},
-			PRIME_AGENT_TRACES_PROVIDER_NAME,
+			OPTIMUS_TRACES_PROVIDER_NAME,
 		);
 
 		const handle = showFullPaneOverlay(this.host.ui, dialog, {
@@ -607,7 +607,7 @@ export class ProviderAuthFlows {
 		};
 
 		try {
-			const browserLogin = loginPrimeAgentTraces({
+			const browserLogin = loginOptimusTraces({
 				onAuth: (info) => {
 					dialog.showAuth(info.url, info.instructions);
 					armManualInput("Complete the sign-in in your browser, or paste a Prime API key below:");
@@ -642,8 +642,8 @@ export class ProviderAuthFlows {
 
 			if (result.source === "manual") {
 				browserAbort.abort();
-				dialog.showProgress("Checking Prime Agent trace access...");
-				const access = await checkPrimeAgentTracesAccess(result.apiKey, resolvePrimeAgentTracesBaseUrl(), {
+				dialog.showProgress("Checking Optimus Prime trace access...");
+				const access = await checkOptimusTracesAccess(result.apiKey, resolveOptimusTracesBaseUrl(), {
 					signal: dialog.signal,
 				});
 				if (dialog.signal.aborted) {
@@ -652,16 +652,16 @@ export class ProviderAuthFlows {
 				}
 				if (!access.ok) {
 					const status = access.status === undefined ? "" : `HTTP ${access.status}: `;
-					throw new Error(`Prime API key does not have Prime Agent trace access (${status}${access.message})`);
+					throw new Error(`Prime API key does not have Optimus Prime trace access (${status}${access.message})`);
 				}
 			}
 
-			return await this.completePrimeAgentTracesLogin(result.apiKey, closeDialog);
+			return await this.completeOptimusTracesLogin(result.apiKey, closeDialog);
 		} catch (error: unknown) {
 			closeDialog();
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			if (!dialog.signal.aborted && errorMsg !== "Login cancelled") {
-				this.host.showError(`Failed to login to ${PRIME_AGENT_TRACES_PROVIDER_NAME}: ${errorMsg}`);
+				this.host.showError(`Failed to login to ${OPTIMUS_TRACES_PROVIDER_NAME}: ${errorMsg}`);
 				return { status: "failed" };
 			}
 			return { status: "cancelled" };

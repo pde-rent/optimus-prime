@@ -108,7 +108,7 @@ describe("herdrAgentStateExtension", () => {
 		"HERDR_PANE_ID",
 		"HERDR_PI_IDLE_DEBOUNCE_MS",
 		"HERDR_PI_RETRY_GRACE_MS",
-		"PRIME_AGENT_CODING_AGENT_DIR",
+		"OPTIMUS_CODING_AGENT_DIR",
 	];
 
 	for (const key of envKeys) {
@@ -230,7 +230,7 @@ describe("herdrAgentStateExtension", () => {
 		process.env.HERDR_SOCKET_PATH = socketPath;
 		process.env.HERDR_PANE_ID = "w1:p1";
 		process.env.HERDR_PI_IDLE_DEBOUNCE_MS = "10";
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = tempDir;
+		process.env.OPTIMUS_CODING_AGENT_DIR = tempDir;
 
 		const { pi, handlers } = createMockPi();
 		herdrAgentStateExtension(pi);
@@ -250,7 +250,7 @@ describe("herdrAgentStateExtension", () => {
 		handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
 		await waitForRequests(1);
 		expect(requests[0]?.method).toBe("pane.report_agent");
-		expect(requests[0]?.params.agent).toBe("prime-agent");
+		expect(requests[0]?.params.agent).toBe("optimus");
 		expect(requests[0]?.params.pane_id).toBe("w1:p1");
 		expect(requests[0]?.params.state).toBe("idle");
 		expect(requests[0]?.params.agent_session_path).toBe("/tmp/session.jsonl");
@@ -270,7 +270,7 @@ describe("herdrAgentStateExtension", () => {
 		await handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown", reason: "quit" }, ctx);
 		await waitForRequests(4);
 		expect(requests[3]?.method).toBe("pane.release_agent");
-		expect(requests[3]?.params.agent).toBe("prime-agent");
+		expect(requests[3]?.params.agent).toBe("optimus");
 	});
 
 	it("unsubscribes the shared-bus herdr:blocked listener on shutdown", async () => {
@@ -472,7 +472,7 @@ describe("herdrAgentStateExtension", () => {
 		process.env.HERDR_ENV = "1";
 		process.env.HERDR_SOCKET_PATH = socketPath;
 		process.env.HERDR_PANE_ID = "w1:p1";
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = tempDir;
+		process.env.OPTIMUS_CODING_AGENT_DIR = tempDir;
 
 		const ctx = { sessionManager: { getSessionFile: () => undefined, getSessionId: () => "s" } };
 

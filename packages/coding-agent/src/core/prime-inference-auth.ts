@@ -8,8 +8,8 @@ import { readJsonFile, writeJsonAtomically } from "../utils/shared.js";
 
 export const PRIME_INFERENCE_PROVIDER_ID = "prime-inference";
 export const PRIME_INFERENCE_PROVIDER_NAME = "Prime Inference";
-export const PRIME_AGENT_TRACES_PROVIDER_ID = "prime-agent-traces";
-export const PRIME_AGENT_TRACES_PROVIDER_NAME = "Prime Agent Traces";
+export const OPTIMUS_TRACES_PROVIDER_ID = "optimus-traces";
+export const OPTIMUS_TRACES_PROVIDER_NAME = "Optimus Prime Traces";
 
 const DEFAULT_PRIME_API_BASE_URL = "https://api.primeintellect.ai";
 const DEFAULT_PRIME_FRONTEND_URL = "https://app.primeintellect.ai";
@@ -24,7 +24,7 @@ export type PrimeInferenceLoginResult = {
 	source: PrimeInferenceAuthSource;
 };
 
-export type PrimeCliConfig = {
+export type OptimusCliConfig = {
 	apiKey?: string;
 	baseUrl: string;
 	frontendUrl: string;
@@ -77,12 +77,12 @@ export type PrimeTeam = {
 	createdAt?: string;
 };
 
-function defaultPrimeCliConfigPath(): string {
+function defaultOptimusCliConfigPath(): string {
 	return join(homedir(), ".prime", "config.json");
 }
 
-export function getPrimeCliConfigPath(configPath?: string): string {
-	return configPath ?? defaultPrimeCliConfigPath();
+export function getOptimusCliConfigPath(configPath?: string): string {
+	return configPath ?? defaultOptimusCliConfigPath();
 }
 
 function normalizeBaseUrl(value: string | undefined): string {
@@ -112,12 +112,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readPrimeCliConfigData(configPath: string): Record<string, unknown> {
+function readOptimusCliConfigData(configPath: string): Record<string, unknown> {
 	const parsed = readJsonFile(configPath);
 	return isRecord(parsed) ? parsed : {};
 }
 
-function writePrimeCliConfigData(configPath: string, data: Record<string, unknown>): void {
+function writeOptimusCliConfigData(configPath: string, data: Record<string, unknown>): void {
 	const dir = dirname(configPath);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -131,12 +131,12 @@ function clearPrimeTeamFields(data: Record<string, unknown>): void {
 	delete data.team_role;
 }
 
-export function loadPrimeCliConfig(configPath: string = defaultPrimeCliConfigPath()): PrimeCliConfig {
-	const data = readPrimeCliConfigData(configPath);
+export function loadOptimusCliConfig(configPath: string = defaultOptimusCliConfigPath()): OptimusCliConfig {
+	const data = readOptimusCliConfigData(configPath);
 	const teamIdFromEnv = stringEnv("PRIME_TEAM_ID");
 	const teamId = teamIdFromEnv ?? stringField(data, "team_id");
 
-	const config: PrimeCliConfig = {
+	const config: OptimusCliConfig = {
 		baseUrl: normalizeBaseUrl(stringField(data, "base_url")),
 		frontendUrl: normalizeUrl(stringField(data, "frontend_url"), DEFAULT_PRIME_FRONTEND_URL),
 		inferenceUrl: normalizeUrl(stringField(data, "inference_url"), DEFAULT_PRIME_INFERENCE_URL),
@@ -163,27 +163,30 @@ export function loadPrimeCliConfig(configPath: string = defaultPrimeCliConfigPat
 	return config;
 }
 
-export function savePrimeCliApiKey(apiKey: string, configPath: string = defaultPrimeCliConfigPath()): PrimeCliConfig {
-	const data = readPrimeCliConfigData(configPath);
+export function saveOptimusCliApiKey(
+	apiKey: string,
+	configPath: string = defaultOptimusCliConfigPath(),
+): OptimusCliConfig {
+	const data = readOptimusCliConfigData(configPath);
 	data.api_key = apiKey;
 	clearPrimeTeamFields(data);
-	writePrimeCliConfigData(configPath, data);
-	return loadPrimeCliConfig(configPath);
+	writeOptimusCliConfigData(configPath, data);
+	return loadOptimusCliConfig(configPath);
 }
 
-export function clearPrimeCliCredentials(configPath: string = defaultPrimeCliConfigPath()): PrimeCliConfig {
-	const data = readPrimeCliConfigData(configPath);
+export function clearOptimusCliCredentials(configPath: string = defaultOptimusCliConfigPath()): OptimusCliConfig {
+	const data = readOptimusCliConfigData(configPath);
 	delete data.api_key;
 	clearPrimeTeamFields(data);
-	writePrimeCliConfigData(configPath, data);
-	return loadPrimeCliConfig(configPath);
+	writeOptimusCliConfigData(configPath, data);
+	return loadOptimusCliConfig(configPath);
 }
 
-export function savePrimeCliTeamSelection(
+export function saveOptimusCliTeamSelection(
 	team: PrimeTeam | null,
-	configPath: string = defaultPrimeCliConfigPath(),
-): PrimeCliConfig {
-	const data = readPrimeCliConfigData(configPath);
+	configPath: string = defaultOptimusCliConfigPath(),
+): OptimusCliConfig {
+	const data = readOptimusCliConfigData(configPath);
 	if (team) {
 		data.team_id = team.teamId;
 		data.team_name = team.name;
@@ -195,18 +198,18 @@ export function savePrimeCliTeamSelection(
 	} else {
 		clearPrimeTeamFields(data);
 	}
-	writePrimeCliConfigData(configPath, data);
-	return loadPrimeCliConfig(configPath);
+	writeOptimusCliConfigData(configPath, data);
+	return loadOptimusCliConfig(configPath);
 }
 
-export function resolvePrimeAgentTracesBaseUrl(baseUrl?: string): string {
-	return normalizeBaseUrl(baseUrl ?? stringEnv("PRIME_AGENT_TRACES_BASE_URL"));
+export function resolveOptimusTracesBaseUrl(baseUrl?: string): string {
+	return normalizeBaseUrl(baseUrl ?? stringEnv("OPTIMUS_TRACES_BASE_URL"));
 }
 
-function resolvePrimeAgentTracesChallengeConfig(config: PrimeCliConfig): PrimeChallengeConfig {
+function resolveOptimusTracesChallengeConfig(config: OptimusCliConfig): PrimeChallengeConfig {
 	return {
-		baseUrl: resolvePrimeAgentTracesBaseUrl(),
-		frontendUrl: stringEnv("PRIME_AGENT_TRACES_BASE_URL") ? config.frontendUrl : DEFAULT_PRIME_FRONTEND_URL,
+		baseUrl: resolveOptimusTracesBaseUrl(),
+		frontendUrl: stringEnv("OPTIMUS_TRACES_BASE_URL") ? config.frontendUrl : DEFAULT_PRIME_FRONTEND_URL,
 	};
 }
 
@@ -586,7 +589,7 @@ export async function checkPrimeInferenceAccess(
 	return checkPrimeScopeAccess(apiKey, baseUrl, "inference", "inference", options);
 }
 
-export async function checkPrimeAgentTracesAccess(
+export async function checkOptimusTracesAccess(
 	apiKey: string,
 	baseUrl: string,
 	options: {
@@ -607,7 +610,7 @@ export async function loginPrimeInference(
 	callbacks: PrimeInferenceLoginCallbacks,
 	options: PrimeInferenceLoginOptions = {},
 ): Promise<PrimeInferenceLoginResult> {
-	const config = loadPrimeCliConfig(options.configPath);
+	const config = loadOptimusCliConfig(options.configPath);
 	const fetchFn = options.fetchFn ?? fetch;
 	const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -646,19 +649,19 @@ export async function loginPrimeInference(
 	return { apiKey, source: "browser" };
 }
 
-export async function loginPrimeAgentTraces(
+export async function loginOptimusTraces(
 	callbacks: PrimeInferenceLoginCallbacks,
 	options: PrimeInferenceLoginOptions = {},
 ): Promise<PrimeInferenceLoginResult> {
-	const config = loadPrimeCliConfig(options.configPath);
-	const traceConfig = resolvePrimeAgentTracesChallengeConfig(config);
+	const config = loadOptimusCliConfig(options.configPath);
+	const traceConfig = resolveOptimusTracesChallengeConfig(config);
 	const fetchFn = options.fetchFn ?? fetch;
 	const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
 	if (config.apiKey) {
 		callbacks.onProgress?.("Checking existing Prime CLI credentials...");
-		const access = await checkPrimeAgentTracesAccess(config.apiKey, traceConfig.baseUrl, {
+		const access = await checkOptimusTracesAccess(config.apiKey, traceConfig.baseUrl, {
 			fetchFn,
 			requestTimeoutMs,
 			signal: callbacks.signal,
@@ -668,7 +671,7 @@ export async function loginPrimeAgentTraces(
 			return { apiKey: config.apiKey, source: "prime-cli" };
 		}
 		callbacks.onProgress?.(
-			`Existing Prime CLI key cannot upload Prime Agent traces (${formatAccessFailure(access)}). Starting browser login...`,
+			`Existing Prime CLI key cannot upload Optimus Prime traces (${formatAccessFailure(access)}). Starting browser login...`,
 		);
 	} else {
 		callbacks.onProgress?.("No Prime CLI API key found. Starting browser login...");
@@ -683,14 +686,14 @@ export async function loginPrimeAgentTraces(
 		"agent_traces",
 	);
 	throwIfCancelled(callbacks.signal);
-	callbacks.onProgress?.("Checking Prime Agent trace access...");
-	const access = await checkPrimeAgentTracesAccess(apiKey, traceConfig.baseUrl, {
+	callbacks.onProgress?.("Checking Optimus Prime trace access...");
+	const access = await checkOptimusTracesAccess(apiKey, traceConfig.baseUrl, {
 		fetchFn,
 		requestTimeoutMs,
 		signal: callbacks.signal,
 	});
 	if (!access.ok) {
-		throw new Error(`Prime API key does not have Prime Agent trace access (${formatAccessFailure(access)})`);
+		throw new Error(`Prime API key does not have Optimus Prime trace access (${formatAccessFailure(access)})`);
 	}
 
 	throwIfCancelled(callbacks.signal);

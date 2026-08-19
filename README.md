@@ -1,178 +1,183 @@
-<p align="center">
-  <a href="https://primeintellect.ai">
-    <picture>
-      <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/40c36e38-c5bd-4c5a-9cb3-f7b902cd155d">
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8">
-      <img alt="Prime Intellect" src="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8" width="312" style="max-width: 100%;">
-    </picture>
-  </a>
-</p>
+<h3 align="center">Optimus Prime</h3>
 
-<h3 align="center">
-Prime Agent: A Self-Improving RLM Agent
-</h3>
+<p align="center">
+  A self-improving RLM coding agent that runs on Bun, with a persistent JavaScript/TypeScript REPL as its primary tool.
+</p>
 
 <p align="center">
   <a href="packages/coding-agent/docs/index.md">Documentation</a> &bull;
-  <a href="https://github.com/PrimeIntellect-ai/verifiers">Verifiers</a> &bull;
-  <a href="https://github.com/PrimeIntellect-ai/prime-rl">PRIME-RL</a> &bull;
-  <a href="https://github.com/badlogic/pi-mono">pi-mono</a>
+  <a href="#what-is-different-here">What is different</a> &bull;
+  <a href="#measured-against-both-parents">Measurements</a> &bull;
+  <a href="#credits">Credits</a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/ci.yml">
-    <img src="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
-  <a href="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/build-binaries.yml">
-    <img src="https://github.com/PrimeIntellect-ai/prime-agent/actions/workflows/build-binaries.yml/badge.svg" alt="Build Binaries" />
-  </a>
-</p>
+---
 
-Prime Agent is an open-source coding and research agent for general and long-running work. It is designed around two core abstractions:
+## Install
 
-- The **[Recursive Language Model (RLM)](https://www.primeintellect.ai/blog/rlm)** treats context as variables (*prompt-as-a-variable*) and tools like recursive subagents as function calls (*programmatic tool /sub-agent calling*) inside a persistent REPL.
-- The **[Continual Harness](https://arxiv.org/abs/2605.09998)** stores supplemental prompts, memories, skill descriptions, and reusable subagent specifications as durable state that Prime Agent can refine through small, evidence-backed updates, local to the session by default.
-
-Prime Agent combines a persistent JavaScript/TypeScript control environment with durable harness state, so useful working context and reusable operating patterns can outlive a single chat window.
-
-- **Everything is programmatic:** a persistent Bun JS/TS REPL is the built-in model tool; file operations, shell commands, tool use, subagents, and context management happen through code.
-- **Subagents are built in:** `rlm(...)` spawns real child agents for parallel or background work and returns their results programmatically.
-- **The harness can improve:** `/refine` reviews the current trajectory and can apply small, evidence-backed updates to supplemental harness state. It never rewrites the immutable base system prompt, and recorded snapshots support rollback.
-- **Skills are executable:** a skill can ship a `skill.js` module that is preloaded into the REPL and called directly, and the built-in skill creator can turn recurring workflows into project or personal skills.
-- **Sessions run in the background:** daemon-backed agents keep running when the terminal disconnects and can be reattached later.
-- **Agents communicate directly:** running agents can exchange messages and orchestrate one another without routing everything through the user.
-- **Long tasks keep moving:** automatic compaction, persistent goals, heartbeats, schedules, autonomous mode, and retained subagents preserve progress across turns and terminal sessions.
-
-## What this fork changes
-
-Optimus Prime is a hard fork of [`prime-agent`](https://github.com/PrimeIntellect-ai/prime-agent).
-Three themes: **no Python**, **no runtime dependencies we can write ourselves**, **Bun everywhere**.
-
-### Runtime, not Python
-
-| | prime-agent | Optimus Prime |
-|---|---|---|
-| Model REPL | IPython kernel (Python) | single Bun JS/TS REPL (`src/core/bun-repl/`) |
-| `.py` files in tree | 23 | 1 (a logo render script) |
-| Daemon transport | `zeromq` | Bun IPC |
-| Test runner | Vitest | `bun test` |
-
-### Runtime dependencies
-
-Vendored in place of a package wherever the package was doing something small: ANSI styling,
-East Asian width, fuzzy matching, partial-JSON parsing, Markdown parsing, UUIDv7, image sniffing,
-Google wire types. Provider SDKs are replaced by plain `fetch`.
-
-| Package | prime-agent | Optimus Prime | Dropped |
-|---|---|---|---|
-| `tui` | 5 | **0** | `chalk`, `marked`, `get-east-asian-width`, `mime-types`, `@types/mime-types` |
-| `ai` | 11 | **1** | `@anthropic-ai/sdk`, `@aws-sdk/client-bedrock-runtime`, `@google/genai`, `@mistralai/mistralai`, `openai`, `chalk`, `partial-json`, `proxy-agent`, `undici`, `zod-to-json-schema` |
-| `coding-agent` | 23 | **16** | `chalk`, `strip-ansi`, `marked`, `undici`, `uuid`, `zeromq`, `file-type` |
-| `agent` | 2 | 2 | — |
-
-### TUI
-
-The TUI keeps its differential renderer and zero dependencies; these are additions on top.
-
-- **Collapsible blocks are clickable.** Tool calls, bash runs, agent messages, and REPL cells
-  carry a `▸`/`▾` chevron that toggles that one block. Clicking rides the existing OSC 8 hyperlink
-  path — no layout or bounds tracking — and is active in fullscreen mouse mode; the keybindings
-  (`Ctrl+O` / `Ctrl+P` / `Ctrl+J` / `Ctrl+T`) still drive everything globally.
-- **Per-block state survives global toggles.** Expanding one tool is no longer wiped by an
-  unrelated global expand.
-- **Higher-contrast selection.** Autocomplete and selector rows are a filled bar with bold text
-  and a `❯` marker, instead of a dark accent color that rendered the selected row dimmer than its
-  neighbours.
-
-### Other
-
-- Self-hosted **SearXNG** websearch backend, with per-category engine curation and infoboxes.
-- Full 32-provider model catalogue, no longer regenerated at build time.
-- `bun:ffi` for Windows VT input.
-
-## Upstream
-
-Upstream still fixes bugs in code we share, and **neither upstream reaches us automatically** —
-`prime-agent` shares our history and merges; `pi` does not, because prime-agent *vendors* pi's
-source, so every relevant pi fix is a hand-port.
-
-Standing routine, weekly and before any release:
+Requires [Bun](https://bun.sh) 1.4 or newer. There is no Node, npm, or Python anywhere in the
+toolchain or the runtime.
 
 ```sh
-bun scripts/upstream-report.ts          # new upstream commits since last triage
-bun scripts/upstream-report.ts --mark   # record them as triaged
+git clone https://github.com/pde-rent/optimus-prime.git
+cd optimus-prime
+bun install
+bun run build
+cd packages/coding-agent && bun link --global
 ```
 
-Triage each into PORT / N/A / CONFLICTS / SKIP, security and data-loss first. A fix in code we
-deleted is still a signal — we usually inherited the logic, and therefore the bug. Full process,
-including the upstream PRs known to be defective, in [docs/upstream-sync.md](docs/upstream-sync.md).
+That puts three equivalent commands on your PATH — `optimus`, `optimus-prime`, and `pi` (kept so
+existing muscle memory and scripts keep working):
 
-## Getting Started
-
-Install the latest stable release on macOS or Linux:
-
-```bash
-curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+```sh
+optimus                       # interactive session in the current directory
+optimus "explain src/main.ts" # one-shot with a message
+optimus -p "list the tools"   # print a response and exit
 ```
 
-The installer downloads a versioned release, verifies its SHA-256 checksum, and installs the `prime-agent` command. The agent's REPL runs on [Bun](https://bun.sh), which must be available on your `PATH`.
+Configuration, sessions, auth and installed packages live in `~/.optimus/agent`. An install that
+predates the rename is moved from `~/.prime/agent` on first run; if that move fails you are told
+rather than started with an empty profile.
 
-Start Prime Agent from the repository or directory you want it to work in:
+## What is different here
 
-```bash
-cd /path/to/project
-prime-agent
+This is a hard fork of [prime-agent](https://github.com/PrimeIntellect-ai/prime-agent), which is
+itself built on [pi](https://github.com/earendil-works/pi). Both are credited below. The fork
+exists to push two things much harder than either parent: **dependency surface** and **Bun-native
+execution**.
+
+### The REPL is the tool
+
+The agent's single built-in tool is `repl` — a persistent JavaScript/TypeScript sandbox whose
+variables, functions and imports survive between turns and across compaction. Upstream ran a
+Python IPython kernel over ZeroMQ for this; that is gone, along with its 968 lines of Python and
+the `zeromq` native module.
+
+The whole Bun standard library is in scope from a cell: `Bun.file`, `Bun.write`, `Bun.Glob`,
+`Bun.spawn`, `Bun.$`, `Bun.Transpiler`, `Bun.CryptoHasher`, `Bun.YAML`/`TOML`, `Bun.Image`,
+`Bun.stringWidth`, `Bun.semver`, `Bun.zstd*`/`gzip*`, `fetch`, `HTMLRewriter`, and `%%bash` cells
+for anything shell-shaped.
+
+### Session state that actually survives
+
+REPL snapshots use structured clone rather than JSON, so `Map`, `Set`, `Date`, `RegExp`, `BigInt`,
+typed arrays and circular references come back intact instead of as `{}`. Functions are carried as
+source and re-evaluated, so helpers defined once are still callable next turn. Live handles — a
+`Bun.serve` server, a timer — are never captured, and the model is told by name what it lost
+rather than finding a hollow object later.
+
+### Recursive language model
+
+`await rlm('sub-task')` spawns a child agent that returns at admission rather than completion,
+with results arriving as messages or files. Recursion depth is adjustable at runtime rather than
+fixed (`core/rlm-max-depth.ts`), and refinement can promote what a session learned into reusable
+skills, prompts and memory (`/refine`). Memory retrieval is a local BM25F index over weighted
+fields (`core/refinement/memory-search.ts`) — no embedding service, no network call.
+
+### Skills
+
+Twelve skills ship in the REPL by default: `chart`, `edit`, `websearch`, `agent-message`,
+`agent-observe`, `attach-image`, `compact`, `goal`, `refine`, `skill-creator`, `linear`, `notion`.
+
+`chart` renders line, scatter, bar, column, candlestick, sparkline and histogram output straight to
+the terminal using braille (2×4 dots per character cell) and eighth-block elements. It is written
+here, not installed — the drawing is the small part of any library that does this.
+
+`websearch` defaults to a self-hosted [SearXNG](deploy/searxng/) instance (free, keyless, no
+third party sees your queries) and falls back to Serper by flag or environment variable. It emits
+the same JSON shape either way.
+
+### No telemetry
+
+Upstream defaulted analytics **on**, posting run timings, token counts, tool and turn counts,
+model categories and a persistent installation id to `api.primeintellect.ai`; `/traces` uploaded
+whole session transcripts to the same host. Both subsystems are deleted outright, not merely
+switched off. No code path in this fork phones home.
+
+## Measured against both parents
+
+Measured on the same machine (M3, macOS) on 2026-08-19, from a clean clone of each project at
+that date. Install weight is a production install (`--omit=dev` / `--production`), so it reflects
+what actually ships rather than developer tooling.
+
+| | prime-agent | pi | **Optimus Prime** |
+|---|---|---|---|
+| Direct runtime dependencies | 33 | 27 | **5** |
+| Packages in a production install | 125 | 84 | **18** |
+| Production `node_modules` | 197 MB | 140 MB | **11 MB** |
+| Entries in the lockfile | 443 | 395 | **93** |
+| Shipped bundle | 13 MB | 11 MB | **6.7 MB** |
+| `--version` cold start, mean of 5 | 230 ms | 350 ms | **74 ms** |
+| `--version` cold start, best of 5 | 130 ms | 270 ms | **60 ms** |
+| Python in the repo | 968 lines | none | **none** |
+
+Two honest caveats, because the numbers are only useful if you can trust them:
+
+**Startup is not a like-for-like runtime comparison.** Optimus runs on Bun; both parents run on
+Node. Some of that 3–5× is Bun rather than this codebase. The dependency and install-size figures
+have no such caveat.
+
+**Source lines did not shrink.** Optimus is ~149k lines of source against prime-agent's ~148k and
+pi's ~121k. Removing a dependency does not delete its work — it moves that work into `src`, where
+it is auditable, tree-shaken and typed against the rest of the codebase. Anyone claiming both
+"fewer dependencies" and "less code" is usually counting one of them wrong. What shrank is the
+code you did not write and cannot see: **93 lockfile entries instead of 443**.
+
+### The five remaining dependencies
+
+| Package | Why it stays |
+|---|---|
+| `@speed-highlight/core` | Syntax highlighting rule data, zero dependencies of its own. Its matcher is re-implemented here synchronously so highlighting runs inside the render pass and uses the active theme |
+| `jiti` | Module loading for extensions. Bun handles TS and cache-busting natively, but `Bun.plugin` does not intercept bare specifiers for runtime dynamic imports, which extensions need to resolve workspace packages and bundled virtual modules |
+| `proper-lockfile` | Cross-process file locking |
+| `extract-zip` | Zip extraction; Bun's archive API is write-only |
+| `@mariozechner/clipboard` | Optional, native clipboard including images |
+
+Everything else was replaced with Bun builtins or local code, each differential-tested against the
+package it replaced before removal: gitignore matching (1440/1440 identical), git URL parsing
+(20/20), glob matching (512/512), JSON Schema emission and validation (12/12 byte-identical
+schemas, 26/26 identical checks), Myers line diff (exact, plus 400 randomised reconstructions).
+
+## Why this matters
+
+**Performance.** Startup cost is dominated by how much code has to be found, parsed and evaluated
+before the first prompt renders. Eighteen packages parse faster than a hundred and twenty-five.
+Replacing `cli-highlight` alone removed a ~350 ms import of the whole of highlight.js.
+
+**Supply-chain control.** Every one of the 443 packages a `prime-agent` install pulls in is code
+that runs with your credentials, in your repositories, on your machine, and that updates without
+you reading the diff. In 2026 that is the realistic attack surface for a developer tool — not the
+model, the install graph. Ninety-three entries is not zero, but it is an audit a person can
+actually perform. The five direct dependencies above each earn their place with a reason, and
+provider SDKs — `openai`, `@anthropic-ai/sdk`, `@mistralai/mistralai`, `@aws-sdk/*`, `@google/genai`
+— are all gone: one fetch client speaks every provider, with the wire types vendored.
+
+## Development
+
+```sh
+bun run build          # typecheck + bundle every package
+bun run check          # biome, tsgo, installer and browser smoke checks
+bun run test           # every package's suite
+bunx tsgo --noEmit     # types only
 ```
 
-On first launch, run `/login` to choose a subscription or API-key provider. Prime Agent works in the current directory and can run commands and modify files there. Use a disposable clone, clean worktree, or another checkpoint you can inspect and restore.
+Per-package suites run from the package directory, and need the Vitest-compat preload:
 
-> [!WARNING]
-> Prime Agent executes model-generated JavaScript and project commands with your user permissions. Its worker and REPL processes improve lifecycle isolation and recovery; they are **not** a security sandbox. Review changes and use trusted repositories, instructions, skills, and extensions only. Run untrusted code or instructions in an external sandbox or restricted environment.
-
-Useful commands:
-
-```bash
-prime-agent agents                   # Browse running, idle, and saved sessions
-prime-agent attach <agent>           # Reattach to a running session
-prime-agent --resume [path|id]       # Browse sessions or resume one directly
-prime-agent status                   # Inspect background service state
-prime-agent doctor [--fix]           # Inspect or repair background services
-prime-agent update [--force]         # Update Prime Agent
-prime-agent shutdown [--force]       # Stop every agent, worker, and background service
+```sh
+cd packages/coding-agent
+bun test --preload ../../scripts/test-preload.ts --isolate test/bun-repl.test.ts
 ```
 
-## Built for Long-Running Work
-Prime Agent is built for long-running work, especially for evaluations in research. These features are available in the TUI, and when run autonomously.
+## Credits
 
-- **Continual Harness:** `/refine` can persist focused, reviewable lessons as supplemental prompts, memories, reusable skill descriptions, or subagent specifications, with recorded refinement history. It does not replace packaging and reviewing new executable skills.
-- **Direct agent-to-agent communication:** running agents and retained subagents can discover one another, exchange messages, and steer active work.
-- **Daemon-backed continuity:** active sessions, REPL state, schedules, and subagents keep running when the terminal detaches and can be reattached later.
-- **Heartbeats and schedules:** `/heartbeat`, `rlm_heartbeat`, and `prime-agent schedule` can re-enter a session periodically or at a specific time.
-- **Persistent goals:** `/goal` keeps an objective and its progress active across turns until it is completed, paused, or cleared.
-- **Bounded autonomous mode:** `/autonomous` continues within configured turn, token, and time budgets and can run user-defined quality gates. A passed gate checks only what that gate verifies; reaching a limit does not imply task success.
+This project stands on two upstreams and keeps both copyright notices in
+[LICENSE](LICENSE) as MIT requires:
 
-## Documentation
+- **[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)** — the
+  direct parent. The RLM architecture, the refinement and skills system, the daemon and agents
+  view, and most of the harness this fork rewrites.
+- **[earendil-works/pi](https://github.com/earendil-works/pi)** (Mario Zechner) — the foundation
+  prime-agent itself was built from: the agent loop, the TUI, the provider layer and the
+  extension system.
 
-- [Quickstart](packages/coding-agent/docs/quickstart.md) — install, authenticate, and run a first session
-- [Usage and CLI reference](packages/coding-agent/docs/usage.md) — commands, sessions, autonomous limits, and output modes
-- [Long-running and background agents](packages/coding-agent/docs/long-running-agents.md) — detach and reattach, goals, heartbeats, and schedules
-- [RLM programming model](packages/coding-agent/docs/rlm.md) — the persistent JS/TS REPL, subagents, skills, and the trust model
-- [JSON mode](packages/coding-agent/docs/json.md) and [RPC mode](packages/coding-agent/docs/rpc.md) — headless automation and integrations
-- [Skills](packages/coding-agent/docs/skills.md) — install and create reusable capabilities
-- [Provider setup](packages/coding-agent/docs/providers.md) — subscription and API-key providers
-- [Architecture overview](packages/coding-agent/docs/architecture.md) — daemon, worker, REPL, and persistence boundaries
-- [Development](packages/coding-agent/docs/development.md) — build and run from source
-
-## Contributing
-
-Start with a GitHub Discussion for [general questions](https://github.com/PrimeIntellect-ai/prime-agent/discussions/categories/general), [bug reports](https://github.com/PrimeIntellect-ai/prime-agent/discussions/categories/bug-reports), and [feature requests](https://github.com/PrimeIntellect-ai/prime-agent/discussions/categories/feature-requests). Maintainers promote accepted work into Issues, and pull requests are reviewed from maintainers and vouched contributors.
-
-Read the [contribution guidelines](CONTRIBUTING.md) for the full process. Report security vulnerabilities privately by following the [security policy](SECURITY.md).
-
-## Acknowledgements
-
-Our agent and TUI is built on top of [`pi`](https://github.com/earendil-works/pi). We thank the authors of `pi` for their valuable work.
-
-## License
-
-Prime Agent is fully open source and released under the [MIT License](LICENSE).
+Optimus Prime is an independent hard fork. Neither project endorses it, and bugs here are ours.

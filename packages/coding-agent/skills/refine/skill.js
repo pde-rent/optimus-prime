@@ -1,5 +1,5 @@
 /**
- * Prime Agent refine skill: continual harness refinement from the REPL.
+ * Optimus Prime refine skill: continual harness refinement from the REPL.
  *
  * Refinement runs host-side (the same implementation as /refine); these
  * functions are thin typed wrappers over the generic host bridge.

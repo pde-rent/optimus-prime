@@ -199,8 +199,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			await expect(authStorage.getApiKey("prime-inference")).resolves.toBe("prime-cli-key");
@@ -218,8 +218,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			await expect(authStorage.getApiKey("prime-inference")).resolves.toBe("prime-cli-key");
@@ -233,8 +233,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.markAuthStale("prime-inference")).toBe(true);
@@ -254,8 +254,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 			authStorage.markAuthStale("prime-inference");
 
@@ -276,8 +276,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 			authStorage.markAuthStale("prime-inference");
 
@@ -344,8 +344,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			await expect(authStorage.getApiKey("prime-inference")).resolves.toBe("prime-cli-key");
@@ -376,8 +376,8 @@ describe("AuthStorage", () => {
 				});
 
 				authStorage = AuthStorage.create(authJsonPath, {
-					primeCliConfigPath: primeConfigPath,
-					usePrimeCliConfig: true,
+					optimusCliConfigPath: primeConfigPath,
+					useOptimusCliConfig: true,
 				});
 
 				await expect(authStorage.getApiKey("prime-inference")).resolves.toBe("env-prime-key");
@@ -422,8 +422,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.getProviderHeaders("prime-inference")).toEqual({ "X-Prime-Team-ID": "cli-team" });
@@ -446,8 +446,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.getProviderHeaders("prime-inference")).toBeUndefined();
@@ -466,8 +466,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.getProviderHeaders("prime-inference")).toBeUndefined();
@@ -489,8 +489,8 @@ describe("AuthStorage", () => {
 				});
 
 				authStorage = AuthStorage.create(authJsonPath, {
-					primeCliConfigPath: primeConfigPath,
-					usePrimeCliConfig: true,
+					optimusCliConfigPath: primeConfigPath,
+					useOptimusCliConfig: true,
 				});
 
 				expect(authStorage.getProviderHeaders("prime-inference")).toEqual({ "X-Prime-Team-ID": "env-team" });
@@ -515,8 +515,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.getProviderHeaders("prime-inference")).toEqual({ "X-Prime-Team-ID": "cli-team" });
@@ -528,8 +528,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(authStorage.getProviderHeaders("prime-inference")).toEqual({ "X-Prime-Team-ID": "team-1" });
@@ -542,8 +542,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("new-prime-key");
@@ -569,8 +569,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("new-prime-key");
@@ -601,8 +601,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("prime-cli-key");
@@ -627,8 +627,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("prime-cli-key");
@@ -661,8 +661,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("prime-cli-key");
@@ -675,7 +675,7 @@ describe("AuthStorage", () => {
 			expect(authStorage.getProviderHeaders("prime-inference")).toBeUndefined();
 		});
 
-		test("setPrimeInferenceApiKey removes legacy Prime Agent credential after Prime CLI save", () => {
+		test("setPrimeInferenceApiKey removes legacy Optimus Prime credential after Prime CLI save", () => {
 			const primeConfigPath = join(tempDir, "prime-config.json");
 			writeAuthJson({
 				"prime-inference": {
@@ -686,8 +686,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceApiKey("new-prime-key");
@@ -703,8 +703,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			expect(() => authStorage.setPrimeInferenceApiKey("new-prime-key")).toThrow();
@@ -720,7 +720,7 @@ describe("AuthStorage", () => {
 				},
 			});
 
-			authStorage = AuthStorage.create(authJsonPath, { usePrimeCliConfig: false });
+			authStorage = AuthStorage.create(authJsonPath, { useOptimusCliConfig: false });
 
 			authStorage.setPrimeInferenceApiKey("new-prime-key");
 
@@ -750,8 +750,8 @@ describe("AuthStorage", () => {
 			});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.logout("prime-inference");
@@ -770,8 +770,8 @@ describe("AuthStorage", () => {
 			writeAuthJson({});
 
 			authStorage = AuthStorage.create(authJsonPath, {
-				primeCliConfigPath: primeConfigPath,
-				usePrimeCliConfig: true,
+				optimusCliConfigPath: primeConfigPath,
+				useOptimusCliConfig: true,
 			});
 
 			authStorage.setPrimeInferenceTeamSelection({ teamId: "team-1", name: "Research", role: "admin" });

@@ -122,7 +122,7 @@ const { WorkerRecoveryJournal } = await import("../src/modes/daemon/worker-recov
 const { createDeferred } = await import("./suite/scheduling.js");
 const childProcessModule = await import("../src/utils/child-process.js");
 
-const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
+const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const previousSupervisorRegistryDir = process.env[supervisorRegistryDirEnv];
 const supervisorRegistryDirs = new Set<string>();
 

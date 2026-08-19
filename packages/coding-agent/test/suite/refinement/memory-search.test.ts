@@ -28,12 +28,16 @@ describe("searchHarnessMemories", () => {
 		};
 		expect(searchHarnessMemories(memories, { query: "", topK: 5 })).toEqual({
 			suppressedByGate: 0,
+			duplicatesCollapsed: 0,
+			totalMatchesBeforeCollapse: 0,
 			queryTerms: [],
 			totalMatches: 0,
 			results: [],
 		});
 		expect(searchHarnessMemories(memories, { query: "   ", topK: 5 })).toEqual({
 			suppressedByGate: 0,
+			duplicatesCollapsed: 0,
+			totalMatchesBeforeCollapse: 0,
 			queryTerms: [],
 			totalMatches: 0,
 			results: [],
@@ -298,5 +302,138 @@ describe("searchHarnessMemories", () => {
 		expect(results[0].snippet).toBe("");
 		expect(results[0].contentChars).toBe(0);
 		expect(results[0].truncated).toBe(false);
+	});
+});
+
+describe("relevance gates", () => {
+	it("does not let a high-scoring low-coverage decoy suppress a full-coverage hit", () => {
+		const filler = Array.from({ length: 400 }, (_, index) => `background sentence number ${index} about builds`).join(
+			" ",
+		);
+		const memories: Record<string, HarnessEntry> = {
+			perfect: makeEntry({
+				id: "perfect",
+				title: "Credential lifecycle",
+				path: "ops/creds",
+				content: `${filler} the keeper key rotation is quarterly ${filler}`,
+			}),
+			// Short, and its only term sits in the weight-3 title field, so it outscores
+			// the long entry that actually matched the whole query.
+			decoy: makeEntry({ id: "decoy", title: "keeper", path: "keeper", content: "keeper" }),
+		};
+		const { results } = searchHarnessMemories(memories, { query: "keeper key rotation quarterly", topK: 5 });
+		expect(results.map((result) => result.id)).toContain("perfect");
+	});
+
+	it("keeps a prose query answerable when most of its words are absent from the corpus", () => {
+		const memories: Record<string, HarnessEntry> = {
+			keeper: makeEntry({
+				id: "keeper",
+				title: "Keeper private key must never be logged",
+				path: "btr/security",
+				content: "KEEPER_PRIVATE_KEY is never printed, echoed or written to a log line.",
+			}),
+			terse: makeEntry({ id: "terse", title: "User wants short answers", path: "style", content: "Keep it brief." }),
+		};
+		const { results } = searchHarnessMemories(memories, {
+			query: "is it safe to print the keeper key in a log line",
+			topK: 5,
+		});
+		expect(results[0]?.id).toBe("keeper");
+	});
+
+	it("reports how many candidates the gates removed", () => {
+		const memories: Record<string, HarnessEntry> = {};
+		for (let index = 0; index < 4; index++) {
+			memories[`mem_${index}`] = makeEntry({
+				id: `mem_${index}`,
+				title: `Note ${index}`,
+				content: "the token expires quickly",
+			});
+		}
+		const response = searchHarnessMemories(memories, { query: "photosynthesis token", topK: 5 });
+		expect(response.results).toEqual([]);
+		expect(response.suppressedByGate).toBeGreaterThan(0);
+	});
+});
+
+describe("duplicate collapsing", () => {
+	const body =
+		"Never run kubectl patch against the sitp workloads; Argo selfHeal reverts the change within sixty seconds.";
+
+	it("returns one hit when the same body is stored under two ids", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:argocd_only": makeEntry({
+				id: "argocd_only",
+				title: "Config goes through argocd-values",
+				content: body,
+			}),
+			"global:no_kubectl_patch": makeEntry({ id: "no_kubectl_patch", title: "Do not patch sitp", content: body }),
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch argo selfheal", topK: 5 });
+
+		expect(response.results).toHaveLength(1);
+		expect(response.duplicatesCollapsed).toBe(1);
+		// Whichever copy ranks higher wins; the other stays addressable through the
+		// winner so it can still be merged or deleted.
+		const covered = [`global:${response.results[0].id}`, ...(response.results[0].duplicateIds ?? [])].sort();
+		expect(covered).toEqual(["global:argocd_only", "global:no_kubectl_patch"]);
+	});
+
+	it("prefers the local copy of a memory promoted to global, matching get_memory", () => {
+		const memories: Record<string, HarnessEntry> = {
+			argocd_only: { ...makeEntry({ id: "argocd_only", title: "Config", content: body }), scope: "global" },
+			"local:argocd_only": { ...makeEntry({ id: "argocd_only", title: "Config", content: body }), scope: "local" },
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch argo selfheal", topK: 5 });
+
+		expect(response.results).toHaveLength(1);
+		expect(response.results[0].scope).toBe("local");
+	});
+
+	it("keeps short bodies that merely look alike", () => {
+		const memories: Record<string, HarnessEntry> = {
+			a: makeEntry({ id: "a", title: "Deploy note one", content: "deploy on friday" }),
+			b: makeEntry({ id: "b", title: "Deploy note two", content: "deploy on friday" }),
+		};
+		const response = searchHarnessMemories(memories, { query: "deploy friday", topK: 5 });
+
+		expect(response.results).toHaveLength(2);
+		expect(response.duplicatesCollapsed).toBe(0);
+	});
+});
+
+describe("duplicate accounting", () => {
+	const body =
+		"Never run kubectl patch against the sitp workloads; Argo selfHeal reverts the change within sixty seconds.";
+
+	it("counts distinct matches and keeps a differently titled twin's name", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:argocd_only": makeEntry({
+				id: "argocd_only",
+				title: "Config goes through argocd-values",
+				content: body,
+			}),
+			"global:no_kubectl_patch": makeEntry({ id: "no_kubectl_patch", title: "Do not patch sitp", content: body }),
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch argo selfheal", topK: 5 });
+
+		// The model must be told how many memories it can act on, not how many rows the
+		// gates passed, or it infers a distinct memory it will never be shown.
+		expect(response.totalMatches).toBe(1);
+		expect(response.totalMatchesBeforeCollapse).toBe(2);
+		expect(response.results[0].duplicateTitles).toHaveLength(1);
+		expect(response.results[0].duplicateTitles?.[0]).not.toBe(response.results[0].title);
+	});
+
+	it("omits twin titles when the collapsed entries share the survivor's title", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:a": makeEntry({ id: "a", title: "Same name", content: body }),
+			"local:a": { ...makeEntry({ id: "a", title: "Same name", content: body }), scope: "local" },
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch argo selfheal", topK: 5 });
+
+		expect(response.results).toHaveLength(1);
+		expect(response.results[0].duplicateTitles).toBeUndefined();
 	});
 });

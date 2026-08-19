@@ -1,9 +1,9 @@
 # MCP Integrations
 
-Connect external services (Linear, Notion, …) to Prime Agent over the
+Connect external services (Linear, Notion, …) to Optimus Prime over the
 [Model Context Protocol](https://modelcontextprotocol.io).
 
-Consistent with Prime Agent's single-tool design, MCP integrations are **not**
+Consistent with Optimus Prime's single-tool design, MCP integrations are **not**
 exposed as new agent tools. Each integration is a [JS-backed skill](skills.md)
 bound as a global in the persistent JavaScript REPL, which the model calls
 directly:
@@ -41,7 +41,7 @@ Built-in integrations (Linear, Notion) ship **disabled**. Logging in enables the
 - `/mcp` lists integrations and connection status; `/mcp logout <name>`
   disconnects.
 
-Credentials are stored once in `~/.prime/agent/auth.json` under `mcp:<name>`.
+Credentials are stored once in `~/.optimus/agent/auth.json` under `mcp:<name>`.
 Enablement is derived from whether valid credentials exist — there is no separate
 on/off switch.
 
@@ -89,11 +89,11 @@ directory holding `SKILL.md`, `skill.js`, and a copy of `mcp-client.js`.
 
 ### 1. Declare the server
 
-Add it under `mcpServers` in `~/.prime/agent/settings.json` (or project
-`.prime/agent/settings.json`):
+Add it under `mcpServers` in `~/.optimus/agent/settings.json` (or project
+`.optimus/agent/settings.json`):
 
 ```jsonc
-// ~/.prime/agent/settings.json
+// ~/.optimus/agent/settings.json
 {
   "mcpServers": {
     "acme": {
@@ -122,7 +122,7 @@ Only remote `"http"` servers are wired through to the REPL. HTTP server fields:
 ### 2. Ship the skill
 
 Create a skill directory (any [skills location](skills.md#locations), e.g.
-`~/.prime/agent/skills/acme/`) with the JS-skill layout:
+`~/.optimus/agent/skills/acme/`) with the JS-skill layout:
 
 ```
 acme/

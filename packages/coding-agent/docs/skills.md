@@ -1,10 +1,10 @@
-> Prime Agent can create skills. Ask it to build one for your use case.
+> Optimus Prime can create skills. Ask it to build one for your use case.
 
 # Skills
 
-Skills are self-contained capability packages that Prime Agent loads on demand. A skill provides specialized workflows, setup instructions, helper scripts, and reference documentation for specific tasks.
+Skills are self-contained capability packages that Optimus Prime loads on demand. A skill provides specialized workflows, setup instructions, helper scripts, and reference documentation for specific tasks.
 
-Prime Agent implements the [Agent Skills standard](https://agentskills.io/specification), warning about violations but remaining lenient. It also supports JS-backed skills: a superset of markdown skills that ship a `skill.js` module preloaded into the persistent JavaScript REPL.
+Optimus Prime implements the [Agent Skills standard](https://agentskills.io/specification), warning about violations but remaining lenient. It also supports JS-backed skills: a superset of markdown skills that ship a `skill.js` module preloaded into the persistent JavaScript REPL.
 
 ## Table of Contents
 
@@ -12,7 +12,7 @@ Prime Agent implements the [Agent Skills standard](https://agentskills.io/specif
 - [Built-in Skills](#built-in-skills)
 - [How Skills Work](#how-skills-work)
 - [JS-Backed Skills](#js-backed-skills)
-- [Creating Skills with Prime Agent](#creating-skills-with-prime-agent)
+- [Creating Skills with Optimus Prime](#creating-skills-with-optimus)
 - [Skill Commands](#skill-commands)
 - [Skill Structure](#skill-structure)
 - [Frontmatter](#frontmatter)
@@ -24,21 +24,21 @@ Prime Agent implements the [Agent Skills standard](https://agentskills.io/specif
 
 > **Security:** Skills can instruct the model to perform any action and may include executable code the model invokes. Review skill content before use.
 
-Prime Agent loads skills from:
+Optimus Prime loads skills from:
 
 - Global:
-  - `~/.prime/agent/skills/`
+  - `~/.optimus/agent/skills/`
   - `~/.agents/skills/`
 - Project:
-  - `.prime/agent/skills/`
+  - `.optimus/agent/skills/`
   - `.agents/skills/` in `cwd` and ancestor directories (up to git repo root, or filesystem root when not in a repo)
 - Packages: `skills/` directories or `pi.skills` entries in `package.json`
 - Settings: `skills` array with files or directories
 - CLI: `--skill <path>` (repeatable, additive even with `--no-skills`)
-- Built-in: `skills/` shipped with the prime-agent package (lowest precedence)
+- Built-in: `skills/` shipped with the optimus package (lowest precedence)
 
 Discovery rules:
-- In `~/.prime/agent/skills/` and `.prime/agent/skills/`, direct root `.md` files are discovered as individual skills
+- In `~/.optimus/agent/skills/` and `.optimus/agent/skills/`, direct root `.md` files are discovered as individual skills
 - In all skill locations, directories containing `SKILL.md` are discovered recursively
 - In `~/.agents/skills/` and project `.agents/skills/`, root `.md` files are ignored
 
@@ -46,7 +46,7 @@ Disable discovery with `--no-skills` (explicit `--skill` paths still load).
 
 ## Built-in Skills
 
-Prime Agent ships with built-in skills that load by default:
+Optimus Prime ships with built-in skills that load by default:
 
 - `agent-message` - JS-backed. Message an agent's parent, siblings, or direct children through the daemon (`await agent_message.send(...)`).
 - `agent-observe` - JS-backed. Read-only observation of the agent's family: status and bounded recent-message previews.
@@ -99,13 +99,13 @@ listed on [searx.space](https://searx.space) found effectively none that answer 
 programmatic JSON query — they return `429`, `403`, or `418` on the first request
 from a clean IP, because operators disable the JSON API and run a bot limiter.
 Rotating between instances to work around that would be circumventing anti-abuse
-controls on volunteer-run servers, so Prime Agent does not ship it. Self-host
+controls on volunteer-run servers, so Optimus Prime does not ship it. Self-host
 instead: it is one command, faster, and rate-limit free.
 
 **Backend selection**, in order: `options.backend` (or
-`PRIME_AGENT_WEBSEARCH_BACKEND`) → `SEARXNG_URL` → a Serper key → a message
+`OPTIMUS_WEBSEARCH_BACKEND`) → `SEARXNG_URL` → a Serper key → a message
 explaining both options. There is never a silent fallback. When neither backend
-is configured, Prime Agent also shows a startup notice recommending SearXNG.
+is configured, Optimus Prime also shows a startup notice recommending SearXNG.
 
 **Token cost.** Output is bounded because it goes straight into the agent's
 context: results are deduplicated by URL and by domain (max 2 per site), HTML is
@@ -121,7 +121,7 @@ truncation is stated explicitly in the output.
 Once loaded, the model can call it directly in the REPL by binding name:
 
 ```js
-console.log(await websearch.run("latest Prime Agent release"));
+console.log(await websearch.run("latest Optimus Prime release"));
 console.log(await websearch.run("bun test runner docs", { count: 3, maxChars: 800 }));
 console.log(await websearch.run("rust async runtimes", { backend: "serper" }));
 console.log(await websearch.read("https://docs.searxng.org/", { maxChars: 2000 }));
@@ -169,7 +169,7 @@ To use skills from Claude Code or OpenAI Codex, add their directories to setting
 }
 ```
 
-For project-level Claude Code skills, add to `.prime/agent/settings.json`:
+For project-level Claude Code skills, add to `.optimus/agent/settings.json`:
 
 ```json
 {
@@ -179,7 +179,7 @@ For project-level Claude Code skills, add to `.prime/agent/settings.json`:
 
 ## How Skills Work
 
-1. At startup, Prime Agent scans skill locations and extracts names, descriptions, type, and file locations
+1. At startup, Optimus Prime scans skill locations and extracts names, descriptions, type, and file locations
 2. The system prompt includes visible skills in XML format per the [specification](https://agentskills.io/integrate-skills)
 3. When a task matches, the agent uses the `repl` tool — a persistent Bun JavaScript/TypeScript REPL — to load the full `SKILL.md` (models don't always do this; use prompting or `/skill:name` to force it)
 4. The agent follows the instructions, using relative paths to reference scripts and assets
@@ -190,7 +190,7 @@ Skills with `disable-model-invocation: true` are hidden from the startup skill l
 
 ## JS-Backed Skills
 
-A JS-backed skill uses the same `SKILL.md` metadata and invocation behavior as a markdown skill, but also ships an ESM module that Prime Agent preloads into the persistent JavaScript REPL and binds to a global. The full authoring contract lives in `skills/skill-creator/references/js-skills.md`.
+A JS-backed skill uses the same `SKILL.md` metadata and invocation behavior as a markdown skill, but also ships an ESM module that Optimus Prime preloads into the persistent JavaScript REPL and binds to a global. The full authoring contract lives in `skills/skill-creator/references/js-skills.md`.
 
 ```
 web-search/
@@ -203,7 +203,7 @@ Detection rules:
 - a `skill.js` at the skill root marks the skill as JS-backed (`skill.mjs` and `skill.ts` are also accepted, in that order of preference)
 - the binding name is the skill name with hyphens converted to underscores, and must be a valid JavaScript identifier (otherwise the skill loads as markdown-only, with a warning)
 
-For `web-search`, Prime Agent exposes `web_search` in the REPL. The module is an ESM file exporting a factory:
+For `web-search`, Optimus Prime exposes `web_search` in the REPL. The module is an ESM file exporting a factory:
 
 ```js
 export default function createSkill(ctx) {
@@ -255,18 +255,18 @@ Load the module standalone, outside the REPL, before relying on it in a session:
 bun -e 'const f = (await import("./skill.js")).default; const api = await f({ hostRequest: async () => ({}), display() {}, cwd: process.cwd(), env: process.env }); console.log(await api.run("prime agent skills"));'
 ```
 
-Then, in a fresh Prime Agent session, confirm the binding exists (`Object.keys(web_search)`) and that a real call works.
+Then, in a fresh Optimus Prime session, confirm the binding exists (`Object.keys(web_search)`) and that a real call works.
 
-## Creating Skills with Prime Agent
+## Creating Skills with Optimus Prime
 
-Prime Agent ships with a built-in `skill-creator` skill that teaches the agent both the Agent Skills format and the JS-backed `skill.js` contract. You can ask for a skill in normal language:
+Optimus Prime ships with a built-in `skill-creator` skill that teaches the agent both the Agent Skills format and the JS-backed `skill.js` contract. You can ask for a skill in normal language:
 
 ```text
 Create a project JS-backed skill named release-audit in
-.prime/agent/skills/release-audit. It should expose
+.optimus/agent/skills/release-audit. It should expose
 await release_audit.run(repository, targetVersion), include concise SKILL.md
 instructions, use only Bun and web standard-library APIs, and verify the
-callable in a fresh Prime Agent session.
+callable in a fresh Optimus Prime session.
 ```
 
 To force the creation workflow explicitly, invoke the built-in skill command:
@@ -277,13 +277,13 @@ To force the creation workflow explicitly, invoke the built-in skill command:
 
 Tell the agent three things:
 
-1. **Scope:** use `.prime/agent/skills/<name>/` for a project skill committed with the repository, or `~/.prime/agent/skills/<name>/` for a personal skill.
+1. **Scope:** use `.optimus/agent/skills/<name>/` for a project skill committed with the repository, or `~/.optimus/agent/skills/<name>/` for a personal skill.
 2. **Kind:** ask for a markdown skill when the capability is primarily instructions; ask for a JS-backed skill when the agent should call reusable functionality from the REPL.
 3. **Contract:** describe the intended JavaScript call, inputs, output, dependencies, credentials, and verification behavior.
 
 The agent should create `SKILL.md` in both cases. For a JS-backed skill it should also create `skill.js` exporting a `createSkill(ctx)` factory, expose a documented (JSDoc'd) callable, and verify the module loads — standalone with `bun -e`, then as a REPL binding.
 
-Use `/reload` to rediscover new or edited skill metadata. Start a fresh Prime Agent session after adding or editing a `skill.js` so the REPL preloads the new module.
+Use `/reload` to rediscover new or edited skill metadata. Start a fresh Optimus Prime session after adding or editing a `skill.js` so the REPL preloads the new module.
 
 ### Installed Skills and Continual Harness Skills
 
@@ -394,7 +394,7 @@ description: Helps with PDFs.
 
 ## Validation
 
-Prime Agent validates skills against the Agent Skills standard. Most issues produce warnings but still load the skill:
+Optimus Prime validates skills against the Agent Skills standard. Most issues produce warnings but still load the skill:
 
 - Name doesn't match parent directory
 - Name exceeds 64 characters or contains invalid characters

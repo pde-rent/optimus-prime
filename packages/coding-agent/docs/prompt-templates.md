@@ -1,4 +1,4 @@
-> Prime Agent can create prompt templates. Ask it to build one for your workflow.
+> Optimus Prime can create prompt templates. Ask it to build one for your workflow.
 
 # Prompt Templates
 
@@ -6,10 +6,10 @@ Prompt templates are Markdown snippets that expand into full prompts. Type `/nam
 
 ## Locations
 
-Prime Agent loads prompt templates from:
+Optimus Prime loads prompt templates from:
 
-- Global: `~/.prime/agent/prompts/*.md`
-- Project: `.prime/agent/prompts/*.md`
+- Global: `~/.optimus/agent/prompts/*.md`
+- Project: `.optimus/agent/prompts/*.md`
 - Packages: `prompts/` directories or `pi.prompts` entries in `package.json`
 - Settings: `prompts` array with files or directories
 - CLI: `--prompt-template <path>` (repeatable)

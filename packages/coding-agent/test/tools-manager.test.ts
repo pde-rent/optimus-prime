@@ -3,14 +3,14 @@ import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 
 const toolState = vi.hoisted(() => ({
-	toolsDir: `/tmp/prime-agent-tools-manager-${process.pid}`,
+	toolsDir: `/tmp/optimus-tools-manager-${process.pid}`,
 	platform: "linux",
 	architecture: "x64",
 	extractZip: async (_source: string, _options: { dir: string }): Promise<void> => {},
 }));
 
 vi.mock("../src/config.js", () => ({
-	APP_NAME: "prime-agent",
+	APP_NAME: "optimus",
 	getBinDir: () => toolState.toolsDir,
 }));
 
@@ -170,6 +170,6 @@ describe("tools manager", () => {
 		expect(linux).toContain("sudo dnf install ripgrep");
 		expect(windows).toContain("winget install BurntSushi.ripgrep.MSVC");
 		expect(termux).toContain("pkg install ripgrep");
-		expect(mac).toContain("Prime Agent and subagents remain available");
+		expect(mac).toContain("Optimus Prime and subagents remain available");
 	});
 });

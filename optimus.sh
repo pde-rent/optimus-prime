@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PRIME_AGENT_LAUNCHER_PATH="$SCRIPT_DIR/prime-agent.sh"
+export OPTIMUS_LAUNCHER_PATH="$SCRIPT_DIR/optimus.sh"
 if BUILD_ID="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null)"; then
-  export PRIME_AGENT_BUILD_ID="$BUILD_ID"
+  export OPTIMUS_BUILD_ID="$BUILD_ID"
 fi
 
 # Check for --no-env / --dist flags
@@ -59,7 +59,7 @@ if [[ "$NO_ENV" == "true" ]]; then
   unset AZURE_OPENAI_API_KEY
   unset AZURE_OPENAI_BASE_URL
   unset AZURE_OPENAI_RESOURCE_NAME
-  echo "Running Prime Agent without API keys..."
+  echo "Running Optimus Prime without API keys..."
 fi
 
 # --dist runs the bundled build (what users get; faster startup than the TS entrypoint).

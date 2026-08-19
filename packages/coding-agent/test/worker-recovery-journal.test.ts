@@ -14,7 +14,7 @@ describe("WorkerRecoveryJournal", () => {
 	});
 
 	function createPath(): string {
-		const root = mkdtempSync(join(tmpdir(), "prime-agent-worker-recovery-"));
+		const root = mkdtempSync(join(tmpdir(), "optimus-worker-recovery-"));
 		roots.push(root);
 		return join(root, "worker.recovery.jsonl");
 	}

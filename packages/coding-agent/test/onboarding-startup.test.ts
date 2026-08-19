@@ -5,7 +5,7 @@ import { PRIME_INFERENCE_PROVIDER_ID } from "../src/core/prime-inference-auth.js
 import {
 	type OnboardingStartupState,
 	shouldRunOnboarding,
-	shouldRunPrimeCliOnboardingSplash,
+	shouldRunOptimusCliOnboardingSplash,
 } from "../src/modes/interactive/onboarding.js";
 
 function makeModel(provider: string): Model<Api> {
@@ -42,7 +42,7 @@ describe("startup onboarding decision", () => {
 			modelHasAuth: true,
 			primeAuthSource: "prime_cli",
 		});
-		expect(shouldRunPrimeCliOnboardingSplash(state)).toBe(true);
+		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(true);
 		expect(shouldRunOnboarding(state)).toBe(true);
 	});
 
@@ -67,7 +67,7 @@ describe("startup onboarding decision", () => {
 			modelHasAuth: true,
 			primeAuthSource: "prime_cli",
 		});
-		expect(shouldRunPrimeCliOnboardingSplash(state)).toBe(false);
+		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(false);
 		expect(shouldRunOnboarding(state)).toBe(false);
 	});
 
@@ -78,7 +78,7 @@ describe("startup onboarding decision", () => {
 			modelHasAuth: true,
 			primeAuthSource: "stored",
 		});
-		expect(shouldRunPrimeCliOnboardingSplash(state)).toBe(false);
+		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(false);
 		expect(shouldRunOnboarding(state)).toBe(false);
 	});
 });

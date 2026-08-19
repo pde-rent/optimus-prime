@@ -1,6 +1,6 @@
 /**
  * Harness reloader — in-session hot-reload for the fork's custom harness
- * modules (coordinator / recursion additions distinct from stock prime-agent).
+ * modules (coordinator / recursion additions distinct from stock optimus).
  *
  * Each harness module is re-imported from source through jiti with
  * `moduleCache: false`, the same dynamic loader the extension system uses for

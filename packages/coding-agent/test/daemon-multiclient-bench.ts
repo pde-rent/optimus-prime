@@ -91,9 +91,9 @@ let socketCounter = 0;
 function socketPathForRun(): string {
 	socketCounter++;
 	if (process.platform === "win32") {
-		return `\\\\.\\pipe\\prime-agent-multiclient-bench-${process.pid}-${socketCounter}`;
+		return `\\\\.\\pipe\\optimus-multiclient-bench-${process.pid}-${socketCounter}`;
 	}
-	return `/tmp/prime-agent-multiclient-${process.pid}-${socketCounter}.sock`;
+	return `/tmp/optimus-multiclient-${process.pid}-${socketCounter}.sock`;
 }
 
 async function removeSocketPath(socketPath: string): Promise<void> {
@@ -244,7 +244,7 @@ function createStreamingEvent(text: string, delta: string, sequence: number): ob
 		},
 		meta: {
 			id: `${activeSessionId}:${sequence}`,
-			protocol: { name: "prime-agent.daemon", version: 1 },
+			protocol: { name: "optimus.daemon", version: 1 },
 			activeSessionId,
 			sequence,
 			emittedAt: "2026-01-01T00:00:00.000Z",
@@ -256,7 +256,7 @@ function repeatedText(length: number, seed: string): string {
 	return seed.repeat(Math.ceil(length / seed.length)).slice(0, length);
 }
 
-const streamCorpus = repeatedText(STREAM_CHARS, "Prime Agent daemon multi-client streaming benchmark. ");
+const streamCorpus = repeatedText(STREAM_CHARS, "Optimus Prime daemon multi-client streaming benchmark. ");
 const attachMessages = Array.from({ length: ATTACH_HISTORY_MESSAGES }, (_, index) => {
 	const text = repeatedText(ATTACH_MESSAGE_CHARS, `history-message-${index} `);
 	return index % 2 === 0
@@ -280,7 +280,7 @@ function createAttachResponseForMessages(
 		runtimeKind: "top-level",
 		activeSessionId,
 		sessionId: "session-benchmark",
-		cwd: "/tmp/prime-agent-benchmark",
+		cwd: "/tmp/optimus-benchmark",
 		isStreaming: false,
 		isCompacting: false,
 		attachedClients: clientIndex + 1,
@@ -297,7 +297,7 @@ function createAttachResponseForMessages(
 		steeringMode: "one-at-a-time",
 		followUpMode: "one-at-a-time",
 		sessionId: summary.sessionId,
-		sessionDir: "/tmp/prime-agent-benchmark/sessions",
+		sessionDir: "/tmp/optimus-benchmark/sessions",
 		leafId: "leaf-benchmark",
 		autoCompactionEnabled: true,
 		messageCount: messages.length,
@@ -312,7 +312,7 @@ function createAttachResponseForMessages(
 		command: "attach",
 		success: true,
 		data: {
-			protocol: { name: "prime-agent.daemon", version: 1 },
+			protocol: { name: "optimus.daemon", version: 1 },
 			activeSessionId,
 			snapshot: {
 				activeSessionId,
@@ -433,7 +433,7 @@ async function runFanoutV2(clientCount: number): Promise<BenchmarkResult> {
 				},
 				meta: {
 					id: `active-benchmark:${sequence}`,
-					protocol: { name: "prime-agent.daemon", version: 2 },
+					protocol: { name: "optimus.daemon", version: 2 },
 					activeSessionId: "active-benchmark",
 					sequence,
 					cursor: { generation: "benchmark-generation", sequence },
@@ -471,7 +471,7 @@ async function runAttachV2(
 	clientCount: number,
 	scenario: "attach-v2" | "session-attach-v2",
 ): Promise<BenchmarkResult> {
-	const cacheRoot = await mkdtemp(join(tmpdir(), "prime-agent-attach-v2-bench-"));
+	const cacheRoot = await mkdtemp(join(tmpdir(), "optimus-attach-v2-bench-"));
 	const transcript = new SnapshotTranscriptCache({
 		activeSessionId: "active-benchmark",
 		snapshotId: `snapshot-${randomUUID()}`,
@@ -569,7 +569,7 @@ async function loadSessionFixture(sessionFile: string): Promise<{
 
 	// Work on a private copy: SessionManager may rewrite old session versions during
 	// migration, and a live daemon may append to the source while this benchmark runs.
-	const tempDir = await mkdtemp(join(tmpdir(), "prime-agent-session-bench-"));
+	const tempDir = await mkdtemp(join(tmpdir(), "optimus-session-bench-"));
 	const fixturePath = join(tempDir, "session.jsonl");
 	await copyFile(sessionFile, fixturePath);
 
@@ -619,7 +619,7 @@ function printResults(
 	results: BenchmarkResult[],
 	details = `stream=${STREAM_CHARS} chars/${STREAM_CHUNK_CHARS}-char chunks; attach=${ATTACH_HISTORY_MESSAGES} messages x ${ATTACH_MESSAGE_CHARS} chars`,
 ): void {
-	console.log("Prime Agent daemon multi-client benchmark");
+	console.log("Optimus Prime daemon multi-client benchmark");
 	console.log(details);
 	console.table(
 		results.map((result) => ({
@@ -641,7 +641,7 @@ function printResults(
 }
 
 function printSessionLoad(sessionFile: string, result: SessionLoadResult): void {
-	console.log("Prime Agent real-session benchmark");
+	console.log("Optimus Prime real-session benchmark");
 	console.log(`fixture: ${basename(sessionFile)} (${(result.fileBytes / MEBIBYTE).toFixed(2)} MiB)`);
 	console.table([
 		{
@@ -706,7 +706,7 @@ function closeWriteStream(stream: NodeJS.WritableStream): Promise<void> {
 }
 
 async function generateSessionFixture(sizeMiB: number): Promise<GeneratedSessionFixture> {
-	const directory = await mkdtemp(join(tmpdir(), `prime-agent-generated-${sizeMiB}mib-`));
+	const directory = await mkdtemp(join(tmpdir(), `optimus-generated-${sizeMiB}mib-`));
 	const file = join(directory, `generated-${sizeMiB}mib.jsonl`);
 	const targetBytes = sizeMiB * MEBIBYTE;
 	const stream = createWriteStream(file, { encoding: "utf8" });

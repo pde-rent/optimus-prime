@@ -881,8 +881,8 @@ describe("AgentSession queue characterization", () => {
 		}) => {
 			const harness = await createAutoRefineHarness();
 			harnesses.push(harness);
-			const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-			process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+			const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+			process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 			try {
 				const globalDir = getGlobalHarnessStateDir();
 				const localDir = getLocalHarnessStateDir(harness.sessionManager.getSessionArtifactDir())!;
@@ -927,9 +927,9 @@ describe("AgentSession queue characterization", () => {
 				}
 			} finally {
 				if (previousAgentDir === undefined) {
-					delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+					delete process.env.OPTIMUS_CODING_AGENT_DIR;
 				} else {
-					process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+					process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 				}
 			}
 		},
@@ -939,8 +939,8 @@ describe("AgentSession queue characterization", () => {
 		const original = await createAutoRefineHarness();
 		const branched = await createAutoRefineHarness();
 		harnesses.push(original, branched);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${original.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${original.tempDir}/agent`;
 		try {
 			const originalLocalDir = getLocalHarnessStateDir(original.sessionManager.getSessionArtifactDir())!;
 			const branchedLocalDir = getLocalHarnessStateDir(branched.sessionManager.getSessionArtifactDir())!;
@@ -979,7 +979,7 @@ describe("AgentSession queue characterization", () => {
 			]);
 
 			const originalRefinement = await original.session.refine({ instructions: "remember this locally" });
-			branched.sessionManager.appendCustomEntry("prime-agent.refinement", originalRefinement);
+			branched.sessionManager.appendCustomEntry("optimus.refinement", originalRefinement);
 			expect(loadHarnessState(originalLocalDir, "local").entries.memory.remember_me.content).toBe(
 				"Original content should be rolled back.",
 			);
@@ -992,9 +992,9 @@ describe("AgentSession queue characterization", () => {
 			);
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});
@@ -1002,8 +1002,8 @@ describe("AgentSession queue characterization", () => {
 	it("persists a prompt started while a background refine is in flight", async () => {
 		const harness = await createAutoRefineHarness();
 		harnesses.push(harness);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 		try {
 			const planGate = createDeferred();
 			const planStartedPromise = createDeferred();
@@ -1061,9 +1061,9 @@ describe("AgentSession queue characterization", () => {
 			expect(persistedAssistants).toHaveLength(1);
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});
@@ -1071,8 +1071,8 @@ describe("AgentSession queue characterization", () => {
 	it("preserves a same-entry harness write made during background planning", async () => {
 		const harness = await createAutoRefineHarness();
 		harnesses.push(harness);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 		try {
 			const localDir = getLocalHarnessStateDir(harness.sessionManager.getSessionArtifactDir())!;
 			const initialState = loadHarnessState(localDir, "local");
@@ -1142,9 +1142,9 @@ describe("AgentSession queue characterization", () => {
 			expect(loadHarnessState(localDir, "local").entries.memory.shared.content).toBe("concurrent kernel content");
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});
@@ -1152,8 +1152,8 @@ describe("AgentSession queue characterization", () => {
 	it("rolls back a local refinement in a non-persisted session via the recorded state path", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 		try {
 			const recordedDir = join(harness.tempDir, "recorded-local", "harness");
 			const recordedState = loadHarnessState(recordedDir, "local");
@@ -1176,7 +1176,7 @@ describe("AgentSession queue characterization", () => {
 				{ id: "refine_recorded", scope: "local" },
 			);
 			seeded.harnessStatePath = saveHarnessState(recordedDir, recordedState);
-			harness.sessionManager.appendCustomEntry("prime-agent.refinement", seeded);
+			harness.sessionManager.appendCustomEntry("optimus.refinement", seeded);
 
 			const result = await harness.session.refine({ rollbackId: "refine_recorded" });
 
@@ -1184,9 +1184,9 @@ describe("AgentSession queue characterization", () => {
 			expect(loadHarnessState(recordedDir, "local").entries.memory.remember_me).toBeUndefined();
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});
@@ -1194,8 +1194,8 @@ describe("AgentSession queue characterization", () => {
 	it("keeps a legacy scope-less rollback in the global store with global scope", async () => {
 		const harness = await createAutoRefineHarness();
 		harnesses.push(harness);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 		try {
 			const globalDir = getGlobalHarnessStateDir();
 			const timestamp = new Date().toISOString();
@@ -1247,7 +1247,7 @@ describe("AgentSession queue characterization", () => {
 				],
 				harnessStatePath: getHarnessStatePath(globalDir),
 			};
-			harness.sessionManager.appendCustomEntry("prime-agent.refinement", legacyRefinement);
+			harness.sessionManager.appendCustomEntry("optimus.refinement", legacyRefinement);
 
 			const result = await harness.session.refine({ rollbackId: "refine_legacy" });
 
@@ -1262,9 +1262,9 @@ describe("AgentSession queue characterization", () => {
 			expect(rollbackRecord?.scope).toBe("global");
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});
@@ -3272,8 +3272,8 @@ describe("AgentSession scheduler scenarios", () => {
 			autoRefineReviewer: reviewer,
 		});
 		harnesses.push(harness);
-		const previousAgentDir = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-		process.env.PRIME_AGENT_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
+		const previousAgentDir = process.env.OPTIMUS_CODING_AGENT_DIR;
+		process.env.OPTIMUS_CODING_AGENT_DIR = `${harness.tempDir}/agent`;
 		try {
 			const localDir = getLocalHarnessStateDir(harness.sessionManager.getSessionArtifactDir())!;
 			const memoryIds = () => {
@@ -3340,9 +3340,9 @@ describe("AgentSession scheduler scenarios", () => {
 			expect(harness.getPendingResponseCount()).toBe(0);
 		} finally {
 			if (previousAgentDir === undefined) {
-				delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+				delete process.env.OPTIMUS_CODING_AGENT_DIR;
 			} else {
-				process.env.PRIME_AGENT_CODING_AGENT_DIR = previousAgentDir;
+				process.env.OPTIMUS_CODING_AGENT_DIR = previousAgentDir;
 			}
 		}
 	});

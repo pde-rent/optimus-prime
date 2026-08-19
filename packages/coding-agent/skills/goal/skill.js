@@ -1,5 +1,5 @@
 /**
- * Prime Agent goal skill: manage the persistent thread goal from the REPL.
+ * Optimus Prime goal skill: manage the persistent thread goal from the REPL.
  *
  * All goal state lives in the host; these functions are thin typed wrappers
  * over the generic host bridge.

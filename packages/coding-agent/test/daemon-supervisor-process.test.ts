@@ -27,7 +27,7 @@ const children = new Set<ChildProcess>();
 const workerPids = new Set<number>();
 const daemonSockets = new Set<string>();
 const childDiagnostics = new WeakMap<ChildProcess, { stdout: string; stderr: string }>();
-const PROCESS_STRESS_WORKERS = Number.parseInt(process.env.PRIME_AGENT_STRESS_WORKERS ?? "10", 10);
+const PROCESS_STRESS_WORKERS = Number.parseInt(process.env.OPTIMUS_STRESS_WORKERS ?? "10", 10);
 
 afterEach(async () => {
 	for (const socketPath of daemonSockets) {
@@ -451,7 +451,7 @@ describe("daemon supervisor resident workers", () => {
 			type: "create",
 			sessionPath: sessionFile,
 			lifecycle: "client_owned",
-			launchEnv: { PRIME_AGENT_OWNED_TEST: launchEnvSentinel },
+			launchEnv: { OPTIMUS_OWNED_TEST: launchEnvSentinel },
 			config: { cwd: projectDir, agentDir, sessionDir, noTools: true, noExtensions: true },
 		});
 		expect(created.success).toBe(true);
@@ -1485,7 +1485,7 @@ describe("daemon supervisor resident workers", () => {
 			throw new Error("Recovered worker did not expose its pid");
 		}
 		workerPids.add(recovered.workerPid);
-		expect(readFileSync(sessionFile, "utf8")).toContain("prime-agent.worker_recovery");
+		expect(readFileSync(sessionFile, "utf8")).toContain("optimus.worker_recovery");
 		await expect(connection.getState()).resolves.toMatchObject({ sessionId: createdSummary.sessionId });
 
 		await connection.dispose();

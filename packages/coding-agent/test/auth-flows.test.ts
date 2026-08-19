@@ -131,8 +131,8 @@ describe("ProviderAuthFlows", () => {
 			}),
 		);
 		const authStorage = AuthStorage.create(authJsonPath, {
-			primeCliConfigPath: primeConfigPath,
-			usePrimeCliConfig: true,
+			optimusCliConfigPath: primeConfigPath,
+			useOptimusCliConfig: true,
 		});
 		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse({
@@ -162,7 +162,7 @@ describe("ProviderAuthFlows", () => {
 		const defaultPrimeDir = join(tempDir, ".prime");
 		mkdirSync(defaultPrimeDir, { recursive: true });
 		writeFileSync(join(defaultPrimeDir, "config.json"), JSON.stringify({ api_key: "prime-cli-key" }));
-		const authStorage = AuthStorage.create(authJsonPath, { usePrimeCliConfig: false });
+		const authStorage = AuthStorage.create(authJsonPath, { useOptimusCliConfig: false });
 		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			jsonResponse({
 				data: { scope: { inference: { write: true } } },
@@ -194,8 +194,8 @@ describe("ProviderAuthFlows", () => {
 	it("offers Prime Inference logout when auth comes from the Prime CLI config", async () => {
 		writeFileSync(primeConfigPath, JSON.stringify({ api_key: "prime-cli-key" }));
 		const authStorage = AuthStorage.create(authJsonPath, {
-			primeCliConfigPath: primeConfigPath,
-			usePrimeCliConfig: true,
+			optimusCliConfigPath: primeConfigPath,
+			useOptimusCliConfig: true,
 		});
 		const { host, overlays } = createHost(authStorage);
 
@@ -208,7 +208,7 @@ describe("ProviderAuthFlows", () => {
 	});
 
 	it("opens login on the requested MCP Connections category", async () => {
-		const authStorage = AuthStorage.create(authJsonPath, { usePrimeCliConfig: false });
+		const authStorage = AuthStorage.create(authJsonPath, { useOptimusCliConfig: false });
 		const { host, overlays } = createHost(authStorage);
 
 		const loginResult = new ProviderAuthFlows(host).runLogin({ initialCategory: "service" });

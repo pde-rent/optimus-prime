@@ -49,9 +49,9 @@ function spawnFrontend(
 		env: {
 			...process.env,
 			...environment,
-			PRIME_AGENT_INTERNAL_LEGACY_OWNED_WORKER_FRONTEND: "1",
-			PRIME_AGENT_TEST_OWNED_PID_PATH: pidPath,
-			...(keepAlive ? { PRIME_AGENT_TEST_KEEP_ALIVE: "1" } : {}),
+			OPTIMUS_INTERNAL_LEGACY_OWNED_WORKER_FRONTEND: "1",
+			OPTIMUS_TEST_OWNED_PID_PATH: pidPath,
+			...(keepAlive ? { OPTIMUS_TEST_KEEP_ALIVE: "1" } : {}),
 		},
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -135,7 +135,7 @@ describe("owned session worker processes", () => {
 				args,
 				pidPath,
 				tty === false,
-				tty === undefined ? {} : { PRIME_AGENT_TEST_STDIN_TTY: tty ? "1" : "0" },
+				tty === undefined ? {} : { OPTIMUS_TEST_STDIN_TTY: tty ? "1" : "0" },
 			);
 			if (stdin !== undefined) frontend.stdin?.write(stdin);
 			const workerPid = await waitForWorkerPid(pidPath);
@@ -174,7 +174,7 @@ describe("owned session worker processes", () => {
 		tempDirs.push(root);
 		const pidPath = join(root, "worker.pid");
 		const frontend = spawnFrontend(["--mode", "rpc"], pidPath, false, {
-			PRIME_AGENT_TEST_REVERSE_RPC_RESPONSES: "1",
+			OPTIMUS_TEST_REVERSE_RPC_RESPONSES: "1",
 		});
 		let stdout = "";
 		frontend.stdout?.on("data", (chunk: Buffer) => {
@@ -199,7 +199,7 @@ describe("owned session worker processes", () => {
 		tempDirs.push(root);
 		const pidPath = join(root, "worker.pid");
 		const frontend = spawnFrontend(["--mode", "rpc"], pidPath, false, {
-			PRIME_AGENT_TEST_INVALID_RPC_OUTPUT: "1",
+			OPTIMUS_TEST_INVALID_RPC_OUTPUT: "1",
 		});
 		let stdout = "";
 		frontend.stdout?.on("data", (chunk: Buffer) => {
@@ -222,7 +222,7 @@ describe("owned session worker processes", () => {
 		tempDirs.push(root);
 		const pidPath = join(root, "worker.pid");
 		const frontend = spawnFrontend(["--mode", "rpc"], pidPath, false, {
-			PRIME_AGENT_TEST_CRASH_ON_ACK: "1",
+			OPTIMUS_TEST_CRASH_ON_ACK: "1",
 		});
 		let stdout = "";
 		frontend.stdout?.on("data", (chunk: Buffer) => {
@@ -248,7 +248,7 @@ describe("owned session worker processes", () => {
 		tempDirs.push(root);
 		const pidPath = join(root, "worker.pid");
 		const frontend = spawnFrontend(["--mode", "rpc"], pidPath, false, {
-			PRIME_AGENT_TEST_CRASH_ON_COMMAND: "get_state",
+			OPTIMUS_TEST_CRASH_ON_COMMAND: "get_state",
 		});
 		let stdout = "";
 		frontend.stdout?.on("data", (chunk: Buffer) => {
@@ -277,7 +277,7 @@ describe("owned session worker processes", () => {
 		tempDirs.push(root);
 		const pidPath = join(root, "worker.pid");
 		const frontend = spawnFrontend(["--mode", "rpc"], pidPath, false, {
-			PRIME_AGENT_TEST_EXIT_ZERO_ON_COMMAND: "get_state",
+			OPTIMUS_TEST_EXIT_ZERO_ON_COMMAND: "get_state",
 		});
 		let stdout = "";
 		frontend.stdout?.on("data", (chunk: Buffer) => {

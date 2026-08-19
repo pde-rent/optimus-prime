@@ -46,7 +46,7 @@ describe("bundled skills preload into the REPL", () => {
 		const compactStatus = { tokens: 42, context_window: 1000, percent: 4.2, scheduled: false };
 		const manager = new BunReplManager({
 			cwd,
-			env: { PRIME_AGENT_REPL_SKILLS: replSkillsEnv() },
+			env: { OPTIMUS_REPL_SKILLS: replSkillsEnv() },
 			hostHandlers: {
 				"compact.status": async () => compactStatus,
 				"goal.get": async () => ({ goal: null, remaining_tokens: 100 }),
@@ -75,7 +75,7 @@ describe("bundled skills preload into the REPL", () => {
 		const target = join(cwd, "target.txt");
 		writeFileSync(target, "one\ntwo\nthree\n");
 
-		const manager = new BunReplManager({ cwd, env: { PRIME_AGENT_REPL_SKILLS: replSkillsEnv() } });
+		const manager = new BunReplManager({ cwd, env: { OPTIMUS_REPL_SKILLS: replSkillsEnv() } });
 		try {
 			await manager.start();
 			const result = await manager.execute(`await edit(${JSON.stringify(target)}, "two", "TWO")`);
@@ -91,7 +91,7 @@ describe("bundled skills preload into the REPL", () => {
 	it("reports a sent agent message on the cell that issued it", async () => {
 		const manager = new BunReplManager({
 			cwd: makeTempDir(),
-			env: { PRIME_AGENT_REPL_SKILLS: replSkillsEnv() },
+			env: { OPTIMUS_REPL_SKILLS: replSkillsEnv() },
 			hostHandlers: {
 				"agent_message.send": async (payload) => ({
 					id: "agentmsg_1",
@@ -132,7 +132,7 @@ describe("bundled skills preload into the REPL", () => {
 
 		const manager = new BunReplManager({
 			cwd: makeTempDir(),
-			env: { PRIME_AGENT_REPL_SKILLS: replSkillsEnv() },
+			env: { OPTIMUS_REPL_SKILLS: replSkillsEnv() },
 			hostHandlers: {
 				"agent_message.send": async (payload) => {
 					// Resolve only after the cell has already returned, so the receipt is late.

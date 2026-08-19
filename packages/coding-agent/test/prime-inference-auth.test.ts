@@ -5,11 +5,11 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	checkPrimeAgentTracesAccess,
+	checkOptimusTracesAccess,
 	checkPrimeInferenceAccess,
 	fetchPrimeTeams,
-	loadPrimeCliConfig,
-	loginPrimeAgentTraces,
+	loadOptimusCliConfig,
+	loginOptimusTraces,
 	loginPrimeInference,
 } from "../src/core/prime-inference-auth.js";
 
@@ -71,15 +71,15 @@ describe("Prime Inference auth", () => {
 		tempDir = join(tmpdir(), `pi-prime-auth-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		configPath = join(tempDir, "config.json");
-		originalTraceBaseUrl = process.env.PRIME_AGENT_TRACES_BASE_URL;
-		delete process.env.PRIME_AGENT_TRACES_BASE_URL;
+		originalTraceBaseUrl = process.env.OPTIMUS_TRACES_BASE_URL;
+		delete process.env.OPTIMUS_TRACES_BASE_URL;
 	});
 
 	afterEach(() => {
 		if (originalTraceBaseUrl === undefined) {
-			delete process.env.PRIME_AGENT_TRACES_BASE_URL;
+			delete process.env.OPTIMUS_TRACES_BASE_URL;
 		} else {
-			process.env.PRIME_AGENT_TRACES_BASE_URL = originalTraceBaseUrl;
+			process.env.OPTIMUS_TRACES_BASE_URL = originalTraceBaseUrl;
 		}
 		if (existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
@@ -97,7 +97,7 @@ describe("Prime Inference auth", () => {
 			}),
 		);
 
-		expect(loadPrimeCliConfig(configPath)).toEqual({
+		expect(loadOptimusCliConfig(configPath)).toEqual({
 			apiKey: "prime-key",
 			baseUrl: "https://prime-api.example",
 			frontendUrl: "https://prime-app.example",
@@ -118,7 +118,7 @@ describe("Prime Inference auth", () => {
 			}),
 		);
 
-		expect(loadPrimeCliConfig(configPath)).toMatchObject({
+		expect(loadOptimusCliConfig(configPath)).toMatchObject({
 			apiKey: "prime-key",
 			teamId: "team-1",
 			teamName: "Research",
@@ -140,11 +140,11 @@ describe("Prime Inference auth", () => {
 		);
 
 		try {
-			expect(loadPrimeCliConfig(configPath)).toMatchObject({
+			expect(loadOptimusCliConfig(configPath)).toMatchObject({
 				teamId: "env-team",
 				teamIdFromEnv: true,
 			});
-			expect(loadPrimeCliConfig(configPath).teamName).toBeUndefined();
+			expect(loadOptimusCliConfig(configPath).teamName).toBeUndefined();
 		} finally {
 			if (originalTeamId === undefined) {
 				delete process.env.PRIME_TEAM_ID;
@@ -197,7 +197,7 @@ describe("Prime Inference auth", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
-	it("checks Prime Agent trace access with Prime whoami permissions", async () => {
+	it("checks Optimus Prime trace access with Prime whoami permissions", async () => {
 		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 			expect(getUrl(input)).toBe("https://prime-api.example/api/v1/user/whoami");
 			expect(init?.method).toBe("GET");
@@ -206,7 +206,7 @@ describe("Prime Inference auth", () => {
 		});
 
 		await expect(
-			checkPrimeAgentTracesAccess("prime-key", "https://prime-api.example", { fetchFn: fetchMock }),
+			checkOptimusTracesAccess("prime-key", "https://prime-api.example", { fetchFn: fetchMock }),
 		).resolves.toEqual({ ok: true });
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
@@ -226,18 +226,15 @@ describe("Prime Inference auth", () => {
 		});
 		const onAuth = vi.fn();
 
-		const result = await loginPrimeAgentTraces(
-			{ onAuth },
-			{ configPath, fetchFn: fetchMock, requestTimeoutMs: 1000 },
-		);
+		const result = await loginOptimusTraces({ onAuth }, { configPath, fetchFn: fetchMock, requestTimeoutMs: 1000 });
 
 		expect(result).toEqual({ apiKey: "prime-cli-key", source: "prime-cli" });
 		expect(onAuth).not.toHaveBeenCalled();
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
-	it("validates imported Prime CLI trace credentials against PRIME_AGENT_TRACES_BASE_URL", async () => {
-		process.env.PRIME_AGENT_TRACES_BASE_URL = "https://trace-api.example/api/v1";
+	it("validates imported Prime CLI trace credentials against OPTIMUS_TRACES_BASE_URL", async () => {
+		process.env.OPTIMUS_TRACES_BASE_URL = "https://trace-api.example/api/v1";
 		writeFileSync(
 			configPath,
 			JSON.stringify({
@@ -252,10 +249,7 @@ describe("Prime Inference auth", () => {
 		});
 		const onAuth = vi.fn();
 
-		const result = await loginPrimeAgentTraces(
-			{ onAuth },
-			{ configPath, fetchFn: fetchMock, requestTimeoutMs: 1000 },
-		);
+		const result = await loginOptimusTraces({ onAuth }, { configPath, fetchFn: fetchMock, requestTimeoutMs: 1000 });
 
 		expect(result).toEqual({ apiKey: "prime-cli-key", source: "prime-cli" });
 		expect(onAuth).not.toHaveBeenCalled();
@@ -365,8 +359,8 @@ describe("Prime Inference auth", () => {
 		expect(progress.join("\n")).toContain("Existing Prime CLI key cannot access Prime Inference");
 	});
 
-	it("requests agent trace scope during Prime Agent trace browser login", async () => {
-		process.env.PRIME_AGENT_TRACES_BASE_URL = "https://prime-api.example/api/v1";
+	it("requests agent trace scope during Optimus Prime trace browser login", async () => {
+		process.env.OPTIMUS_TRACES_BASE_URL = "https://prime-api.example/api/v1";
 		writeFileSync(
 			configPath,
 			JSON.stringify({
@@ -393,7 +387,7 @@ describe("Prime Inference auth", () => {
 		});
 		const onAuth = vi.fn();
 
-		const result = await loginPrimeAgentTraces(
+		const result = await loginOptimusTraces(
 			{
 				onAuth,
 			},

@@ -30,7 +30,7 @@ interface SupervisorOwnerRecord {
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const launcherFixturePath = resolve(__dirname, "../../fixtures/eng-4606-update-launcher.ts");
-const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
+const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const supervisors = new Set<SupervisorHandle>();
 const harnesses: Harness[] = [];
 const sockets = new Set<string>();
@@ -422,7 +422,7 @@ describe("ENG-4606 update restart coordinator", () => {
 		expect(await connection.getMessages()).toContainEqual(
 			expect.objectContaining({
 				role: "custom",
-				customType: "prime-agent.update_complete",
+				customType: "optimus.update_complete",
 				display: true,
 			}),
 		);

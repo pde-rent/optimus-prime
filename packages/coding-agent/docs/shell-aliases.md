@@ -1,8 +1,8 @@
 # Shell Aliases
 
-Prime Agent runs bash in non-interactive mode (`bash -c`), which doesn't expand aliases by default.
+Optimus Prime runs bash in non-interactive mode (`bash -c`), which doesn't expand aliases by default.
 
-To enable your shell aliases, add to `~/.prime/agent/settings.json`:
+To enable your shell aliases, add to `~/.optimus/agent/settings.json`:
 
 ```json
 {

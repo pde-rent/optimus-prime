@@ -1,5 +1,5 @@
 {
-	"name": "prime-agent",
+	"name": "optimus",
 	"private": true,
 	"type": "module",
 	"workspaces": ["packages/*"],
@@ -22,7 +22,7 @@
 		"prepublishOnly": "bun run clean && bun run build && bun run check",
 		"publish": "bun run prepublishOnly && bun publish --access public",
 		"publish:dry": "bun run prepublishOnly && bun publish --access public --dry-run",
-		"release:pack": "bun scripts/pack-prime-agent-release.mjs",
+		"release:pack": "bun scripts/pack-optimus-release.mjs",
 		"release:patch": "bun scripts/release.mjs patch",
 		"release:minor": "bun scripts/release.mjs minor",
 		"release:major": "bun scripts/release.mjs major",

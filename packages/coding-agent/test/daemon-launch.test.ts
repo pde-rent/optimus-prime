@@ -46,7 +46,7 @@ async function startFakeDaemon(options: FakeDaemonOptions = {}): Promise<FakeDae
 		send(socket, {
 			type: "daemon_hello",
 			socketPath,
-			protocol: { name: "prime-agent.daemon", version: options.protocolVersion ?? DAEMON_PROTOCOL_VERSION },
+			protocol: { name: "optimus.daemon", version: options.protocolVersion ?? DAEMON_PROTOCOL_VERSION },
 			appVersion: options.appVersion,
 			schemaId: options.schemaId ?? DAEMON_SCHEMA_ID,
 			clientId: "fake-client",
@@ -121,7 +121,7 @@ const server = createServer((socket) => {
 	send(socket, {
 		type: "daemon_hello",
 		socketPath,
-		protocol: { name: "prime-agent.daemon", version: ${DAEMON_PROTOCOL_VERSION} },
+		protocol: { name: "optimus.daemon", version: ${DAEMON_PROTOCOL_VERSION} },
 		schemaId: ${JSON.stringify(DAEMON_SCHEMA_ID)},
 	});
 	let buffer = "";
@@ -289,7 +289,7 @@ describe("ensureInteractiveDaemonRunning", () => {
 
 		try {
 			await expect(ensureInteractiveDaemonRunning(socketPath)).rejects.toThrow(
-				/Prime Agent daemon exited during startup \(code 23\)\.[\s\S]*fatal startup failure/,
+				/Optimus Prime daemon exited during startup \(code 23\)\.[\s\S]*fatal startup failure/,
 			);
 			expect(Date.now() - startedAt).toBeLessThan(10_000);
 		} finally {
@@ -330,7 +330,7 @@ describe("ensureInteractiveDaemonRunning", () => {
 
 		try {
 			await expect(ensureInteractiveDaemonRunning(socketPath, join(dir, "missing-cwd"))).rejects.toThrow(
-				/Failed to spawn Prime Agent daemon: .*ENOENT/,
+				/Failed to spawn Optimus Prime daemon: .*ENOENT/,
 			);
 		} finally {
 			if (originalAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
@@ -353,7 +353,7 @@ describe("ensureInteractiveDaemonRunning", () => {
 			send(socket, {
 				type: "daemon_hello",
 				socketPath,
-				protocol: { name: "prime-agent.daemon", version: DAEMON_PROTOCOL_VERSION },
+				protocol: { name: "optimus.daemon", version: DAEMON_PROTOCOL_VERSION },
 				appVersion: VERSION,
 				schemaId: DAEMON_SCHEMA_ID,
 				clientId: "fake-client",

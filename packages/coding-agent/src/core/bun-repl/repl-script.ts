@@ -1027,7 +1027,7 @@ process.stdin.on("end", () => {
 });
 
 /**
- * Preloaded skills. The host passes `PRIME_AGENT_REPL_SKILLS` as JSON
+ * Preloaded skills. The host passes `OPTIMUS_REPL_SKILLS` as JSON
  * `[{ name, global, entry }]`; each entry is an ESM module that default-exports
  * (or exports `createSkill`) a factory taking the skill context and returning the
  * object bound into the sandbox under `global`. A module without a factory is
@@ -1050,7 +1050,7 @@ const skillContext = {
 };
 
 async function loadPreloadedSkills(): Promise<void> {
-	const raw = process.env.PRIME_AGENT_REPL_SKILLS;
+	const raw = process.env.OPTIMUS_REPL_SKILLS;
 	if (!raw) return;
 	let specs: PreloadedSkillSpec[];
 	try {
@@ -1070,7 +1070,7 @@ async function loadPreloadedSkills(): Promise<void> {
 			INJECTED.add(spec.global);
 		} catch (err: unknown) {
 			process.stderr.write(
-				`prime-agent: skill "${spec.name}" failed to load: ${err instanceof Error ? err.message : String(err)}\n`,
+				`optimus: skill "${spec.name}" failed to load: ${err instanceof Error ? err.message : String(err)}\n`,
 			);
 		}
 	}

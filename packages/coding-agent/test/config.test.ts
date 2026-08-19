@@ -60,7 +60,7 @@ afterEach(() => {
 
 function createUnmanagedInstall(): { packageDir: string } {
 	const temp = mkdtempSync(join(tmpdir(), "pi-unmanaged-"));
-	const packageDir = join(temp, "opt", "prime-agent");
+	const packageDir = join(temp, "opt", "optimus");
 	mkdirSync(packageDir, { recursive: true });
 	tempDir = temp;
 	process.env.PI_PACKAGE_DIR = packageDir;
@@ -70,7 +70,7 @@ function createUnmanagedInstall(): { packageDir: string } {
 
 function createHomebrewInstall(): { packageDir: string } {
 	const prefix = mkdtempSync(join(tmpdir(), "pi-homebrew-"));
-	const packageDir = join(prefix, "Cellar", "prime-agent", "0.7.0", "libexec", "lib", "node_modules", "prime-agent");
+	const packageDir = join(prefix, "Cellar", "optimus", "0.7.0", "libexec", "lib", "node_modules", "optimus");
 	mkdirSync(packageDir, { recursive: true });
 	tempDir = prefix;
 	process.env.PI_PACKAGE_DIR = packageDir;
@@ -189,14 +189,14 @@ describe("detectInstallMethod", () => {
 		createHomebrewInstall();
 
 		expect(detectInstallMethod()).toBe("homebrew");
-		expect(getSelfUpdateCommand("prime-agent")).toBeUndefined();
-		expect(getSelfUpdateUnavailableInstruction("prime-agent")).toBe("Update with: brew upgrade prime-agent");
-		expect(getUpdateInstruction("prime-agent")).toBe("Update with: brew upgrade prime-agent");
+		expect(getSelfUpdateCommand("optimus")).toBeUndefined();
+		expect(getSelfUpdateUnavailableInstruction("optimus")).toBe("Update with: brew upgrade optimus");
+		expect(getUpdateInstruction("optimus")).toBe("Update with: brew upgrade optimus");
 	});
 
 	test("self-updates tarball specs without uninstalling the same logical package first", () => {
 		createBunGlobalInstall();
-		const tarballUrl = "https://downloads.example.test/prime-agent/prime-agent-0.73.0.tgz";
+		const tarballUrl = "https://downloads.example.test/optimus/optimus-0.73.0.tgz";
 
 		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", tarballUrl);
 
@@ -209,9 +209,9 @@ describe("detectInstallMethod", () => {
 
 	test("self-updates renamed tarball packages by uninstalling the old package after install", () => {
 		createBunGlobalInstall();
-		const tarballUrl = "https://downloads.example.test/prime-agent/prime-agent-0.73.0.tgz";
+		const tarballUrl = "https://downloads.example.test/optimus/optimus-0.73.0.tgz";
 
-		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", tarballUrl, "prime-agent");
+		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", tarballUrl, "optimus");
 
 		expect(command).toEqual({
 			command: "bun",
@@ -234,7 +234,7 @@ describe("detectInstallMethod", () => {
 
 	test("quotes self-update display arguments containing spaces", () => {
 		createBunGlobalInstall();
-		const localSpec = "file:/tmp/pi prefix/prime-agent-0.73.0.tgz";
+		const localSpec = "file:/tmp/pi prefix/optimus-0.73.0.tgz";
 
 		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", localSpec);
 
@@ -342,7 +342,19 @@ describe("detectInstallMethod", () => {
 
 describe("session paths", () => {
 	test("uses the short app-prefixed session dir env var", () => {
-		expect(ENV_SESSION_DIR).toBe("PRIME_AGENT_SESSION_DIR");
+		expect(ENV_SESSION_DIR).toBe("OPTIMUS_SESSION_DIR");
+	});
+
+	test("still reads the pre-rename env var so existing shells keep working", () => {
+		const sessionRoot = join(tmpdir(), `pi-renamed-session-root-${Date.now()}`);
+		delete process.env[ENV_SESSION_DIR];
+		delete process.env[ENV_LEGACY_SESSION_DIR];
+		process.env.OPTIMUS_SESSION_DIR = sessionRoot;
+		try {
+			expect(getSessionsDir("/agent")).toBe(sessionRoot);
+		} finally {
+			delete process.env.OPTIMUS_SESSION_DIR;
+		}
 	});
 
 	test("uses the session root env var when computing sessions dir", () => {
@@ -361,9 +373,9 @@ describe("session paths", () => {
 	});
 
 	test("expands tilde in the session root env var", () => {
-		process.env[ENV_SESSION_DIR] = "~/prime-agent-sessions";
+		process.env[ENV_SESSION_DIR] = "~/optimus-sessions";
 
-		expect(getSessionsDir("/agent")).toBe(join(homedir(), "prime-agent-sessions"));
+		expect(getSessionsDir("/agent")).toBe(join(homedir(), "optimus-sessions"));
 	});
 
 	test("uses the env session root as the default session dir", () => {

@@ -1,5 +1,5 @@
 /**
- * Prime Agent websearch skill: one bounded search interface over two backends.
+ * Optimus Prime websearch skill: one bounded search interface over two backends.
  *
  *   1. SearXNG, self-hosted  - keyless, private, free. Set `SEARXNG_URL`.
  *   2. Serper                - hosted Google API. Set a key via /login.
@@ -32,7 +32,7 @@ export const NOT_CONFIGURED_MESSAGE =
 	"     then in settings.yml set `search.formats: [html, json]` and `server.limiter: false`,\n" +
 	"     and export SEARXNG_URL=http://localhost:8888\n" +
 	"  2. Serper (hosted Google API, free tier): get a key at https://serper.dev, then run\n" +
-	'     /login in Prime Agent, switch to MCP Connections, and choose "Serper (web search)".\n' +
+	'     /login in Optimus Prime, switch to MCP Connections, and choose "Serper (web search)".\n' +
 	"Public SearXNG instances are not used: they block programmatic clients by design.";
 
 /**
@@ -56,12 +56,10 @@ function expandUser(p, env) {
 	return p;
 }
 
-/** Resolve the Prime Agent config dir the same way the runtime does. */
+/** Resolve the Optimus Prime config dir the same way the runtime does. */
 function agentDir(env) {
 	const raw =
-		env.PRIME_AGENT_CODING_AGENT_DIR ||
-		env.PI_CODING_AGENT_DIR ||
-		`${env.HOME || env.USERPROFILE || ""}/.prime/agent`;
+		env.OPTIMUS_CODING_AGENT_DIR || env.PI_CODING_AGENT_DIR || `${env.HOME || env.USERPROFILE || ""}/.optimus/agent`;
 	return expandUser(raw, env);
 }
 
@@ -352,6 +350,47 @@ export function cleanUrl(raw) {
 	}
 }
 
+/**
+ * Identity key for a page, as opposed to `cleanUrl`, which is what we display.
+ * `https://www.x.com/a`, `http://x.com/a/` and `https://x.com/a/index.html` are one
+ * page; keeping all three spends the snippet budget three times on the same text.
+ *
+ * @param {string} url - An already-cleaned URL.
+ * @returns {string} Scheme-, `www.`- and index-insensitive key, or the input on failure.
+ */
+function urlIdentity(url) {
+	try {
+		const parsed = new URL(url);
+		const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+		const path = parsed.pathname.replace(/\/index\.html?$/i, "/").replace(/\/+$/, "");
+		return `${host}${path}${parsed.search}`;
+	} catch {
+		return url;
+	}
+}
+
+/**
+ * Comparable form of a snippet, for collapsing syndicated copies of one article.
+ * Mirrors publish identical text under different domains, which URL and title dedupe
+ * cannot see. Returns "" for bodies too short to identify a page by.
+ *
+ * The whole body is the key, not a prefix: two unrelated pages can share a long
+ * boilerplate lede, and snippets are short enough that hashing a prefix buys nothing.
+ *
+ * @param {string} snippet
+ * @returns {string} Normalised key, or "" when the snippet is too short to trust.
+ */
+function snippetKey(snippet) {
+	const normalized = String(snippet ?? "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, " ")
+		.trim();
+	return normalized.length >= MIN_DEDUPE_SNIPPET_CHARS ? normalized : "";
+}
+
+/** Below this, a snippet is too generic to treat as a page fingerprint. */
+const MIN_DEDUPE_SNIPPET_CHARS = 80;
+
 /** Comparable form of a title, for collapsing near-identical engine results. */
 function titleKey(title) {
 	return title
@@ -372,12 +411,15 @@ function titleKey(title) {
 export function dedupeResults(results) {
 	const seenUrl = new Set();
 	const seenTitle = new Set();
+	const seenSnippet = new Set();
 	const perDomain = new Map();
 	const out = [];
 
 	for (const raw of results ?? []) {
 		const url = cleanUrl(raw?.url);
-		if (!url || seenUrl.has(url)) continue;
+		if (!url) continue;
+		const identity = urlIdentity(url);
+		if (seenUrl.has(identity)) continue;
 
 		let domain;
 		try {
@@ -391,10 +433,17 @@ export function dedupeResults(results) {
 		const count = perDomain.get(domain) ?? 0;
 		if (seenTitle.has(tKey) || count >= 2) continue;
 
-		seenUrl.add(url);
+		// Last gate, and the only one that catches syndication: same body, different
+		// site. Skipped for short snippets, which are too generic to fingerprint.
+		const snippet = stripHtml(raw?.content);
+		const sKey = snippetKey(snippet);
+		if (sKey && seenSnippet.has(sKey)) continue;
+
+		seenUrl.add(identity);
 		seenTitle.add(tKey);
+		if (sKey) seenSnippet.add(sKey);
 		perDomain.set(domain, count + 1);
-		out.push({ title, url, snippet: stripHtml(raw?.content) });
+		out.push({ title, url, snippet });
 	}
 	return out;
 }
@@ -514,7 +563,7 @@ export default function createSkill(ctx = {}) {
 	 * @returns {Promise<{backend: "searxng"|"serper"|"none", url?: string, key?: string}>}
 	 */
 	async function selectBackend(explicit) {
-		const choice = String(explicit || env.PRIME_AGENT_WEBSEARCH_BACKEND || "")
+		const choice = String(explicit || env.OPTIMUS_WEBSEARCH_BACKEND || "")
 			.trim()
 			.toLowerCase();
 		const url = await searxngUrl(env);
@@ -531,7 +580,7 @@ export default function createSkill(ctx = {}) {
 		/**
 		 * Search the web and return a short, deduplicated, budget-capped summary.
 		 *
-		 * Backend order: `options.backend` (or `PRIME_AGENT_WEBSEARCH_BACKEND`),
+		 * Backend order: `options.backend` (or `OPTIMUS_WEBSEARCH_BACKEND`),
 		 * then `SEARXNG_URL`, then a Serper key. Returns setup instructions when
 		 * neither is configured.
 		 *

@@ -13,7 +13,7 @@ let tempDir = "";
 
 describe("Bun REPL parity", () => {
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "prime-agent-parity-"));
+		tempDir = mkdtempSync(join(tmpdir(), "optimus-parity-"));
 	});
 
 	afterEach(() => {

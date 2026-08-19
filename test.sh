@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-AUTH_FILE="$HOME/.prime/agent/auth.json"
-AUTH_BACKUP="$HOME/.prime/agent/auth.json.bak"
+AUTH_FILE="$HOME/.optimus/agent/auth.json"
+AUTH_BACKUP="$HOME/.optimus/agent/auth.json.bak"
 
 # Restore auth.json on exit (success or failure)
 cleanup() {

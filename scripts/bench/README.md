@@ -31,7 +31,7 @@ report `not built` / `0` without it. `bun run build:binary` (in
 - **Time to first prompt.** `--version` is a floor: it skips session, settings,
   provider, and TUI setup. A real cold-start number needs a scripted run against
   a mock provider (boot -> ready -> one turn -> `/compact` -> `/resume`).
-- **A/B against stock prime-agent or Claude Code.** The numbers here are
+- **A/B against stock optimus or Claude Code.** The numbers here are
   self-relative; comparing requires checking out the other tree on the same box.
 - **Feature-parity matrix.** Parity is asserted by the test suite, not by this
   bench.

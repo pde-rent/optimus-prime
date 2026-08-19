@@ -22,7 +22,7 @@ describe("formatDaemonListTable", () => {
 	it("renders columns, marks the default daemon, and shows blanks for missing fields", () => {
 		const daemons: DaemonInfo[] = [
 			{
-				socketPath: "/tmp/prime-agent-1000/daemon.sock",
+				socketPath: "/tmp/optimus-1000/daemon.sock",
 				pid: 1234,
 				uptimeSeconds: 7200,
 				version: "0.1.5",
@@ -41,7 +41,7 @@ describe("formatDaemonListTable", () => {
 		const table = stripAnsi(formatDaemonListTable(daemons));
 		const lines = table.split("\n");
 		expect(lines[0]!.trim().split(/\s+/)).toEqual(["socket", "pid", "version", "status", "sessions", "uptime"]);
-		expect(table).toContain("/tmp/prime-agent-1000/daemon.sock *");
+		expect(table).toContain("/tmp/optimus-1000/daemon.sock *");
 		expect(table).toContain("* default background service");
 		expect(table).toContain("current");
 		expect(table).toContain("orphan-file");

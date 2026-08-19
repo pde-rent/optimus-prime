@@ -7,7 +7,7 @@ RPC mode enables headless operation of the coding agent via a JSON protocol over
 ## Starting RPC Mode
 
 ```bash
-prime-agent --mode rpc [options]
+optimus --mode rpc [options]
 ```
 
 Common options:
@@ -759,9 +759,9 @@ Response:
   "success": true,
   "data": {
     "commands": [
-      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.prime/agent/extensions/session.ts"},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.prime/agent/prompts/fix-tests.md"},
-      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.prime/agent/skills/brave-search/SKILL.md"}
+      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.optimus/agent/extensions/session.ts"},
+      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.optimus/agent/prompts/fix-tests.md"},
+      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.optimus/agent/skills/brave-search/SKILL.md"}
     ]
   }
 }
@@ -775,8 +775,8 @@ Each command has:
   - `"prompt"`: Loaded from a prompt template `.md` file
   - `"skill"`: Loaded from a skill directory (name is prefixed with `skill:`)
 - `location`: Where it was loaded from (optional, not present for extensions):
-  - `"user"`: User-level (`~/.prime/agent/`)
-  - `"project"`: Project-level (`./.prime/agent/`)
+  - `"user"`: User-level (`~/.optimus/agent/`)
+  - `"project"`: Project-level (`./.optimus/agent/`)
   - `"path"`: Explicit path via CLI or settings
 - `path`: Absolute file path to the command source (optional)
 
@@ -1181,7 +1181,7 @@ Set the terminal window/tab title. Fire-and-forget.
   "type": "extension_ui_request",
   "id": "uuid-8",
   "method": "setTitle",
-  "title": "Prime Agent - my project"
+  "title": "Optimus Prime - my project"
 }
 ```
 
@@ -1366,7 +1366,7 @@ Created by the `bash` RPC command (not by LLM tool calls):
 Save as `rpc-client.ts` and run with `bun rpc-client.ts`:
 
 ```typescript
-const proc = Bun.spawn(["prime-agent", "--mode", "rpc", "--no-session"], {
+const proc = Bun.spawn(["optimus", "--mode", "rpc", "--no-session"], {
   stdin: "pipe",
   stdout: "pipe",
 });
@@ -1420,7 +1420,7 @@ For a complete example of handling the extension UI protocol, see [`examples/rpc
 const { spawn } = require("child_process");
 const { StringDecoder } = require("string_decoder");
 
-const agent = spawn("prime-agent", ["--mode", "rpc", "--no-session"]);
+const agent = spawn("optimus", ["--mode", "rpc", "--no-session"]);
 
 function attachJsonlReader(stream, onLine) {
     const decoder = new StringDecoder("utf8");

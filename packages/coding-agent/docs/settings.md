@@ -1,11 +1,11 @@
 # Settings
 
-Prime Agent uses JSON settings files with project settings overriding global settings.
+Optimus Prime uses JSON settings files with project settings overriding global settings.
 
 | Location | Scope |
 |----------|-------|
-| `~/.prime/agent/settings.json` | Global (all projects) |
-| `.prime/agent/settings.json` | Project (current directory) |
+| `~/.optimus/agent/settings.json` | Global (all projects) |
+| `.optimus/agent/settings.json` | Project (current directory) |
 
 Edit directly or use `/settings` for common options.
 
@@ -48,26 +48,26 @@ Edit directly or use `/settings` for common options.
 
 ### Update Checks
 
-Stable builds fetch the release manifest at `https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/latest.json`. Beta builds fetch `beta.json` and continue following beta updates. Override the base URL with `PRIME_AGENT_DOWNLOAD_BASE_URL`.
+Stable builds fetch the release manifest at `https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/latest.json`. Beta builds fetch `beta.json` and continue following beta updates. Override the base URL with `OPTIMUS_DOWNLOAD_BASE_URL`.
 
-Set `PI_SKIP_VERSION_CHECK=1` to disable the Prime Agent version update check. Use `--offline` or `PI_OFFLINE=1` to disable startup network operations, including update checks and package update checks.
+Set `PI_SKIP_VERSION_CHECK=1` to disable the Optimus Prime version update check. Use `--offline` or `PI_OFFLINE=1` to disable startup network operations, including update checks and package update checks.
 
 The stable `latest.json` and beta `beta.json` manifests use the same JSON shape:
 
 ```json
 {
   "version": "0.73.1",
-  "package": "prime-agent",
-  "tarball": "releases/v0.73.1/prime-agent-0.73.1.tgz"
+  "package": "optimus",
+  "tarball": "releases/v0.73.1/optimus-0.73.1.tgz"
 }
 ```
 
-`version` is required. `package` is optional and may also be named `packageName`; it defaults to the current package name. `tarball` is optional; when present, Prime Agent installs that tarball instead of the package name. Relative tarball paths resolve against `PRIME_AGENT_DOWNLOAD_BASE_URL`.
+`version` is required. `package` is optional and may also be named `packageName`; it defaults to the current package name. `tarball` is optional; when present, Optimus Prime installs that tarball instead of the package name. Relative tarball paths resolve against `OPTIMUS_DOWNLOAD_BASE_URL`.
 
 ### Pseudonymous usage analytics
 
 
-Prime Agent does not send prompts, responses, thinking, tool arguments or results, command text, filenames, paths, repository information, environment variables, credentials, raw error messages, hostnames, usernames, emails, or hardware identifiers. A random installation ID is stored as `telemetry.json` in the configured agent directory (normally `~/.prime/agent/`).
+Optimus Prime does not send prompts, responses, thinking, tool arguments or results, command text, filenames, paths, repository information, environment variables, credentials, raw error messages, hostnames, usernames, emails, or hardware identifiers. A random installation ID is stored as `telemetry.json` in the configured agent directory (normally `~/.optimus/agent/`).
 
 Telemetry can be disabled globally or for an individual project. Project settings can only further restrict telemetry: they cannot re-enable a global opt-out or suppress the global one-time disclosure.
 
@@ -86,12 +86,12 @@ Disable analytics with any of:
 ```
 
 ```bash
-PRIME_AGENT_TELEMETRY=0 prime-agent
-DO_NOT_TRACK=1 prime-agent
-prime-agent --offline
+OPTIMUS_TELEMETRY=0 optimus
+DO_NOT_TRACK=1 optimus
+optimus --offline
 ```
 
-`PRIME_AGENT_TELEMETRY_ENDPOINT` overrides the ingestion endpoint for development and self-hosted deployments.
+`OPTIMUS_TELEMETRY_ENDPOINT` overrides the ingestion endpoint for development and self-hosted deployments.
 
 ### Warnings
 
@@ -193,7 +193,7 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 
 `npmCommand` is used for all package-manager operations, including installs, uninstalls, and dependency installs inside git packages. Use argv-style entries exactly as the process should be launched.
 
-Prime Agent identifies which package manager the argv names — `bun`, `npm`, `pnpm`, or `yarn`, scanning the whole argv so wrappers such as `["mise", "exec", "node@20", "--", "pnpm"]` are recognized — and emits that manager's own flags for each operation (production installs, install directory, version lookup, global modules root). An argv whose manager cannot be identified falls back to npm-style flags, and its git package dependency installs use plain `install`.
+Optimus Prime identifies which package manager the argv names — `bun`, `npm`, `pnpm`, or `yarn`, scanning the whole argv so wrappers such as `["mise", "exec", "node@20", "--", "pnpm"]` are recognized — and emits that manager's own flags for each operation (production installs, install directory, version lookup, global modules root). An argv whose manager cannot be identified falls back to npm-style flags, and its git package dependency installs use plain `install`.
 
 ### Daemon
 
@@ -201,7 +201,7 @@ Prime Agent identifies which package manager the argv names — `bun`, `npm`, `p
 |---------|------|---------|-------------|
 | `idleEvictionMinutes` | number or `"off"` | `90` | Idle threshold in minutes for whole-tree worker eviction and individual idle-child passivation; `"off"` disables both. |
 
-`idleEvictionMinutes` is a global daemon policy and is read only from `~/.prime/agent/settings.json`. Set it to a positive number to configure the idle threshold.
+`idleEvictionMinutes` is a global daemon policy and is read only from `~/.optimus/agent/settings.json`. Set it to a positive number to configure the idle threshold.
 
 ### Sessions
 
@@ -210,10 +210,10 @@ Prime Agent identifies which package manager the argv names — `bun`, `npm`, `p
 | `sessionDir` | string | - | Directory where session files are stored. Accepts absolute or relative paths, plus `~`. |
 
 ```json
-{ "sessionDir": ".prime/agent/sessions" }
+{ "sessionDir": ".optimus/agent/sessions" }
 ```
 
-When multiple sources specify a session directory, precedence is `--session-dir`, `PRIME_AGENT_SESSION_DIR`, the legacy `PRIME_AGENT_CODING_AGENT_SESSION_DIR`, then `sessionDir` in `settings.json`.
+When multiple sources specify a session directory, precedence is `--session-dir`, `OPTIMUS_SESSION_DIR`, the legacy `OPTIMUS_CODING_AGENT_SESSION_DIR`, then `sessionDir` in `settings.json`.
 
 ### Model Cycling
 
@@ -237,7 +237,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 These settings define where to load extensions, skills, prompts, and themes from.
 
-Paths in `~/.prime/agent/settings.json` resolve relative to `~/.prime/agent`. Paths in `.prime/agent/settings.json` resolve relative to `.prime/agent`. Absolute paths and `~` are supported.
+Paths in `~/.optimus/agent/settings.json` resolve relative to `~/.optimus/agent`. Paths in `.optimus/agent/settings.json` resolve relative to `.optimus/agent`. Absolute paths and `~` are supported.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -247,7 +247,7 @@ Paths in `~/.prime/agent/settings.json` resolve relative to `~/.prime/agent`. Pa
 | `prompts` | string[] | `[]` | Local prompt template paths or directories |
 | `themes` | string[] | `[]` | Local theme file paths or directories |
 | `enableSkillCommands` | boolean | `true` | Register skills as `/skill:name` commands |
-| `enableBuiltinSkills` | boolean | `true` | Load built-in skills shipped with prime-agent |
+| `enableBuiltinSkills` | boolean | `true` | Load built-in skills shipped with optimus |
 | `bundledSkills.websearch` | boolean | `true` | Load the built-in `websearch` skill |
 
 Arrays support glob patterns and exclusions. Use `!pattern` to exclude. Use `+path` to force-include an exact path and `-path` to force-exclude an exact path.
@@ -315,16 +315,16 @@ See [packages.md](packages.md) for package management details.
 
 ## Project Overrides
 
-Project settings (`.prime/agent/settings.json`) override global settings. Nested objects are merged:
+Project settings (`.optimus/agent/settings.json`) override global settings. Nested objects are merged:
 
 ```json
-// ~/.prime/agent/settings.json (global)
+// ~/.optimus/agent/settings.json (global)
 {
   "theme": "dark",
   "compaction": { "enabled": true, "reserveTokens": 16384 }
 }
 
-// .prime/agent/settings.json (project)
+// .optimus/agent/settings.json (project)
 {
   "compaction": { "reserveTokens": 8192 }
 }

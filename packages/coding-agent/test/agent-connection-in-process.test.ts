@@ -79,7 +79,7 @@ function createFakeSession(id: string, messages: AgentMessage[]): FakeSessionCon
 	const session = {
 		sessionManager: {
 			getCwd: () => `/tmp/${id}`,
-			getSessionDir: () => "/tmp/prime-agent-sessions",
+			getSessionDir: () => "/tmp/optimus-sessions",
 			getLeafId: () => `${id}-leaf`,
 			getEntries: () => [],
 			getTree: () => [],

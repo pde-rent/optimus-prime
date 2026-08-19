@@ -1,6 +1,6 @@
 # RLM Runtime Architecture
 
-Prime Agent gives each agent session a persistent JavaScript/TypeScript REPL running in a Bun child process, plus a native recursive sub-agent interface. The sandbox `rlm` object is a model-facing shim; the TypeScript host owns child execution, persistence, usage accounting, and lifecycle.
+Optimus Prime gives each agent session a persistent JavaScript/TypeScript REPL running in a Bun child process, plus a native recursive sub-agent interface. The sandbox `rlm` object is a model-facing shim; the TypeScript host owns child execution, persistence, usage accounting, and lifecycle.
 
 The agent tool is named `repl`. Cells are JavaScript/TypeScript; there is no IPython, Jupyter, or Python involved.
 
@@ -73,7 +73,7 @@ sequenceDiagram
 | `src/core/bun-repl/state-snapshot.ts` | Reads and writes the JSON namespace snapshot in the session artifact directory. |
 | `src/core/bun-repl/provisioner.ts` | Lazy startup, restore-on-first-start, and disposal of the manager. |
 | `src/core/bun-repl/tool.ts` | The `repl` agent tool wrapper: parameter schema, output shaping, image attachments. |
-| `src/core/agent-session.ts` | RLM policy, child creation, registry, usage attribution, cancellation, goal handlers, and REPL environment (including `PRIME_AGENT_REPL_SKILLS`). |
+| `src/core/agent-session.ts` | RLM policy, child creation, registry, usage attribution, cancellation, goal handlers, and REPL environment (including `OPTIMUS_REPL_SKILLS`). |
 | `src/core/rlm-runtime.ts` | Typed request/spawn-handle validation for `rlm.run`, model discovery, list, and delete. |
 
 The REPL side does not call providers or implement an agent loop.
@@ -85,7 +85,7 @@ The REPL is created lazily on first `repl` use (`BunReplProvisioner.ensure()`; `
 The child boots in this order:
 
 1. Build the `node:vm` context and populate it with the sandbox globals.
-2. Preload JS skills listed in `PRIME_AGENT_REPL_SKILLS` (see [JS Skill Preloading](#js-skill-preloading)).
+2. Preload JS skills listed in `OPTIMUS_REPL_SKILLS` (see [JS Skill Preloading](#js-skill-preloading)).
 3. Emit `{"id":"ready","type":"idle"}`, which resolves the manager's start promise.
 
 If the session artifact directory holds a snapshot, the provisioner restores it right after start and reports the revived names.
@@ -184,7 +184,7 @@ Restore is best-effort and lossy by construction. Plain data — strings, number
 A JS-backed skill is a normal markdown skill whose directory also contains `skill.js` at its root. `AgentSession` collects the loaded JS skills and passes them to the REPL child as one environment variable:
 
 ```text
-PRIME_AGENT_REPL_SKILLS = [{ "name": "word-count", "global": "word_count", "entry": "/abs/path/skill.js" }, …]
+OPTIMUS_REPL_SKILLS = [{ "name": "word-count", "global": "word_count", "entry": "/abs/path/skill.js" }, …]
 ```
 
 This variable is **host-set, not user-set**. Setting it yourself is not a supported configuration; add skills the normal way instead.
@@ -263,7 +263,7 @@ Registry scope follows the parent transcript. An unrelated new parent session do
 
 ## Usage and Cost Attribution
 
-The admission handle does not contain usage or completion data. Prime Agent asynchronously folds the child's assistant usage and cost into the parent assistant turn that launched it.
+The admission handle does not contain usage or completion data. Optimus Prime asynchronously folds the child's assistant usage and cost into the parent assistant turn that launched it.
 
 The parent transcript persists a `child_usage_attributed` entry containing:
 
@@ -279,7 +279,7 @@ The continual harness is a persisted state ledger for prompt notes, memories, re
 
 It is owned entirely by the TypeScript host (`src/core/refinement/`). There is no REPL-side harness object; the model reaches it through the `refine` skill, which forwards `refine.run` and `refine.status` host requests, and the user reaches it through `/refine`.
 
-Session-local state lives in the session artifact directory under `harness/harness_state.json`. Explicitly global entries live under `~/.prime/agent/harness/`.
+Session-local state lives in the session artifact directory under `harness/harness_state.json`. Explicitly global entries live under `~/.optimus/agent/harness/`.
 
 `/refine` runs a dedicated review over the current trajectory and applies small create/update/delete edits. Rollback uses recorded before/after snapshots. The base system prompt remains immutable; refinements are supplemental state.
 
@@ -300,7 +300,7 @@ Goal state, persistence, token and wall-clock accounting, and continuation promp
 For a persisted root session, the relevant layout is:
 
 ```text
-~/.prime/agent/
+~/.optimus/agent/
   sessions/
     <root-session-id>.jsonl
   session-artifacts/

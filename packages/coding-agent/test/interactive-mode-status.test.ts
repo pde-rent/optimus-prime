@@ -2942,7 +2942,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 		shouldRunOnboarding(): boolean;
 		markOnboardingShown(): void;
 		runStartupOnboarding(): Promise<boolean>;
-		runOnboardingFlow(showPrimeCliSplash?: boolean): Promise<void>;
+		runOnboardingFlow(showOptimusCliSplash?: boolean): Promise<void>;
 		applySelectedModel(model: AgentConnectionModel): Promise<void>;
 		prepareForModelSelectionAfterLogin(authResult: AuthenticationResult): Promise<boolean>;
 		setupAutocompleteProvider(): void;
@@ -3625,7 +3625,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 		expect(prompt).not.toHaveBeenCalled();
 	});
 
-	function createPrimeCliHarness(shown: boolean): OnboardingFake {
+	function createOptimusCliHarness(shown: boolean): OnboardingFake {
 		const fakeThis = Object.create(InteractiveMode.prototype) as OnboardingFake;
 		fakeThis.connectionState = createConnectionState({ model: primeModel });
 		fakeThis.connectionModels = [primeModel];
@@ -3656,20 +3656,20 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	}
 
 	test("shows onboarding when the selected Prime model is backed by Prime CLI auth", () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 
 		expect(shouldRunOnboarding.call(fakeThis)).toBe(true);
 		expect(fakeThis.uiServices.modelRegistry.refresh).toHaveBeenCalledTimes(1);
 	});
 
 	test("skips Prime CLI onboarding after it has been shown", () => {
-		const fakeThis = createPrimeCliHarness(true);
+		const fakeThis = createOptimusCliHarness(true);
 
 		expect(shouldRunOnboarding.call(fakeThis)).toBe(false);
 	});
 
 	test("persists that onboarding was shown once", () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 
 		markOnboardingShown.call(fakeThis);
 
@@ -3679,7 +3679,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	test("persists onboarding before opening the one-shot flow", async () => {
 		let shown = false;
 		let flushed = false;
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 		fakeThis.uiServices.settingsManager.getOnboardingShown = vi.fn(() => shown);
 		fakeThis.uiServices.settingsManager.setOnboardingShown = vi.fn((nextShown: boolean) => {
 			shown = nextShown;
@@ -3687,8 +3687,8 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 		fakeThis.uiServices.settingsManager.flush = vi.fn(async () => {
 			flushed = true;
 		});
-		fakeThis.runOnboardingFlow = vi.fn(async (showPrimeCliSplash?: boolean) => {
-			expect(showPrimeCliSplash).toBe(true);
+		fakeThis.runOnboardingFlow = vi.fn(async (showOptimusCliSplash?: boolean) => {
+			expect(showOptimusCliSplash).toBe(true);
 			expect(shown).toBe(true);
 			expect(flushed).toBe(true);
 		});
@@ -3701,7 +3701,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	});
 
 	test("cancelled Prime CLI splash exits onboarding before opening configuration", async () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 		fakeThis.showOnboardingSplash = vi.fn(async () => undefined);
 		fakeThis.showConfigurationMenu = vi.fn(async () => {});
 
@@ -3711,7 +3711,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	});
 
 	test("opens the Models tab after the Prime CLI splash", async () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 		const configuration = createDeferred<void>();
 		const dismiss = vi.fn();
 		fakeThis.showOnboardingSplash = vi.fn(async () => ({ showProgress: vi.fn(), dismiss }));
@@ -3730,7 +3730,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	});
 
 	test("opens the Models tab when models are already available", async () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 		fakeThis.connectionState = createConnectionState({ model: undefined });
 		fakeThis.getModelCandidates = vi.fn(async () => [primeModel]);
 		fakeThis.showConfigurationMenu = vi.fn(async () => {});
@@ -3742,7 +3742,7 @@ describe("InteractiveMode Prime CLI onboarding", () => {
 	});
 
 	test("opens Prime login before the Models tab when no models are available", async () => {
-		const fakeThis = createPrimeCliHarness(false);
+		const fakeThis = createOptimusCliHarness(false);
 		fakeThis.connectionState = createConnectionState({ model: undefined });
 		fakeThis.getModelCandidates = vi.fn(async () => []);
 		const showProgress = vi.fn();
@@ -3873,12 +3873,12 @@ describe("InteractiveMode post-login model preparation", () => {
 describe("InteractiveMode splash cwd display", () => {
 	test("formats home-relative cwd paths", () => {
 		expect(formatSplashCwd(homedir())).toBe("~");
-		expect(formatSplashCwd(path.join(homedir(), "pi", "prime-agent"))).toBe("~/pi/prime-agent");
+		expect(formatSplashCwd(path.join(homedir(), "pi", "optimus"))).toBe("~/pi/optimus");
 	});
 
 	test("keeps worktree paths as cwd paths instead of repo branch labels", () => {
-		expect(formatSplashCwd(path.join(homedir(), "pi", "prime-agent", ".worktrees", "improve-onboarding"))).toBe(
-			"~/pi/prime-agent/.worktrees/improve-onboarding",
+		expect(formatSplashCwd(path.join(homedir(), "pi", "optimus", ".worktrees", "improve-onboarding"))).toBe(
+			"~/pi/optimus/.worktrees/improve-onboarding",
 		);
 	});
 });

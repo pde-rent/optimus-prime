@@ -71,7 +71,7 @@ interface CleanupProcessIdentity {
 const fixturePath = resolve(__dirname, "../../fixtures/eng-4600-supervisor-fixture.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
 const cliPath = resolve(__dirname, "../../../src/cli.ts");
-const supervisorRegistryDirEnv = "PRIME_AGENT_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
+const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const handles = new Set<FixtureHandle>();
 const harnesses: Harness[] = [];
 const cleanupProcesses = new Map<string, CleanupProcessIdentity>();
@@ -261,7 +261,7 @@ async function createPaths(): Promise<{
 		registryDir: join(harness.tempDir, "registry"),
 		socketPath:
 			process.platform === "win32"
-				? `\\\\.\\pipe\\prime-agent-eng-4600-${process.pid}-${Date.now()}`
+				? `\\\\.\\pipe\\optimus-eng-4600-${process.pid}-${Date.now()}`
 				: join(harness.tempDir, "daemon.sock"),
 	};
 }

@@ -9,7 +9,7 @@ import { serializeConversation } from "../compaction/utils.js";
 import { convertToLlm } from "../messages.js";
 import type { CustomEntry } from "../session-manager.js";
 
-export const REFINEMENT_CUSTOM_TYPE = "prime-agent.refinement";
+export const REFINEMENT_CUSTOM_TYPE = "optimus.refinement";
 
 export const REFINE_SKILL_NAME = "refine";
 const HARNESS_STATE_DIR_NAME = "harness";
@@ -110,13 +110,13 @@ export interface AutoRefineReview {
 	instructions?: string;
 }
 
-const REFINEMENT_SYSTEM_PROMPT = `You are Prime Agent's /refine continual harness subsystem.
+const REFINEMENT_SYSTEM_PROMPT = `You are Optimus Prime's /refine continual harness subsystem.
 
 Your job is to improve the editable continual harness state from the current trajectory.
 This is similar in spirit to context compaction, but instead of summarizing the
 conversation you emit precise Create, Update, or Delete edits to reusable state.
 The continual harness is the persistent, editable set of prompt notes, memories,
-skills, and subagent specs that lets Prime Agent improve reusable behavior
+skills, and subagent specs that lets Optimus Prime improve reusable behavior
 outside the token history.
 Use "continual harness" for that persistent artifact layer; keep "RLM" for the
 runtime, JavaScript/TypeScript REPL, and native call interface that executes those artifacts.
@@ -128,7 +128,7 @@ Continual harness components:
 - subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with \`handle = await rlm("sub-task")\`; admission returns immediately with \`rlm_child_id\`, \`name\`, \`session_dir\`, and \`model\`, never the child's answer. Results arrive only through explicit \`agent_message\` replies or files; children reply with \`await agent_message.send(message, { receiver_role: 'parent' })\`. Use \`await rlm.list_subagents()\` to recover direct child handles and \`await agent_message.send(message, { receiver_role: 'child', receiver_name: handle.name })\` for follow-ups. Do not invent wrappers like \`run_subagent(...)\`.
 
 Scope and persistence policy:
-- The default editable continual harness store is local to the current Prime Agent session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.
+- The default editable continual harness store is local to the current Optimus Prime session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.
 - A caller may explicitly request global refinement. Global edits must be stable cross-session lessons, durable user preferences, reusable skills/subagents, or tool/environment facts that should affect future sessions.
 - Entry ids in the harness overview may carry a display-only \`local:\` or \`global:\` prefix. Always use the bare id (no prefix) in edits.
 - All edits in one refinement apply only to the requested scope's store. During a local refinement, global entries are read-only context: never propose update or delete edits for them; create a local entry instead when a session-specific override is genuinely needed.
@@ -162,7 +162,7 @@ JSON only with this exact shape:
   ]
 }`;
 
-const AUTO_REFINE_REVIEW_SYSTEM_PROMPT = `You are Prime Agent's automatic /refine review gate.
+const AUTO_REFINE_REVIEW_SYSTEM_PROMPT = `You are Optimus Prime's automatic /refine review gate.
 
 Decide whether this checkpoint should run /refine. Auto /refine writes local continual harness state by default, so approve when the trajectory contains evidence useful to this session's future turns.
 Reject one-off noise, unsupported hypotheses, and transient tool outputs. Ask for global refinement only for durable cross-session lessons or explicitly project-qualified lessons likely to be reused in future sessions.
@@ -520,7 +520,7 @@ export function formatHarnessStateForPrompt(
 	const lines = [
 		"# Continual Harness State",
 		"",
-		"Local continual harness entries belong to this Prime Agent session. Global continual harness entries persist across Prime Agent sessions.",
+		"Local continual harness entries belong to this Optimus Prime session. Global continual harness entries persist across Optimus Prime sessions.",
 		"The continual harness entries below are compact summaries, not full descriptions. Use them as routing/context hints; inspect or refine the underlying continual harness entry only when detail matters.",
 		"Default to local continual harness refinement for current task progress, temporary blockers, and session coordination. Use global continual harness refinement only for stable cross-session lessons, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts.",
 		"Use these continual harness prompt notes, memories, skills, and subagent specs when they are relevant. The base system prompt is immutable; prompt entries below are supplemental notes only.",
@@ -993,8 +993,8 @@ export async function planRefinement(
 
 	const conversationText = serializeConversation(convertToLlm(messages)).slice(-80_000);
 	const scopeInstruction = options.global
-		? "Requested refinement scope: global. Only propose stable cross-session continual harness edits, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts that should affect future Prime Agent sessions. Do not persist session-only progress, temporary blockers, or current-run coordination globally."
-		: "Requested refinement scope: local. Prefer local continual harness edits for current task progress, temporary blockers, current-run coordination, and project facts that are not clearly reusable across Prime Agent sessions. Global entries in the overview are read-only context: do not propose update or delete edits for them; create a local entry instead if an override is needed.";
+		? "Requested refinement scope: global. Only propose stable cross-session continual harness edits, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts that should affect future Optimus Prime sessions. Do not persist session-only progress, temporary blockers, or current-run coordination globally."
+		: "Requested refinement scope: local. Prefer local continual harness edits for current task progress, temporary blockers, current-run coordination, and project facts that are not clearly reusable across Optimus Prime sessions. Global entries in the overview are read-only context: do not propose update or delete edits for them; create a local entry instead if an override is needed.";
 	const userPrompt = [
 		`<current_harness_state>\n${overviewForPrompt(state)}\n</current_harness_state>`,
 		`<refinement_history>\n${historyForPrompt(history)}\n</refinement_history>`,

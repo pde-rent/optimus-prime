@@ -71,6 +71,10 @@ export interface HarnessSearchMemoryHit {
 	snippet: string;
 	/** Present only when the snippet is shorter than the stored body. */
 	truncated?: true;
+	/** Ids storing the same body as this hit, collapsed to avoid returning the text twice. */
+	duplicate_ids?: string[];
+	/** Titles of those collapsed entries, when they differ from this hit's own. */
+	duplicate_titles?: string[];
 	/** Merged-state key; `scope:id` and therefore derivable. Verbose only. */
 	key?: string;
 	version?: number;
@@ -89,6 +93,10 @@ export interface HarnessSearchMemoryResponse {
 	results: HarnessSearchMemoryHit[];
 	/** Candidates dropped by the relevance gates. Present only when non-zero. */
 	suppressed_by_gate?: number;
+	/** Hits collapsed because an identical body was already returned. Present only when non-zero. */
+	duplicates_collapsed?: number;
+	/** Pre-collapse match count. Diagnostic, so verbose only. */
+	total_matches_before_collapse?: number;
 	/** Recovery facets, sent only when nothing matched, so a miss can be reworded. */
 	memory_count?: number;
 	paths?: string[];
@@ -346,6 +354,12 @@ function searchMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContex
 	if (found.suppressedByGate > 0) {
 		response.suppressed_by_gate = found.suppressedByGate;
 	}
+	if (found.duplicatesCollapsed > 0) {
+		response.duplicates_collapsed = found.duplicatesCollapsed;
+	}
+	if (verbose) {
+		response.total_matches_before_collapse = found.totalMatchesBeforeCollapse;
+	}
 	// Retrieval is the only path to a memory's contents and nothing retrieves
 	// automatically, so an empty result must say whether the store is empty or the
 	// wording missed. Sent only on a miss: on a hit it is noise the model pays for.
@@ -371,6 +385,8 @@ function toSearchHit(result: HarnessMemorySearchResult, verbose: boolean): Harne
 	// Omitted rather than sent false: an absent key costs nothing, `truncated: false`
 	// costs its name on every hit.
 	if (result.truncated) hit.truncated = true;
+	if (result.duplicateIds?.length) hit.duplicate_ids = result.duplicateIds;
+	if (result.duplicateTitles?.length) hit.duplicate_titles = result.duplicateTitles;
 	if (verbose) {
 		hit.key = result.key;
 		hit.version = result.version;

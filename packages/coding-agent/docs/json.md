@@ -1,10 +1,10 @@
 # JSON Event Stream Mode
 
 ```bash
-prime-agent --mode json "Your prompt"
+optimus --mode json "Your prompt"
 ```
 
-Outputs all session events as JSON lines to stdout. Useful for integrating Prime Agent into other tools or custom UIs.
+Outputs all session events as JSON lines to stdout. Useful for integrating Optimus Prime into other tools or custom UIs.
 
 ## Event Types
 
@@ -78,5 +78,5 @@ Followed by events as they occur:
 ## Example
 
 ```bash
-prime-agent --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
+optimus --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
 ```

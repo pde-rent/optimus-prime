@@ -1,6 +1,6 @@
 # RLM Programming Model
 
-Prime Agent is built around a recursive language model (RLM) runtime: the model works inside a persistent JavaScript/TypeScript control environment and composes capabilities as code. Provider calls, session persistence, child lifecycles, scheduling, and safety policy remain in the TypeScript host; the persistent Bun REPL is the model-facing programming surface.
+Optimus Prime is built around a recursive language model (RLM) runtime: the model works inside a persistent JavaScript/TypeScript control environment and composes capabilities as code. Provider calls, session persistence, child lifecycles, scheduling, and safety policy remain in the TypeScript host; the persistent Bun REPL is the model-facing programming surface.
 
 ## RLM Loop
 
@@ -56,7 +56,7 @@ Run a project's normal commands through its own environment from a `%%bash` cell
 bun run check
 ```
 
-`%%bash` and `%%js` are the only cell magics; there is no `%%time`, no `%%capture`, no `!command`, and no line magics. Each `%%bash` cell is a temporary subshell, while JavaScript state and `cd(dir)` changes persist in the REPL. Prime Agent extensions may intentionally add custom tools, but the built-in RLM design does not require a separate model tool for every capability.
+`%%bash` and `%%js` are the only cell magics; there is no `%%time`, no `%%capture`, no `!command`, and no line magics. Each `%%bash` cell is a temporary subshell, while JavaScript state and `cd(dir)` changes persist in the REPL. Optimus Prime extensions may intentionally add custom tools, but the built-in RLM design does not require a separate model tool for every capability.
 
 The sandbox deliberately has no `process`, so a cell cannot kill the REPL child: use `env` instead of `process.env`, and `cd()` / `pwd()` instead of `process.chdir()` / `process.cwd()`. `Bun.*`, `fetch`, `console`, `display()`, `crypto`, `Buffer`, and the timer functions are available, and every JavaScript-backed skill is bound under its own name.
 
@@ -117,7 +117,7 @@ The default recursion depth allows a root agent to create children. Raising the 
 
 ### 3. Skills add programmatic capability
 
-Prime Agent supports the Agent Skills markdown format and extends it with JavaScript-backed skills. Both use `SKILL.md` for discovery, routing, and instructions. A JavaScript-backed skill also contains a `skill.js` (or `skill.mjs` / `skill.ts`) at its directory root: an ES module exporting a `createSkill(ctx)` factory, whose return value the host binds into the REPL under the skill name with `-` replaced by `_`.
+Optimus Prime supports the Agent Skills markdown format and extends it with JavaScript-backed skills. Both use `SKILL.md` for discovery, routing, and instructions. A JavaScript-backed skill also contains a `skill.js` (or `skill.mjs` / `skill.ts`) at its directory root: an ES module exporting a `createSkill(ctx)` factory, whose return value the host binds into the REPL under the skill name with `-` replaced by `_`.
 
 For a skill named `release-audit` whose factory returns a callable, the model can call:
 

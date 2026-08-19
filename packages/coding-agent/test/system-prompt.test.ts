@@ -102,7 +102,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages). Prefer the standard library and the project's own dependencies over adding new ones.",
 				"",
-				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Prime Agent session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 				"",
 				"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
 				"",
@@ -343,8 +343,8 @@ describe("buildSystemPrompt", () => {
 						id: "validation",
 						kind: "memory",
 						title: "Validation",
-						content: "Run `npm run check` after PrimeAgent code changes.",
-						path: "repo/prime-agent",
+						content: "Run `npm run check` after Optimus code changes.",
+						path: "repo/optimus",
 						reference: {},
 						arguments: {},
 						metadata: {},
@@ -416,7 +416,7 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("Local continual harness entries belong to this Prime Agent session");
+		expect(prompt).toContain("Local continual harness entries belong to this Optimus Prime session");
 		expect(prompt).toContain("The continual harness entries below are compact summaries, not full descriptions");
 		expect(prompt).toContain("Use global continual harness refinement only for stable cross-session lessons");
 		expect(prompt).toContain("When to call `await refine.run()`");
@@ -526,7 +526,7 @@ describe("buildSystemPrompt", () => {
 			entries: {
 				prompt: {},
 				memory: {
-					validation: harnessEntry("memory", "validation", "Validation", "repo/prime-agent", "Run bun run check."),
+					validation: harnessEntry("memory", "validation", "Validation", "repo/optimus", "Run bun run check."),
 				},
 				skill: {},
 				subagent: {},
@@ -557,7 +557,7 @@ describe("buildSystemPrompt", () => {
 			entries: {
 				prompt: {},
 				memory: {
-					validation: harnessEntry("memory", "validation", "Validation", "repo/prime-agent", "Run bun run check."),
+					validation: harnessEntry("memory", "validation", "Validation", "repo/optimus", "Run bun run check."),
 				},
 				skill: {
 					review: harnessEntry("skill", "review", "Review", "quality", "Check rollback safety."),

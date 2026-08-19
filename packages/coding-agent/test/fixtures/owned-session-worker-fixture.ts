@@ -8,23 +8,23 @@ import { attachJsonlLineReader, serializeJsonLine } from "../../src/modes/rpc/js
 import { isTruthyEnvVar } from "../../src/utils/shared.js";
 
 const args = process.argv.slice(2);
-if (process.env.PRIME_AGENT_TEST_STDIN_TTY) {
-	Object.defineProperty(process.stdin, "isTTY", { value: isTruthyEnvVar(process.env.PRIME_AGENT_TEST_STDIN_TTY) });
+if (process.env.OPTIMUS_TEST_STDIN_TTY) {
+	Object.defineProperty(process.stdin, "isTTY", { value: isTruthyEnvVar(process.env.OPTIMUS_TEST_STDIN_TTY) });
 }
-const pidPath = process.env.PRIME_AGENT_TEST_OWNED_PID_PATH;
+const pidPath = process.env.OPTIMUS_TEST_OWNED_PID_PATH;
 installOwnedSessionWorkerOwnerWatch();
 
-if (isTruthyEnvVar(process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER)) {
+if (isTruthyEnvVar(process.env.OPTIMUS_INTERNAL_OWNED_WORKER)) {
 	if (pidPath) {
 		writeFileSync(`${pidPath}.ppid`, `${process.ppid}\n`);
-		writeFileSync(`${pidPath}.profile`, `${process.env.PRIME_AGENT_INTERNAL_OWNED_PROFILE ?? ""}\n`);
+		writeFileSync(`${pidPath}.profile`, `${process.env.OPTIMUS_INTERNAL_OWNED_PROFILE ?? ""}\n`);
 		writeFileSync(pidPath, `${process.pid}\n`);
 		process.once("SIGTERM", () => {
 			writeFileSync(`${pidPath}.terminated`, "terminated\n");
 			process.exit(0);
 		});
 	}
-	if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_KEEP_ALIVE)) {
+	if (isTruthyEnvVar(process.env.OPTIMUS_TEST_KEEP_ALIVE)) {
 		setInterval(() => {}, 1000);
 	}
 	if (args.includes("--mode") && args.includes("rpc")) {
@@ -42,20 +42,16 @@ if (isTruthyEnvVar(process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER)) {
 		};
 		attachJsonlLineReader(process.stdin, (line) => {
 			const command = JSON.parse(line) as { id?: string; type: string; marker?: string };
-			if (process.env.PRIME_AGENT_TEST_EXIT_ZERO_ON_COMMAND === command.type) {
+			if (process.env.OPTIMUS_TEST_EXIT_ZERO_ON_COMMAND === command.type) {
 				process.exit(0);
 			}
-			if (process.env.PRIME_AGENT_TEST_CRASH_ON_COMMAND === command.type) {
+			if (process.env.OPTIMUS_TEST_CRASH_ON_COMMAND === command.type) {
 				process.exit(1);
 			}
 			if (command.type === "ack_result") {
-				if (
-					isTruthyEnvVar(process.env.PRIME_AGENT_TEST_CRASH_ON_ACK) &&
-					pidPath &&
-					!existsSync(`${pidPath}.crashed`)
-				) {
+				if (isTruthyEnvVar(process.env.OPTIMUS_TEST_CRASH_ON_ACK) && pidPath && !existsSync(`${pidPath}.crashed`)) {
 					writeFileSync(`${pidPath}.crashed`, "crashed\n");
-					const recoveryPath = process.env.PRIME_AGENT_INTERNAL_OWNED_RECOVERY_DESCRIPTOR;
+					const recoveryPath = process.env.OPTIMUS_INTERNAL_OWNED_RECOVERY_DESCRIPTOR;
 					if (recoveryPath) {
 						writeFileSync(
 							recoveryPath,
@@ -73,11 +69,11 @@ if (isTruthyEnvVar(process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER)) {
 				}
 				return;
 			}
-			if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_INVALID_RPC_OUTPUT)) {
+			if (isTruthyEnvVar(process.env.OPTIMUS_TEST_INVALID_RPC_OUTPUT)) {
 				process.stdout.write("truncated-json\n");
 				process.stdout.write("null\n");
 			}
-			if (isTruthyEnvVar(process.env.PRIME_AGENT_TEST_REVERSE_RPC_RESPONSES)) {
+			if (isTruthyEnvVar(process.env.OPTIMUS_TEST_REVERSE_RPC_RESPONSES)) {
 				reversedCommands.push(command);
 				if (reversedCommands.length === 2) {
 					for (const pending of reversedCommands.reverse()) {
@@ -92,7 +88,7 @@ if (isTruthyEnvVar(process.env.PRIME_AGENT_INTERNAL_OWNED_WORKER)) {
 		process.stdin.resume();
 	} else {
 		process.stdin.pipe(process.stdout);
-		if (!isTruthyEnvVar(process.env.PRIME_AGENT_TEST_KEEP_ALIVE)) {
+		if (!isTruthyEnvVar(process.env.OPTIMUS_TEST_KEEP_ALIVE)) {
 			process.stdin.once("end", closeOwnedSessionWorkerOwnerWatch);
 		}
 	}

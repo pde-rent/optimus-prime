@@ -226,7 +226,7 @@ import type {
 	InteractiveModeLocalToolRendererDefinition,
 	InteractiveModeUiServices,
 } from "./interactive-mode-services.js";
-import { type OnboardingStartupState, shouldRunOnboarding, shouldRunPrimeCliOnboardingSplash } from "./onboarding.js";
+import { type OnboardingStartupState, shouldRunOnboarding, shouldRunOptimusCliOnboardingSplash } from "./onboarding.js";
 import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
 import { QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
@@ -1760,8 +1760,8 @@ export class InteractiveMode {
 		return shouldRunOnboarding(this.getOnboardingState());
 	}
 
-	private shouldRunPrimeCliOnboardingSplash(): boolean {
-		return shouldRunPrimeCliOnboardingSplash(this.getOnboardingState());
+	private shouldRunOptimusCliOnboardingSplash(): boolean {
+		return shouldRunOptimusCliOnboardingSplash(this.getOnboardingState());
 	}
 
 	private markOnboardingShown(): void {
@@ -1775,10 +1775,10 @@ export class InteractiveMode {
 			return false;
 		}
 
-		const showPrimeCliSplash = this.shouldRunPrimeCliOnboardingSplash();
+		const showOptimusCliSplash = this.shouldRunOptimusCliOnboardingSplash();
 		this.markOnboardingShown();
 		await this.settingsManager.flush();
-		await this.runOnboardingFlow(showPrimeCliSplash);
+		await this.runOnboardingFlow(showOptimusCliSplash);
 		return true;
 	}
 
@@ -1790,9 +1790,9 @@ export class InteractiveMode {
 		}
 	}
 
-	private async runOnboardingFlow(showPrimeCliSplash = this.shouldRunPrimeCliOnboardingSplash()): Promise<void> {
+	private async runOnboardingFlow(showOptimusCliSplash = this.shouldRunOptimusCliOnboardingSplash()): Promise<void> {
 		this.modelRegistry.refresh();
-		if (showPrimeCliSplash) {
+		if (showOptimusCliSplash) {
 			const splash = await this.showOnboardingSplash("choose a model");
 			if (!splash) {
 				return;

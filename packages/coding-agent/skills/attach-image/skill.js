@@ -1,5 +1,5 @@
 /**
- * Prime Agent attach-image skill: load on-disk images into the model's context
+ * Optimus Prime attach-image skill: load on-disk images into the model's context
  * as viewable multimodal attachments.
  *
  * Images are emitted through the REPL `display()` bridge, which turns them into

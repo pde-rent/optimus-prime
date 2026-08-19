@@ -477,7 +477,7 @@ describe("skills", () => {
 		});
 
 		it("should warn when JS skills share a binding name", () => {
-			const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-skills-"));
+			const tempDir = mkdtempSync(join(tmpdir(), "optimus-skills-"));
 			try {
 				writeJsSkill(tempDir, "web-search");
 				writeJsSkill(tempDir, "web_search");

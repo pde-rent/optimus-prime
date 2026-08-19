@@ -5,7 +5,7 @@ import type { DeleteSessionFileResult } from "../../core/session-file-actions.js
 import { deleteSessionFile } from "../../core/session-file-actions.js";
 import { readSessionInfo, type SessionInfo, SessionManager } from "../../core/session-manager.js";
 
-export const DAEMON_CATALOG_ROLE_ENV = "PRIME_AGENT_INTERNAL_DAEMON_CATALOG";
+export const DAEMON_CATALOG_ROLE_ENV = "OPTIMUS_INTERNAL_DAEMON_CATALOG";
 
 interface SessionInfoWire extends Omit<SessionInfo, "created" | "modified"> {
 	created: string;
@@ -205,8 +205,8 @@ async function handleCatalogRequest(request: CatalogRequest): Promise<void> {
 			}
 			case "mark_interrupted":
 				SessionManager.open(request.sessionPath).appendCustomMessageEntry(
-					"prime-agent.worker_recovery",
-					"<prime_agent_worker_interrupted>\nThe isolated session worker stopped during in-flight work. The saved transcript was recovered, but uncertain model, tool, bash, or child-agent work was not replayed. Inspect external side effects before continuing.\n</prime_agent_worker_interrupted>",
+					"optimus.worker_recovery",
+					"<optimus_worker_interrupted>\nThe isolated session worker stopped during in-flight work. The saved transcript was recovered, but uncertain model, tool, bash, or child-agent work was not replayed. Inspect external side effects before continuing.\n</optimus_worker_interrupted>",
 					false,
 					{
 						activeSessionId: request.activeSessionId,

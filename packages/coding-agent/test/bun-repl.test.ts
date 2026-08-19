@@ -12,7 +12,7 @@ let tempDir = "";
 
 describe("Bun REPL", () => {
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "prime-agent-bunrepl-"));
+		tempDir = mkdtempSync(join(tmpdir(), "optimus-bunrepl-"));
 	});
 
 	afterEach(() => {

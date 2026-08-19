@@ -1,7 +1,7 @@
 # Bun REPL parity with the Python/IPython kernel
 
 The fork replaced a persistent Python/IPython kernel (`src/core/kernel/*`,
-`prime-agent-runtime/src/rlm/*`, the `ipython` tools) with a persistent Bun JS/TS REPL
+`optimus-runtime/src/rlm/*`, the `ipython` tools) with a persistent Bun JS/TS REPL
 (`packages/coding-agent/src/core/bun-repl/`). Parity was assumed rather than proven. This
 document is the audit: every capability the old kernel had, what the Bun REPL does today,
 and — where it was missing — what was implemented.
@@ -100,7 +100,7 @@ deletion) and read as the specification.
 
 | Capability | Old kernel | Verdict | Notes |
 |---|---|---|---|
-| Diff display (`application/vnd.prime-agent.diff+json`) | present | **present** | same MIME, same snake_case wire keys |
+| Diff display (`application/vnd.optimus.diff+json`) | present | **present** | same MIME, same snake_case wire keys |
 | Agent-message display | present | **present** | |
 | Late agent messages after the cell settled | LRU of 256 handlers | **present** | bounded FIFO of 64 correlation ids |
 | Image attachments into model context | `ATTACHMENT_DISPLAY_MIME` wrapper | **present** (redesigned) | The wrapper MIME is **dropped**: `display({mimeType, data})` now carries the real image MIME directly, and the `attach-image` skill was ported to JS. Simpler, one less indirection |
@@ -128,9 +128,9 @@ deletion) and read as the specification.
 | `nest_asyncio`, `asyncio` in the namespace | JS has native promises and top-level await |
 | Jupyter wire protocol: ZeroMQ, HMAC signing, connection files, 5 ports, heartbeat | Replaced by NDJSON over the child's stdio. No sockets, no key material, no port allocation — strictly less attack surface |
 | Fork server (`fork-server.ts`, COW pre-import, `gc.freeze()`) | Existed because a Python kernel took seconds to boot. A Bun child starts in tens of milliseconds |
-| Boot concurrency gate (`boot-gate.ts`, semaphore, `PRIME_AGENT_MAX_CONCURRENT_KERNEL_BOOTS`) | Same reason: it throttled expensive Python venv boots. Nothing to throttle |
-| Python venv bootstrap: `uv`, `pyproject.toml` parsing, editable installs, `PRIME_AGENT_KERNEL_PYTHON`/`_VENV`, `setup-kernel-venv.sh` | No interpreter to provision. Skills preload from `PRIME_AGENT_REPL_SKILLS` as ESM modules |
-| `_PrimeAgentCallableSkillModule` / `sys.modules` rewriting / `inspect.signature` copying | Python module mechanics. A JS skill is already a plain callable object |
+| Boot concurrency gate (`boot-gate.ts`, semaphore, `OPTIMUS_MAX_CONCURRENT_KERNEL_BOOTS`) | Same reason: it throttled expensive Python venv boots. Nothing to throttle |
+| Python venv bootstrap: `uv`, `pyproject.toml` parsing, editable installs, `OPTIMUS_KERNEL_PYTHON`/`_VENV`, `setup-kernel-venv.sh` | No interpreter to provision. Skills preload from `OPTIMUS_REPL_SKILLS` as ESM modules |
+| `_OptimusCallableSkillModule` / `sys.modules` rewriting / `inspect.signature` copying | Python module mechanics. A JS skill is already a plain callable object |
 | `tyro` CLI dual-surface for skills (`rlm/skill.py`) | Python packaging (`console_scripts` + `tyro`). No JS equivalent shipped and no caller |
 | `global_` keyword workaround | `global` is reserved in Python, not in JS |
 | Busy-kernel wait/kill prompt and `KernelBusyAfterInterruptError` | See the interrupt table above — structurally unreachable now |

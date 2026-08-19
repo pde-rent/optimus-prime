@@ -1,5 +1,5 @@
 /**
- * Prime Agent compact skill: context compaction control from the REPL.
+ * Optimus Prime compact skill: context compaction control from the REPL.
  *
  * Compaction runs host-side (the same implementation as /compact); these
  * functions are thin typed wrappers over the generic host bridge.

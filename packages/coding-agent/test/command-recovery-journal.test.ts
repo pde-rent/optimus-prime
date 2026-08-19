@@ -14,7 +14,7 @@ describe("CommandRecoveryJournal", () => {
 	});
 
 	function createPath(): string {
-		const root = mkdtempSync(join(tmpdir(), "prime-agent-command-journal-"));
+		const root = mkdtempSync(join(tmpdir(), "optimus-command-journal-"));
 		roots.push(root);
 		return join(root, "commands.jsonl");
 	}

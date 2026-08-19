@@ -6,7 +6,7 @@ import {
 	isWorkerSocketPath,
 	mergeDiscoveredDaemonProcesses,
 	parseLsofListeners,
-	parsePrimeAgentProcessIds,
+	parseOptimusProcessIds,
 	parsePsEtimes,
 	parseSsListeners,
 	planReap,
@@ -29,23 +29,23 @@ describe("worker socket classification", () => {
 describe("parseSsListeners", () => {
 	const stdout = [
 		"Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port",
-		'u_str LISTEN 0      511    /tmp/custom.sock 10147608 * 0 users:(("prime-agent",pid=1234,fd=22))',
-		'u_str LISTEN 0      511    /tmp/prime-agent-1000/daemon.sock 79453846 * 0 users:(("prime-agent",pid=5678,fd=24))',
+		'u_str LISTEN 0      511    /tmp/custom.sock 10147608 * 0 users:(("optimus",pid=1234,fd=22))',
+		'u_str LISTEN 0      511    /tmp/optimus-1000/daemon.sock 79453846 * 0 users:(("optimus",pid=5678,fd=24))',
 		'u_str LISTEN 0      4096   /run/dbus/system_bus_socket 123 * 0 users:(("dbus-daemon",pid=900,fd=3))',
-		'u_str ESTAB  0      0      /tmp/other.sock 456 * 0 users:(("prime-agent",pid=4321,fd=9))',
+		'u_str ESTAB  0      0      /tmp/other.sock 456 * 0 users:(("optimus",pid=4321,fd=9))',
 		"",
 	].join("\n");
 
-	it("extracts socket + pid for prime-agent LISTEN sockets only", () => {
-		const daemons = parseSsListeners(stdout, "prime-agent");
+	it("extracts socket + pid for optimus LISTEN sockets only", () => {
+		const daemons = parseSsListeners(stdout, "optimus");
 		expect(daemons).toEqual([
 			{ pid: 1234, socketPath: "/tmp/custom.sock" },
-			{ pid: 5678, socketPath: "/tmp/prime-agent-1000/daemon.sock" },
+			{ pid: 5678, socketPath: "/tmp/optimus-1000/daemon.sock" },
 		]);
 	});
 
 	it("ignores sockets owned by other processes and non-LISTEN states", () => {
-		const daemons = parseSsListeners(stdout, "prime-agent");
+		const daemons = parseSsListeners(stdout, "optimus");
 		expect(daemons.some((daemon) => daemon.socketPath.includes("dbus"))).toBe(false);
 		expect(daemons.some((daemon) => daemon.pid === 4321)).toBe(false);
 	});
@@ -65,16 +65,16 @@ describe("parseLsofListeners", () => {
 	});
 });
 
-describe("parsePrimeAgentProcessIds", () => {
+describe("parseOptimusProcessIds", () => {
 	it("finds process.title names even when lsof reports the executable as node", () => {
 		const stdout = [
-			"  123 node prime-agent --mode daemon",
-			"  456 prime-agent prime-agent",
-			"  789 /usr/local/bin/prime-agent prime-agent",
+			"  123 node optimus --mode daemon",
+			"  456 optimus optimus",
+			"  789 /usr/local/bin/optimus optimus",
 			"  900 node unrelated.js",
 			"",
 		].join("\n");
-		expect(parsePrimeAgentProcessIds(stdout, "prime-agent")).toEqual([123, 456, 789]);
+		expect(parseOptimusProcessIds(stdout, "optimus")).toEqual([123, 456, 789]);
 	});
 });
 
@@ -183,7 +183,7 @@ describe("planReap", () => {
 		const daemon = makeDaemon({ socketPath: "/tmp/hung.sock", status: "unreachable", pid: 7 });
 		const skipped = planReap([daemon], false)[0]!;
 		expect(skipped.kind).toBe("skip");
-		expect(skipped.kind === "skip" ? skipped.reason : "").toContain("prime-agent shutdown --force");
+		expect(skipped.kind === "skip" ? skipped.reason : "").toContain("optimus shutdown --force");
 		expect(planReap([daemon], true)[0]!.kind).toBe("kill");
 	});
 

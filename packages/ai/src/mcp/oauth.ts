@@ -256,7 +256,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): OAuthProviderInt
 				);
 			}
 			callbacks.onProgress?.("Registering OAuth client…");
-			clientId = await registerClient(meta.registration_endpoint, `Prime Agent (${label})`);
+			clientId = await registerClient(meta.registration_endpoint, `Optimus Prime (${label})`);
 		}
 
 		const { verifier, challenge } = await generatePKCE();

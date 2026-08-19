@@ -24,11 +24,11 @@ describe("owned session worker CLI routing", () => {
 	});
 
 	it("does not recursively route an owned worker", () => {
-		expect(isOwnedSessionWorkerProcess({ PRIME_AGENT_INTERNAL_OWNED_WORKER: "1" })).toBe(true);
+		expect(isOwnedSessionWorkerProcess({ OPTIMUS_INTERNAL_OWNED_WORKER: "1" })).toBe(true);
 		expect(isOwnedSessionWorkerProcess({})).toBe(false);
 		expect(
 			classifyOwnedSessionWorkerInvocation(["--mode", "rpc"], true, {
-				PRIME_AGENT_INTERNAL_OWNED_WORKER: "1",
+				OPTIMUS_INTERNAL_OWNED_WORKER: "1",
 			}),
 		).toBeUndefined();
 	});

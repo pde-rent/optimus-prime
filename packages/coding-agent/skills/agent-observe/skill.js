@@ -1,5 +1,5 @@
 /**
- * Read-only Prime Agent session observation skill.
+ * Read-only Optimus Prime session observation skill.
  *
  * All session lookup and data access live in the host; these functions only
  * call the host bridge exposed inside the REPL.

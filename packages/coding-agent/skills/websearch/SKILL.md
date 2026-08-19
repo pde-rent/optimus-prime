@@ -47,7 +47,7 @@ on volunteer-run servers. Self-host instead - it is one command.
 
 In order:
 
-1. `options.backend` (`"searxng"` or `"serper"`), or `PRIME_AGENT_WEBSEARCH_BACKEND`
+1. `options.backend` (`"searxng"` or `"serper"`), or `OPTIMUS_WEBSEARCH_BACKEND`
 2. `SEARXNG_URL`
 3. A Serper key
 4. Otherwise: a message explaining both options. Never a silent fallback.

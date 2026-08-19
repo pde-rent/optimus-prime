@@ -21,7 +21,7 @@ describe("session migrations", () => {
 	});
 
 	it("moves legacy per-cwd session files into the flat session root", () => {
-		const agentDir = mkdtempSync(join(tmpdir(), "prime-agent-migrations-"));
+		const agentDir = mkdtempSync(join(tmpdir(), "optimus-migrations-"));
 		tempDirs.push(agentDir);
 		process.env[ENV_AGENT_DIR] = agentDir;
 
@@ -56,7 +56,7 @@ describe("session migrations", () => {
 	});
 
 	it("moves root session files using only the JSONL header", () => {
-		const agentDir = mkdtempSync(join(tmpdir(), "prime-agent-migrations-"));
+		const agentDir = mkdtempSync(join(tmpdir(), "optimus-migrations-"));
 		tempDirs.push(agentDir);
 		process.env[ENV_AGENT_DIR] = agentDir;
 
@@ -80,7 +80,7 @@ describe("session migrations", () => {
 	});
 
 	it("does not move session files from non-legacy subdirectories", () => {
-		const agentDir = mkdtempSync(join(tmpdir(), "prime-agent-migrations-"));
+		const agentDir = mkdtempSync(join(tmpdir(), "optimus-migrations-"));
 		tempDirs.push(agentDir);
 		process.env[ENV_AGENT_DIR] = agentDir;
 

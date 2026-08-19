@@ -31,7 +31,7 @@ describe("package commands", () => {
 	let originalCwd: string;
 	let originalAgentDir: string | undefined;
 	let originalPiPackageDir: string | undefined;
-	let originalPrimeAgentDownloadBaseUrl: string | undefined;
+	let originalOptimusDownloadBaseUrl: string | undefined;
 	let originalTmpDir: string | undefined;
 	let originalExitCode: typeof process.exitCode;
 	let originalExecPath: string;
@@ -98,7 +98,7 @@ if(${options.failOnInstall ? "true" : "false"}&&args.includes("install"))process
 		originalCwd = process.cwd();
 		originalAgentDir = process.env[ENV_AGENT_DIR];
 		originalPiPackageDir = process.env.PI_PACKAGE_DIR;
-		originalPrimeAgentDownloadBaseUrl = process.env.PRIME_AGENT_DOWNLOAD_BASE_URL;
+		originalOptimusDownloadBaseUrl = process.env.OPTIMUS_DOWNLOAD_BASE_URL;
 		originalTmpDir = process.env.TMPDIR;
 		// Bun ignores `process.exitCode = undefined` (unlike Node), so the suite has
 		// to reset with 0 or one failing command leaks its exit code into every
@@ -118,7 +118,7 @@ if(${options.failOnInstall ? "true" : "false"}&&args.includes("install"))process
 		process.exitCode = originalExitCode ?? 0;
 		restoreEnv(ENV_AGENT_DIR, originalAgentDir);
 		restoreEnv("PI_PACKAGE_DIR", originalPiPackageDir);
-		restoreEnv("PRIME_AGENT_DOWNLOAD_BASE_URL", originalPrimeAgentDownloadBaseUrl);
+		restoreEnv("OPTIMUS_DOWNLOAD_BASE_URL", originalOptimusDownloadBaseUrl);
 		restoreEnv("TMPDIR", originalTmpDir);
 		restoreEnv("PATH", originalPath);
 		Object.defineProperty(process, "execPath", { value: originalExecPath, configurable: true });
@@ -233,7 +233,7 @@ if(${options.failOnInstall ? "true" : "false"}&&args.includes("install"))process
 
 	it("installs the release manifest tarball spec for forced self updates", async () => {
 		const recordPath = join(tempDir, "self-update.json");
-		const tarballUrl = "https://downloads.example.test/prime-agent/prime-agent-current.tgz";
+		const tarballUrl = "https://downloads.example.test/optimus/optimus-current.tgz";
 		stageBunGlobalSelfInstall({ scope: "@earendil-works", recordPath });
 		const fetchMock = vi.fn(async () => Response.json({ tarball: tarballUrl, version: VERSION }));
 		vi.stubGlobal("fetch", fetchMock);
@@ -303,16 +303,16 @@ if(${options.failOnInstall ? "true" : "false"}&&args.includes("install"))process
 		}
 	});
 
-	it("installs the Prime Agent tarball from the update manifest during self-update", async () => {
+	it("installs the Optimus Prime tarball from the update manifest during self-update", async () => {
 		const recordPath = join(tempDir, "self-update.json");
-		const baseUrl = "https://downloads.example.test/prime-agent";
+		const baseUrl = "https://downloads.example.test/optimus";
 		const newerVersion = getNewerPatchVersion();
-		const tarballPath = `releases/v${newerVersion}/prime-agent-${newerVersion}.tgz`;
+		const tarballPath = `releases/v${newerVersion}/optimus-${newerVersion}.tgz`;
 		stageBunGlobalSelfInstall({ scope: "@earendil-works", recordPath });
-		process.env.PRIME_AGENT_DOWNLOAD_BASE_URL = baseUrl;
+		process.env.OPTIMUS_DOWNLOAD_BASE_URL = baseUrl;
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async () => Response.json({ package: "prime-agent", tarball: tarballPath, version: newerVersion })),
+			vi.fn(async () => Response.json({ package: "optimus", tarball: tarballPath, version: newerVersion })),
 		);
 
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -333,17 +333,17 @@ if(${options.failOnInstall ? "true" : "false"}&&args.includes("install"))process
 		}
 	});
 
-	it("does not self-update when the same-version manifest uses the Prime Agent package alias", async () => {
+	it("does not self-update when the same-version manifest uses the Optimus Prime package alias", async () => {
 		const recordPath = join(tempDir, "self-update.json");
-		const baseUrl = "https://downloads.example.test/prime-agent";
+		const baseUrl = "https://downloads.example.test/optimus";
 		stageBunGlobalSelfInstall({ scope: "@earendil-works", recordPath });
-		process.env.PRIME_AGENT_DOWNLOAD_BASE_URL = baseUrl;
+		process.env.OPTIMUS_DOWNLOAD_BASE_URL = baseUrl;
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () =>
 				Response.json({
-					package: "prime-agent",
-					tarball: "releases/current/prime-agent.tgz",
+					package: "optimus",
+					tarball: "releases/current/optimus.tgz",
 					version: VERSION,
 				}),
 			),

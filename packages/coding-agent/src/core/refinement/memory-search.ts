@@ -67,6 +67,18 @@ export interface HarnessMemorySearchResult {
 	/** Share of the query's total idf this entry matched, rounded to 2dp. */
 	coverage: number;
 	matchedTerms: string[];
+	/**
+	 * Ids of entries collapsed into this hit because they store the same text. Their
+	 * bodies are deliberately not repeated; the ids are here so the duplicate can be
+	 * merged or deleted.
+	 */
+	duplicateIds?: string[];
+	/**
+	 * Titles of collapsed entries that differ from this hit's own. The bodies are
+	 * identical, but a differently-titled twin can be the better-named one, so the
+	 * name survives the collapse even though the text does not.
+	 */
+	duplicateTitles?: string[];
 	snippet: string;
 	contentChars: number;
 	truncated: boolean;
@@ -74,8 +86,10 @@ export interface HarnessMemorySearchResult {
 
 export interface HarnessMemorySearchResponse {
 	queryTerms: string[];
-	/** Matches surviving the relevance gates, before the topK slice. */
+	/** Distinct matches after duplicate bodies are collapsed, before the topK slice. */
 	totalMatches: number;
+	/** Matches surviving the relevance gates, before duplicates were collapsed. */
+	totalMatchesBeforeCollapse: number;
 	/**
 	 * Candidates that matched a query term but were dropped by the relevance gates.
 	 * Retrieval is model-initiated, so an empty result is otherwise indistinguishable
@@ -83,6 +97,8 @@ export interface HarnessMemorySearchResponse {
 	 * the memory does not exist.
 	 */
 	suppressedByGate: number;
+	/** Hits removed because an identical body was already being returned. */
+	duplicatesCollapsed: number;
 	results: HarnessMemorySearchResult[];
 }
 
@@ -342,11 +358,16 @@ interface ScoredDoc {
 	matchedTerms: string[];
 }
 
+/** Local before global on a tie, matching how `harness.get_memory` resolves an ambiguous id. */
+function scopeRank(scope: HarnessScope): number {
+	return scope === "local" ? 0 : 1;
+}
+
 function compareScored(left: ScoredDoc, right: ScoredDoc): number {
 	return (
 		right.score - left.score ||
 		right.doc.updatedAt.localeCompare(left.doc.updatedAt) ||
-		left.doc.scope.localeCompare(right.doc.scope) ||
+		scopeRank(left.doc.scope) - scopeRank(right.doc.scope) ||
 		left.doc.key.localeCompare(right.doc.key)
 	);
 }
@@ -356,6 +377,59 @@ function applyRatioGate(ranked: readonly ScoredDoc[]): ScoredDoc[] {
 	const top = ranked[0].score;
 	if (top <= 0) return [];
 	return ranked.filter((candidate) => candidate.score >= MIN_SCORE_RATIO * top);
+}
+
+/** Below this a body is too short to be a reliable duplicate fingerprint. */
+const MIN_DEDUPE_CONTENT_CHARS = 40;
+
+/**
+ * Two entries holding the same lesson under different ids -- a local memory promoted
+ * to global, or the same fact re-saved after a reword -- would otherwise each spend a
+ * result slot and a snippet on identical text. Keep the best-ranked copy and carry the
+ * others' ids on it, so the duplication is visible and fixable without being paid for
+ * twice.
+ */
+function collapseDuplicateBodies(ranked: readonly ScoredDoc[]): {
+	deduped: ScoredDoc[];
+	duplicateIds: Map<string, string[]>;
+	duplicateTitles: Map<string, string[]>;
+	duplicatesCollapsed: number;
+} {
+	const deduped: ScoredDoc[] = [];
+	const duplicateIds = new Map<string, string[]>();
+	const duplicateTitles = new Map<string, string[]>();
+	const winnerByBody = new Map<string, ScoredDoc>();
+	let duplicatesCollapsed = 0;
+
+	for (const candidate of ranked) {
+		const body = candidate.doc.content.replace(/\s+/g, " ").trim().toLowerCase();
+		if (body.length < MIN_DEDUPE_CONTENT_CHARS) {
+			deduped.push(candidate);
+			continue;
+		}
+		const winner = winnerByBody.get(body);
+		if (!winner) {
+			winnerByBody.set(body, candidate);
+			deduped.push(candidate);
+			continue;
+		}
+		// `ranked` is already sorted, so the first entry seen for a body is the one to
+		// keep and every later one is the duplicate.
+		duplicatesCollapsed += 1;
+		const scopedId = `${candidate.doc.scope}:${candidate.doc.id}`;
+		const existing = duplicateIds.get(winner.doc.key);
+		if (existing) existing.push(scopedId);
+		else duplicateIds.set(winner.doc.key, [scopedId]);
+		if (candidate.doc.title && candidate.doc.title !== winner.doc.title) {
+			const titles = duplicateTitles.get(winner.doc.key);
+			if (titles) {
+				if (!titles.includes(candidate.doc.title)) titles.push(candidate.doc.title);
+			} else {
+				duplicateTitles.set(winner.doc.key, [candidate.doc.title]);
+			}
+		}
+	}
+	return { deduped, duplicateIds, duplicateTitles, duplicatesCollapsed };
 }
 
 /**
@@ -369,7 +443,15 @@ export function searchHarnessMemories(
 	const kept = rawTerms.filter((term) => !ENGLISH_STOPWORDS.has(term));
 	const baseTerms = kept.length > 0 ? kept : rawTerms;
 	const queryTerms = [...new Set(expandPlurals(baseTerms))];
-	if (queryTerms.length === 0) return { queryTerms: [], totalMatches: 0, suppressedByGate: 0, results: [] };
+	if (queryTerms.length === 0)
+		return {
+			queryTerms: [],
+			totalMatches: 0,
+			totalMatchesBeforeCollapse: 0,
+			suppressedByGate: 0,
+			duplicatesCollapsed: 0,
+			results: [],
+		};
 
 	const { docs, postings } = buildIndex(memories);
 	const scope = options.scope;
@@ -381,7 +463,15 @@ export function searchHarnessMemories(
 		candidates.push(index);
 	}
 	const total = candidates.length;
-	if (total === 0) return { queryTerms, totalMatches: 0, suppressedByGate: 0, results: [] };
+	if (total === 0)
+		return {
+			queryTerms,
+			totalMatches: 0,
+			totalMatchesBeforeCollapse: 0,
+			suppressedByGate: 0,
+			duplicatesCollapsed: 0,
+			results: [],
+		};
 
 	const averageLength: number[] = [];
 	for (let field = 0; field < FIELD_COUNT; field++) {
@@ -469,12 +559,18 @@ export function searchHarnessMemories(
 		gated = coverageApplies ? fallback.filter((candidate) => candidate.coverage >= MIN_COVERAGE) : fallback;
 	}
 
-	const totalMatches = gated.length;
 	const suppressedByGate = Math.max(0, scored.length - gated.length);
-	const selected = gated.slice(0, Math.max(0, options.topK));
+	const { deduped, duplicateIds, duplicateTitles, duplicatesCollapsed } = collapseDuplicateBodies(gated);
+	// Counts the distinct memories the model can act on: reporting the pre-collapse
+	// figure would tell it more memories exist than it can ever be shown.
+	const totalMatches = deduped.length;
+	const totalMatchesBeforeCollapse = gated.length;
+	const selected = deduped.slice(0, Math.max(0, options.topK));
 	const width = snippetWidth(selected.length);
 	const results = selected.map(({ doc, score, coverage, matchedTerms }) => {
 		const { snippet, truncated } = buildSnippet(doc.content, matchedTerms, width);
+		const duplicates = duplicateIds.get(doc.key);
+		const twinTitles = duplicateTitles.get(doc.key);
 		return {
 			key: doc.key,
 			id: doc.id,
@@ -486,13 +582,15 @@ export function searchHarnessMemories(
 			score: roundTo(score, 4),
 			coverage: roundTo(coverage, 2),
 			matchedTerms,
+			...(duplicates ? { duplicateIds: duplicates } : {}),
+			...(twinTitles ? { duplicateTitles: twinTitles } : {}),
 			snippet,
 			contentChars: doc.content.length,
 			truncated,
 		};
 	});
 
-	return { queryTerms, totalMatches, suppressedByGate, results };
+	return { queryTerms, totalMatches, totalMatchesBeforeCollapse, suppressedByGate, duplicatesCollapsed, results };
 }
 
 /**

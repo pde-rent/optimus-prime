@@ -82,12 +82,12 @@ describe("websearch: backend selection", () => {
 		expect(calls[0].url).toContain("google.serper.dev");
 	});
 
-	it("honours PRIME_AGENT_WEBSEARCH_BACKEND", async () => {
+	it("honours OPTIMUS_WEBSEARCH_BACKEND", async () => {
 		const calls = stubFetch((url) => response(url.includes("serper") ? SERPER_HIT : SEARX_HIT));
 		const env = {
 			SEARXNG_URL: "http://localhost:8888",
 			SERPER_API_KEY: "k",
-			PRIME_AGENT_WEBSEARCH_BACKEND: "serper",
+			OPTIMUS_WEBSEARCH_BACKEND: "serper",
 		};
 		await createSkill({ env }).run("q");
 		expect(calls[0].url).toContain("google.serper.dev");
@@ -188,6 +188,36 @@ describe("websearch: cleaning and dedupe", () => {
 			{ title: "Three", url: "https://d.test/3" },
 		]);
 		expect(out).toHaveLength(2);
+	});
+
+	it("treats scheme, www and index.html variants as one page", () => {
+		const body = "Bun implements a fast all-in-one JavaScript runtime with a bundler and test runner built in.";
+		const out = dedupeResults([
+			{ title: "Bun docs | Runtime", url: "https://www.bun.test/docs", content: body },
+			{ title: "Bun docs - Runtime", url: "http://bun.test/docs", content: body },
+			{ title: "Bun Documentation", url: "https://bun.test/docs/index.html", content: body },
+		]);
+		expect(out).toHaveLength(1);
+	});
+
+	it("collapses syndicated copies of one article across different domains", () => {
+		const body =
+			"The release adds a bundler, a test runner and a package manager to the runtime, all shipped in one binary.";
+		const out = dedupeResults([
+			{ title: "Bun 1.0 released", url: "https://news-a.test/bun", content: body },
+			{ title: "Bun ships 1.0", url: "https://news-b.test/bun", content: body },
+			{ title: "Bun hits 1.0", url: "https://news-c.test/bun", content: body },
+		]);
+		expect(out).toHaveLength(1);
+	});
+
+	it("keeps distinct pages whose snippets are too short to fingerprint", () => {
+		const out = dedupeResults([
+			{ title: "Alpha", url: "https://a.test/1", content: "Read more" },
+			{ title: "Beta", url: "https://b.test/2", content: "Read more" },
+			{ title: "Gamma", url: "https://c.test/3", content: "" },
+		]);
+		expect(out).toHaveLength(3);
 	});
 
 	it("skips results with an unusable URL", () => {

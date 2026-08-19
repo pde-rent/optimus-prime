@@ -135,7 +135,7 @@ async function waitForCondition(predicate: () => boolean): Promise<void> {
 function createCustomMessage(content: string): CustomMessage {
 	return {
 		role: "custom",
-		customType: "prime-agent.test",
+		customType: "optimus.test",
 		content,
 		display: false,
 		timestamp: Date.now(),
@@ -632,7 +632,7 @@ describe("issue #4257 update restart resume", () => {
 		expect(
 			harness.sessionManager
 				.getEntries()
-				.some((entry) => entry.type === "custom_message" && entry.customType === "prime-agent.update_restart"),
+				.some((entry) => entry.type === "custom_message" && entry.customType === "optimus.update_restart"),
 		).toBe(true);
 		abortSpy.mockRestore();
 		agentAbortSpy.mockRestore();

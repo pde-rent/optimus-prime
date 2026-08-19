@@ -37,7 +37,7 @@ describe("InteractiveMode /debug", () => {
 
 	beforeEach(() => {
 		previousAgentDir = process.env[ENV_AGENT_DIR];
-		tempAgentDir = mkdtempSync(join(tmpdir(), "prime-agent-debug-test-"));
+		tempAgentDir = mkdtempSync(join(tmpdir(), "optimus-debug-test-"));
 		process.env[ENV_AGENT_DIR] = tempAgentDir;
 	});
 

@@ -384,7 +384,7 @@ async function captureGitWorktreeSnapshot(
 		".",
 		":(exclude)verification",
 		":(exclude)target",
-		":(exclude).vf-prime-agent",
+		":(exclude).vf-optimus",
 		":(exclude)Cargo.lock",
 		":(exclude)submission.tar.gz",
 		":(exclude)runner_args.log",

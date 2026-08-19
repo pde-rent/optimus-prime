@@ -1,6 +1,6 @@
 # JS-Backed Skills
 
-A JS-backed skill is a regular markdown skill that also ships a `skill.js` module. Prime Agent preloads that module into the persistent JavaScript REPL and binds its API to a global, so the agent can call it directly instead of shelling out.
+A JS-backed skill is a regular markdown skill that also ships a `skill.js` module. Optimus Prime preloads that module into the persistent JavaScript REPL and binds its API to a global, so the agent can call it directly instead of shelling out.
 
 ## Detection Contract
 

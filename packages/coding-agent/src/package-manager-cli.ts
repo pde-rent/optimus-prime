@@ -480,15 +480,15 @@ async function runSelfUpdate(command: SelfUpdateCommand): Promise<void> {
 }
 
 const UPDATE_RESTART_CONTINUATION_PROMPT =
-	"Prime Agent restarted after an update. Continue the interrupted task from the saved transcript and restored tool/kernel state. Inspect current state before retrying commands when needed.";
+	"Optimus Prime restarted after an update. Continue the interrupted task from the saved transcript and restored tool/kernel state. Inspect current state before retrying commands when needed.";
 
 const UPDATE_SESSION_LOSS_COPY: DaemonSessionLossCopy = {
 	busyDetail(count) {
 		const { noun, pronoun } = pluralizeSessions(count);
-		return `Prime Agent has ${count} busy ${noun}. After the update installs, it will stop ${pronoun}, restart its background service, and resume interrupted work.`;
+		return `Optimus Prime has ${count} busy ${noun}. After the update installs, it will stop ${pronoun}, restart its background service, and resume interrupted work.`;
 	},
 	unlistableDetail:
-		"Running agents could not be listed. After the update installs, Prime Agent will stop resident agents, restart its background service, and resume interrupted work where possible.",
+		"Running agents could not be listed. After the update installs, Optimus Prime will stop resident agents, restart its background service, and resume interrupted work where possible.",
 	question: "Continue?",
 	nonTtyHint: "Re-run with --force to proceed.",
 };
@@ -1006,8 +1006,8 @@ async function restoreDaemonUpdateRestartSession(
 					type: "append_custom_message",
 					activeSessionId,
 					message: {
-						customType: "prime-agent.update_complete",
-						content: `Prime Agent updated to v${VERSION}. This daemon session was restored after the update.`,
+						customType: "optimus.update_complete",
+						content: `Optimus Prime updated to v${VERSION}. This daemon session was restored after the update.`,
 						display: true,
 						details: { version: VERSION },
 					},

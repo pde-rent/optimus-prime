@@ -1,5 +1,5 @@
 /**
- * MCP-client integration base for Prime Agent JS skills.
+ * MCP-client integration base for Optimus Prime JS skills.
  *
  * A skill targets one MCP `server`, and its tools are discovered from that
  * server at runtime and dispatched dynamically, so the agent writes ordinary
@@ -37,7 +37,7 @@ export class NotEnabled extends Error {
 	constructor(server) {
 		super(
 			`The '${server}' integration is not enabled: no credentials found. ` +
-				`Tell the user to run \`/mcp login ${server}\` in Prime Agent to connect it. ` +
+				`Tell the user to run \`/mcp login ${server}\` in Optimus Prime to connect it. ` +
 				`Do not ask them to set environment variables.`,
 		);
 		this.name = "NotEnabled";
@@ -53,9 +53,9 @@ export class McpToolError extends Error {
 	}
 }
 
-/** Resolve the Prime Agent config dir the same way the rest of the runtime does. */
+/** Resolve the Optimus Prime config dir the same way the rest of the runtime does. */
 function agentDir(env) {
-	const raw = env.PRIME_AGENT_CODING_AGENT_DIR || env.PI_CODING_AGENT_DIR || `${homedir()}/.prime/agent`;
+	const raw = env.OPTIMUS_CODING_AGENT_DIR || env.PI_CODING_AGENT_DIR || `${homedir()}/.optimus/agent`;
 	const expanded = raw.startsWith("~") ? homedir() + raw.slice(1) : raw;
 	// resolve() so a relative env override reads auth.json from the right place,
 	// not relative to the REPL's cwd.
@@ -339,7 +339,7 @@ export class McpClient {
 			params: {
 				protocolVersion: "2025-06-18",
 				capabilities: {},
-				clientInfo: { name: "prime-agent", version: "1.0.0" },
+				clientInfo: { name: "optimus", version: "1.0.0" },
 			},
 		});
 		// The session id returned by `initialize` must ride along on every later

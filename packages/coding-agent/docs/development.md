@@ -4,36 +4,36 @@ See the repository [AGENTS.md](../../../AGENTS.md) for the current contribution 
 
 ## Setup
 
-Prime Agent requires [Bun](https://bun.sh) 1.3.0 or newer. Bun is both the build toolchain and the runtime for the agent's REPL, so no separate interpreter is needed.
+Optimus Prime requires [Bun](https://bun.sh) 1.3.0 or newer. Bun is both the build toolchain and the runtime for the agent's REPL, so no separate interpreter is needed.
 
 ```bash
-git clone https://github.com/PrimeIntellect-ai/prime-agent
-cd prime-agent
+git clone https://github.com/PrimeIntellect-ai/optimus
+cd optimus
 bun install
 ```
 
 Run from source:
 
 ```bash
-/path/to/prime-agent/prime-agent.sh
+/path/to/optimus/optimus.sh
 ```
 
 The script can be called from any directory and preserves the caller's working directory. Use that behavior to run a source checkout against a separate test project.
 
 ## Product and Source Names
 
-Prime Agent is the product, public CLI, release artifact, and repository name. The monorepo still retains inherited `@earendil-works/pi-*` npm workspace names, a source-package `pi` bin entry, the `pi` package manifest key, and some `PI_*` compatibility environment variables. These names are source and compatibility details, not a signal that contributors should install or develop against pi-mono.
+Optimus Prime is the product, public CLI, release artifact, and repository name. The monorepo still retains inherited `@earendil-works/pi-*` npm workspace names, a source-package `pi` bin entry, the `pi` package manifest key, and some `PI_*` compatibility environment variables. These names are source and compatibility details, not a signal that contributors should install or develop against pi-mono.
 
-Public releases are currently versioned tarball artifacts installed by the stable and beta installer scripts. `scripts/pack-prime-agent-release.mjs` rewrites the coding-agent package name, executable, config metadata, and internal dependency URLs for that distribution. Do not document the inherited npm workspace package as the public Prime Agent install path.
+Public releases are currently versioned tarball artifacts installed by the stable and beta installer scripts. `scripts/pack-optimus-release.mjs` rewrites the coding-agent package name, executable, config metadata, and internal dependency URLs for that distribution. Do not document the inherited npm workspace package as the public Optimus Prime install path.
 
 ## Local Configuration
 
-User configuration lives under `~/.prime/agent/`. Project-local settings, prompts, themes, extensions, skills, and system-prompt files live under `.prime/agent/` in the project root. Override the user config directory with `PRIME_AGENT_CODING_AGENT_DIR` and the session directory with `PRIME_AGENT_SESSION_DIR`.
+User configuration lives under `~/.optimus/agent/`. Project-local settings, prompts, themes, extensions, skills, and system-prompt files live under `.optimus/agent/` in the project root. Override the user config directory with `OPTIMUS_CODING_AGENT_DIR` and the session directory with `OPTIMUS_SESSION_DIR`.
 
 Use an isolated config directory when manually exercising daemon behavior so development sessions do not collide with normal sessions:
 
 ```bash
-PRIME_AGENT_CODING_AGENT_DIR=/tmp/prime-agent-dev /path/to/prime-agent/prime-agent.sh
+OPTIMUS_CODING_AGENT_DIR=/tmp/optimus-dev /path/to/optimus/optimus.sh
 ```
 
 ## Daemon Protocol Changes
@@ -42,7 +42,7 @@ Classify every daemon command, event, or response-shape change as backward-compa
 
 ## Package Asset Resolution
 
-Prime Agent runs from source, Node.js package output, and standalone release artifacts. Always use `src/config.ts` helpers for package assets:
+Optimus Prime runs from source, Node.js package output, and standalone release artifacts. Always use `src/config.ts` helpers for package assets:
 
 ```typescript
 import { getPackageDir, getThemeDir } from "./config.js";
@@ -52,15 +52,15 @@ Do not resolve packaged assets directly from `__dirname`.
 
 ## Debugging
 
-The hidden `/debug` command writes `~/.prime/agent/prime-agent-debug.log` with rendered TUI lines, their visible widths, and the current agent messages. Daemon, worker, client, and provider diagnostic logs live under `~/.prime/agent/logs/`.
+The hidden `/debug` command writes `~/.optimus/agent/optimus-debug.log` with rendered TUI lines, their visible widths, and the current agent messages. Daemon, worker, client, and provider diagnostic logs live under `~/.optimus/agent/logs/`.
 
 Useful service commands:
 
 ```bash
-prime-agent status
-prime-agent doctor
-prime-agent doctor --fix
-prime-agent shutdown
+optimus status
+optimus doctor
+optimus doctor --fix
+optimus shutdown
 ```
 
 ## Validation
