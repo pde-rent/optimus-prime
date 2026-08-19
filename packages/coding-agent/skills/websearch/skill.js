@@ -369,19 +369,29 @@ function urlIdentity(url) {
 	}
 }
 
+/** Below this, a snippet is too generic to treat as a page fingerprint. */
+const MIN_DEDUPE_SNIPPET_CHARS = 80;
+
+/** Word 3-grams; see src/utils/near-duplicate.ts for why order-sensitivity matters. */
+const SHINGLE_SIZE = 3;
+const MIN_SHINGLES = 4;
+const NEAR_DUPLICATE_THRESHOLD = 0.5;
+const DIGIT = /\p{N}/u;
+
 /**
  * Order-sensitive fingerprint of a snippet, for collapsing syndicated copies of one
  * article. Mirrors republish the same body under different domains, and each copy is
  * usually truncated differently or carries a wire-service prefix, so exact matching
  * sees three distinct strings and pays for the same text three times.
  *
- * This mirrors `src/utils/near-duplicate.ts`. Skills are copied wholesale into the
- * bundle and cannot import from `src`, so the logic exists on both sides of that
- * boundary; `test/websearch-skill.test.ts` asserts the two agree on a shared fixture
- * so they cannot drift apart silently.
+ * This mirrors `src/utils/near-duplicate.ts`, including the one-sidedness guard that
+ * stops a single substituted token (a version, a count, an environment name) from
+ * being treated as noise. Skills are copied wholesale into the bundle and cannot
+ * import from `src`, so the logic exists on both sides of that boundary;
+ * `test/near-duplicate.test.ts` asserts the two agree on a shared fixture.
  *
  * @param {string} snippet
- * @returns {Set<string>|undefined} Word 3-grams, or undefined when too short to trust.
+ * @returns {{shingles: Set<string>, tokens: Set<string>}|undefined} undefined when too short to trust.
  */
 export function snippetFingerprint(snippet) {
 	const text = String(snippet ?? "");
@@ -397,33 +407,60 @@ export function snippetFingerprint(snippet) {
 	for (let index = 0; index + SHINGLE_SIZE <= words.length; index++) {
 		shingles.add(words.slice(index, index + SHINGLE_SIZE).join(" "));
 	}
-	return shingles.size >= MIN_SHINGLES ? shingles : undefined;
+	if (shingles.size < MIN_SHINGLES) return undefined;
+	return { shingles, tokens: new Set(words) };
 }
 
 /**
- * Jaccard overlap of two snippet fingerprints.
+ * Jaccard overlap of two snippet fingerprints' shingles.
  *
- * @param {Set<string>|undefined} left
- * @param {Set<string>|undefined} right
+ * @param {{shingles: Set<string>}|undefined} left
+ * @param {{shingles: Set<string>}|undefined} right
  * @returns {number} 0 when either side is missing.
  */
 export function snippetSimilarity(left, right) {
-	if (!left || !right || left.size === 0 || right.size === 0) return 0;
-	const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+	if (!left || !right || left.shingles.size === 0 || right.shingles.size === 0) return 0;
+	const [small, large] =
+		left.shingles.size <= right.shingles.size ? [left.shingles, right.shingles] : [right.shingles, left.shingles];
 	let intersection = 0;
 	for (const shingle of small) {
 		if (large.has(shingle)) intersection += 1;
 	}
-	return intersection / (left.size + right.size - intersection);
+	return intersection / (left.shingles.size + right.shingles.size - intersection);
 }
 
-/** Below this, a snippet is too generic to treat as a page fingerprint. */
-const MIN_DEDUPE_SNIPPET_CHARS = 80;
+/**
+ * Words present in `from` and absent from `other`.
+ *
+ * @param {Set<string>} from
+ * @param {Set<string>} other
+ * @returns {string[]}
+ */
+function extraTokens(from, other) {
+	const extra = [];
+	for (const token of from) {
+		if (!other.has(token)) extra.push(token);
+	}
+	return extra;
+}
 
-/** Word 3-grams; see src/utils/near-duplicate.ts for why order-sensitivity matters. */
-const SHINGLE_SIZE = 3;
-const MIN_SHINGLES = 4;
-const NEAR_DUPLICATE_THRESHOLD = 0.5;
+/**
+ * Whether two snippets differ only by addition on one side. A substitution -- one
+ * version number swapped for another -- shows up as both sides holding a token the
+ * other lacks, and is never a duplicate. See src/utils/near-duplicate.ts.
+ *
+ * @param {{shingles: Set<string>, tokens: Set<string>}|undefined} left
+ * @param {{shingles: Set<string>, tokens: Set<string>}|undefined} right
+ * @returns {boolean}
+ */
+export function isNearDuplicateSnippet(left, right) {
+	if (!left || !right) return false;
+	if (snippetSimilarity(left, right) < NEAR_DUPLICATE_THRESHOLD) return false;
+	const onlyLeft = extraTokens(left.tokens, right.tokens);
+	const onlyRight = extraTokens(right.tokens, left.tokens);
+	if (onlyLeft.length > 0 && onlyRight.length > 0) return false;
+	return !onlyLeft.some((token) => DIGIT.test(token)) && !onlyRight.some((token) => DIGIT.test(token));
+}
 
 /** Comparable form of a title, for collapsing near-identical engine results. */
 function titleKey(title) {
@@ -440,13 +477,16 @@ function titleKey(title) {
  * eat the whole budget.
  *
  * @param {Array<{title?: string, url?: string, content?: string}>} results - Raw backend results.
+ * @param {{nearDuplicates?: number}} [stats] - Filled in with what was collapsed, so the
+ *   caller can say so; a dropped source is otherwise invisible to the model and the user.
  * @returns {Array<{title: string, url: string, snippet: string}>} Cleaned, unique results.
  */
-export function dedupeResults(results) {
+export function dedupeResults(results, stats) {
 	const seenUrl = new Set();
 	const seenTitle = new Set();
 	/** Fingerprints of the snippets already kept, for the near-duplicate scan. */
 	const keptSnippets = [];
+	let nearDuplicatesDropped = 0;
 	const perDomain = new Map();
 	const out = [];
 
@@ -473,10 +513,8 @@ export function dedupeResults(results) {
 		// too generic to fingerprint.
 		const snippet = stripHtml(raw?.content);
 		const fingerprint = snippetFingerprint(snippet);
-		if (
-			fingerprint &&
-			keptSnippets.some((kept) => snippetSimilarity(fingerprint, kept) >= NEAR_DUPLICATE_THRESHOLD)
-		) {
+		if (fingerprint && keptSnippets.some((kept) => isNearDuplicateSnippet(fingerprint, kept))) {
+			nearDuplicatesDropped += 1;
 			continue;
 		}
 
@@ -486,6 +524,7 @@ export function dedupeResults(results) {
 		perDomain.set(domain, count + 1);
 		out.push({ title, url, snippet });
 	}
+	if (stats) stats.nearDuplicates = nearDuplicatesDropped;
 	return out;
 }
 
@@ -508,7 +547,10 @@ function clip(text, max) {
  * @param {number} [opts.maxChars=2400] - Hard cap on the whole response.
  * @returns {string} Formatted, budget-bounded text.
  */
-export function formatResults(results, { query, via = "", count = DEFAULT_COUNT, maxChars = DEFAULT_MAX_CHARS }) {
+export function formatResults(
+	results,
+	{ query, via = "", count = DEFAULT_COUNT, maxChars = DEFAULT_MAX_CHARS, nearDuplicates = 0 },
+) {
 	const header = `Results for "${query}"${via ? ` (via ${via})` : ""}:`;
 	const wanted = results.slice(0, count);
 	if (wanted.length === 0) return `${header}\n\nNo results.`;
@@ -528,6 +570,11 @@ export function formatResults(results, { query, via = "", count = DEFAULT_COUNT,
 
 	if (shown < results.length) {
 		lines.push("", `[truncated: showing ${shown} of ${results.length} results, ${maxChars} char budget]`);
+	}
+	// Say what was dropped. Collapsing a syndicated copy saves tokens; doing it
+	// silently means neither the model nor the user can tell a source went missing.
+	if (nearDuplicates > 0) {
+		lines.push(`[${nearDuplicates} near-duplicate result${nearDuplicates === 1 ? "" : "s"} collapsed]`);
 	}
 	const out = lines.join("\n");
 	return out.length > maxChars ? `${out.slice(0, maxChars - 1)}…` : out;
@@ -653,7 +700,9 @@ export default function createSkill(ctx = {}) {
 								chosen.url,
 							]
 						: [await searchSerper(chosen.key, query, { timeoutMs, count }), "serper"];
-				return formatResults(dedupeResults(results), { query, via, count, maxChars });
+				const stats = { nearDuplicates: 0 };
+				const deduped = dedupeResults(results, stats);
+				return formatResults(deduped, { query, via, count, maxChars, nearDuplicates: stats.nearDuplicates });
 			} catch (e) {
 				return `Web search failed: ${e?.message || e}`;
 			}

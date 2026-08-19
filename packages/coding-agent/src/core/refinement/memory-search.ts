@@ -1,4 +1,4 @@
-import { isNearDuplicate, textFingerprint } from "../../utils/near-duplicate.js";
+import { isNearDuplicate, type TextFingerprint, textFingerprint } from "../../utils/near-duplicate.js";
 import type { HarnessEntry, HarnessScope } from "./refinement.js";
 
 /**
@@ -87,7 +87,13 @@ export interface HarnessMemorySearchResult {
 
 export interface HarnessMemorySearchResponse {
 	queryTerms: string[];
-	/** Distinct matches after duplicate bodies are collapsed, before the topK slice. */
+	/**
+	 * Distinct matches after duplicate bodies are collapsed, before the topK slice.
+	 * Exact-duplicate collapsing is complete, but near-duplicate collapsing only runs
+	 * over the head of the ranking, so on a corpus with many near-identical bodies this
+	 * can overstate distinctness past that window. The returned results are unaffected,
+	 * since topK never reaches it.
+	 */
 	totalMatches: number;
 	/** Matches surviving the relevance gates, before duplicates were collapsed. */
 	totalMatchesBeforeCollapse: number;
@@ -411,7 +417,7 @@ function collapseDuplicateBodies(ranked: readonly ScoredDoc[]): {
 
 	// Kept in ranking order alongside their fingerprints, so a candidate is only ever
 	// compared against entries that already won a slot.
-	const winnerFingerprints: { doc: ScoredDoc; fingerprint: Set<string> | undefined }[] = [];
+	const winnerFingerprints: { doc: ScoredDoc; fingerprint: TextFingerprint | undefined }[] = [];
 
 	for (const [index, candidate] of ranked.entries()) {
 		const body = candidate.doc.content.replace(/\s+/g, " ").trim().toLowerCase();
@@ -422,25 +428,26 @@ function collapseDuplicateBodies(ranked: readonly ScoredDoc[]): {
 		let winner = winnerByBody.get(body);
 		// Exact match is the common case and costs a hash lookup; the pairwise scan only
 		// runs when the body is new, and only over the head of the ranking.
-		if (!winner && index < NEAR_DUPLICATE_SCAN_LIMIT) {
-			const fingerprint = textFingerprint(body);
-			if (fingerprint) {
-				for (const kept of winnerFingerprints) {
-					if (isNearDuplicate(fingerprint, kept.fingerprint)) {
-						winner = kept.doc;
-						break;
-					}
+		const inScanWindow = index < NEAR_DUPLICATE_SCAN_LIMIT;
+		const fingerprint = winner || !inScanWindow ? undefined : textFingerprint(body);
+		if (fingerprint) {
+			for (const kept of winnerFingerprints) {
+				if (isNearDuplicate(fingerprint, kept.fingerprint)) {
+					winner = kept.doc;
+					break;
 				}
 			}
 		}
 		if (!winner) {
 			winnerByBody.set(body, candidate);
-			if (index < NEAR_DUPLICATE_SCAN_LIMIT) {
-				winnerFingerprints.push({ doc: candidate, fingerprint: textFingerprint(body) });
-			}
+			if (inScanWindow) winnerFingerprints.push({ doc: candidate, fingerprint });
 			deduped.push(candidate);
 			continue;
 		}
+		// A body collapsed as a near-duplicate must still claim its exact key, or a
+		// byte-identical copy ranked past the scan window would escape dedupe entirely --
+		// something plain exact matching caught before near-duplicate collapsing existed.
+		if (!winnerByBody.has(body)) winnerByBody.set(body, winner);
 		// `ranked` is already sorted, so the first entry seen for a body is the one to
 		// keep and every later one is the duplicate.
 		duplicatesCollapsed += 1;

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildRlmPrompt } from "../src/core/prompts/index.js";
+import { DEFAULT_RLM_RUNTIME_LABELS } from "../src/core/prompts/rlm.js";
 import type { HarnessEntry, HarnessState, RefinementKind } from "../src/core/refinement/index.js";
 import type { Skill } from "../src/core/skills.js";
 import { buildSystemPrompt } from "../src/core/system-prompt.js";
@@ -73,6 +74,11 @@ describe("buildRlmPrompt", () => {
 				"",
 				"As the user-facing root agent, when work follows a plan, uses many subagents, or spans multiple turns, proactively give regular concise progress updates so the user does not have to ask. State the current plan, what has completed, any blockers, the proposed fixes, and the next actions. Lead with user-visible outcomes rather than internal process or gate names. Mention internal details only when they explain a blocker or decision. Send an update at meaningful milestones and before ending a turn while work is still running. Do not repeat unchanged status or interrupt short work with unnecessary updates.",
 				"",
+				"Choose the shape that carries the result, not prose by default. Prose for judgements and next steps. A table for a handful of labelled values the reader will compare exactly. Code or a diff for anything they will copy or apply. A chart when the shape of the data is the answer.",
+				"When the `chart` skill is loaded, its output is plain text and can go anywhere your prose goes — a reply, a report, a file. `chart(values)` for a trend, `chart.bar` to compare magnitudes, `chart.spark(values)` inline inside a sentence or table cell, `chart.gauge(ratio)` for progress or a percentage, `chart.histogram` for a distribution, `chart.candle` for OHLC series.",
+				"Reach for a chart on latency and timing distributions, token or cost trends over a run, benchmark comparisons, error-rate movement, file-size or coverage changes, and anything you would otherwise describe as rising, falling, or spiky. Three numbers do not need a chart; twenty usually do.",
+				"Do not chart and then restate the same numbers in prose. Lead with the shape, then say what it means and what follows from it.",
+				"",
 				"Use simplified technical English by default for user-facing prose.",
 				"Prefer short sentences, common words, and concrete verbs. State one main action or fact per sentence when practical. Use lists for steps or conditions.",
 				"Keep necessary technical terms, names, commands, code, paths, and exact quoted text unchanged. State uncertainty directly.",
@@ -80,7 +86,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Working directory: /repo",
 				"Recursive agent depth: 0",
-				"REPL runtime: the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...), `$` \u2014 Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control., Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin, `pi` \u2014 harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence, native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing, Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern, a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel.",
+				`REPL runtime: ${DEFAULT_RLM_RUNTIME_LABELS.join(", ")}.`,
 				"",
 				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",

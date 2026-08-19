@@ -3,6 +3,8 @@ export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
 	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control.",
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
+	"databases with no driver to install: `bun:sqlite` (`new Database(path)` — local state, indexed history, full-text search over your own notes), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), and `Bun.redis`/`Bun.RedisClient` (caching, queues, shared state). Reach for sqlite before anything networked: it needs no server and survives a restart",
+	"`Bun.S3Client` for S3-compatible object storage, and `Bun.connect`/`Bun.listen` for raw TCP and TLS when a protocol has no HTTP client",
 	"`pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
 	"native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing",
 	"Web Crypto (crypto.randomUUID, crypto.subtle)",
@@ -22,6 +24,20 @@ export interface RlmPromptOptions {
 	parentAgent?: string;
 	activeTools?: string[];
 }
+
+/**
+ * How to present a result.
+ *
+ * The model defaults to prose for everything unless told otherwise, which buries numeric
+ * results the reader has to reconstruct in their head. Charts are cheap here — one call
+ * returning a string — so the guidance is about picking the right shape, not about the API.
+ */
+const OUTPUT_FORM_PROMPT = [
+	"Choose the shape that carries the result, not prose by default. Prose for judgements and next steps. A table for a handful of labelled values the reader will compare exactly. Code or a diff for anything they will copy or apply. A chart when the shape of the data is the answer.",
+	"When the `chart` skill is loaded, its output is plain text and can go anywhere your prose goes — a reply, a report, a file. `chart(values)` for a trend, `chart.bar` to compare magnitudes, `chart.spark(values)` inline inside a sentence or table cell, `chart.gauge(ratio)` for progress or a percentage, `chart.histogram` for a distribution, `chart.candle` for OHLC series.",
+	"Reach for a chart on latency and timing distributions, token or cost trends over a run, benchmark comparisons, error-rate movement, file-size or coverage changes, and anything you would otherwise describe as rising, falling, or spiky. Three numbers do not need a chart; twenty usually do.",
+	"Do not chart and then restate the same numbers in prose. Lead with the shape, then say what it means and what follows from it.",
+].join("\n");
 
 const LONG_RUNNING_WORK_PROMPT = [
 	"For slow or independently completing work, use a nonblocking control loop: start the work, record its handle or output location, then end your turn. Read the result on a later turn or when a reply arrives.",
@@ -113,6 +129,8 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		LONG_RUNNING_WORK_PROMPT,
 		"",
 		...(depth === 0 ? [USER_PROGRESS_PROMPT, ""] : []),
+		// Presentation only matters where a person reads it; a subagent reports to its parent.
+		...(depth === 0 ? [OUTPUT_FORM_PROMPT, ""] : []),
 		SIMPLIFIED_TECHNICAL_ENGLISH_PROMPT,
 		"",
 		`Working directory: ${cwd}`,

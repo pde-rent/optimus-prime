@@ -58,6 +58,18 @@ The whole Bun standard library is in scope from a cell: `Bun.file`, `Bun.write`,
 `Bun.stringWidth`, `Bun.semver`, `Bun.zstd*`/`gzip*`, `fetch`, `HTMLRewriter`, and `%%bash` cells
 for anything shell-shaped.
 
+### Databases, with nothing to install
+
+`Database` (`bun:sqlite`), `SQL`/`sql` (Postgres, MySQL, MariaDB via tagged templates that
+parameterise rather than interpolate), `redis`/`RedisClient`, `S3Client`, and `Bun.connect`/
+`Bun.listen` for raw TCP and TLS are all bound as REPL globals under the names Bun's own
+documentation uses, so the model reaches for them without an import. They resolve lazily, so a
+cell that never touches a database pays nothing — REPL start stays at ~17 ms.
+
+That makes durable local state a one-liner rather than a dependency decision: indexed tool
+history, full-text search over a session, per-project memory, cached file metadata. The prompt
+points at SQLite first, since it needs no server and survives a restart.
+
 ### Session state that actually survives
 
 REPL snapshots use structured clone rather than JSON, so `Map`, `Set`, `Date`, `RegExp`, `BigInt`,

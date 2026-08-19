@@ -154,6 +154,12 @@ const { readdir } = await import("node:fs/promises");
 
 The vm context is populated explicitly. Cells get `console`, `display()`, `rlm`, `cd(dir)`, `pwd()`, `env`, `crypto`, `Buffer`, `URL`, `URLSearchParams`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`, `util.inspect`, the timer functions, `queueMicrotask`, and one binding per preloaded JS skill. Bun's own globals (`Bun.file`, `Bun.write`, `Bun.Glob`, `Bun.spawn`, `fetch`) and every `node:*` builtin are reachable as usual.
 
+Database and storage clients are bound under the names Bun's own documentation uses: `Database`
+(`bun:sqlite`), `SQL` and `sql` (Postgres, MySQL, MariaDB), `redis` and `RedisClient`, and
+`S3Client`. Each is a lazy getter, so a cell that never opens a database does not pay for
+constructing one, and REPL start stays around 17 ms. Each is also assignable, so a cell may shadow
+the name with its own value.
+
 There is deliberately **no `process`** in the sandbox, so model-generated code cannot exit or signal the REPL child out from under the host. Use `env` in place of `process.env`, and `cd()`/`pwd()` in place of `process.chdir()`/`process.cwd()`. `cd()` changes the child's real working directory, so JS cells and `%%bash` cells always agree on where they are, and an assignment into `env` is visible to every later `%%bash` cell.
 
 `display({ mimeType, data })` emits a payload to the host. Image MIME types become context attachments the model can actually see; `application/vnd.optimus-prime.diff+json` renders an inline diff; agent-message receipts are surfaced on the tool result. This is the entire display surface — there is no Python-style rich display, and no matplotlib, pandas, or `rich` rendering path.

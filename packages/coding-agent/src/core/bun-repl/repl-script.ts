@@ -456,6 +456,46 @@ Object.assign(context, {
 	rlm: rlmObj,
 	pi: piObj,
 });
+/**
+ * Database handles, bound lazily.
+ *
+ * `Database`, `SQL`, `sql` and `redis` are the names Bun's own documentation uses, so a model
+ * reaches for them without an import. They are getters because `bun:sqlite` and the SQL client
+ * cost real work to construct, and most cells never touch a database — resolving them eagerly
+ * would put that on every REPL start.
+ */
+for (const [name, resolve] of [
+	["Database", () => (require("bun:sqlite") as { Database: unknown }).Database],
+	["SQL", () => (bunGlobal as { SQL?: unknown } | undefined)?.SQL],
+	["sql", () => (bunGlobal as { sql?: unknown } | undefined)?.sql],
+	["redis", () => (bunGlobal as { redis?: unknown } | undefined)?.redis],
+	["RedisClient", () => (bunGlobal as { RedisClient?: unknown } | undefined)?.RedisClient],
+	["S3Client", () => (bunGlobal as { S3Client?: unknown } | undefined)?.S3Client],
+] as const) {
+	let cached: unknown;
+	let resolved = false;
+	Object.defineProperty(context, name, {
+		configurable: true,
+		enumerable: true,
+		get() {
+			if (!resolved) {
+				try {
+					cached = resolve();
+				} catch {
+					cached = undefined;
+				}
+				resolved = true;
+			}
+			return cached;
+		},
+		// Assignable, so a cell can shadow the name with its own value.
+		set(value: unknown) {
+			Object.defineProperty(context, name, { configurable: true, enumerable: true, writable: true, value });
+		},
+	});
+	INJECTED.add(name);
+}
+
 context.globalThis = context; // keep the context's own globalThis pointing at itself
 
 // ---------------------------------------------------------------------------

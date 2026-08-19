@@ -222,6 +222,30 @@ describe("websearch: cleaning and dedupe", () => {
 		expect(out).toHaveLength(1);
 	});
 
+	it("reports how many near-duplicates it collapsed", () => {
+		const body =
+			"The release adds a bundler, a test runner and a package manager to the runtime, all shipped in a single binary.";
+		const stats: { nearDuplicates?: number } = {};
+		const kept = dedupeResults(
+			[
+				{ title: "Bun 1.0 released", url: "https://news-a.test/bun", content: body },
+				{ title: "Bun ships 1.0", url: "https://news-b.test/bun", content: `(Reuters) - ${body}` },
+			],
+			stats,
+		);
+		expect(kept).toHaveLength(1);
+		expect(stats.nearDuplicates).toBe(1);
+
+		// A collapsed source must be visible in the output, not silently missing.
+		const out = formatResults(kept, {
+			query: "bun",
+			count: 5,
+			maxChars: 10000,
+			nearDuplicates: stats.nearDuplicates,
+		});
+		expect(out).toContain("[1 near-duplicate result collapsed]");
+	});
+
 	it("keeps two stories that merely cover the same event", () => {
 		const out = dedupeResults([
 			{

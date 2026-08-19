@@ -442,15 +442,29 @@ describe("near-duplicate collapsing", () => {
 	const base =
 		"Never run kubectl patch against the sitp workloads because Argo selfHeal reverts the change within sixty seconds.";
 
-	it("collapses a body that differs only by a corrected typo", () => {
+	it("keeps two records that differ by a substituted token", () => {
+		// The substitution guard: high shingle overlap, but `replicas 3` and
+		// `replicas 12` are different records and the differing token is the payload.
+		const manifest = "The deployment manifest for the rates ingester sets replicas to";
 		const memories: Record<string, HarnessEntry> = {
-			"global:a": makeEntry({ id: "a", title: "Argo rule", content: base.replace("reverts", "revrts") }),
-			"global:b": makeEntry({ id: "b", title: "Argo rule restated", content: base }),
+			"global:small": makeEntry({
+				id: "small",
+				title: "Ingester scale",
+				content: `${manifest} 3 and requests two hundred millicores of cpu per pod.`,
+			}),
+			"global:large": makeEntry({
+				id: "large",
+				title: "Ingester scale after ramp",
+				content: `${manifest} 12 and requests two hundred millicores of cpu per pod.`,
+			}),
 		};
-		const response = searchHarnessMemories(memories, { query: "kubectl patch sitp argo selfheal", topK: 5 });
+		const response = searchHarnessMemories(memories, {
+			query: "deployment manifest rates ingester replicas",
+			topK: 5,
+		});
 
-		expect(response.results).toHaveLength(1);
-		expect(response.duplicatesCollapsed).toBe(1);
+		expect(response.results).toHaveLength(2);
+		expect(response.duplicatesCollapsed).toBe(0);
 	});
 
 	it("collapses a body that only appended a sentence", () => {
