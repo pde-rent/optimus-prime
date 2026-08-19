@@ -51,12 +51,11 @@ Optimus Prime ships with built-in skills that load by default:
 - `agent-message` - JS-backed. Message an agent's parent, siblings, or direct children through the daemon (`await agent_message.send(...)`).
 - `agent-observe` - JS-backed. Read-only observation of the agent's family: status and bounded recent-message previews.
 - `attach-image` - JS-backed. Load an on-disk image into the model's context as a viewable attachment (`await attach_image.run("diagram.png")`).
+- `chart` - JS-backed. Terminal charts (line, bar, scatter, candlestick, sparkline, gauge, donut, histogram); `chart.builder` exposes the composable builder.
 - `check` - JS-backed. Run the project's own checker (`await check()`), detected from root markers searched upward, so a package inherits the repository's config.
 - `compact` - JS-backed. Check context usage and schedule compaction from the REPL.
 - `edit` - JS-backed. Replace one exact, unique string (`await edit(path, oldStr, newStr)`), or edit by line against a content tag (`await edit.src(path)` then `await edit.patch(path, tag, hunks)`).
 - `goal` - JS-backed. Read, create, and complete the persistent thread goal.
-- `linear` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.
-- `notion` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.
 - `refine` - JS-backed. Trigger continual harness refinement from the REPL.
 - `skill-creator` - markdown. Teaches the agent to create new skills: markdown skill layout, frontmatter rules, placement and precedence, and the full JS-backed skill contract (`skill.js` detection, the factory signature, the skill context, verification) with a working template in `references/js-skills.md`.
 - `websearch` - JS-backed web search and page reader. Backed by a self-hosted [SearXNG](https://docs.searxng.org) instance (free, keyless) or the [Serper](https://serper.dev) API.
@@ -153,7 +152,7 @@ To disable all built-in skills, set `enableBuiltinSkills` to `false` in `setting
 
 ```json
 {
-  "skills": ["-linear/SKILL.md"]
+  "skills": ["-chart/SKILL.md"]
 }
 ```
 
@@ -299,7 +298,7 @@ Skills register as `/skill:name` commands:
 /skill:pdf-tools extract      # Load skill with arguments
 ```
 
-Arguments after the command are appended to the skill content as `User: <args>`.
+Arguments after the command are appended verbatim after the skill block, separated by a blank line.
 
 Toggle skill commands via `/settings` in interactive mode or in `settings.json`:
 

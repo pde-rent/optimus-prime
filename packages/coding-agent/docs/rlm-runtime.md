@@ -283,7 +283,7 @@ On reload, the aggregate is reapplied to the parent message. Context-tree report
 
 The continual harness is a persisted state ledger for prompt notes, memories, reusable skill descriptions, sub-agent specifications, and refinement events. It is not a second execution engine.
 
-It is owned entirely by the TypeScript host (`src/core/refinement/`). There is no REPL-side harness object; the model reaches it through the `refine` skill, which forwards `refine.run` and `refine.status` host requests, and the user reaches it through `/refine`.
+It is owned entirely by the TypeScript host (`src/core/refinement/`). The REPL never touches the store directly, but it does reach it: `rlm.harness` forwards every call as a `harness.*` host request, which is how memories are searched and entries are written. Refinement runs go through the `refine` skill's `refine.run` and `refine.status`, and the user reaches it through `/refine`.
 
 Session-local state lives in the session artifact directory under `harness/harness_state.json`. Explicitly global entries live under `~/.optimus/agent/harness/`.
 

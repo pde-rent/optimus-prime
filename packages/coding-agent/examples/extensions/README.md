@@ -143,7 +143,7 @@ import { Type } from "@earendil-works/pi-ai";
 export default function (pi: ExtensionAPI) {
   // Subscribe to lifecycle events
   pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName === "bash" && event.input.command?.includes("rm -rf")) {
+    if (event.toolName === "repl" && event.input.code?.includes("rm -rf")) {
       const ok = await ctx.ui.confirm("Dangerous!", "Allow rm -rf?");
       if (!ok) return { block: true, reason: "Blocked by user" };
     }

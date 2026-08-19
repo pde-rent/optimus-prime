@@ -196,7 +196,7 @@ To override any of it for a repository, say so in `AGENTS.md` or `CLAUDE.md`: pr
 
 ## Host Bridge
 
-JavaScript skills use typed host requests for capabilities whose authoritative state belongs outside the REPL. For example, the `goal`, `agent_message`, and `compact` skills call the host through their skill context (`ctx.hostRequest(type, payload)`, the same channel as `rlm.host_request(type, payload)`); the TypeScript host validates the request and owns the state transition. Harness state is host-owned as well: there is no REPL-side harness object, and `/refine` and the `refine` skill are the interface to it.
+JavaScript skills use typed host requests for capabilities whose authoritative state belongs outside the REPL. For example, the `goal`, `agent_message`, and `compact` skills call the host through their skill context (`ctx.hostRequest(type, payload)`, the same channel as `rlm.host_request(type, payload)`); the TypeScript host validates the request and owns the state transition. Harness state is host-owned as well, but it is reachable from the REPL: `rlm.harness` exposes the CRUD and search surface, and every call travels as a `harness.*` host request rather than touching the store directly. `/refine` and the `refine` skill drive a refinement run.
 
 This keeps credentials, provider execution, transcript writes, worker routing, and scheduling out of the REPL while retaining a programmatic model interface.
 

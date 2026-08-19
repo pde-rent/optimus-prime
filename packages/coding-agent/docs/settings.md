@@ -64,35 +64,6 @@ The stable `latest.json` and beta `beta.json` manifests use the same JSON shape:
 
 `version` is required. `package` is optional and may also be named `packageName`; it defaults to the current package name. `tarball` is optional; when present, Optimus Prime installs that tarball instead of the package name. Relative tarball paths resolve against `OPTIMUS_DOWNLOAD_BASE_URL`.
 
-### Pseudonymous usage analytics
-
-
-Optimus Prime does not send prompts, responses, thinking, tool arguments or results, command text, filenames, paths, repository information, environment variables, credentials, raw error messages, hostnames, usernames, emails, or hardware identifiers. A random installation ID is stored as `telemetry.json` in the configured agent directory (normally `~/.optimus/agent/`).
-
-Telemetry can be disabled globally or for an individual project. Project settings can only further restrict telemetry: they cannot re-enable a global opt-out or suppress the global one-time disclosure.
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `telemetry.enabled` | boolean | `true` | Send pseudonymous aggregate usage and performance events |
-
-Disable analytics with any of:
-
-```json
-{
-  "telemetry": {
-    "enabled": false
-  }
-}
-```
-
-```bash
-OPTIMUS_TELEMETRY=0 optimus
-DO_NOT_TRACK=1 optimus
-optimus --offline
-```
-
-`OPTIMUS_TELEMETRY_ENDPOINT` overrides the ingestion endpoint for development and self-hosted deployments.
-
 ### Warnings
 
 | Setting | Type | Default | Description |

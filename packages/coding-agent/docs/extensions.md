@@ -67,7 +67,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName === "bash" && event.input.command?.includes("rm -rf")) {
+    if (event.toolName === "repl" && event.input.code?.includes("rm -rf")) {
       const ok = await ctx.ui.confirm("Dangerous!", "Allow rm -rf?");
       if (!ok) return { block: true, reason: "Blocked by user" };
     }
@@ -691,7 +691,7 @@ Behavior guarantees:
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 pi.on("tool_call", async (event, ctx) => {
-  // event.toolName - "repl", "bash", "edit", etc.
+  // event.toolName - "repl" (the only active built-in), plus extension and SDK tool names.
   // event.toolCallId
   // event.input - tool parameters (mutable)
 
@@ -1497,7 +1497,7 @@ const all = pi.getAllTools();
 const names = all.map(t => t.name);
 const builtinTools = all.filter((t) => t.sourceInfo.source === "builtin");
 const extensionTools = all.filter((t) => t.sourceInfo.source !== "builtin" && t.sourceInfo.source !== "sdk");
-pi.setActiveTools(["bash", "edit"]); // Switch to optional shell/edit tools
+pi.setActiveTools(["repl"]); // repl is the only built-in; add your registered tool names alongside it
 ```
 
 `pi.getAllTools()` returns `name`, `description`, `parameters`, and `sourceInfo`.

@@ -46,7 +46,6 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, and message counts |
-| `/traces [status\|on\|off\|preview\|upload-current\|upload-all\|login]` | Preview, upload, or manage opt-in trace sharing |
 | `/usage`, `/context` | Show the parent and subagent context, token, and cost breakdown |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/fork` | Create a new session from a previous user message |
@@ -359,9 +358,7 @@ optimus --tools repl -p "Review the code"
 | `PI_SKIP_VERSION_CHECK` | Skip the Optimus Prime version update check at startup. This prevents the release manifest request |
 | `OPTIMUS_DOWNLOAD_BASE_URL` | Override the Optimus Prime release manifest and tarball base URL |
 | `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
-| `PRIME_API_KEY` | Prime Inference API key; also used for trace sharing when it has `agent_traces` scope |
-| `OPTIMUS_TRACES_API_KEY` | Prime API key used only for opt-in trace sharing |
-| `OPTIMUS_TRACES_BASE_URL` | Override the Optimus Prime trace upload API base URL |
+| `PRIME_API_KEY` | Prime Inference API key |
 | `OPTIMUS_REPL_SKILLS` | Host-set, not user-set: the agent session passes the JSON array of JavaScript-backed skills (`{name, global, entry}`) to preload into the REPL child. Setting it yourself has no effect on skill discovery |
 | `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 

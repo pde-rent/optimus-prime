@@ -121,15 +121,15 @@ Depth is dynamic; the graph is still assembled by the agent rather than resolved
 
 | Skill | What it does |
 |---|---|
-| `agent_message` | Send to parent, child or sibling |
-| `agent_observe` | Read-only view of the family |
+| `agent-message` | Send to parent, child or sibling |
+| `agent-observe` | Read-only view of the family |
 | `refine` | Promote what a session learned into skills, prompts, memory, subagent specs |
 | `goal` | Persistent objective across turns |
 | `compact` | Deliberate context cut |
 | `edit` | Hash-anchored edits — a file that moved underneath is rejected, not corrupted |
 | `check` | Verify through the project's own checker |
 | `websearch` | Self-hosted [SearXNG](deploy/searxng/), Serper by flag |
-| `attach_image` | Put an image in context |
+| `attach-image` | Put an image in context |
 | `skill-creator` | Write new skills |
 | `chart` | Terminal charts — line, bar, candlestick, gauge, sparkline |
 
