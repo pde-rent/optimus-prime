@@ -86,7 +86,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Working directory: /repo",
 				"Recursive agent depth: 0",
-				`REPL runtime: ${DEFAULT_RLM_RUNTIME_LABELS.join(", ")}.`,
+				`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 				"",
 				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",

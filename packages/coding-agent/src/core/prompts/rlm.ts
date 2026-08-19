@@ -135,7 +135,10 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		"",
 		`Working directory: ${cwd}`,
 		`Recursive agent depth: ${depth}`,
-		`REPL runtime: ${DEFAULT_RLM_RUNTIME_LABELS.join(", ")}.`,
+		// One capability per line. Joined with commas these ran together into a single paragraph
+		// whose own sentence-ending periods collided with the separators ("process control., Bun
+		// built-in modules"), and it sat beside a structured skills block in the same prompt.
+		`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 	];
 
 	const childDoctrine = buildChildAgentDoctrine(options);
