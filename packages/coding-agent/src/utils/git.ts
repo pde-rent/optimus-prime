@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import hostedGitInfo from "hosted-git-info";
+import hostedGitInfo from "./hosted-git.js";
 
 /**
  * Parsed git URL information.

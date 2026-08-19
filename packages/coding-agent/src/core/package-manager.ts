@@ -24,11 +24,11 @@ function getEnv(): NodeJS.ProcessEnv {
 
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
-import ignore from "ignore";
 import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
 import { shouldUseWindowsShell } from "../utils/child-process.js";
 import { type GitSource, parseGitUrl } from "../utils/git.js";
 import { matchGlob } from "../utils/glob-match.js";
+import ignore from "../utils/ignore-matcher.js";
 import { canonicalizePath, isLocalPath } from "../utils/paths.js";
 import { ensureDir } from "../utils/shared.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
