@@ -32,7 +32,7 @@ The parent keeps its own context focused while the REPL holds working state and 
 
 The default RLM runtime exposes one built-in model tool: `repl`. It executes JavaScript/TypeScript in a persistent Bun REPL. Reading and editing files, running project commands, transforming results, invoking skills, and delegating work all begin from that REPL instead of separate built-in tool calls.
 
-A cell is JS/TS with top-level `await`, and its last top-level expression is echoed as the cell result. Top-level `const`, `let`, `var`, `function`, and `class` declarations persist across cells, so variables, parsed results, and task handles remain available on later turns:
+A cell is JS/TS with top-level `await`, and its last top-level expression is echoed as the cell result. Top-level `const`, `let`, `var`, `function`, and `class` declarations persist across cells, so variables, parsed results, and task handles remain available on later turns. Persistence makes them globals rather than block-scoped bindings, so a declaration that reuses a runtime name (`rlm`, `display`, `pwd`, a skill's global) is refused instead of replacing that API for the rest of the session:
 
 ```js
 const glob = new Bun.Glob("**/*.toml");

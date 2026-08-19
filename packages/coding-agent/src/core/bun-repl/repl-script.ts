@@ -219,34 +219,37 @@ const piObj = Object.freeze({
 	truncateTail,
 });
 
-// Names injected into the sandbox that must never appear in snapshots/namespace listings.
-const INJECTED = new Set([
-	"globalThis",
-	"console",
-	"setTimeout",
-	"clearTimeout",
-	"setInterval",
-	"clearInterval",
-	"queueMicrotask",
-	"Buffer",
-	"URL",
-	"URLSearchParams",
-	"TextEncoder",
-	"TextDecoder",
-	"atob",
-	"btoa",
-	"crypto",
-	"display",
-	"util",
-	"cd",
-	"pwd",
-	"env",
-	"__import",
-	"__rlm_host_request",
-	"rlm",
-	"mcp",
-	"pi",
-]);
+/**
+ * Names the sandbox provides, so they never appear in snapshots or namespace listings.
+ *
+ * Filled from what is actually installed below rather than restated by hand: the previous
+ * literal covered a third of the injected surface, so `fetch`, `Bun`, `$` and every other
+ * platform global were listed as the cell's own variables and pushed through every snapshot.
+ */
+const INJECTED = new Set<string>();
+
+/**
+ * Install the harness's own API, refusing replacement.
+ *
+ * Persistence rewrites a cell's `const rlm = ...` into `globalThis.rlm = ...` (see
+ * transform.ts), so an ordinary declaration does not shadow `rlm` for one cell — it replaces
+ * the function for the rest of the session, and nothing in the session can put it back. A
+ * setter that throws refuses the write in both strict and sloppy mode, and covers every route
+ * to it: declaration, bare assignment, destructuring, import alias.
+ */
+function installHarnessGlobal(name: string, value: unknown): void {
+	INJECTED.add(name);
+	Object.defineProperty(context, name, {
+		configurable: true,
+		enumerable: true,
+		get: () => value,
+		set() {
+			throw new Error(
+				`\`${name}\` is part of the REPL runtime and cannot be redeclared: top-level declarations persist as globals, so this would replace it for the rest of the session. Rename the variable.`,
+			);
+		},
+	});
+}
 
 // Per-execute state.
 /** Child process of a running %%bash cell, so an interrupt can stop it. */
@@ -410,6 +413,7 @@ function bunOnlyGlobal(name: string): unknown {
 // The Bun runtime object, resolved dynamically so the build needs no @types/bun.
 const bunGlobal = (globalThis as { Bun?: unknown }).Bun;
 
+// Platform surface: what Bun would have given the cell anyway. A cell may replace any of it.
 Object.assign(context, {
 	globalThis: context,
 	console: sandboxConsole(),
@@ -470,9 +474,14 @@ Object.assign(context, {
 	CustomEvent,
 	DOMException,
 	navigator,
+	util,
+});
+for (const name of Object.keys(context)) INJECTED.add(name);
+
+// Harness surface: losing any of it breaks the runtime, so it is installed protected.
+for (const [name, value] of Object.entries({
 	process: sandboxProcess,
 	display,
-	util,
 	cd,
 	pwd,
 	env: process.env,
@@ -481,7 +490,9 @@ Object.assign(context, {
 	rlm: rlmObj,
 	mcp: mcpObj,
 	pi: piObj,
-});
+})) {
+	installHarnessGlobal(name, value);
+}
 /**
  * Database handles, bound lazily.
  *
@@ -593,15 +604,40 @@ function isSyntaxError(err: unknown): boolean {
 	return typeof err === "object" && err !== null && (err as { name?: unknown }).name === "SyntaxError";
 }
 
+type TsTranspiler = { transformSync(source: string): string };
+
+function bunTranspiler(): TsTranspiler | null {
+	const bun = (globalThis as { Bun?: { Transpiler: new (o: { loader: string }) => TsTranspiler } }).Bun;
+	return bun ? new bun.Transpiler({ loader: "ts" }) : null;
+}
+
 function stripTypes(body: string): string | null {
-	const transpiler = (
-		globalThis as { Bun?: { Transpiler: new (o: { loader: string }) => { transformSync(s: string): string } } }
-	).Bun;
+	const transpiler = bunTranspiler();
 	if (!transpiler) return null;
 	try {
-		return new transpiler.Transpiler({ loader: "ts" }).transformSync(body);
+		return transpiler.transformSync(body);
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * Bun's parse diagnostic for a cell `node:vm` refused to compile.
+ *
+ * The vm reports nearly every parse failure as `Unexpected EOF`, at a line number into the
+ * *wrapped* cell — pointing at code the model never wrote, and naming nothing it can fix.
+ * Bun's parser names the actual mistake ("Unterminated string literal"), which is worth a
+ * second parse on a path that has already failed.
+ */
+function transpileDiagnostic(body: string): string | null {
+	const transpiler = bunTranspiler();
+	if (!transpiler) return null;
+	try {
+		transpiler.transformSync(body);
+		return null;
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		return message.trim() || null;
 	}
 }
 
@@ -614,12 +650,33 @@ function stripTypes(body: string): string | null {
 const STATIC_IMPORT_HINT =
 	'This REPL evaluates cells in a vm where static `import` statements are unavailable; use `await import("module")` instead.';
 
-function withStaticImportHint(err: unknown, body: string): unknown {
-	if (!isSyntaxError(err) || !hasStaticImport(body)) return err;
+/**
+ * The recurring shape behind an unterminated literal: a long prompt written across lines
+ * inside `'...'`. The engine calls that `Unexpected EOF`, which reads like a truncated cell
+ * and invites a retry of the same quoting.
+ */
+const MULTILINE_STRING_HINT =
+	"A quoted string cannot span lines. Use a backtick template literal (`...`) for multi-line text such as a subagent prompt, or escape the newlines as \\n.";
+
+/** Append what the engine's own message leaves out, without repeating anything already in it. */
+function withSyntaxHints(err: unknown, body: string): unknown {
+	if (!isSyntaxError(err)) return err;
 	const e = err as { message?: unknown };
-	if (typeof e.message === "string" && !e.message.includes(STATIC_IMPORT_HINT)) {
-		e.message = `${e.message}\n${STATIC_IMPORT_HINT}`;
+	if (typeof e.message !== "string") return err;
+
+	const hints: string[] = [];
+	if (hasStaticImport(body)) hints.push(STATIC_IMPORT_HINT);
+	const diagnostic = transpileDiagnostic(body);
+	if (diagnostic) {
+		hints.push(diagnostic);
+		if (/unterminated string/i.test(diagnostic)) hints.push(MULTILINE_STRING_HINT);
 	}
+
+	let message = e.message;
+	for (const hint of hints) {
+		if (!message.includes(hint)) message += `\n${hint}`;
+	}
+	e.message = message;
 	return err;
 }
 
@@ -642,11 +699,11 @@ async function runJs(req: BunReplExecuteRequest, body: string): Promise<void> {
 		// that failed to compile ran none of its statements. If the retry also fails to
 		// compile it was a genuine JS mistake, so the original error is what surfaces.
 		const stripped = isSyntaxError(err) ? stripTypes(body) : null;
-		if (stripped === null) throw withStaticImportHint(err, body);
+		if (stripped === null) throw withSyntaxHints(err, body);
 		try {
 			value = await evaluate(wrapCell(stripped));
 		} catch (retryErr: unknown) {
-			throw isSyntaxError(retryErr) ? withStaticImportHint(err, body) : retryErr;
+			throw isSyntaxError(retryErr) ? withSyntaxHints(err, body) : retryErr;
 		}
 	}
 	const resultStr = value !== undefined ? serializeValue(value) : undefined;
@@ -678,7 +735,15 @@ function describeError(err: unknown): { name: string; message: string; traceback
 	const e = err as { name?: unknown; message?: unknown; stack?: unknown };
 	const name = typeof e.name === "string" && e.name ? e.name : "Error";
 	const message = typeof e.message === "string" ? e.message : String(err);
-	return { name, message, traceback: typeof e.stack === "string" ? cellFrames(e.stack) : [] };
+	const traceback = typeof e.stack === "string" ? cellFrames(e.stack) : [];
+	// `stack` was frozen when the error was constructed, so anything added to the message
+	// afterwards — the syntax hints above — is missing from it. The host prints the traceback
+	// whenever there is one, so a hint that lives only on the message is never read.
+	const traceText = traceback.join("\n");
+	for (const line of message.split("\n")) {
+		if (line.trim() && !traceText.includes(line)) traceback.push(line);
+	}
+	return { name, message, traceback };
 }
 
 /**
@@ -689,7 +754,12 @@ function describeError(err: unknown): { name: string; message: string; traceback
 function cellFrames(stack: string): string[] {
 	const lines = stack.split("\n");
 	const lastCellFrame = lines.reduce((last, line, i) => (line.includes("evalmachine") ? i : last), -1);
-	const kept = lastCellFrame >= 0 ? lines.slice(0, lastCellFrame + 1) : lines;
+	// No cell frame at all means the error came from the REPL itself — a `%%bash` exit status,
+	// a refused runtime binding. Every `at ...` line then points into this script, which says
+	// nothing about the cell that was run, so the message stands alone.
+	const firstFrame = lines.findIndex((line) => /^\s+at\s/.test(line));
+	const kept =
+		lastCellFrame >= 0 ? lines.slice(0, lastCellFrame + 1) : firstFrame >= 0 ? lines.slice(0, firstFrame) : lines;
 	return kept.slice(0, TRACEBACK_MAX_LINES);
 }
 
@@ -1132,8 +1202,7 @@ async function loadPreloadedSkills(): Promise<void> {
 			const mod = (await import(spec.entry)) as Record<string, unknown>;
 			const factory = typeof mod.createSkill === "function" ? mod.createSkill : mod.default;
 			const api = typeof factory === "function" ? await (factory as (ctx: unknown) => unknown)(skillContext) : mod;
-			context[spec.global] = api;
-			INJECTED.add(spec.global);
+			installHarnessGlobal(spec.global, api);
 		} catch (err: unknown) {
 			process.stderr.write(
 				`optimus: skill "${spec.name}" failed to load: ${err instanceof Error ? err.message : String(err)}\n`,
