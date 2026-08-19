@@ -34,10 +34,12 @@ const config: SettingsConfig = {
 	fullscreen: true,
 	warnings: {},
 	graphResolver: "off",
+	rlmMaxDepth: 1,
 };
 
 const callbacks: SettingsCallbacks = {
 	onGraphResolverChange: () => {},
+	onRlmMaxDepthChange: () => {},
 	onAutoCompactChange: () => {},
 	onIdleEvictionMinutesChange: () => {},
 	onShowImagesChange: () => {},

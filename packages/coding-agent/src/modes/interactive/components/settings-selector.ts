@@ -49,6 +49,8 @@ export interface SettingsConfig {
 	hideThinkingBlock: boolean;
 	treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 	graphResolver: GraphResolverLevel;
+	/** Undefined means unset, which falls through to RLM_MAX_DEPTH and then to 1. */
+	rlmMaxDepth: number | undefined;
 	showHardwareCursor: boolean;
 	editorPaddingX: number;
 	autocompleteMaxVisible: number;
@@ -76,6 +78,7 @@ export interface SettingsCallbacks {
 	onHideThinkingBlockChange: (hidden: boolean) => void;
 	onTreeFilterModeChange: (mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all") => void;
 	onGraphResolverChange: (level: GraphResolverLevel) => void;
+	onRlmMaxDepthChange: (maxDepth: number) => void;
 	onShowHardwareCursorChange: (enabled: boolean) => void;
 	onEditorPaddingXChange: (padding: number) => void;
 	onAutocompleteMaxVisibleChange: (maxVisible: number) => void;
@@ -251,6 +254,13 @@ export class SettingsSelectorComponent extends Container {
 				description: "Disable verbose printing at startup",
 				currentValue: config.quietStartup ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "rlm-max-depth",
+				label: "Recursion depth",
+				description: "How many levels of sub-agents an agent may spawn",
+				currentValue: String(config.rlmMaxDepth ?? 1),
+				values: ["0", "1", "2", "3", "4"],
 			},
 			{
 				id: "graph-resolver",
@@ -484,6 +494,9 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "quiet-startup":
 						callbacks.onQuietStartupChange(newValue === "true");
+						break;
+					case "rlm-max-depth":
+						callbacks.onRlmMaxDepthChange(Number.parseInt(newValue, 10));
 						break;
 					case "graph-resolver":
 						callbacks.onGraphResolverChange(newValue as GraphResolverLevel);

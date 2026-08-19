@@ -7511,6 +7511,7 @@ export class InteractiveMode {
 					hideThinkingBlock: this.hideThinkingBlock,
 					treeFilterMode: this.settingsManager.getTreeFilterMode(),
 					graphResolver: this.settingsManager.getGraphResolver(),
+					rlmMaxDepth: this.settingsManager.getRlmMaxDepth(),
 					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 					editorPaddingX: this.settingsManager.getEditorPaddingX(),
 					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
@@ -7614,6 +7615,13 @@ export class InteractiveMode {
 					},
 					onTreeFilterModeChange: (mode) => {
 						this.settingsManager.setTreeFilterMode(mode);
+					},
+					onRlmMaxDepthChange: (maxDepth) => {
+						// Through the connection for the same reason as the graph dial: the session caches
+						// the resolved depth and renders it into the prompt.
+						void this.agentConnection.setRlmMaxDepth(maxDepth, { global: true }).catch((error: unknown) => {
+							this.showError(error instanceof Error ? error.message : String(error));
+						});
 					},
 					onGraphResolverChange: (level) => {
 						// Same reason as `/graph`: the session caches a depth floor and a prompt block
