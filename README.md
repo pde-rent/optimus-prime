@@ -1,4 +1,9 @@
-<h3 align="center">Optimus Prime</h3>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="Optimus Prime" src="assets/logo-light.svg" width="460">
+  </picture>
+</p>
 
 <p align="center">
   A self-improving RLM coding agent that runs on Bun, with a persistent JavaScript/TypeScript REPL as its primary tool.

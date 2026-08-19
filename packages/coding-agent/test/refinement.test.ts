@@ -99,7 +99,7 @@ function createRefineModel(reasoning: boolean): Model<"openai-completions"> {
 		name: "GPT 5.5",
 		api: "openai-completions",
 		provider: "prime-inference",
-		baseUrl: "https://inference.primeintellect.ai/v1",
+		baseUrl: "https://openrouter.ai/api/v1",
 		reasoning,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

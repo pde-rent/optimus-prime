@@ -1,10 +1,8 @@
 <p align="center">
-  <a href="https://primeintellect.ai">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="../../assets/brand/prime-butterfly.svg">
-      <img alt="Prime Intellect butterfly mark" src="../../assets/brand/prime-butterfly-black.svg" width="96">
-    </picture>
-  </a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../assets/logo-dark.svg">
+    <img alt="Optimus Prime" src="../../assets/logo-light.svg" width="300">
+  </picture>
 </p>
 
 <h1 align="center">Optimus Prime CLI</h1>
@@ -43,13 +41,12 @@ Optimus Prime began as a hard fork of [pi-mono](https://github.com/badlogic/pi-m
 ## Quick Start
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh
+bun run build && cd packages/coding-agent && bun link --global
 ```
 
 To install the beta built from the latest commit on `main`:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh -s -- beta
 ```
 
 Authenticate with an API key:

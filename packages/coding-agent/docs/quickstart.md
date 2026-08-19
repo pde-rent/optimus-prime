@@ -7,13 +7,12 @@ This page gets you from install to a useful first Optimus Prime session.
 Install the latest stable release on Linux or macOS:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh
+bun run build && cd packages/coding-agent && bun link --global
 ```
 
 To try the latest beta built from `main`:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh -s -- beta
 ```
 
 Both commands fetch versioned Optimus Prime release artifacts and install the `optimus` command. The inherited npm workspace identifiers in the source tree are not the public install path.

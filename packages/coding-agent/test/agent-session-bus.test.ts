@@ -467,7 +467,6 @@ describe("duplicate agent messages", () => {
 				],
 			}),
 			sendAgentMessage,
-			// biome-ignore lint/suspicious/noExplicitAny: partial controller is enough here
 		} as any);
 		return { handlers, sendAgentMessage };
 	}

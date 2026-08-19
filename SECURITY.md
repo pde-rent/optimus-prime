@@ -4,7 +4,7 @@
 
 Do not report security vulnerabilities through public Issues, Discussions, or pull requests.
 
-Send the report to [security@primeintellect.ai](mailto:security@primeintellect.ai). For encrypted communication and the current company-wide disclosure policy, see [primeintellect.ai/security](https://www.primeintellect.ai/security).
+Report privately through [GitHub security advisories](https://github.com/pde-rent/optimus-prime/security/advisories/new) on this repository.
 
 Include the following when possible:
 

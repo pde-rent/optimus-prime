@@ -7,7 +7,7 @@ Optimus Prime is an RLM-native coding and research harness built around a persis
 Install the latest stable release on Linux or macOS:
 
 ```bash
-curl -fsSL https://app.primeintellect.ai/optimus/install.sh | sh
+bun run build && cd packages/coding-agent && bun link --global
 ```
 
 Then run it in a project directory:
