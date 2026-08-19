@@ -1850,6 +1850,56 @@ describe("agentLoop with AgentMessage", () => {
 	});
 });
 
+describe("unknown tool calls", () => {
+	it("names the tools that do exist, so a wrong guess can be corrected", async () => {
+		const context: AgentContext = {
+			systemPrompt: "You are helpful.",
+			messages: [],
+			tools: [
+				{
+					name: "repl",
+					label: "repl",
+					description: "repl",
+					parameters: Type.Object({}),
+					execute: async () => ({ content: [], details: {} }),
+				},
+				{
+					name: "read",
+					label: "read",
+					description: "read",
+					parameters: Type.Object({}),
+					execute: async () => ({ content: [], details: {} }),
+				},
+			],
+		};
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		const assistantMessage = createAssistantMessage(
+			[{ type: "toolCall", id: "tool_1", name: "bash", arguments: {} }],
+			"toolUse",
+		);
+		let turns = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			const message = turns++ === 0 ? assistantMessage : createAssistantMessage([{ type: "text", text: "ok" }]);
+			queueMicrotask(() => {
+				stream.push({ type: "done", reason: turns === 1 ? "toolUse" : "stop", message });
+			});
+			return stream;
+		};
+
+		const stream = agentLoop([createUserMessage("Hello")], context, config, undefined, streamFn);
+		for await (const _event of stream) {
+		}
+		const messages = await stream.result();
+
+		const toolResult = messages.find((m) => m.role === "toolResult");
+		expect(toolResult?.role).toBe("toolResult");
+		const text = JSON.stringify(toolResult);
+		expect(text).toContain("Tool bash not found");
+		expect(text).toContain("read, repl");
+	});
+});
+
 describe("agentLoopContinue with AgentMessage", () => {
 	it("should throw when context has no messages", () => {
 		const context: AgentContext = {

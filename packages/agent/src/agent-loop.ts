@@ -778,9 +778,13 @@ async function prepareToolCall(
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
 	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
 	if (!tool) {
+		// Naming what does exist turns a dead end into a correction: a model that guessed
+		// `bash` otherwise guesses again instead of reaching for the tool that runs shell cells.
+		const available = (currentContext.tools ?? []).map((t) => t.name).sort();
+		const suffix = available.length > 0 ? `. Available tools: ${available.join(", ")}` : "";
 		return {
 			kind: "immediate",
-			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
+			result: createErrorToolResult(`Tool ${toolCall.name} not found${suffix}`),
 			isError: true,
 		};
 	}
