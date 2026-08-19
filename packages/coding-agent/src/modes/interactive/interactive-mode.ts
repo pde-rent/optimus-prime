@@ -13,7 +13,6 @@ import {
 	supportsFastMode,
 	type ToolCall,
 } from "@earendil-works/pi-ai";
-import { BUILTIN_MCP_CATALOG } from "@earendil-works/pi-ai/mcp";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -8483,12 +8482,11 @@ export class InteractiveMode {
 		const isAuthed = (name: string) => authStorage.get(`mcp:${name}`) !== undefined;
 
 		if (sub === "list") {
-			const labels = new Map(BUILTIN_MCP_CATALOG.map((e) => [e.server, e.label]));
-			const names = new Set([...labels.keys(), ...Object.keys(this.settingsManager.getMcpServers() ?? {})]);
-			const lines = [...names].map((name) => {
-				const status = isAuthed(name) ? "connected" : "not connected";
-				return `  ${labels.get(name) ?? name} (${name}) — ${status}`;
-			});
+			const names = Object.keys(this.settingsManager.getMcpServers() ?? {});
+			const lines = names.map((name) => `  ${name} — ${isAuthed(name) ? "connected" : "not connected"}`);
+			if (lines.length === 0) {
+				lines.push("  (none configured — add one under the mcpServers setting)");
+			}
 			this.showStatus(
 				`MCP integrations:\n${lines.join("\n")}\n\nUse /mcp login <name> to connect, /mcp logout <name> to disconnect.`,
 			);

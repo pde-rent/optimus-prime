@@ -25,7 +25,6 @@ import {
 	Type,
 	type Validator,
 } from "@earendil-works/pi-ai";
-import { registerBuiltinMcpOAuthProviders } from "@earendil-works/pi-ai/mcp";
 import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
@@ -469,7 +468,6 @@ export class ModelRegistry {
 		// unique to another daemon session is dropped here and re-registered on that
 		// session's next refresh. Fully isolating it would require a session-scoped
 		// registry in pi-ai (out of scope here).
-		registerBuiltinMcpOAuthProviders();
 		this.onOAuthProvidersReset?.();
 
 		this.loadModels();

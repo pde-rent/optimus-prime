@@ -2,12 +2,7 @@
 // linear/notion skills' mcp-client.js); the host only registers OAuth providers, gates
 // integration skills by auth, and serves mcp.* host-requests.
 
-import {
-	BUILTIN_MCP_CATALOG,
-	createMcpOAuthProvider,
-	getCatalogEntry,
-	registerBuiltinMcpOAuthProviders,
-} from "@earendil-works/pi-ai/mcp";
+import { createMcpOAuthProvider } from "@earendil-works/pi-ai/mcp";
 import { registerOAuthProvider, unregisterOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import type { AuthStorage } from "../auth-storage.js";
 import type { McpServerConfig } from "../settings-manager.js";
@@ -62,14 +57,6 @@ export class McpManager {
 
 	private resolveIntegrations(): void {
 		const integrations = new Map<string, ResolvedIntegration>();
-		for (const entry of BUILTIN_MCP_CATALOG) {
-			integrations.set(entry.server, {
-				server: entry.server,
-				label: entry.label,
-				url: entry.url,
-				usesOAuth: entry.oauth?.kind === "oauth",
-			});
-		}
 		for (const [server, config] of Object.entries(this.getUserServers() ?? {})) {
 			if (config.type !== "http") continue; // stdio servers self-manage in the skill
 			integrations.set(server, {
@@ -87,7 +74,6 @@ export class McpManager {
 	}
 
 	private registerProviders(): void {
-		registerBuiltinMcpOAuthProviders();
 		this.registerUserProviders();
 	}
 
@@ -111,10 +97,6 @@ export class McpManager {
 						url: integration.url,
 					}),
 				);
-			} else if (getCatalogEntry(integration.server)) {
-				// User overrode a catalog server with a custom URL but no oauth: drop the
-				// built-in provider so we never send the official token to that URL.
-				unregisterOAuthProvider(id);
 			}
 		}
 		// Drop providers for user servers removed since the last registration.
@@ -130,27 +112,8 @@ export class McpManager {
 		if (integration.bearerTokenEnvVar && process.env[integration.bearerTokenEnvVar]?.trim()) {
 			return true;
 		}
-		// A user server that overrides a catalog name must NOT inherit the built-in's
-		// stored mcp: creds — those were issued for the official endpoint and could be
-		// sent to the override URL. Such an override authenticates only via a bearer
-		// env var (handled above); we don't trust auth.json OAuth creds for it.
-		if (integration.userDeclared && getCatalogEntry(integration.server)) {
-			return false;
-		}
 		const cred = this.authStorage.get(this.providerId(integration.server));
 		return cred !== undefined;
-	}
-
-	/** `-<server>/SKILL.md` overrides for every built-in integration the user isn't logged into. */
-	getDisabledBuiltinSkillOverrides(): string[] {
-		const overrides: string[] = [];
-		for (const entry of BUILTIN_MCP_CATALOG) {
-			const integration = this.integrations.get(entry.server);
-			if (integration && !this.isAuthed(integration)) {
-				overrides.push(`-${entry.server}/SKILL.md`);
-			}
-		}
-		return overrides;
 	}
 
 	/** Host-request handlers exposed to the kernel. */

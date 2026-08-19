@@ -23,43 +23,6 @@ describe("McpManager", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("disables every built-in integration when no credentials exist", () => {
-		const manager = new McpManager({ authStorage });
-		const overrides = manager.getDisabledBuiltinSkillOverrides();
-		expect(overrides).toContain("-linear/SKILL.md");
-		expect(overrides).toContain("-notion/SKILL.md");
-	});
-
-	it("enables an integration once credentials are stored", () => {
-		authStorage.set("mcp:linear", {
-			type: "oauth",
-			access: "tok",
-			refresh: "r",
-			expires: Date.now() + 3600_000,
-		});
-		const manager = new McpManager({ authStorage });
-		const overrides = manager.getDisabledBuiltinSkillOverrides();
-		expect(overrides).not.toContain("-linear/SKILL.md");
-		expect(overrides).toContain("-notion/SKILL.md");
-
-		const status = manager.listStatus().find((s) => s.server === "linear");
-		expect(status?.enabled).toBe(true);
-	});
-
-	it("registers an OAuth provider per built-in integration", () => {
-		new McpManager({ authStorage });
-		expect(getOAuthProvider("mcp:linear")).toBeDefined();
-		expect(getOAuthProvider("mcp:notion")).toBeDefined();
-	});
-
-	it("keeps MCP providers registered after ModelRegistry.refresh() resets the registry", () => {
-		new McpManager({ authStorage });
-		const registry = ModelRegistry.create(authStorage, join(tempDir, "models.json"));
-		registry.refresh(); // calls resetOAuthProviders(); must re-add MCP providers
-		expect(getOAuthProvider("mcp:linear")).toBeDefined();
-		expect(getOAuthProvider("mcp:notion")).toBeDefined();
-	});
-
 	it("re-registers user-declared OAuth servers after ModelRegistry.refresh via the reset hook", () => {
 		const manager = new McpManager({
 			authStorage,
@@ -93,35 +56,6 @@ describe("McpManager", () => {
 		expect(Object.keys(handlers).sort()).toEqual(["mcp.begin_login", "mcp.config", "mcp.refresh"]);
 		await handlers["mcp.begin_login"]({ server: "linear" });
 		expect(called).toBe("linear");
-	});
-
-	it("mcp.config returns the resolved URL + headers, honoring a user override of a catalog name", async () => {
-		const manager = new McpManager({
-			authStorage,
-			getUserServers: () => ({
-				linear: { type: "http", url: "https://proxy.test/mcp", oauth: true, headers: { "X-Extra": "1" } },
-			}),
-		});
-		const handlers = manager.hostHandlers();
-		expect(await handlers["mcp.config"]({ server: "linear" })).toEqual({
-			url: "https://proxy.test/mcp",
-			headers: { "X-Extra": "1" },
-		});
-		expect(await handlers["mcp.config"]({ server: "notion" })).toEqual({ url: "https://mcp.notion.com/mcp" });
-	});
-
-	it("does not treat an oauth override of a catalog name as authed via the official stored cred", () => {
-		authStorage.set("mcp:linear", {
-			type: "oauth",
-			access: "official",
-			refresh: "r",
-			expires: Date.now() + 3600_000,
-		});
-		const manager = new McpManager({
-			authStorage,
-			getUserServers: () => ({ linear: { type: "http", url: "https://proxy.test/mcp", oauth: true } }),
-		});
-		expect(manager.listStatus().find((s) => s.server === "linear")?.enabled).toBe(false);
 	});
 
 	it("honors a bearer-token env var for user-declared servers", () => {

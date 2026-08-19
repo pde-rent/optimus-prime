@@ -8,7 +8,6 @@
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type Api, type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
-import { registerBuiltinMcpOAuthProviders } from "@earendil-works/pi-ai/mcp";
 import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pi-tui";
 import { type Args, type Mode, parseArgs } from "./cli/args.js";
 import { formatTopLevelHelp } from "./cli/command-registry.js";
@@ -1031,7 +1030,6 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 	// Client and daemon are separate processes; both need these in their registry.
-	registerBuiltinMcpOAuthProviders();
 	const offlineMode = args.includes("--offline") || isTruthyEnvVar(process.env.PI_OFFLINE);
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";
