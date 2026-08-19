@@ -246,7 +246,7 @@ export interface ToolResultMessage<TDetails = any> {
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 
-import type { TSchema } from "typebox";
+import type { TSchema } from "./utils/schema.js";
 
 export interface Tool<TParameters extends TSchema = TSchema> {
 	name: string;

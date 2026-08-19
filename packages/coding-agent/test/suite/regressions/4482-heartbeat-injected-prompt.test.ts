@@ -1,8 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type Message, Type } from "@earendil-works/pi-ai";
 import { Container, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import { type AgentCronJob, shouldDeferHeartbeatCronJob } from "../../../src/core/cron-jobs.js";
 import { createGoalContextMessage, type GoalState } from "../../../src/core/goals.js";
 import { createHeartbeatPromptMessage, HEARTBEAT_PROMPT_CUSTOM_TYPE } from "../../../src/core/messages.js";

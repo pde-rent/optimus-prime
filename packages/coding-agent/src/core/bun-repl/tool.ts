@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";

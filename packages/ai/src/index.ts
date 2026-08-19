@@ -1,6 +1,3 @@
-export type { Static, TSchema } from "typebox";
-export { Type } from "typebox";
-
 export * from "./api-registry.js";
 export * from "./env-api-keys.js";
 export * from "./log.js";
@@ -37,6 +34,15 @@ export type {
 	OAuthSelectPrompt,
 } from "./utils/oauth/types.js";
 export * from "./utils/overflow.js";
+export type {
+	Static,
+	TLocalizedValidationError,
+	TProperties,
+	TSchema,
+	ValidationError,
+	Validator,
+} from "./utils/schema.js";
+export { Compile, Type, Value } from "./utils/schema.js";
 export * from "./utils/stream-failure.js";
 export * from "./utils/typebox-helpers.js";
 export * from "./utils/validation.js";

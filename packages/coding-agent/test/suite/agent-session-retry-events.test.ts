@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core";
-import { type AssistantMessage, fauxAssistantMessage, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { type AssistantMessage, fauxAssistantMessage, fauxThinking, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import { createHarness, type Harness } from "./harness.js";
 
 function normalizeEventOrder(events: Harness["events"]): string[] {

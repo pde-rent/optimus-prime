@@ -15,6 +15,20 @@ import type { HarnessEntry, HarnessScope } from "./refinement.js";
  * the target corpus. Semantic retrieval remains an evidence-led future step.
  */
 
+/**
+ * Query-side function words. They match nothing discriminative, but they are in the
+ * corpus, so leaving them in inflates the coverage denominator and gates out real
+ * hits. Language keywords that are also English function words (`as`, `for`, `this`,
+ * `in`, `is`, `if`, `do`, `from`, `with`) are deliberately absent: on a coding corpus
+ * they are the discriminative token.
+ * ponytail: English-only heuristic, upgrade path is a per-language list keyed off the
+ * script detection already in `tokenizeBase`.
+ */
+const ENGLISH_STOPWORDS = new Set(
+	"a about an and are at be been but by can could does did had has have how i into it its me my of on or should so than that the their them then there these they to us was we were what when where which who why will would you your".split(
+		" ",
+	),
+);
 const BM25_K1 = 1.2;
 const FIELD_COUNT = 3;
 const FIELD_WEIGHTS = [3, 2, 1];
@@ -22,6 +36,7 @@ const FIELD_B = [0.6, 0.5, 0.75];
 
 const PHRASE_BONUS_WEIGHT = 0.15;
 const MIN_COVERAGE = 0.3;
+const MIN_COVERAGE_IDF = Math.log(2);
 const MIN_SCORE_RATIO = 0.25;
 const PREFIX_MIN_LENGTH = 4;
 const PREFIX_WEIGHT = 0.5;
@@ -32,15 +47,10 @@ const SNIPPET_MIN_CHARS = 80;
 const SNIPPET_EDGE_EXPANSION = 32;
 const SNIPPET_MAX_OCCURRENCES = 200;
 
-const INDEX_CACHE_LIMIT = 8;
-const INDEX_CACHE_MAX_CORPUS = 20000;
-
 export interface HarnessMemorySearchOptions {
 	query: string;
 	topK: number;
 	scope?: HarnessScope;
-	/** When provided, the built index is memoized under this key (LRU 8). */
-	indexKey?: string;
 }
 
 export interface HarnessMemorySearchResult {
@@ -66,6 +76,13 @@ export interface HarnessMemorySearchResponse {
 	queryTerms: string[];
 	/** Matches surviving the relevance gates, before the topK slice. */
 	totalMatches: number;
+	/**
+	 * Candidates that matched a query term but were dropped by the relevance gates.
+	 * Retrieval is model-initiated, so an empty result is otherwise indistinguishable
+	 * from an empty store: this is the signal to widen or reword rather than conclude
+	 * the memory does not exist.
+	 */
+	suppressedByGate: number;
 	results: HarnessMemorySearchResult[];
 }
 
@@ -174,13 +191,6 @@ interface BuiltIndex {
 	postings: Map<string, number[]>;
 }
 
-interface CachedIndex extends BuiltIndex {
-	touched: number;
-}
-
-const indexCache = new Map<string, CachedIndex>();
-let cacheClock = 0;
-
 function buildIndex(memories: Readonly<Record<string, HarnessEntry>>): BuiltIndex {
 	const docs: IndexedDoc[] = [];
 	const postings = new Map<string, number[]>();
@@ -218,36 +228,6 @@ function buildIndex(memories: Readonly<Record<string, HarnessEntry>>): BuiltInde
 		});
 	}
 	return { docs, postings };
-}
-
-function getIndex(memories: Readonly<Record<string, HarnessEntry>>, indexKey: string | undefined): BuiltIndex {
-	if (indexKey === undefined) return buildIndex(memories);
-	const corpusSize = Object.keys(memories).length;
-	if (corpusSize > INDEX_CACHE_MAX_CORPUS) return buildIndex(memories);
-
-	const cached = indexCache.get(indexKey);
-	if (cached) {
-		cacheClock += 1;
-		cached.touched = cacheClock;
-		return cached;
-	}
-
-	cacheClock += 1;
-	const entry: CachedIndex = { ...buildIndex(memories), touched: cacheClock };
-	indexCache.set(indexKey, entry);
-	while (indexCache.size > INDEX_CACHE_LIMIT) {
-		let evictKey: string | undefined;
-		let oldest = Number.POSITIVE_INFINITY;
-		for (const [key, value] of indexCache) {
-			if (value.touched < oldest) {
-				oldest = value.touched;
-				evictKey = key;
-			}
-		}
-		if (evictKey === undefined) break;
-		indexCache.delete(evictKey);
-	}
-	return entry;
 }
 
 /** Field-weighted term frequency; BM25F saturates this sum once, not each field. */
@@ -385,11 +365,13 @@ export function searchHarnessMemories(
 	memories: Readonly<Record<string, HarnessEntry>>,
 	options: HarnessMemorySearchOptions,
 ): HarnessMemorySearchResponse {
-	const baseTerms = [...new Set(tokenizeBase(options.query))];
+	const rawTerms = [...new Set(tokenizeBase(options.query))];
+	const kept = rawTerms.filter((term) => !ENGLISH_STOPWORDS.has(term));
+	const baseTerms = kept.length > 0 ? kept : rawTerms;
 	const queryTerms = [...new Set(expandPlurals(baseTerms))];
-	if (queryTerms.length === 0) return { queryTerms: [], totalMatches: 0, results: [] };
+	if (queryTerms.length === 0) return { queryTerms: [], totalMatches: 0, suppressedByGate: 0, results: [] };
 
-	const { docs, postings } = getIndex(memories, options.indexKey);
+	const { docs, postings } = buildIndex(memories);
 	const scope = options.scope;
 	const candidates: number[] = [];
 	const inScope = new Uint8Array(docs.length);
@@ -399,7 +381,7 @@ export function searchHarnessMemories(
 		candidates.push(index);
 	}
 	const total = candidates.length;
-	if (total === 0) return { queryTerms, totalMatches: 0, results: [] };
+	if (total === 0) return { queryTerms, totalMatches: 0, suppressedByGate: 0, results: [] };
 
 	const averageLength: number[] = [];
 	for (let field = 0; field < FIELD_COUNT; field++) {
@@ -421,8 +403,21 @@ export function searchHarnessMemories(
 		return idf;
 	};
 
+	// Out-of-vocabulary terms are unmatchable, so counting them in the coverage
+	// denominator at max idf makes every prose query fail the gate. They are excluded
+	// -- but the denominator is floored, so matching one ubiquitous term (a term in
+	// most documents carries almost no idf) cannot reach full coverage on its own.
 	let queryIdf = 0;
-	for (const term of queryTerms) queryIdf += idfOf(term);
+	for (const term of queryTerms) {
+		let inCorpus = false;
+		for (const index of postings.get(term) ?? [])
+			if (inScope[index]) {
+				inCorpus = true;
+				break;
+			}
+		if (inCorpus) queryIdf += idfOf(term);
+	}
+	const coverageDenominator = Math.max(queryIdf, MIN_COVERAGE_IDF);
 	const phraseBonus = PHRASE_BONUS_WEIGHT * queryIdf;
 	const phrase = fold(options.query).toLowerCase().replace(WHITESPACE_RUN, " ").trim();
 
@@ -443,23 +438,39 @@ export function searchHarnessMemories(
 		if (phrase && (doc.titleFolded.includes(phrase) || doc.pathFolded.includes(phrase))) {
 			score += phraseBonus;
 		}
-		scored.push({ doc, score, coverage: queryIdf > 0 ? matchedIdf / queryIdf : 0, matchedTerms });
+		scored.push({
+			doc,
+			score,
+			coverage: coverageDenominator > 0 ? matchedIdf / coverageDenominator : 0,
+			matchedTerms,
+		});
 	}
 	scored.sort(compareScored);
 
 	// Coverage is only meaningful once the query carries more than one concept;
 	// plural variants of a single word do not make a query multi-term.
 	const coverageApplies = baseTerms.length >= 2;
-	let gated: ScoredDoc[] = [];
-	if (scored.length > 0 && (!coverageApplies || scored[0].coverage >= MIN_COVERAGE)) {
-		gated = applyRatioGate(scored).filter((candidate) => !coverageApplies || candidate.coverage >= MIN_COVERAGE);
-	}
+	// Per candidate, never keyed on the top-scoring one: a short doc matching a single
+	// rare term in the weight-3 title field can outscore a long doc that matched the
+	// whole query, and a top-doc gate then suppresses the entire result set.
+	const eligible = coverageApplies ? scored.filter((candidate) => candidate.coverage >= MIN_COVERAGE) : scored;
+	let gated: ScoredDoc[] = applyRatioGate(eligible);
 
 	if (gated.length === 0) {
-		gated = prefixFallback(docs, candidates, queryTerms, postings, averageLength, idfOf, queryIdf);
+		const fallback = prefixFallback(
+			docs,
+			candidates,
+			queryTerms,
+			postings,
+			averageLength,
+			idfOf,
+			coverageDenominator,
+		);
+		gated = coverageApplies ? fallback.filter((candidate) => candidate.coverage >= MIN_COVERAGE) : fallback;
 	}
 
 	const totalMatches = gated.length;
+	const suppressedByGate = Math.max(0, scored.length - gated.length);
 	const selected = gated.slice(0, Math.max(0, options.topK));
 	const width = snippetWidth(selected.length);
 	const results = selected.map(({ doc, score, coverage, matchedTerms }) => {
@@ -481,7 +492,7 @@ export function searchHarnessMemories(
 		};
 	});
 
-	return { queryTerms, totalMatches, results };
+	return { queryTerms, totalMatches, suppressedByGate, results };
 }
 
 /**
@@ -496,7 +507,7 @@ function prefixFallback(
 	postings: ReadonlyMap<string, number[]>,
 	averageLength: readonly number[],
 	idfOf: (term: string) => number,
-	queryIdf: number,
+	coverageDenominator: number,
 ): ScoredDoc[] {
 	const prefixes = queryTerms.filter((term) => term.length >= PREFIX_MIN_LENGTH);
 	if (prefixes.length === 0) return [];
@@ -530,7 +541,12 @@ function prefixFallback(
 		}
 		if (matchedTerms.length === 0) continue;
 		matchedTerms.sort();
-		scored.push({ doc, score, coverage: queryIdf > 0 ? Math.min(1, matchedIdf / queryIdf) : 0, matchedTerms });
+		scored.push({
+			doc,
+			score,
+			coverage: coverageDenominator > 0 ? Math.min(1, matchedIdf / coverageDenominator) : 0,
+			matchedTerms,
+		});
 	}
 	scored.sort(compareScored);
 	return applyRatioGate(scored);

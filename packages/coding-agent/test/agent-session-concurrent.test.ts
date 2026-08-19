@@ -10,8 +10,8 @@ import {
 	getModel,
 	type ImageContent,
 	type TextContent,
+	Type,
 } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { ModelRegistry } from "../src/core/model-registry.js";

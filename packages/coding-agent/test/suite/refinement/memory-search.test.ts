@@ -27,11 +27,13 @@ describe("searchHarnessMemories", () => {
 			auth: makeEntry({ id: "auth", title: "Auth flow", content: "JWT tokens with 15min expiry" }),
 		};
 		expect(searchHarnessMemories(memories, { query: "", topK: 5 })).toEqual({
+			suppressedByGate: 0,
 			queryTerms: [],
 			totalMatches: 0,
 			results: [],
 		});
 		expect(searchHarnessMemories(memories, { query: "   ", topK: 5 })).toEqual({
+			suppressedByGate: 0,
 			queryTerms: [],
 			totalMatches: 0,
 			results: [],
@@ -296,17 +298,5 @@ describe("searchHarnessMemories", () => {
 		expect(results[0].snippet).toBe("");
 		expect(results[0].contentChars).toBe(0);
 		expect(results[0].truncated).toBe(false);
-	});
-
-	it("returns identical results whether or not the index is memoized", () => {
-		const memories: Record<string, HarnessEntry> = {
-			alpha: makeEntry({ id: "alpha", title: "Auth flow", content: "auth tokens rotate" }),
-			beta: makeEntry({ id: "beta", title: "Notes", path: "auth/middleware", content: "handlers" }),
-		};
-		const uncached = searchHarnessMemories(memories, { query: "auth", topK: 5 });
-		const cold = searchHarnessMemories(memories, { query: "auth", topK: 5, indexKey: "memo-test" });
-		const warm = searchHarnessMemories(memories, { query: "auth", topK: 5, indexKey: "memo-test" });
-		expect(cold).toEqual(uncached);
-		expect(warm).toEqual(uncached);
 	});
 });

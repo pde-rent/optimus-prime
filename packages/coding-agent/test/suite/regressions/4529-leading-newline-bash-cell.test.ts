@@ -1,9 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { Type } from "typebox";
 import { parseReplBashCell } from "../../../src/core/tools/code-preview.js";
 import { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";

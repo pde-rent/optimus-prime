@@ -444,7 +444,7 @@ describe("buildSystemPrompt", () => {
 		);
 		expect(prompt).toContain("`await rlm.harness.get_memory({ id, scope })`");
 		expect(prompt).toContain(
-			"Refinement history is not injected; call `await rlm.harness.overview()` for recent refinement events.",
+			"call `await rlm.harness.overview()` to list every saved continual harness entry (id, title, path) -- memories included -- alongside recent refinement events.",
 		);
 		// Memory bodies must never reach the cached system prompt, and no rendered line may
 		// carry a version, a count, or the refinement log: all of them churn the cache.

@@ -25,8 +25,10 @@ import type {
 	OAuthCredentials,
 	OAuthLoginCallbacks,
 	SimpleStreamOptions,
+	Static,
 	TextContent,
 	ToolResultMessage,
+	TSchema,
 } from "@earendil-works/pi-ai";
 import type {
 	AutocompleteItem,
@@ -39,7 +41,6 @@ import type {
 	OverlayOptions,
 	TUI,
 } from "@earendil-works/pi-tui";
-import type { Static, TSchema } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.js";
 import type { BashResult } from "../bash-executor.js";
 import type { CompactionPreparation, CompactionResult } from "../compaction/index.js";

@@ -5,9 +5,9 @@ import {
 	EventStream,
 	type Message,
 	type Model,
+	Type,
 	type UserMessage,
 } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
 import { agentLoop, agentLoopContinue, runAgentLoop } from "../src/agent-loop.js";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.js";
 

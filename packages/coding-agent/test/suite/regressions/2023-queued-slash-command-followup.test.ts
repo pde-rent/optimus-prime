@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { createHarness, getAssistantTexts, getUserTexts, type Harness } from "../harness.js";
 
 describe("issue #2023 queued slash-command follow-up", () => {

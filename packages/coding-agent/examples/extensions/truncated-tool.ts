@@ -14,6 +14,7 @@
  */
 
 import { mkdtemp, writeFile } from "node:fs/promises";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
@@ -27,7 +28,6 @@ import { Text } from "@earendil-works/pi-tui";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
-import { Type } from "typebox";
 
 const RgParams = Type.Object({
 	pattern: Type.String({ description: "Search pattern (regex)" }),

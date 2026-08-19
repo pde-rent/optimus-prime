@@ -51,6 +51,9 @@ export const HARNESS_HOST_REQUEST_TYPES: readonly string[] = [
 /** Search snippets are lossy, so `harness.get_memory` caps rather than truncates silently. */
 const GET_MEMORY_MAX_CHARS = 20000;
 
+/** `get_state` returns the recent tail of the refinement log, not all of it. */
+const GET_STATE_MAX_REFINEMENTS = 20;
+
 /**
  * Wire shape of a `harness.search_memory` hit (snake_case, like every other bridge payload).
  *
@@ -84,6 +87,11 @@ export interface HarnessSearchMemoryResponse {
 	scope: HarnessScope | "all";
 	total_matches: number;
 	results: HarnessSearchMemoryHit[];
+	/** Candidates dropped by the relevance gates. Present only when non-zero. */
+	suppressed_by_gate?: number;
+	/** Recovery facets, sent only when nothing matched, so a miss can be reworded. */
+	memory_count?: number;
+	paths?: string[];
 }
 
 export interface HarnessGetMemoryResponse {
@@ -325,8 +333,9 @@ function searchMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContex
 	const scope = resolveReadScope(payload, type);
 	const verbose = payload.verbose === true;
 
-	const found = searchHarnessMemories(loadMergedState(ctx).entries.memory, { query, topK, scope });
-	return {
+	const memories = loadMergedState(ctx).entries.memory;
+	const found = searchHarnessMemories(memories, { query, topK, scope });
+	const response: HarnessSearchMemoryResponse = {
 		query,
 		query_terms: found.queryTerms,
 		top_k: topK,
@@ -334,6 +343,20 @@ function searchMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContex
 		total_matches: found.totalMatches,
 		results: found.results.map((result) => toSearchHit(result, verbose)),
 	};
+	if (found.suppressedByGate > 0) {
+		response.suppressed_by_gate = found.suppressedByGate;
+	}
+	// Retrieval is the only path to a memory's contents and nothing retrieves
+	// automatically, so an empty result must say whether the store is empty or the
+	// wording missed. Sent only on a miss: on a hit it is noise the model pays for.
+	if (found.results.length === 0) {
+		const inScope = Object.values(memories).filter(
+			(entry) => scope === undefined || (entry.scope ?? "global") === scope,
+		);
+		response.memory_count = inScope.length;
+		response.paths = [...new Set(inScope.map((entry) => entry.path).filter(Boolean))].sort();
+	}
+	return response;
 }
 
 function toSearchHit(result: HarnessMemorySearchResult, verbose: boolean): HarnessSearchMemoryHit {
@@ -406,6 +429,32 @@ function getMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContext):
 	};
 }
 
+/**
+ * Every other read on this bridge is bounded -- search by `PAYLOAD_BUDGET`, single
+ * reads by `GET_MEMORY_MAX_CHARS` -- but `get_state` returned every entry's full body
+ * plus the entire refinement log, so the one call meant as an escape hatch was the one
+ * that could exhaust the context window.
+ */
+function boundedState(state: HarnessState): Record<string, unknown> {
+	const entries: Record<string, Record<string, HarnessEntry>> = {};
+	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
+		entries[kind] = {};
+		for (const [id, entry] of Object.entries(state.entries[kind])) {
+			const content = entry.content ?? "";
+			entries[kind][id] =
+				content.length > GET_MEMORY_MAX_CHARS
+					? { ...entry, content: content.slice(0, GET_MEMORY_MAX_CHARS) }
+					: entry;
+		}
+	}
+	return {
+		schema: state.schema,
+		entries,
+		refinements: state.refinements.slice(-GET_STATE_MAX_REFINEMENTS),
+		refinement_count: state.refinements.length,
+	};
+}
+
 /** Handle a `harness.*` host request from the Bun REPL sandbox. */
 export function handleHarnessHostRequest(
 	type: string,
@@ -416,7 +465,7 @@ export function handleHarnessHostRequest(
 		return overview(loadMergedState(ctx));
 	}
 	if (type === "harness.get_state") {
-		return loadMergedState(ctx) as unknown as Record<string, unknown>;
+		return boundedState(loadMergedState(ctx));
 	}
 	if (type === "harness.record_refinement") {
 		return recordRefinement(payload, ctx);

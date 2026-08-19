@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Type } from "typebox";
+import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { complete } from "../src/stream.js";
 import type { Context, Model } from "../src/types.js";

@@ -24,7 +24,7 @@
 
 import { beforeAll, describe, expect, it } from "bun:test";
 import { writeFileSync } from "fs";
-import { Type } from "typebox";
+import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { completeSimple, getEnvApiKey } from "../src/stream.js";
 import type { Api, AssistantMessage, Message, Model, Tool, ToolResultMessage } from "../src/types.js";

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel, Type } from "@earendil-works/pi-ai";
 import {
 	Agent,
 	type AgentContext,

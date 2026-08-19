@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { createHarness, type Harness } from "./harness.js";
 
 /**

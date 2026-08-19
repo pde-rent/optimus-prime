@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { fauxAssistantMessage, fauxToolCall, type Model, Type } from "@earendil-works/pi-ai";
 import type { AgentCronJob } from "../../src/core/cron-jobs.js";
 import type { ExtensionAPI } from "../../src/index.js";
 import { createHarness, getAssistantTexts, getMessageText, type Harness } from "./harness.js";

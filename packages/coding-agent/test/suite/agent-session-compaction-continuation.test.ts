@@ -12,9 +12,9 @@ import {
 	fauxAssistantMessage,
 	fauxToolCall,
 	type ToolResultMessage,
+	Type,
 	type Usage,
 } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
 import type { AgentSession } from "../../src/core/agent-session.js";
 import { createHarness, type Harness } from "./harness.js";
 

@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Type } from "typebox";
+import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { completeSimple, getEnvApiKey } from "../src/stream.js";
 import type { AssistantMessage, Message, Tool, ToolResultMessage } from "../src/types.js";

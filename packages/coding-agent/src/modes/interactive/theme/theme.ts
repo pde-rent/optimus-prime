@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Compile, type Static, Type, type Validator } from "@earendil-works/pi-ai";
 import {
 	bestAnsiColor,
 	blendColor,
@@ -13,8 +14,7 @@ import {
 	rgbTo256,
 	type SelectListTheme,
 } from "@earendil-works/pi-tui";
-import { type Static, type TProperties, Type } from "typebox";
-import type { Validator } from "typebox/compile";
+
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
 import type { SourceInfo } from "../../../core/source-info.js";
 import { boldSpan, color as chalk } from "../../../utils/ansi.js";
@@ -110,15 +110,11 @@ const ThemeJsonSchema = Type.Object({
 
 type ThemeJson = Static<typeof ThemeJsonSchema>;
 
-// typebox/compile costs ~300ms to import, so the theme validator loads lazily.
-// Built-in themes never validate; custom themes get a minimal structural check
-// until the validator is ready (preloaded from initTheme), after which full
-// schema validation applies (e.g. on watcher reloads and setTheme).
-let validateThemeJson: Validator<TProperties, typeof ThemeJsonSchema> | undefined;
+let validateThemeJson: Validator<Static<typeof ThemeJsonSchema>> | undefined;
 let themeValidatorPromise: Promise<void> | undefined;
 
 export function preloadThemeValidator(): Promise<void> {
-	themeValidatorPromise ??= import("typebox/compile").then(({ Compile }) => {
+	themeValidatorPromise ??= Promise.resolve().then(() => {
 		validateThemeJson = Compile(ThemeJsonSchema);
 	});
 	return themeValidatorPromise;

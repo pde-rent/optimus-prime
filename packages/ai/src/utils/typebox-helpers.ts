@@ -1,4 +1,4 @@
-import { type TUnsafe, Type } from "typebox";
+import { type TSchema, Type } from "./schema.js";
 
 /**
  * Creates a string enum schema compatible with Google's API and other providers
@@ -14,7 +14,7 @@ import { type TUnsafe, Type } from "typebox";
 export function StringEnum<T extends readonly string[]>(
 	values: T,
 	options?: { description?: string; default?: T[number] },
-): TUnsafe<T[number]> {
+): TSchema & { readonly static?: T[number] } {
 	return Type.Unsafe<T[number]>({
 		type: "string",
 		enum: values as any,

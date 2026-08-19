@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Type } from "typebox";
+import { Type } from "../src/index.js";
 import type { Tool, ToolCall } from "../src/types.js";
 import { validateToolArguments } from "../src/utils/validation.js";
 

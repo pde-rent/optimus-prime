@@ -138,7 +138,7 @@ See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 
 export default function (pi: ExtensionAPI) {
   // Subscribe to lifecycle events

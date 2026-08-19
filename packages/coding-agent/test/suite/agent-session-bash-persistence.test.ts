@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { BashOperations } from "../../src/core/tools/bash.js";
 import { createHarness, getMessageText, type Harness } from "./harness.js";
 

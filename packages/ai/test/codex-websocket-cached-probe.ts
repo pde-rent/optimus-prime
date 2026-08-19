@@ -8,8 +8,8 @@
 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Type } from "typebox";
 import { AuthStorage } from "../../coding-agent/src/core/auth-storage.js";
+import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import {
 	closeOpenAICodexWebSocketSessions,

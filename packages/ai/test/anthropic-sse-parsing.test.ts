@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Type } from "typebox";
+import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { streamAnthropic } from "../src/providers/anthropic.js";
 import type { Context, ToolCall } from "../src/types.js";

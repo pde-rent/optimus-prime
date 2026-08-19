@@ -1,4 +1,4 @@
-import { type Static, Type } from "typebox";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import type { AgentTool, AgentToolResult } from "../../src/types.js";
 
 export interface CalculateResult extends AgentToolResult<undefined> {

@@ -6,12 +6,13 @@ import type {
 	Model,
 	ServiceTier,
 	SimpleStreamOptions,
+	Static,
 	streamSimple,
 	TextContent,
 	Tool,
 	ToolResultMessage,
+	TSchema,
 } from "@earendil-works/pi-ai";
-import type { Static, TSchema } from "typebox";
 
 /**
  * Stream function used by the agent loop.

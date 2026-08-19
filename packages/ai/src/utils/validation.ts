@@ -1,7 +1,5 @@
-import { Compile } from "typebox/compile";
-import type { TLocalizedValidationError } from "typebox/error";
-import { Value } from "typebox/value";
 import type { Tool, ToolCall } from "../types.js";
+import { Compile, type TLocalizedValidationError, Value } from "./schema.js";
 
 const validatorCache = new WeakMap<object, ReturnType<typeof Compile>>();
 const TYPEBOX_KIND = Symbol.for("TypeBox.Kind");

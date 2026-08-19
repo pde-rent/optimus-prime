@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { Type } from "typebox";
 import { getEnvApiKey } from "../src/env-api-keys.js";
+import { Type } from "../src/index.js";
 import { getModels, getProviders } from "../src/models.js";
 import { complete } from "../src/stream.js";
 import type { Api, KnownProvider, Model, ProviderStreamOptions, Tool } from "../src/types.js";

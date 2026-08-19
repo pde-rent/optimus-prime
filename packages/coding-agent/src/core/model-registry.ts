@@ -8,6 +8,7 @@ import {
 	type AnthropicMessagesCompat,
 	type Api,
 	type AssistantMessageEventStream,
+	Compile,
 	type Context,
 	getModels,
 	getProviders,
@@ -19,14 +20,16 @@ import {
 	registerApiProvider,
 	resetApiProviders,
 	type SimpleStreamOptions,
+	type Static,
+	type TLocalizedValidationError,
+	Type,
+	type Validator,
 } from "@earendil-works/pi-ai";
 import { registerBuiltinMcpOAuthProviders } from "@earendil-works/pi-ai/mcp";
 import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
-import { type Static, type TProperties, Type } from "typebox";
-import type { Validator } from "typebox/compile";
-import type { TLocalizedValidationError } from "typebox/error";
+
 import { getAgentDir } from "../config.js";
 import { readJsonFile, writeJsonAtomically } from "../utils/shared.js";
 import type { AuthSourceToken, AuthStatus, AuthStorage } from "./auth-storage.js";
@@ -202,15 +205,11 @@ const ModelsConfigSchema = Type.Object({
 	providers: Type.Record(Type.String(), ProviderConfigSchema),
 });
 
-// typebox/compile costs ~300ms to import, so the models.json validator loads
-// lazily. The first load of an existing models.json proceeds on JSON parsing +
-// validateConfig() and reports schema errors asynchronously once the validator
-// is ready; subsequent refreshes validate synchronously.
-let validateModelsConfig: Validator<TProperties, typeof ModelsConfigSchema> | undefined;
+let validateModelsConfig: Validator<Static<typeof ModelsConfigSchema>> | undefined;
 let modelsValidatorPromise: Promise<void> | undefined;
 
 function preloadModelsConfigValidator(): Promise<void> {
-	modelsValidatorPromise ??= import("typebox/compile").then(({ Compile }) => {
+	modelsValidatorPromise ??= Promise.resolve().then(() => {
 		validateModelsConfig = Compile(ModelsConfigSchema);
 	});
 	return modelsValidatorPromise;

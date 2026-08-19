@@ -1,8 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Message, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type Message, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import { Container, type TUI } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import {
 	AGENT_MESSAGE_SOURCE,
 	type AgentFamilyRelationship,

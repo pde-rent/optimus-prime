@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModel } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
+import { getModel, Type } from "@earendil-works/pi-ai";
 import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,

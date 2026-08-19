@@ -1,10 +1,10 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../config.js";
-import { readJsonFile, writeJsonAtomically } from "../../utils/shared.js";
+import { writeJsonAtomically } from "../../utils/shared.js";
 import { serializeConversation } from "../compaction/utils.js";
 import { convertToLlm } from "../messages.js";
 import type { CustomEntry } from "../session-manager.js";
@@ -268,19 +268,96 @@ export function getHarnessStatePath(harnessStateDir: string = getGlobalHarnessSt
 	return join(harnessStateDir, "harness_state.json");
 }
 
+/**
+ * State files this process must not overwrite, because it could not read what was
+ * already there. Writing an empty state over bytes we failed to parse (or failed to
+ * move aside) is indistinguishable from deleting the user's whole harness.
+ */
+const unwritableStatePaths = new Set<string>();
+
+type StateFileRead =
+	/** No file, or an empty one: a first run. Silent, and safe to write. */
+	| { status: "absent" }
+	| { status: "ok"; value: Record<string, unknown> }
+	/** Present, non-empty, and not parseable as a JSON object. */
+	| { status: "corrupt" }
+	/** Present but unreadable (permissions, I/O). Its bytes are still intact. */
+	| { status: "unreadable" };
+
+/**
+ * `readJsonFile` collapses missing, unreadable, and malformed into `undefined`, which
+ * is what let a corrupt store load as empty and be overwritten on the next save. The
+ * three cases need different handling, so read and parse them apart here.
+ */
+function readStateFile(statePath: string): StateFileRead {
+	let text: string;
+	try {
+		text = readFileSync(statePath, "utf8");
+	} catch (error) {
+		return (error as NodeJS.ErrnoException)?.code === "ENOENT" ? { status: "absent" } : { status: "unreadable" };
+	}
+	if (text.trim() === "") {
+		return { status: "absent" };
+	}
+	try {
+		const parsed = JSON.parse(text);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return { status: "corrupt" };
+		}
+		return { status: "ok", value: parsed as Record<string, unknown> };
+	} catch {
+		return { status: "corrupt" };
+	}
+}
+
+/**
+ * Move a corrupt store aside so the session can continue on an empty one without the
+ * next save destroying it. `writeJsonAtomically` publishes with `renameSync`, so a
+ * reader can never observe a torn write -- a parse failure here is real corruption,
+ * not a race, and retrying the read would not help.
+ */
+function quarantineStateFile(statePath: string): void {
+	const backupPath = `${statePath}.corrupt-${Date.now()}`;
+	try {
+		renameSync(statePath, backupPath);
+		console.warn(
+			`Warning: ${statePath} was unreadable and has been moved to ${backupPath}. Continuing with an empty harness state.`,
+		);
+	} catch (error) {
+		// The move failed, so the original bytes are still at statePath. Continue on an
+		// empty state, but never write it back over them.
+		unwritableStatePaths.add(statePath);
+		console.warn(
+			`Warning: ${statePath} is corrupt and could not be moved aside (${error instanceof Error ? error.message : String(error)}). Continuing with an empty harness state; writes to this store are disabled for this session.`,
+		);
+	}
+}
+
 export function loadHarnessState(
 	harnessStateDir: string = getGlobalHarnessStateDir(),
 	scope: HarnessScope = "global",
 ): HarnessState {
 	const statePath = getHarnessStatePath(harnessStateDir);
-	const raw = readJsonFile(statePath);
-	// loadHarnessState runs on every system-prompt build and before each /refine, so
-	// a corrupt or unreadable (or non-object) state file must degrade to empty rather
-	// than throw and break the session. The next saveHarnessState rewrites it cleanly.
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+	// loadHarnessState runs on every system-prompt build and before each /refine, so it
+	// must degrade to empty rather than throw and break the session -- but degrading
+	// must never cost the stored state, so a file we could not read is moved aside (or
+	// else latched read-only) before an empty state is handed back.
+	const read = readStateFile(statePath);
+	if (read.status === "corrupt") {
+		quarantineStateFile(statePath);
 		return emptyHarnessState();
 	}
-	const parsed = raw as Partial<HarnessState>;
+	if (read.status === "unreadable") {
+		unwritableStatePaths.add(statePath);
+		console.warn(
+			`Warning: ${statePath} could not be read. Continuing with an empty harness state; writes to this store are disabled for this session.`,
+		);
+		return emptyHarnessState();
+	}
+	if (read.status === "absent") {
+		return emptyHarnessState();
+	}
+	const parsed = read.value as Partial<HarnessState>;
 	const state = emptyHarnessState();
 	state.schema = typeof parsed.schema === "number" ? parsed.schema : 1;
 	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
@@ -289,8 +366,22 @@ export function loadHarnessState(
 			for (const [id, rawEntry] of Object.entries(records)) {
 				const entry = objectRecord(rawEntry);
 				if (!entry) continue;
+				// Every string field below is read unguarded downstream -- the prompt
+				// builder calls `entry.content.replace(...)` on every build -- so a
+				// half-written entry would throw inside the system-prompt build and take
+				// the session with it. Coerce rather than drop: skipping the entry is the
+				// same data loss as a corrupt file, only quieter.
 				state.entries[kind][id] = {
 					...(entry as unknown as HarnessEntry),
+					id: typeof entry.id === "string" ? entry.id : id,
+					kind,
+					title: typeof entry.title === "string" ? entry.title : id,
+					content: typeof entry.content === "string" ? entry.content : "",
+					path: typeof entry.path === "string" ? entry.path : "general",
+					source: typeof entry.source === "string" ? entry.source : "refine",
+					created_at: typeof entry.created_at === "string" ? entry.created_at : "",
+					updated_at: typeof entry.updated_at === "string" ? entry.updated_at : "",
+					version: typeof entry.version === "number" && Number.isFinite(entry.version) ? entry.version : 1,
 					scope: normalizeHarnessScope(entry.scope, scope),
 					reference: objectRecord(entry.reference) ?? {},
 					arguments: objectRecord(entry.arguments) ?? {},
@@ -300,7 +391,10 @@ export function loadHarnessState(
 		}
 	}
 	if (Array.isArray(parsed.refinements)) {
-		state.refinements = parsed.refinements;
+		state.refinements = parsed.refinements.filter(
+			(event): event is HarnessRefinementEvent =>
+				typeof event === "object" && event !== null && !Array.isArray(event),
+		);
 	}
 	return state;
 }
@@ -326,9 +420,19 @@ export function mergeHarnessStates(globalState: HarnessState, localState?: Harne
 
 export function saveHarnessState(harnessStateDir: string, state: HarnessState): string {
 	const statePath = getHarnessStatePath(harnessStateDir);
+	// Latched by loadHarnessState when the stored file could not be read or moved
+	// aside. Writing here would replace bytes this process never managed to parse.
+	if (unwritableStatePaths.has(statePath)) {
+		return statePath;
+	}
 	mkdirSync(harnessStateDir, { recursive: true });
 	writeJsonAtomically(statePath, state);
 	return statePath;
+}
+
+/** Whether writes to this store are suppressed because its file could not be read. */
+export function isHarnessStateWritable(harnessStateDir: string): boolean {
+	return !unwritableStatePaths.has(getHarnessStatePath(harnessStateDir));
 }
 
 export function getRefinementHistoryPath(harnessStateDir: string = getGlobalHarnessStateDir()): string {
@@ -443,9 +547,14 @@ export function formatHarnessStateForPrompt(
 			[a.path, a.title, a.id].join("\0").localeCompare([b.path, b.title, b.id].join("\0")),
 		);
 		if (kind === "memory") {
+			// No memory titles, paths, or counts here, by design: all of them change on an
+			// ordinary memory write and this prompt sits behind a single cache breakpoint,
+			// so any of them would invalidate the whole conversation on a routine save.
+			// The routing instruction below is constant regardless of what the store holds,
+			// which is why it can say what the roster would have shown without the churn.
 			lines.push(
 				includeReplExamples
-					? 'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`; contents are never injected into this prompt. Read one in full with `await rlm.harness.get_memory({ id, scope })`.'
+					? 'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`; contents are never injected into this prompt. Read one in full with `await rlm.harness.get_memory({ id, scope })`. Call `await rlm.harness.overview()` to list every saved memory (id, title, path) before assuming none exist.'
 					: "memory: not reachable in this session (no `repl` tool); memory contents are never injected into this prompt.",
 			);
 			lines.push("");
@@ -500,7 +609,7 @@ export function formatHarnessStateForPrompt(
 
 	lines.push(
 		includeReplExamples
-			? "Refinement history is not injected; call `await rlm.harness.overview()` for recent refinement events."
+			? "Refinement history is not injected; call `await rlm.harness.overview()` to list every saved continual harness entry (id, title, path) -- memories included -- alongside recent refinement events."
 			: "Refinement history is not injected.",
 	);
 
@@ -510,7 +619,12 @@ export function formatHarnessStateForPrompt(
 function overviewForPrompt(state: HarnessState): string {
 	const lines: string[] = [];
 	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
-		const entries = Object.values(state.entries[kind]);
+		// Newest first: this list is the refiner's only view of what already exists, so
+		// slicing insertion order showed it the 40 oldest entries and hid exactly the
+		// recent ones it is most likely to duplicate or contradict.
+		const entries = Object.values(state.entries[kind]).sort((a, b) =>
+			(b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+		);
 		lines.push(`${kind}: ${entries.length}`);
 		for (const entry of entries.slice(0, 40)) {
 			const content = entry.content.replace(/\s+/g, " ").slice(0, 240);
