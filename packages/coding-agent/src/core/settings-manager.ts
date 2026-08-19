@@ -107,8 +107,10 @@ export type McpServerConfig =
 			oauth?: boolean;
 			/** Force-disable even when credentials exist. */
 			enabled?: boolean;
-			enabledTools?: string[];
-			disabledTools?: string[];
+			/** Only these tools are offered to the model. Named as the wider convention names them. */
+			includeTools?: string[];
+			/** These tools are withheld. Takes precedence over `includeTools`. */
+			excludeTools?: string[];
 	  }
 	| {
 			type: "stdio";
@@ -116,8 +118,8 @@ export type McpServerConfig =
 			args?: string[];
 			env?: Record<string, string>;
 			enabled?: boolean;
-			enabledTools?: string[];
-			disabledTools?: string[];
+			includeTools?: string[];
+			excludeTools?: string[];
 	  };
 
 /**

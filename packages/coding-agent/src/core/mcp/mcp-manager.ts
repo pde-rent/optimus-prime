@@ -26,6 +26,10 @@ interface ResolvedIntegration {
 	enabled?: boolean;
 	/** Extra static HTTP headers from the user config. */
 	headers?: Record<string, string>;
+	/** Transport the entry asked for. Only http can be spoken today. */
+	transport: "http" | "stdio";
+	includeTools?: string[];
+	excludeTools?: string[];
 	/** True when this came from Settings.mcpServers (may override a catalog name). */
 	userDeclared?: boolean;
 }
@@ -59,15 +63,20 @@ export class McpManager {
 	private resolveIntegrations(): void {
 		const integrations = new Map<string, ResolvedIntegration>();
 		for (const [server, config] of Object.entries(this.getUserServers() ?? {})) {
-			if (config.type !== "http") continue; // stdio servers self-manage in the skill
+			// A stdio entry is kept rather than dropped. Silently skipping it made a
+			// correctly configured server report as unknown, which sends the reader
+			// looking for a typo instead of an unimplemented transport.
 			integrations.set(server, {
 				server,
 				label: server,
-				url: config.url,
-				usesOAuth: config.oauth === true,
-				bearerTokenEnvVar: config.bearerTokenEnvVar,
+				url: config.type === "http" ? config.url : "",
+				transport: config.type,
+				usesOAuth: config.type === "http" && config.oauth === true,
+				bearerTokenEnvVar: config.type === "http" ? config.bearerTokenEnvVar : undefined,
 				enabled: config.enabled,
-				headers: config.headers,
+				headers: config.type === "http" ? config.headers : undefined,
+				includeTools: config.includeTools,
+				excludeTools: config.excludeTools,
 				userDeclared: true,
 			});
 		}
@@ -148,13 +157,30 @@ export class McpManager {
 			servers: Array.from(this.integrations.values()).map((integration) => ({
 				server: integration.server,
 				label: integration.label,
-				url: integration.url,
+				transport: integration.transport,
+				url: integration.url || undefined,
 				authed: this.isAuthed(integration),
+				// Stated rather than implied, so a configured server that cannot be
+				// reached says why instead of looking absent.
+				reachable: integration.transport === "http",
 			})),
 		});
 		handlers["mcp.list_tools"] = async (payload) => {
-			const client = await this.#clientFor(String(payload.server ?? ""));
-			return { tools: await client.listTools() };
+			const server = String(payload.server ?? "");
+			const client = await this.#clientFor(server);
+			const integration = this.integrations.get(server);
+			let tools = await client.listTools();
+			// A server can offer dozens of tools; these keep the ones a project cares
+			// about. Exclusion wins, so a broad include list stays safe to narrow.
+			if (integration?.includeTools?.length) {
+				const allowed = new Set(integration.includeTools);
+				tools = tools.filter((tool) => allowed.has(tool.name));
+			}
+			if (integration?.excludeTools?.length) {
+				const denied = new Set(integration.excludeTools);
+				tools = tools.filter((tool) => !denied.has(tool.name));
+			}
+			return { tools };
 		};
 		handlers["mcp.call_tool"] = async (payload) => {
 			const name = String(payload.tool ?? "");
@@ -191,6 +217,11 @@ export class McpManager {
 		if (!integration) {
 			const known = Array.from(this.integrations.keys()).join(", ");
 			throw new Error(`unknown MCP server ${JSON.stringify(server)}${known ? `; configured: ${known}` : ""}`);
+		}
+		if (integration.transport !== "http") {
+			throw new Error(
+				`MCP server ${JSON.stringify(server)} is configured for ${integration.transport}, which this client cannot speak yet; only http servers are reachable`,
+			);
 		}
 		return new McpClient({
 			url: integration.url,

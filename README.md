@@ -161,6 +161,10 @@ inlined: `bearerTokenEnvVar` reads a token from the environment, and `"oauth": t
 uses the browser login flow instead, storing the token with the harness's other
 credentials rather than in the settings file.
 
+A server offering more tools than a project needs can be narrowed with `includeTools`
+and `excludeTools`, named as the wider convention names them. Exclusion wins, so a
+broad include list stays safe to narrow.
+
 From inside a session, the REPL reaches every configured server through one binding:
 
 ```js
@@ -177,7 +181,8 @@ The client speaks both eras of the protocol: the stateless revision (`2026-07-28
 the handshake revisions (`2025-11-25` and earlier), detected per endpoint and cached.
 That matters more than it sounds — roughly seven in eight client connections were still
 handshake-era three weeks after the stateless revision shipped. Transport is Streamable
-HTTP; stdio servers are not reachable yet.
+HTTP. A `"type": "stdio"` entry is accepted and listed, but reports that the transport
+is not reachable rather than going missing.
 
 ## Supply chain
 

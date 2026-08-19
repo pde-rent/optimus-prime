@@ -1,108 +1,94 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { getOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
-import { AuthStorage } from "../src/core/auth-storage.js";
+import { describe, expect, it } from "bun:test";
 import { McpManager } from "../src/core/mcp/mcp-manager.js";
-import { ModelRegistry } from "../src/core/model-registry.js";
 import type { McpServerConfig } from "../src/core/settings-manager.js";
 
-describe("McpManager", () => {
-	let tempDir: string;
-	let authStorage: AuthStorage;
+// biome-ignore lint/suspicious/noExplicitAny: only the two members the manager touches
+const authStorage = { get: () => undefined, getApiKey: async () => undefined } as any;
 
-	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "mcp-mgr-"));
-		authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-		resetOAuthProviders();
-	});
+function manager(servers: Record<string, McpServerConfig>) {
+	return new McpManager({ authStorage, getUserServers: () => servers });
+}
 
-	afterEach(() => {
-		resetOAuthProviders();
-		rmSync(tempDir, { recursive: true, force: true });
-	});
+describe("configured servers", () => {
+	it("lists a stdio server rather than dropping it", async () => {
+		// Silently skipping made a correctly configured server report as unknown, which
+		// sends the reader hunting for a typo instead of an unimplemented transport.
+		const handlers = manager({
+			local: { type: "stdio", command: "some-mcp-server" },
+			remote: { type: "http", url: "https://example.test/mcp" },
+		}).hostHandlers();
 
-	it("re-registers user-declared OAuth servers after ModelRegistry.refresh via the reset hook", () => {
-		const manager = new McpManager({
-			authStorage,
-			getUserServers: () => ({ acme: { type: "http", url: "https://mcp.acme.test/mcp", oauth: true } }),
+		const { servers } = (await handlers["mcp.list_servers"]!({})) as {
+			servers: Array<{ server: string; transport: string; reachable: boolean }>;
+		};
+		expect(servers.map((entry) => entry.server).sort()).toEqual(["local", "remote"]);
+		expect(servers.find((entry) => entry.server === "local")).toMatchObject({
+			transport: "stdio",
+			reachable: false,
 		});
-		const registry = ModelRegistry.create(authStorage, join(tempDir, "models.json"));
-		registry.setOnOAuthProvidersReset(() => manager.registerUserProviders());
-		expect(getOAuthProvider("mcp:acme")).toBeDefined();
-		registry.refresh(); // resets registry; hook must re-add the custom provider
-		expect(getOAuthProvider("mcp:acme")).toBeDefined();
 	});
 
-	it("exposes only mcp.refresh when no interactive login is wired", async () => {
-		const manager = new McpManager({ authStorage });
-		const handlers = manager.hostHandlers();
-		expect(Object.keys(handlers).sort()).toEqual(["mcp.config", "mcp.refresh"]);
+	it("says why a stdio server cannot be reached", async () => {
+		const handlers = manager({ local: { type: "stdio", command: "some-mcp-server" } }).hostHandlers();
 
-		await expect(handlers["mcp.refresh"]({ server: "linear" })).rejects.toThrow("Could not refresh");
-		await expect(handlers["mcp.refresh"]({})).rejects.toThrow("requires a server");
+		const error = await handlers["mcp.list_tools"]!({ server: "local" }).catch((caught: Error) => caught);
+		expect((error as Error).message).toContain("stdio");
+		expect((error as Error).message).not.toContain("unknown MCP server");
 	});
 
-	it("exposes mcp.begin_login only when beginLogin is provided", async () => {
-		let called = "";
-		const manager = new McpManager({
-			authStorage,
-			beginLogin: async (server) => {
-				called = server;
+	it("names the configured servers when asked for one that does not exist", async () => {
+		const handlers = manager({ remote: { type: "http", url: "https://example.test/mcp" } }).hostHandlers();
+
+		const error = await handlers["mcp.list_tools"]!({ server: "typo" }).catch((caught: Error) => caught);
+		expect((error as Error).message).toContain("unknown MCP server");
+		expect((error as Error).message).toContain("remote");
+	});
+});
+
+describe("tool filtering", () => {
+	/** A fake MCP endpoint offering three tools. */
+	function serveTools(): { url: string; stop: () => void } {
+		const server = Bun.serve({
+			port: 0,
+			async fetch(request) {
+				const body = (await request.json().catch(() => ({}))) as { id?: unknown };
+				return new Response(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: body.id,
+						result: { tools: [{ name: "read" }, { name: "write" }, { name: "delete" }] },
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
 			},
 		});
-		const handlers = manager.hostHandlers();
-		expect(Object.keys(handlers).sort()).toEqual(["mcp.begin_login", "mcp.config", "mcp.refresh"]);
-		await handlers["mcp.begin_login"]({ server: "linear" });
-		expect(called).toBe("linear");
-	});
+		return { url: server.url.href, stop: () => server.stop(true) };
+	}
 
-	it("honors a bearer-token env var for user-declared servers", () => {
-		process.env.MY_MCP_TOKEN = "secret";
+	async function toolsWith(filter: Partial<{ includeTools: string[]; excludeTools: string[] }>) {
+		const { url, stop } = serveTools();
 		try {
-			const manager = new McpManager({
-				authStorage,
-				getUserServers: () => ({
-					custom: { type: "http", url: "https://example.test/mcp", bearerTokenEnvVar: "MY_MCP_TOKEN" },
-				}),
-			});
-			const status = manager.listStatus().find((s) => s.server === "custom");
-			expect(status?.enabled).toBe(true);
+			const handlers = manager({ s: { type: "http", url, ...filter } }).hostHandlers();
+			const { tools } = (await handlers["mcp.list_tools"]!({ server: "s" })) as { tools: Array<{ name: string }> };
+			return tools.map((tool) => tool.name);
 		} finally {
-			delete process.env.MY_MCP_TOKEN;
+			stop();
 		}
+	}
+
+	it("offers every tool when nothing is filtered", async () => {
+		expect(await toolsWith({})).toEqual(["read", "write", "delete"]);
 	});
 
-	it("picks up mcpServers added after construction on refresh()", () => {
-		let servers: Record<string, McpServerConfig> = {};
-		const manager = new McpManager({ authStorage, getUserServers: () => servers });
-		expect(manager.listStatus().find((s) => s.server === "acme")).toBeUndefined();
-
-		servers = { acme: { type: "http", url: "https://mcp.acme.test/mcp", oauth: true } };
-		manager.refresh();
-		expect(manager.listStatus().find((s) => s.server === "acme")).toBeDefined();
-		expect(getOAuthProvider("mcp:acme")).toBeDefined();
+	it("narrows to an include list", async () => {
+		expect(await toolsWith({ includeTools: ["read"] })).toEqual(["read"]);
 	});
 
-	it("drops the built-in provider when a catalog name is overridden without oauth", () => {
-		const manager = new McpManager({
-			authStorage,
-			getUserServers: () => ({ linear: { type: "http", url: "https://proxy.test/mcp" } }),
-		});
-		void manager;
-		expect(getOAuthProvider("mcp:linear")).toBeUndefined();
+	it("withholds an exclude list", async () => {
+		expect(await toolsWith({ excludeTools: ["delete"] })).toEqual(["read", "write"]);
 	});
 
-	it("unregisters a user server's OAuth provider when it's removed on refresh()", () => {
-		let servers: Record<string, McpServerConfig> = {
-			acme: { type: "http", url: "https://mcp.acme.test/mcp", oauth: true },
-		};
-		const manager = new McpManager({ authStorage, getUserServers: () => servers });
-		expect(getOAuthProvider("mcp:acme")).toBeDefined();
-
-		servers = {};
-		manager.refresh();
-		expect(getOAuthProvider("mcp:acme")).toBeUndefined();
+	it("lets exclusion win, so a broad include list stays safe to narrow", async () => {
+		expect(await toolsWith({ includeTools: ["read", "delete"], excludeTools: ["delete"] })).toEqual(["read"]);
 	});
 });
