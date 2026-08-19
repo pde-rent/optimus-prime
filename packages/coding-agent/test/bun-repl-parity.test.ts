@@ -314,17 +314,25 @@ describe("Bun REPL parity", () => {
 		}
 	});
 
-	it("tells the model which names did not survive a restore", async () => {
+	it("carries functions across a restore and reports what it could not", async () => {
 		const snapshotDir = join(tempDir, "artifacts");
 		const p1 = new BunReplProvisioner({ bunPath: "bun", cwd: tempDir, snapshotDir });
 		const m1 = await p1.ensure();
-		// `total` is plain data and revives; `helper` is a function, which JSON cannot carry.
-		expect((await m1.execute("const total = 12; function helper() { return total; }")).status).toBe("ok");
+		// `total` is plain data; `helper` is a function, carried as source and re-evaluated.
+		// `server` is a live handle, which cannot be serialized at all.
+		expect(
+			(
+				await m1.execute(
+					"const total = 12; function helper() { return total; } const server = Bun.serve({ port: 0, fetch: () => new Response('x') });",
+				)
+			).status,
+		).toBe("ok");
 		await p1.dispose();
 
-		// The snapshot itself must record what it could not capture.
+		// The snapshot records both halves: what it carried, and what it had to leave behind.
 		const manifest = JSON.parse(readFileSync(join(snapshotDir, "manifest.json"), "utf-8"));
-		expect(manifest.droppedNames).toContain("helper");
+		expect(manifest.names).toContain("helper");
+		expect(manifest.droppedNames).toContain("server");
 
 		let restore: { restoredNames: string[]; failed: string[] } | undefined;
 		const p2 = new BunReplProvisioner({
@@ -335,11 +343,15 @@ describe("Bun REPL parity", () => {
 				restore = r;
 			},
 		});
-		await p2.ensure();
+		const m2 = await p2.ensure();
 		try {
 			expect(restore?.restoredNames).toContain("total");
-			expect(restore?.failed).toContain("helper");
-			expect(restore?.restoredNames).not.toContain("helper");
+			expect(restore?.restoredNames).toContain("helper");
+			expect(restore?.failed).toContain("server");
+			// The restored function is callable and still closes over the restored data.
+			const result = await m2.execute("helper()");
+			expect(result.status).toBe("ok");
+			expect(String(result.result)).toBe("12");
 		} finally {
 			await p2.dispose().catch(() => {});
 		}

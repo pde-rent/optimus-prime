@@ -876,10 +876,9 @@ let codeHighlighter: CodeHighlighterModule | undefined;
 let codeHighlighterPromise: Promise<void> | undefined;
 
 /**
- * Start loading the syntax highlighter (cli-highlight pulls in all of
- * highlight.js, ~350ms) off the startup-critical import path. highlightCode
- * falls back to unhighlighted output until the load completes; await this
- * before the first render to guarantee highlighted code blocks.
+ * Load the syntax highlighter off the startup-critical import path. `highlightCode` falls back
+ * to unhighlighted output until the load completes; await this before the first render to
+ * guarantee highlighted code blocks.
  */
 export function preloadCodeHighlighter(): Promise<void> {
 	codeHighlighterPromise ??= import("./code-highlighter.js").then((module) => {
@@ -1161,21 +1160,20 @@ let cachedCliHighlightTheme: CliHighlightTheme | undefined;
 
 function buildCliHighlightTheme(t: Theme): CliHighlightTheme {
 	return {
-		keyword: (s: string) => t.fg("syntaxKeyword", s),
-		built_in: (s: string) => t.fg("syntaxType", s),
-		literal: (s: string) => t.fg("syntaxNumber", s),
-		number: (s: string) => t.fg("syntaxNumber", s),
-		string: (s: string) => t.fg("syntaxString", s),
-		comment: (s: string) => t.fg("syntaxComment", s),
-		function: (s: string) => t.fg("syntaxFunction", s),
-		title: (s: string) => t.fg("syntaxFunction", s),
-		class: (s: string) => t.fg("syntaxType", s),
+		kwd: (s: string) => t.fg("syntaxKeyword", s),
 		type: (s: string) => t.fg("syntaxType", s),
-		attr: (s: string) => t.fg("syntaxVariable", s),
-		variable: (s: string) => t.fg("syntaxVariable", s),
-		params: (s: string) => t.fg("syntaxVariable", s),
-		operator: (s: string) => t.fg("syntaxOperator", s),
-		punctuation: (s: string) => t.fg("syntaxPunctuation", s),
+		class: (s: string) => t.fg("syntaxType", s),
+		num: (s: string) => t.fg("syntaxNumber", s),
+		bool: (s: string) => t.fg("syntaxNumber", s),
+		str: (s: string) => t.fg("syntaxString", s),
+		cmnt: (s: string) => t.fg("syntaxComment", s),
+		func: (s: string) => t.fg("syntaxFunction", s),
+		var: (s: string) => t.fg("syntaxVariable", s),
+		oper: (s: string) => t.fg("syntaxOperator", s),
+		section: (s: string) => t.fg("syntaxKeyword", s),
+		insert: (s: string) => t.fg("syntaxString", s),
+		deleted: (s: string) => t.fg("syntaxVariable", s),
+		err: (s: string) => t.fg("syntaxVariable", s),
 	};
 }
 
@@ -1194,21 +1192,19 @@ function getCliHighlightTheme(t: Theme): CliHighlightTheme {
 export function highlightCode(code: string, lang?: string): string[] {
 	// The highlighter loads lazily; until then render the block unhighlighted.
 	const highlighter = codeHighlighter;
-	// Validate language before highlighting to avoid stderr spam from cli-highlight
 	const validLang = lang && highlighter?.supportsLanguage(lang) ? lang : undefined;
-	// Skip highlighting when no valid language is specified. cli-highlight's
-	// auto-detection is unreliable and can misidentify prose as AppleScript,
-	// LiveCodeServer, etc., coloring random English words as keywords.
+	// Skip highlighting when no language is given rather than guessing: auto-detection
+	// misidentifies prose often enough to colour random English words as keywords.
 	if (!highlighter || !validLang) {
 		return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
 	}
-	const opts = {
-		language: validLang,
-		ignoreIllegals: true,
-		theme: getCliHighlightTheme(theme),
-	};
+	const palette = getCliHighlightTheme(theme);
 	try {
-		return highlighter.highlight(code, opts).split("\n");
+		const painted = highlighter.highlight(code, validLang, (text, type) => {
+			const paint = type ? palette[type] : undefined;
+			return paint ? paint(text) : text;
+		});
+		return painted.split("\n");
 	} catch {
 		return code.split("\n");
 	}
@@ -1314,13 +1310,14 @@ export function getMarkdownTheme(): MarkdownTheme {
 			if (!highlighter || !validLang) {
 				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
 			}
-			const opts = {
-				language: validLang,
-				ignoreIllegals: true,
-				theme: getCliHighlightTheme(theme),
-			};
+			const palette = getCliHighlightTheme(theme);
 			try {
-				return highlighter.highlight(code, opts).split("\n");
+				return highlighter
+					.highlight(code, validLang, (text, type) => {
+						const paint = type ? palette[type] : undefined;
+						return paint ? paint(text) : text;
+					})
+					.split("\n");
 			} catch {
 				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
 			}

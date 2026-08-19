@@ -764,7 +764,9 @@ describe("ACP mode preserves prime-agent features", () => {
 		expect(init.agentInfo).toMatchObject({ name: "prime-agent" });
 		expect(typeof init.agentInfo?.version).toBe("string");
 		// Namespaced only: unknown root keys are reserved for future ACP fields.
-		expect(init._meta).toHaveProperty(PRIME_AGENT_META_NAMESPACE);
+		// Array form: the namespace contains dots, which the string form reads as a property
+		// path rather than a literal key.
+		expect(init._meta).toHaveProperty([PRIME_AGENT_META_NAMESPACE]);
 		expect(Object.keys(init.agentCapabilities ?? {})).not.toContain("subagents");
 		// close is advertised, so a client knows it may release the session slot.
 		expect(init.agentCapabilities?.sessionCapabilities?.close).toBeDefined();
