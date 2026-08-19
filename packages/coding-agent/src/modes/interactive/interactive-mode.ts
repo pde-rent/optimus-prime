@@ -52,7 +52,6 @@ import {
 	APP_NAME,
 	APP_TITLE,
 	getAgentDir,
-	getAgentTracesLogPath,
 	getDebugLogPath,
 	getLogsDir,
 	getShareViewerUrl,
@@ -61,15 +60,6 @@ import {
 	VERSION,
 } from "../../config.js";
 import { AGENT_MESSAGE_RECEIVED_PREVIEW_LABEL, isAgentSessionMessage } from "../../core/agent-messages.js";
-import {
-	type AgentTracePreviewResult,
-	type AgentTraceUploadAllResult,
-	type AgentTraceUploadResult,
-	getPrimeAgentTraceCredential,
-	previewAgentTraceFile,
-	uploadAgentTraceFile,
-	uploadAllAgentTraces,
-} from "../../core/agent-traces.js";
 import { isNoModelsAvailableMessage } from "../../core/auth-guidance.js";
 import {
 	type AgentCronJob,
@@ -106,7 +96,6 @@ import {
 } from "../../core/messages.js";
 import { findExactModelReferenceMatch, resolveModelScopeFromModels } from "../../core/model-resolver.js";
 import { parseNewSessionCommand } from "../../core/new-session-command.js";
-import { resolvePrimeAgentTracesBaseUrl } from "../../core/prime-inference-auth.js";
 import { resolvePrimeInferencePostLoginModelAction } from "../../core/prime-inference-model-selection.js";
 import { parseCommandArgs } from "../../core/prompt-templates.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
@@ -1076,7 +1065,6 @@ export class InteractiveMode {
 
 	private retryLoader: Loader | undefined = undefined;
 	private retryCountdown: CountdownTimer | undefined = undefined;
-	private traceUploadAllAbortController: AbortController | undefined = undefined;
 
 	// Session-owned queued messages mirrored from connection events.
 	private connectionQueue: AgentConnectionQueueState = { steering: [], followUp: [] };
@@ -2788,7 +2776,6 @@ export class InteractiveMode {
 			this.isBashRunning() ||
 			this.getRetryAttempt() > 0 ||
 			this.connectionState?.sessionActions.active !== undefined ||
-			this.traceUploadAllAbortController !== undefined ||
 			this.sideQuestionEvent?.status === "running"
 		);
 	}
@@ -4705,11 +4692,6 @@ export class InteractiveMode {
 				if (commandName === "system-prompt" && !commandArgs) {
 					this.echoLocalCommand(text);
 					await this.handleSystemPromptCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "traces") {
-					await this.handleTracesCommand(canonicalCommandText);
 					this.editor.setText("");
 					return;
 				}
@@ -6669,7 +6651,6 @@ export class InteractiveMode {
 	}
 
 	private interruptOrClearInput(): void {
-		this.traceUploadAllAbortController?.abort(new Error("Trace upload cancelled"));
 		if (this.sideQuestionEvent?.status === "running") {
 			this.abortSideQuestion(this.sideQuestionEvent.id, true);
 		}
@@ -9293,252 +9274,6 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(prompt, 1, 0));
 		this.ui.requestRender();
-	}
-
-	private formatTraceUploadResult(result: AgentTraceUploadResult): string {
-		switch (result.status) {
-			case "uploaded":
-				return `Trace uploaded (${result.bytesStored.toLocaleString()} bytes).`;
-			case "disabled":
-				return "Trace sharing is disabled.";
-			case "missing_credentials":
-				return "Trace sharing needs a Prime API key. Run /traces login.";
-			case "no_session_file":
-				return "Current session has no persisted trace yet.";
-			case "empty_session":
-				return "Current session trace is empty.";
-			case "invalid_session":
-				return `Trace upload skipped: ${result.message}.`;
-			case "too_large":
-				return `Trace upload skipped: session file is ${result.size.toLocaleString()} bytes; limit is ${result.maxBytes.toLocaleString()} bytes.`;
-			case "failed":
-				if (result.statusCode === 404) {
-					return "Trace upload endpoint was not found. The platform API may not be deployed yet, or PRIME_AGENT_TRACES_BASE_URL points at the wrong API.";
-				}
-				return `Trace upload failed: ${result.statusCode ? `HTTP ${result.statusCode}: ` : ""}${result.message}. See ${getAgentTracesLogPath()} for details.`;
-		}
-	}
-
-	private async uploadCurrentTraceOnce(): Promise<AgentTraceUploadResult> {
-		const state = await this.agentConnection.getState();
-		return uploadAgentTraceFile({
-			sessionFile: state.sessionFile,
-			authStorage: this.modelRegistry.authStorage,
-			settingsManager: this.settingsManager,
-			requireEnabled: false,
-			reloadConfig: false,
-		});
-	}
-
-	private async previewCurrentTrace(): Promise<void> {
-		const state = await this.agentConnection.getState();
-		const result = await previewAgentTraceFile({ sessionFile: state.sessionFile });
-		let info: string;
-		switch (result.status) {
-			case "no_session_file":
-				info = "Trace preview is unavailable until the current session has a persisted assistant response.";
-				break;
-			case "empty_session":
-				info = "The current trace is empty.";
-				break;
-			case "invalid_session":
-			case "failed":
-				info = `Trace preview failed: ${result.message}.`;
-				break;
-			case "ready":
-				info = this.formatTracePreview(result);
-				break;
-		}
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(info, 1, 0));
-		this.ui.requestRender();
-	}
-
-	private formatTracePreview(result: Extract<AgentTracePreviewResult, { status: "ready" }>): string {
-		const lines = [
-			theme.bold("Trace Preview"),
-			theme.fg("dim", "Nothing has been uploaded by this command."),
-			"",
-			`${theme.fg("dim", "File:")} ${result.sessionFile}`,
-			`${theme.fg("dim", "Size:")} ${result.size.toLocaleString()} bytes`,
-			`${theme.fg("dim", "Uploadable:")} ${result.uploadable ? "Yes" : `No (limit ${result.maxBytes.toLocaleString()} bytes)`}`,
-			`${theme.fg("dim", "Endpoint:")} ${result.endpoint}`,
-			`${theme.fg("dim", "Session ID:")} ${result.sessionId}`,
-			`${theme.fg("dim", "Trace ID:")} ${result.traceId}`,
-		];
-		if (result.parentSessionId) {
-			lines.push(`${theme.fg("dim", "Parent session:")} ${result.parentSessionId}`);
-		}
-		if (result.gitRepo) {
-			lines.push(`${theme.fg("dim", "Git repository:")} ${result.gitRepo}`);
-		}
-		if (result.gitCommit) {
-			lines.push(`${theme.fg("dim", "Git commit:")} ${result.gitCommit}`);
-		}
-		lines.push("", theme.bold("Raw JSONL payload preview"));
-		if (result.contentPreview) {
-			lines.push(result.contentPreview);
-			if (result.truncated) {
-				lines.push("", theme.fg("dim", "Preview truncated; upload sends the complete file."));
-			}
-		} else {
-			lines.push(theme.fg("dim", "Payload omitted because the trace exceeds the upload limit."));
-		}
-		return lines.join("\n");
-	}
-
-	private async uploadAllTraces(sessionDir?: string, signal?: AbortSignal): Promise<AgentTraceUploadAllResult> {
-		return uploadAllAgentTraces({
-			authStorage: this.modelRegistry.authStorage,
-			settingsManager: this.settingsManager,
-			sessionDir,
-			requireEnabled: false,
-			reloadConfig: false,
-			signal,
-			onProgress: ({ completed, total }) => {
-				if (total > 0 && (completed === 0 || completed === total || completed % 10 === 0)) {
-					this.showStatus(
-						`Uploading traces: ${completed.toLocaleString()}/${total.toLocaleString()} (${keyText("app.clear")} to cancel)`,
-					);
-				}
-			},
-		});
-	}
-
-	private async handleTracesCommand(text: string): Promise<void> {
-		const command =
-			text
-				.replace(/^\/traces\b/, "")
-				.trim()
-				.toLowerCase() || "status";
-
-		if (command === "status") {
-			await this.settingsManager.reload().catch(() => undefined);
-			const credential = await getPrimeAgentTraceCredential(this.modelRegistry.authStorage);
-			const state = await this.agentConnection.getState();
-			const info = [
-				theme.bold("Trace Sharing"),
-				"",
-				`${theme.fg("dim", "Automatic uploads:")} ${this.settingsManager.getAgentTracesEnabled() ? "Enabled" : "Disabled"}`,
-				`${theme.fg("dim", "Credential:")} ${credential?.label ?? "Not configured"}`,
-				`${theme.fg("dim", "Endpoint:")} ${resolvePrimeAgentTracesBaseUrl()}`,
-				`${theme.fg("dim", "Session file:")} ${state.sessionFile ?? "In-memory"}`,
-				"",
-				theme.fg(
-					"dim",
-					"Commands: /traces on, /traces off, /traces preview, /traces upload-current, /traces upload-all, /traces login",
-				),
-			].join("\n");
-			this.chatContainer.addChild(new Spacer(1));
-			this.chatContainer.addChild(new Text(info, 1, 0));
-			this.ui.requestRender();
-			return;
-		}
-
-		if (command === "off" || command === "disable") {
-			this.settingsManager.setAgentTracesEnabled(false);
-			await this.settingsManager.flush();
-			this.showStatus("Trace sharing disabled.");
-			return;
-		}
-
-		if (command === "login") {
-			await this.createAuthFlows().runPrimeAgentTracesLogin();
-			return;
-		}
-
-		if (command === "preview") {
-			await this.previewCurrentTrace();
-			return;
-		}
-
-		if (command === "on" || command === "enable") {
-			let credential = await getPrimeAgentTraceCredential(this.modelRegistry.authStorage);
-			if (!credential) {
-				const authResult = await this.createAuthFlows().runPrimeAgentTracesLogin();
-				if (authResult.status !== "success") {
-					return;
-				}
-				credential = await getPrimeAgentTraceCredential(this.modelRegistry.authStorage);
-			}
-			if (!credential) {
-				this.showError("Trace sharing needs a Prime API key.");
-				return;
-			}
-
-			this.settingsManager.setAgentTracesEnabled(true);
-			await this.settingsManager.flush();
-			const uploadResult = await this.uploadCurrentTraceOnce();
-			const uploadMessage =
-				uploadResult.status === "no_session_file" || uploadResult.status === "empty_session"
-					? "Current session will upload after the first assistant response."
-					: this.formatTraceUploadResult(uploadResult);
-			this.showStatus(`Trace sharing enabled. ${uploadMessage}`);
-			return;
-		}
-
-		if (command === "upload" || command === "upload-current") {
-			const credential = await getPrimeAgentTraceCredential(this.modelRegistry.authStorage);
-			if (!credential) {
-				this.showError("Trace sharing needs a Prime API key. Run /traces login.");
-				return;
-			}
-			const uploadResult = await this.uploadCurrentTraceOnce();
-			const message = this.formatTraceUploadResult(uploadResult);
-			if (uploadResult.status === "failed") {
-				this.showError(message);
-			} else {
-				this.showStatus(message);
-			}
-			return;
-		}
-
-		if (command === "upload-all") {
-			const credential = await getPrimeAgentTraceCredential(this.modelRegistry.authStorage);
-			if (!credential) {
-				this.showError("Trace sharing needs a Prime API key. Run /traces login.");
-				return;
-			}
-			if (this.traceUploadAllAbortController) {
-				this.showWarning("A trace upload is already running. Cancel it before starting another.");
-				return;
-			}
-			const state = await this.agentConnection.getState();
-			const abortController = new AbortController();
-			this.traceUploadAllAbortController = abortController;
-			let result: AgentTraceUploadAllResult;
-			try {
-				result = await this.uploadAllTraces(state.sessionDir, abortController.signal);
-			} finally {
-				if (this.traceUploadAllAbortController === abortController) {
-					this.traceUploadAllAbortController = undefined;
-				}
-			}
-			if (abortController.signal.aborted) {
-				this.showStatus("Trace upload cancelled.");
-				return;
-			}
-			if (result.total === 0) {
-				this.showStatus("No persisted traces were found.");
-				return;
-			}
-			const summary = [
-				`Uploaded ${result.uploaded.toLocaleString()} of ${result.total.toLocaleString()} traces`,
-				result.skipped > 0 ? `${result.skipped.toLocaleString()} skipped` : undefined,
-				result.failed > 0 ? `${result.failed.toLocaleString()} failed` : undefined,
-				`${result.bytesStored.toLocaleString()} bytes stored`,
-			]
-				.filter((part): part is string => part !== undefined)
-				.join("; ");
-			if (result.failed > 0) {
-				this.showWarning(`${summary}. See ${getAgentTracesLogPath()} for details.`);
-			} else {
-				this.showStatus(`${summary}.`);
-			}
-			return;
-		}
-
-		this.showWarning("Usage: /traces [status|on|off|preview|upload|upload-current|upload-all|login]");
 	}
 
 	private async handleContextCommand(): Promise<void> {
