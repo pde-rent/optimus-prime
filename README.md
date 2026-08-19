@@ -135,6 +135,50 @@ Depth is dynamic; the graph is still assembled by the agent rather than resolved
 
 Memory retrieval is a local BM25F index: no embedding service, no network call.
 
+## MCP
+
+No MCP server ships enabled. The client is built in, so adding one is configuration
+rather than installation.
+
+A server is a named entry under `mcpServers`, in either settings file:
+
+```jsonc
+// ~/.optimus/agent/settings.json      — every project
+// <project>/.optimus/agent/settings.json — this project only
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "bearerTokenEnvVar": "GITHUB_MCP_TOKEN"
+    }
+  }
+}
+```
+
+A project entry overrides a global one of the same name. Credentials are named, never
+inlined: `bearerTokenEnvVar` reads a token from the environment, and `"oauth": true`
+uses the browser login flow instead, storing the token with the harness's other
+credentials rather than in the settings file.
+
+From inside a session, the REPL reaches every configured server through one binding:
+
+```js
+await mcp.servers();                              // what is configured, and what is authed
+const tools = await mcp.tools("github");          // follows pagination
+await mcp.call("github", "search_issues", { q: "is:open label:bug" });
+```
+
+Tools are **not** flattened into the model's tool list. A server exposing eighty tools
+costs nothing until it is asked, which is also why a server's tool names cannot collide
+with the harness's own or with another server's.
+
+The client speaks both eras of the protocol: the stateless revision (`2026-07-28`) and
+the handshake revisions (`2025-11-25` and earlier), detected per endpoint and cached.
+That matters more than it sounds — roughly seven in eight client connections were still
+handshake-era three weeks after the stateless revision shipped. Transport is Streamable
+HTTP; stdio servers are not reachable yet.
+
 ## Supply chain
 
 Every dependency is code that runs with your credentials, in your repositories, and updates

@@ -1,8 +1,9 @@
-// Host side of MCP integrations. The protocol itself runs in the REPL (see the bundled
-// linear/notion skills' mcp-client.js); the host only registers OAuth providers, gates
-// integration skills by auth, and serves mcp.* host-requests.
+// Host side of MCP. The protocol client runs here rather than in the REPL: one
+// implementation instead of a copy per skill, and credentials never enter the
+// sandbox. The REPL reaches it through `mcp.*` host requests, the same way it
+// reaches harness state.
 
-import { createMcpOAuthProvider } from "@earendil-works/pi-ai/mcp";
+import { createMcpOAuthProvider, McpClient } from "@earendil-works/pi-ai/mcp";
 import { registerOAuthProvider, unregisterOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import type { AuthStorage } from "../auth-storage.js";
 import type { McpServerConfig } from "../settings-manager.js";
@@ -143,6 +144,26 @@ export class McpManager {
 				return config;
 			},
 		};
+		handlers["mcp.list_servers"] = async () => ({
+			servers: Array.from(this.integrations.values()).map((integration) => ({
+				server: integration.server,
+				label: integration.label,
+				url: integration.url,
+				authed: this.isAuthed(integration),
+			})),
+		});
+		handlers["mcp.list_tools"] = async (payload) => {
+			const client = await this.#clientFor(String(payload.server ?? ""));
+			return { tools: await client.listTools() };
+		};
+		handlers["mcp.call_tool"] = async (payload) => {
+			const name = String(payload.tool ?? "");
+			if (!name) throw new Error("mcp.call_tool requires a tool");
+			const client = await this.#clientFor(String(payload.server ?? ""));
+			const args = (payload.arguments ?? {}) as Record<string, unknown>;
+			const schema = payload.input_schema as Record<string, unknown> | undefined;
+			return (await client.callTool(name, args, schema)) as unknown as Record<string, unknown>;
+		};
 		// Only expose begin_login when an interactive login is actually wired, so the
 		// kernel doesn't get a handler whose only behavior is to throw.
 		const beginLogin = this.beginLogin;
@@ -155,6 +176,31 @@ export class McpManager {
 			};
 		}
 		return handlers;
+	}
+
+	/**
+	 * Build a client for a configured server.
+	 *
+	 * A fresh client per call is cheap -- modern servers are stateless and the era
+	 * probe is cached per endpoint for the process -- and it keeps a stale token or a
+	 * changed configuration from persisting across a refresh.
+	 */
+	async #clientFor(server: string): Promise<McpClient> {
+		if (!server) throw new Error("an MCP request requires a server");
+		const integration = this.integrations.get(server);
+		if (!integration) {
+			const known = Array.from(this.integrations.keys()).join(", ");
+			throw new Error(`unknown MCP server ${JSON.stringify(server)}${known ? `; configured: ${known}` : ""}`);
+		}
+		return new McpClient({
+			url: integration.url,
+			headers: integration.headers,
+			// Read per request so a refreshed token is picked up without rebuilding.
+			getAccessToken: async () => {
+				if (integration.bearerTokenEnvVar) return process.env[integration.bearerTokenEnvVar];
+				return (await this.authStorage.getApiKey(this.providerId(server))) ?? undefined;
+			},
+		});
 	}
 
 	/** Status for the /mcp list command. */

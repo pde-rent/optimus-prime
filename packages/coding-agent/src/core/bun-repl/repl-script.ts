@@ -128,6 +128,30 @@ type HarnessOptions = Record<string, unknown>;
 const harnessRequest = (type: string, options?: HarnessOptions) => hostBridge.hostRequest(type, options ?? {});
 
 /**
+ * MCP, as one binding rather than one per server.
+ *
+ * The protocol client runs host-side, so credentials never enter this sandbox and
+ * there is one implementation rather than a copy per server. Naming the server as
+ * an argument keeps the prompt cost at zero when no server is configured, and
+ * avoids flattening a server's whole tool list into the model's tool surface --
+ * which is where other harnesses meet name collisions and length limits.
+ */
+const mcpObj = {
+	/** Configured servers and whether each one currently has credentials. */
+	servers: () => hostBridge.hostRequest("mcp.list_servers", {}),
+	/** Tools a server offers, following pagination. */
+	tools: (server: string) => hostBridge.hostRequest("mcp.list_tools", { server }),
+	/**
+	 * Call a tool. Pass the tool's `inputSchema` from `tools()` when the server
+	 * mirrors parameters into headers; without it such a call is rejected.
+	 */
+	call: (server: string, tool: string, args?: Record<string, unknown>, inputSchema?: Record<string, unknown>) =>
+		hostBridge.hostRequest("mcp.call_tool", { server, tool, arguments: args ?? {}, input_schema: inputSchema }),
+	/** Re-read credentials for a server after a login or a token refresh. */
+	refresh: (server: string) => hostBridge.hostRequest("mcp.refresh", { server }),
+};
+
+/**
  * Continual harness CRUD. Host-owned store; every call is a host request.
  * `harness.delete_subagent` deletes a stored subagent spec and is unrelated to
  * `rlm.delete_subagent`, which terminates a live child agent.
@@ -220,6 +244,7 @@ const INJECTED = new Set([
 	"__import",
 	"__rlm_host_request",
 	"rlm",
+	"mcp",
 	"pi",
 ]);
 
@@ -454,6 +479,7 @@ Object.assign(context, {
 	__import: importModule,
 	__rlm_host_request: hostBridge.hostRequest.bind(hostBridge),
 	rlm: rlmObj,
+	mcp: mcpObj,
 	pi: piObj,
 });
 /**
