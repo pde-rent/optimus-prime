@@ -156,7 +156,7 @@ The vm context is populated explicitly. Cells get `console`, `display()`, `rlm`,
 
 There is deliberately **no `process`** in the sandbox, so model-generated code cannot exit or signal the REPL child out from under the host. Use `env` in place of `process.env`, and `cd()`/`pwd()` in place of `process.chdir()`/`process.cwd()`. `cd()` changes the child's real working directory, so JS cells and `%%bash` cells always agree on where they are, and an assignment into `env` is visible to every later `%%bash` cell.
 
-`display({ mimeType, data })` emits a payload to the host. Image MIME types become context attachments the model can actually see; `application/vnd.prime-agent.diff+json` renders an inline diff; agent-message receipts are surfaced on the tool result. This is the entire display surface — there is no Python-style rich display, and no matplotlib, pandas, or `rich` rendering path.
+`display({ mimeType, data })` emits a payload to the host. Image MIME types become context attachments the model can actually see; `application/vnd.optimus-prime.diff+json` renders an inline diff; agent-message receipts are surfaced on the tool result. This is the entire display surface — there is no Python-style rich display, and no matplotlib, pandas, or `rich` rendering path.
 
 ### Timeout and Runaway Cells
 

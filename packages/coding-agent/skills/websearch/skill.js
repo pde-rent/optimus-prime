@@ -21,7 +21,7 @@ const DEFAULT_READ_CHARS = 4000;
 /** Extracted-text cache bounds: this module lives in a long-running REPL. */
 const READ_CACHE_ENTRIES = 5;
 const READ_CACHE_CHARS = 600_000;
-const USER_AGENT = "prime-agent-websearch/1.0 (+https://github.com/PrimeIntellect-ai/prime-agent)";
+const USER_AGENT = "optimus-prime-websearch/1.0 (+https://github.com/pde-rent/optimus-prime)";
 
 const SERPER_URL = "https://google.serper.dev/search";
 

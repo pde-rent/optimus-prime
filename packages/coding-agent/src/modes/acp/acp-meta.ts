@@ -10,7 +10,7 @@
  */
 
 /** Reverse-domain namespace for every prime-agent `_meta` payload. */
-export const PRIME_AGENT_META_NAMESPACE = "ai.primeintellect.prime-agent";
+export const PRIME_AGENT_META_NAMESPACE = "dev.optimus-prime";
 
 export interface PrimeAgentSubagentMeta {
 	id: string;

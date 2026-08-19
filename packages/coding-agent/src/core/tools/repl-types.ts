@@ -5,10 +5,10 @@
  */
 
 /** Display MIME carrying one file edit, emitted by the `edit` skill. */
-export const DIFF_DISPLAY_MIME = "application/vnd.prime-agent.diff+json";
+export const DIFF_DISPLAY_MIME = "application/vnd.optimus-prime.diff+json";
 
 /** Display MIME carrying one agent-message send receipt. */
-export const AGENT_MESSAGE_DISPLAY_MIME = "application/vnd.prime-agent.agent-message+json";
+export const AGENT_MESSAGE_DISPLAY_MIME = "application/vnd.optimus-prime.agent-message+json";
 
 /** Handler for host requests arriving from the REPL comm bridge. */
 export type HostRequestHandler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;

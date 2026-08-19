@@ -79,7 +79,7 @@ The factory receives one argument:
 | Field | Type | Purpose |
 |---|---|---|
 | `hostRequest(type, payload)` | `(string, object) => Promise<any>` | Call a host handler (`goal.get`, `compact.run`, `agent_message.send`, `mcp.config`, …). This is how a skill reaches session state that lives in the host. |
-| `display(payload)` | `({ mimeType, data }) => void` | Emit a display payload to the TUI. Image MIME types become context attachments; `application/vnd.prime-agent.diff+json` renders an inline diff. |
+| `display(payload)` | `({ mimeType, data }) => void` | Emit a display payload to the TUI. Image MIME types become context attachments; `application/vnd.optimus-prime.diff+json` renders an inline diff. |
 | `cwd` | `string` | The REPL's working directory at call time. |
 | `env` | `object` | The REPL child's environment. |
 

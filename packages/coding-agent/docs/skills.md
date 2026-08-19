@@ -233,7 +233,7 @@ The factory receives one context argument:
 | Field | Type | Purpose |
 |---|---|---|
 | `hostRequest(type, payload)` | `(string, object) => Promise<any>` | Call a host handler (`goal.get`, `compact.run`, `agent_message.send`, `mcp.config`, …) to reach session state owned by the host. |
-| `display(payload)` | `({ mimeType, data }) => void` | Emit a display payload to the TUI. Image MIME types become context attachments; `application/vnd.prime-agent.diff+json` renders an inline diff. |
+| `display(payload)` | `({ mimeType, data }) => void` | Emit a display payload to the TUI. Image MIME types become context attachments; `application/vnd.optimus-prime.diff+json` renders an inline diff. |
 | `cwd` | `string` | The REPL's working directory. |
 | `env` | `object` | The REPL child's environment. |
 

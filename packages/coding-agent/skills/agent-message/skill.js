@@ -4,7 +4,7 @@
  * All routing and sender identity live in the host. These functions only call
  * the host bridge exposed inside the REPL.
  */
-const MESSAGE_DISPLAY_MIME = "application/vnd.prime-agent.agent-message+json";
+const MESSAGE_DISPLAY_MIME = "application/vnd.optimus-prime.agent-message+json";
 const ROLES = ["parent", "sibling", "child"];
 
 export default function createSkill({ hostRequest, display }) {
