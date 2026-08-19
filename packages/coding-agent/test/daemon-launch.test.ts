@@ -13,6 +13,7 @@ import {
 } from "../src/cli/daemon-launch.js";
 import { ENV_AGENT_DIR, getDaemonLogPath, VERSION } from "../src/config.js";
 import { DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_ID } from "../src/modes/daemon/daemon-protocol.js";
+import { getDaemonRuntimeIdentity } from "../src/modes/daemon/daemon-runtime-identity.js";
 
 interface FakeDaemonOptions {
 	/** Sessions returned for a `list` command. */
@@ -25,6 +26,7 @@ interface FakeDaemonOptions {
 	protocolVersion?: number;
 	appVersion?: string;
 	schemaId?: string;
+	buildId?: string;
 	serverCapabilities?: string[];
 	onCommand?: (command: { type: string }) => void;
 }
@@ -49,6 +51,9 @@ async function startFakeDaemon(options: FakeDaemonOptions = {}): Promise<FakeDae
 			protocol: { name: "optimus.daemon", version: options.protocolVersion ?? DAEMON_PROTOCOL_VERSION },
 			appVersion: options.appVersion,
 			schemaId: options.schemaId ?? DAEMON_SCHEMA_ID,
+			// A daemon whose build differs from the client's is stale even when protocol, schema and
+			// app version all agree, so a fake that means to look current has to match this too.
+			runtime: { buildId: options.buildId ?? getDaemonRuntimeIdentity().buildId },
 			clientId: "fake-client",
 			serverCapabilities: options.serverCapabilities ?? [],
 		});
@@ -339,6 +344,29 @@ describe("ensureInteractiveDaemonRunning", () => {
 		}
 	});
 
+	it("treats a daemon from a different build as stale", async () => {
+		// Protocol, schema and app version all survive an ordinary rebuild, so without build identity
+		// a worker started before it keeps serving the previous code and the change appears not to
+		// have taken effect.
+		const daemon = await startFakeDaemon({ appVersion: VERSION, buildId: "some-other-build" });
+		try {
+			const probe = await probeDaemonVersion(daemon.socketPath);
+			expect(probe.status).toBe("stale");
+		} finally {
+			await daemon.close();
+		}
+	});
+
+	it("treats a daemon from the same build as current", async () => {
+		const daemon = await startFakeDaemon({ appVersion: VERSION });
+		try {
+			const probe = await probeDaemonVersion(daemon.socketPath);
+			expect(probe.status).toBe("current");
+		} finally {
+			await daemon.close();
+		}
+	});
+
 	it("succeeds when the spawned child loses the race to an already-serving daemon", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pa-launch-startup-race-"));
 		const entrypoint = join(dir, "loser.mjs");
@@ -356,6 +384,7 @@ describe("ensureInteractiveDaemonRunning", () => {
 				protocol: { name: "optimus.daemon", version: DAEMON_PROTOCOL_VERSION },
 				appVersion: VERSION,
 				schemaId: DAEMON_SCHEMA_ID,
+				runtime: { buildId: getDaemonRuntimeIdentity().buildId },
 				clientId: "fake-client",
 				serverCapabilities: [],
 			});

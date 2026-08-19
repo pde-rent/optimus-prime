@@ -85,10 +85,14 @@ export async function probeDaemonVersion(socketPath: string): Promise<DaemonVers
 	}
 	try {
 		const hello = await client.waitForHello(2000);
+		// Build identity is part of "current" because protocol, schema and app version all stay put
+		// across an ordinary rebuild: a worker started before it would otherwise be considered fine
+		// and keep serving the previous code, which looks like a change simply not taking effect.
 		const current =
 			hello.protocol.version === DAEMON_PROTOCOL_VERSION &&
 			hello.schemaId === DAEMON_SCHEMA_ID &&
-			hello.appVersion === VERSION;
+			hello.appVersion === VERSION &&
+			hello.runtime?.buildId === getDaemonRuntimeIdentity().buildId;
 		if (!current) {
 			logDaemonLaunch(
 				`running daemon on ${socketPath} is stale: daemon v${hello.appVersion}/proto${hello.protocol.version}` +

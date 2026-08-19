@@ -29,6 +29,13 @@ try {
 	buildId = `release-${JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).version}`;
 }
 
+// A dirty tree rebuilt twice yields the same `git describe` output, so without this a running
+// daemon started from the previous dirty build still looks current and keeps serving old code.
+// Released builds stay reproducible because only the dirty case gets a per-build suffix.
+if (buildId.endsWith("-dirty")) {
+	buildId = `${buildId}.${Date.now().toString(36)}`;
+}
+
 rmSync(outdir, { recursive: true, force: true });
 
 await build({
