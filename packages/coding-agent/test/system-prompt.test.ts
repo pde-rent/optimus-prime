@@ -149,7 +149,7 @@ describe("buildRlmPrompt", () => {
 				"Recursive agent depth: 0",
 				`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 				"",
-				"Installed skills (preloaded REPL bindings): `websearch`, `refine`.",
+
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 				"",
@@ -223,7 +223,9 @@ describe("buildRlmPrompt", () => {
 			installedSkills: ["websearch"],
 		});
 
-		expect(prompt).toContain("Installed skills (preloaded REPL bindings): `websearch`.");
+		expect(prompt).toContain("Read each skill's SKILL.md for its API");
+		// The names live in the <available_skills> roster, emitted once by buildSystemPrompt.
+		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("A callable `rlm` is already in your global namespace");
 		expect(prompt).toContain("persistent JavaScript/TypeScript REPL (Bun)");
 		expect(prompt).toContain("Each `%%bash` cell runs in a throw-away subshell");
@@ -254,18 +256,28 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).not.toContain("The `repl` tool is a persistent JavaScript/TypeScript REPL");
 	});
 
-	test("falls back to plain skill listing when repl is inactive", () => {
-		const prompt = buildRlmPrompt({
+	test("names the skills only when no roster will be rendered", () => {
+		// buildSystemPrompt renders <available_skills> whenever the model can read a
+		// file, which includes a bash-only session, so the names are not repeated there.
+		const withBash = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
 			installedSkills: ["websearch"],
 			activeTools: ["bash"],
 			allowRecursion: false,
 		});
+		expect(withBash).not.toContain("Installed skills: `websearch`.");
+		expect(withBash).toContain("Read each skill's SKILL.md for its API");
 
-		expect(prompt).toContain("Installed skills: `websearch`. Read their SKILL.md files for usage.");
-		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
-		expect(prompt).not.toContain("Read each skill's SKILL.md for its API");
+		// With no file access there is no roster, so this is the only place they appear.
+		const withoutTools = buildRlmPrompt({
+			cwd: "/repo",
+			messagesPath: "/repo/.pi/sessions/session.jsonl",
+			installedSkills: ["websearch"],
+			activeTools: [],
+			allowRecursion: false,
+		});
+		expect(withoutTools).toContain("Installed skills: `websearch`. Read their SKILL.md files for usage.");
 	});
 
 	test("gates agent messaging and observation doctrine on installed skills", () => {
@@ -727,7 +739,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("Working directory: /repo");
 		expect(prompt).toContain("Conversation log: /repo/.pi/sessions/session.jsonl");
 		expect(prompt).toContain("await rlm('sub-task')");
-		expect(prompt).toContain("returns at admission, not completion");
+		expect(prompt).toContain("returns immediately after task admission");
 		expect(prompt).toContain("Results arrive only through an available messaging capability or files");
 		expect(prompt).toContain("recover direct child handles");
 		expect(prompt).toContain("kernel restart or compaction");
@@ -965,7 +977,9 @@ describe("buildSystemPrompt", () => {
 			cwd: "/repo",
 		});
 
-		expect(prompt).toContain("Installed skills (preloaded REPL bindings): `web_search`.");
+		// The binding is stated once, in the <available_skills> roster.
+		expect(prompt).toContain("<js_binding>web_search</js_binding>");
+		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("<name>web-search</name>");
 		expect(prompt).toContain("<type>js</type>");
 		expect(prompt).toContain("<js_binding>web_search</js_binding>");

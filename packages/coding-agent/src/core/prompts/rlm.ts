@@ -218,13 +218,18 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		skillLines.push(`Local skills live under ${skillsDir}. Read their SKILL.md files when helpful.`);
 	}
 	if (installedSkills.length > 0) {
-		const installed = installedSkills.map((skill) => `\`${skill}\``).join(", ");
-		if (hasRepl) {
-			skillLines.push(`Installed skills (preloaded REPL bindings): ${installed}.`);
+		// The <available_skills> roster carries each skill's name, binding, description
+		// and path already, and it is rendered whenever the model can read a file. Naming
+		// the same bindings again here bought nothing and was paid on every request, so
+		// only the part the roster does not state -- how to interrogate a binding -- is
+		// kept. Without file access there is no roster, so the names are listed instead.
+		const rendersSkillRoster = hasRepl || activeTools.includes("bash");
+		if (rendersSkillRoster) {
 			skillLines.push(
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
 			);
 		} else {
+			const installed = installedSkills.map((skill) => `\`${skill}\``).join(", ");
 			skillLines.push(`Installed skills: ${installed}. Read their SKILL.md files for usage.`);
 		}
 		// Rendered only when the skill exists: an instruction to search, given to an agent with
@@ -313,27 +318,21 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 export function buildSubagentGuidance(
 	options: { includeRefineExamples?: boolean; hasAgentMessage?: boolean; hasAgentObserve?: boolean } = {},
 ): string {
+	// Judgement only. The mechanics -- admission, naming, replies, handles,
+	// observation -- are stated once in the recursion block this renders after, and
+	// restating them here cost every agent at every depth the same words twice.
+	void options.hasAgentMessage;
+	void options.hasAgentObserve;
 	const lines = [
 		"# Delegating to sub-agents",
 		"",
-		"Spawn independent, self-contained work with `const handle = await rlm('task', { name: 'worker' })`. This returns at admission, not completion; keep the handle to stop or inspect the child later.",
-	];
-	if (options.hasAgentMessage) {
-		lines.push(
-			"Ask for an explicit reply when needed. A child replies with `await agent_message.send(message, { receiver_role: 'parent' })`; parent follow-ups use `receiver_role: 'child'` plus the child's name or id. Not every message needs a reply.",
-		);
-	}
-	lines.push("Use `await rlm.list_subagents()` after kernel restart or compaction.");
-	if (options.hasAgentObserve) {
-		lines.push("Use `agent_observe` for bounded transcript inspection.");
-	}
-	lines.push(
-		"Have children write files and read those files for fan-in.",
-		"Delegate parallel context-heavy research or independent implementation; do a single known lookup, edit, or command inline.",
+		"Delegate parallel context-heavy research or independent implementation. Do a single known lookup, edit, or command inline instead.",
 		// A page read lands in the parent's history and is then re-sent every
 		// remaining turn, so the cost is the size times the turns left, not once.
 		"Delegate a read when the source is large and you need a conclusion rather than the text: a long article, a full build log, a wide search sweep. Have the child report the conclusion with its sources. Read inline when you need the actual bytes, such as a file you are about to edit.",
-	);
+		"Have children write files and read those files for fan-in.",
+		"Recover direct child handles with `await rlm.list_subagents()` after a kernel restart or compaction.",
+	];
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");
 	}
