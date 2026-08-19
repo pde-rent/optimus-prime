@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentAutonomousConfig } from "./autonomous.js";
 
-export type AgentExecutionMode = "interactive" | "print" | "json" | "rpc" | "acp";
+export type AgentExecutionMode = "interactive" | "print" | "json" | "rpc";
 
 export interface AgentSessionRuntimeConfig {
 	cwd?: string;

@@ -46,12 +46,10 @@
 		"test:process-stress": "PI_TEST_TAGS=process-stress bun test --preload ../../scripts/test-preload.ts --isolate test/daemon-supervisor-process.test.ts",
 		"postinstall": "bun postinstall.cjs",
 		"prepublishOnly": "bun run clean && bun run build",
-		"bundle": "bun scripts/bundle.mjs",
-		"test:kernel": "PI_TEST_TAGS=kernel-heavy bun test --preload ../../scripts/test-preload.ts --isolate test/acp-cold-cli.test.ts"
+		"bundle": "bun scripts/bundle.mjs"
 	},
 	"dependencies": {
 		"@speed-highlight/core": "^1.2.24",
-		"@agentclientprotocol/sdk": "^1.3.0",
 		"@earendil-works/pi-agent-core": "^1.0.0",
 		"@earendil-works/pi-ai": "^1.0.0",
 		"@earendil-works/pi-tui": "^1.0.0",

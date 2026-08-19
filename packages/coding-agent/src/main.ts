@@ -93,8 +93,6 @@ import {
 	InProcessAgentConnection,
 	InteractiveMode,
 	resolveAttachModelFallbackMessage,
-	runAcpMode,
-	runAcpModeWithConnection,
 	runAgentsViewMode,
 	runDaemonMode,
 	runDaemonSupervisorMode,
@@ -172,9 +170,6 @@ function resolveAppMode(parsed: Args, stdinIsTTY: boolean): AppMode {
 	if (parsed.mode === "rpc") {
 		return "rpc";
 	}
-	if (parsed.mode === "acp") {
-		return "acp";
-	}
 	if (parsed.mode === "json") {
 		return "json";
 	}
@@ -184,7 +179,7 @@ function resolveAppMode(parsed: Args, stdinIsTTY: boolean): AppMode {
 	return "interactive";
 }
 
-function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc" | "acp" | "daemon"> {
+function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc" | "daemon"> {
 	return appMode === "json" ? "json" : "text";
 }
 
@@ -1488,7 +1483,7 @@ export async function main(args: string[], options?: MainOptions) {
 	if (useDaemonClient) {
 		const settingsManager = SettingsManager.create(sessionManager.getCwd(), agentDir);
 		let stdinContent: string | undefined;
-		if (appMode !== "rpc" && appMode !== "acp") {
+		if (appMode !== "rpc") {
 			stdinContent = await readPipedStdin();
 		}
 		time("readPipedStdin");
@@ -1537,9 +1532,6 @@ export async function main(args: string[], options?: MainOptions) {
 		if (appMode === "rpc") {
 			return await runRpcModeWithConnection(connection);
 		}
-		if (appMode === "acp") {
-			return await runAcpModeWithConnection(connection);
-		}
 		const exitCode = await runPrintModeWithConnection(connection, {
 			mode: toPrintOutputMode(appMode),
 			messages: parsed.messages,
@@ -1581,7 +1573,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	// Read piped stdin content (if any) - skip for RPC/daemon modes which use other transports
 	let stdinContent: string | undefined;
-	if (appMode !== "rpc" && appMode !== "acp" && appMode !== "daemon") {
+	if (appMode !== "rpc" && appMode !== "daemon") {
 		stdinContent = await readPipedStdin();
 	}
 	time("readPipedStdin");
@@ -1616,9 +1608,6 @@ export async function main(args: string[], options?: MainOptions) {
 	if (appMode === "rpc") {
 		printTimings();
 		await runRpcMode(runtime);
-	} else if (appMode === "acp") {
-		printTimings();
-		await runAcpMode(runtime);
 	} else if (appMode === "interactive") {
 		if (explicitAgentsView || parsed.resume === true) {
 			console.error(chalk.yellow("Warning: the agents view needs the daemon; opening a normal chat instead"));

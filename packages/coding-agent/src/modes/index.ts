@@ -2,17 +2,6 @@
  * Run modes for the coding agent.
  */
 
-export {
-	type AcpModeOptions,
-	acpStopReason,
-	acpToolKind,
-	acpUpdatesForSessionEvent,
-	bashToolCallId,
-	PRIME_AGENT_META_NAMESPACE,
-	primeAgentMeta,
-	runAcpMode,
-	runAcpModeWithConnection,
-} from "./acp/index.js";
 export type {
 	AgentConnection,
 	AgentConnectionArtifactReference,
