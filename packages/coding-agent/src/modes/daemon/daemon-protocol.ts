@@ -17,6 +17,7 @@ import type {
 	AgentHeartbeatUpdateAction,
 } from "../../core/cron-jobs.js";
 import type { InputSource } from "../../core/extensions/types.js";
+import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { CustomMessage } from "../../core/messages.js";
 import type { QueuedMessageLane, QueuedMessageMutation } from "../../core/session-action-store.js";
 import type { SessionCwdIssue } from "../../core/session-cwd.js";
@@ -63,8 +64,10 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // Revision 17 renames the built-in tool to "repl" and its forwarded session event to
 // repl_sent_agent_message. No alias is accepted for the previous names: the schema id changes with
 // the revision, so a stale daemon is relaunched rather than left speaking the old wire names.
-export const DAEMON_SCHEMA_REVISION = 17;
-export const DAEMON_SCHEMA_ID = "protocol-7-schema-17-1bcb9e7f1a49";
+// Revision 18 adds set_graph_resolver, so a session's graph budget can be changed from a client
+// that is not the process holding the session.
+export const DAEMON_SCHEMA_REVISION = 18;
+export const DAEMON_SCHEMA_ID = "protocol-7-schema-18-5d84c474b7e2";
 
 export type DaemonProtocolName = typeof DAEMON_PROTOCOL_NAME;
 export type DaemonProtocolVersion = number;
@@ -599,6 +602,7 @@ export type DaemonCommand =
 	| { id?: string; type: "set_session_name"; activeSessionId: string; name: string; workerToken?: string }
 	| { id?: string; type: "get_rlm_max_depth_status"; activeSessionId: string }
 	| { id?: string; type: "set_rlm_max_depth"; activeSessionId: string; maxDepth: number; global?: boolean }
+	| { id?: string; type: "set_graph_resolver"; activeSessionId: string; level: GraphResolverLevel }
 	| { id?: string; type: "rename_saved_session"; activeSessionId?: string; sessionPath: string; name: string }
 	| { id?: string; type: "delete_saved_session"; activeSessionId?: string; sessionPath: string }
 	| { id?: string; type: "get_session_context"; activeSessionId: string }
@@ -736,6 +740,7 @@ export const DAEMON_COMMAND_COMPATIBILITY = {
 	set_session_name: LEGACY_DAEMON_COMMAND,
 	get_rlm_max_depth_status: RLM_MAX_DEPTH_COMMAND,
 	set_rlm_max_depth: RLM_MAX_DEPTH_COMMAND,
+	set_graph_resolver: { minProtocol: 7, minSchemaRevision: 18 },
 	rename_saved_session: LEGACY_DAEMON_COMMAND,
 	delete_saved_session: LEGACY_DAEMON_COMMAND,
 	get_session_context: LEGACY_DAEMON_COMMAND,

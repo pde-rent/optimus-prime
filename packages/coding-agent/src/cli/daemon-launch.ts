@@ -24,6 +24,7 @@ import {
 	DAEMON_WORKER_TOKEN_ENV,
 } from "../modes/daemon/daemon-worker-protocol.js";
 import { isHelpCommandRequest, PUBLIC_COMMAND_NAMES, REMOVED_COMMAND_NAMES } from "./command-registry.js";
+import { SETTINGS_VALUE_FLAGS } from "./settings-flags.js";
 import { formatCurrentCliCommand } from "./subprocess-launch.js";
 
 const DAEMON_STARTUP_TIMEOUT_MS = 30_000;
@@ -493,7 +494,7 @@ const EARLY_LAUNCH_VALUE_FLAGS = new Set([
 	"--models",
 	"--tools",
 	"-t",
-	"--thinking",
+	...SETTINGS_VALUE_FLAGS,
 	"--extension",
 	"-e",
 	"--skill",

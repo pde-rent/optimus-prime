@@ -10,6 +10,7 @@ import {
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
+import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../../../core/graph-resolver.js";
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
@@ -47,6 +48,7 @@ export interface SettingsConfig {
 	availableThemes: string[];
 	hideThinkingBlock: boolean;
 	treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all";
+	graphResolver: GraphResolverLevel;
 	showHardwareCursor: boolean;
 	editorPaddingX: number;
 	autocompleteMaxVisible: number;
@@ -73,6 +75,7 @@ export interface SettingsCallbacks {
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
 	onTreeFilterModeChange: (mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all") => void;
+	onGraphResolverChange: (level: GraphResolverLevel) => void;
 	onShowHardwareCursorChange: (enabled: boolean) => void;
 	onEditorPaddingXChange: (padding: number) => void;
 	onAutocompleteMaxVisibleChange: (maxVisible: number) => void;
@@ -248,6 +251,13 @@ export class SettingsSelectorComponent extends Container {
 				description: "Disable verbose printing at startup",
 				currentValue: config.quietStartup ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "graph-resolver",
+				label: "Graph budget",
+				description: "Extra spend allowed to resolve one task with several agents",
+				currentValue: config.graphResolver,
+				values: [...GRAPH_RESOLVER_LEVELS],
 			},
 			{
 				id: "tree-filter-mode",
@@ -474,6 +484,9 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "quiet-startup":
 						callbacks.onQuietStartupChange(newValue === "true");
+						break;
+					case "graph-resolver":
+						callbacks.onGraphResolverChange(newValue as GraphResolverLevel);
 						break;
 					case "tree-filter-mode":
 						callbacks.onTreeFilterModeChange(

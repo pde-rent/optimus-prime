@@ -29,6 +29,8 @@ export interface RlmSubagentRegistryEntry {
 	session_name: string;
 	session_dir: string;
 	status: RlmSubagentRegistryStatus;
+	/** Tokens this child has spent so far, from the harness's own usage attribution. */
+	tokens_spent: number;
 }
 
 export interface RlmListSubagentsResult {
@@ -59,6 +61,32 @@ export type RlmFindModelsHandler = (query: string, limit: number) => RlmFindMode
 const RLM_SUBAGENT_SESSION_NAME_MAX_LENGTH = 64;
 export const DEFAULT_RLM_MODEL_SEARCH_LIMIT = 8;
 export const MAX_RLM_MODEL_SEARCH_LIMIT = 20;
+
+/**
+ * Validate an orchestrator-supplied peer list: the siblings this child may message.
+ *
+ * Directed and per-node, so the cohort's edges are whatever the spawner declared rather than a
+ * single on/off switch over "all siblings". Listing B in A's peers does not let B reach A, which is
+ * what makes one-way review edges expressible.
+ *
+ * An empty array is meaningful and distinct from omitting the kwarg: it says this child talks to
+ * nobody but its parent. Omitting it leaves the family default in place.
+ */
+export function normalizeRequestedRlmPeers(value: unknown): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) {
+		throw new Error("rlm.run peers must be an array of sibling names");
+	}
+	const names: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== "string" || !entry.trim()) {
+			throw new Error("rlm.run peers entries must be non-empty strings");
+		}
+		const name = entry.trim();
+		if (!names.includes(name)) names.push(name);
+	}
+	return names;
+}
 
 /** Validate and normalize an orchestrator-supplied subagent session name. */
 export function normalizeRequestedRlmSubagentSessionName(value: unknown): string | undefined {
@@ -292,6 +320,9 @@ export interface CreateRlmSubagentRuntimeOptions {
 	includeCompactSkill: boolean;
 	rlmDepth: number;
 	rlmMaxDepth: number;
+	rlmMaxDepthPinned?: boolean;
+	/** Siblings this child may message. Undefined leaves the family default. */
+	peerNames?: string[];
 	rlmParentNodeId: string;
 	/** Source of the REPL cell that spawned this subagent, for display. */
 	spawnCode?: string;

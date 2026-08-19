@@ -5,6 +5,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
+import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverLevel } from "./graph-resolver.js";
 
 const RECENT_MODELS_LIMIT = 20;
 export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
@@ -147,6 +148,10 @@ export interface Settings {
 	subagentGraph?: boolean;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
+	/** Multi-agent graph budget dial. "off" keeps the single-agent path. default: "off" */
+	graphResolver?: GraphResolverLevel;
+	/** Clamp on the level ceiling. Only ever lowers it; it cannot raise a level past its budget. */
+	graphMaxTokens?: number;
 	idleEvictionMinutes?: number | "off"; // global daemon policy; default: 90
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
@@ -161,6 +166,8 @@ export interface Settings {
 	hideThinkingBlock?: boolean;
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	quietStartup?: boolean;
+	/** Play the start-up animation and sound. default: true */
+	ignition?: boolean;
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	mcpServers?: Record<string, McpServerConfig>; // User-declared MCP servers (name → config); built-ins are in the ai/mcp catalog
@@ -814,6 +821,34 @@ export class SettingsManager {
 		this.save();
 	}
 
+	/**
+	 * Graph budget dial. Env wins over the settings file so a run can be escalated without
+	 * editing configuration, mirroring how `RLM_MAX_DEPTH` behaves.
+	 */
+	getGraphResolver(): GraphResolverLevel {
+		const fromEnv = process.env.GRAPH_RESOLVER?.trim().toLowerCase();
+		if (isGraphResolverLevel(fromEnv)) return fromEnv;
+		const configured: unknown = this.settings.graphResolver;
+		return isGraphResolverLevel(configured) ? configured : DEFAULT_GRAPH_RESOLVER_LEVEL;
+	}
+
+	setGraphResolver(level: GraphResolverLevel): void {
+		this.globalSettings.graphResolver = level;
+		this.markModified("graphResolver");
+		this.save();
+	}
+
+	getGraphMaxTokens(): number | undefined {
+		const value: unknown = this.settings.graphMaxTokens;
+		return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+	}
+
+	setGraphMaxTokens(maxTokens: number): void {
+		this.globalSettings.graphMaxTokens = maxTokens;
+		this.markModified("graphMaxTokens");
+		this.save();
+	}
+
 	getIdleEvictionMinutes(): number | "off" {
 		const value: unknown = this.globalSettings.idleEvictionMinutes;
 		if (value === "off" || value === "none") return "off";
@@ -1004,6 +1039,17 @@ export class SettingsManager {
 	setShellPath(path: string | undefined): void {
 		this.globalSettings.shellPath = path;
 		this.markModified("shellPath");
+		this.save();
+	}
+
+	/** Start-up brand animation and sound. default: true */
+	getIgnition(): boolean {
+		return this.settings.ignition ?? true;
+	}
+
+	setIgnition(enabled: boolean): void {
+		this.globalSettings.ignition = enabled;
+		this.markModified("ignition");
 		this.save();
 	}
 

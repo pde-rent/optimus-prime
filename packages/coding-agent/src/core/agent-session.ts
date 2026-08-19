@@ -213,6 +213,7 @@ import {
 	createRlmSetEffortHostHandler,
 	findRlmModelMatches,
 	normalizeRequestedRlmEffort,
+	normalizeRequestedRlmPeers,
 	normalizeRequestedRlmSubagentModel,
 	normalizeRequestedRlmSubagentSessionName,
 	type RlmDeleteSubagentResult,
@@ -438,6 +439,8 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 	rlmDepth?: number;
 	rlmMaxDepth?: number;
+	rlmMaxDepthPinned?: boolean;
+	peerNames?: readonly string[];
 	rlmSessionDir?: string;
 	rlmParentNodeId?: string;
 	rlmParentAgent?: string;
@@ -855,6 +858,7 @@ type GoalSlashCommand =
 
 type AutonomousSlashCommand = { kind: "status" } | { kind: "on" } | { kind: "off" };
 
+import { admitsGraphNode, type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "./graph-resolver.js";
 import type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from "./rlm-max-depth.js";
 
 export type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from "./rlm-max-depth.js";
@@ -1019,6 +1023,17 @@ function waitForPromiseOrAbort<T>(
 	});
 }
 
+/**
+ * What one child assistant turn costs against the graph ceiling.
+ *
+ * Summed rather than read from `totalTokens`, because `attributeChildUsage` restores that field to
+ * the child's context size after folding descendant usage in — metering it would count window
+ * occupancy instead of work done. Cache reads count at full weight: a cheap token is still work.
+ */
+function graphTokens(usage: Usage): number {
+	return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+}
+
 function attributeChildUsage(parentUsage: Usage, childUsage: Usage): void {
 	const parentContextTokens =
 		parentUsage.totalTokens ||
@@ -1081,6 +1096,15 @@ export class AgentSession {
 	private _effortRaisedThisRun = false;
 	private _effortEscalationTriggered = false;
 	private _depthChangesThisRun = 0;
+	/**
+	 * Tokens spent on children, and children admitted, since this run began.
+	 *
+	 * Scoped to the run rather than to a "graph", because a graph has no boundary the host can
+	 * observe: the agent decides what a cohort is, and `rlm()` returns at admission rather than at
+	 * completion. The run is the smallest boundary both sides agree on.
+	 */
+	private _graphChildTokensThisRun = 0;
+	private _graphNodesThisRun = 0;
 	private _effortToolErrorStreaks = new Map<string, number>();
 	/** A user interrupt ends the run it happened in, so its trigger is carried into the next one. */
 	private _effortEscalationCarryOver = false;
@@ -1161,6 +1185,9 @@ export class AgentSession {
 	 */
 	private _rlmKernelBootGate: Semaphore | undefined;
 	private readonly _configuredRlmMaxDepth: number | undefined;
+	private readonly _rlmMaxDepthPinned: boolean;
+	/** Siblings this agent may message, when its spawner declared a cohort edge set. */
+	private readonly _peerNames?: readonly string[];
 	private _rlmMaxDepth: number;
 	private _rlmMaxDepthSource: RlmMaxDepthSource;
 	private _rlmSessionDir?: string;
@@ -1257,6 +1284,8 @@ export class AgentSession {
 			config.rlmDepth ??
 			(isNonNegativeInteger(headerRlmDepth) ? headerRlmDepth : parseDepth(process.env.RLM_DEPTH, 0, "RLM_DEPTH"));
 		this._configuredRlmMaxDepth = config.rlmMaxDepth;
+		this._rlmMaxDepthPinned = config.rlmMaxDepthPinned ?? false;
+		this._peerNames = config.peerNames;
 		if (this._configuredRlmMaxDepth !== undefined && !isNonNegativeInteger(this._configuredRlmMaxDepth)) {
 			throw new Error("rlmMaxDepth must be a non-negative integer");
 		}
@@ -1518,6 +1547,24 @@ export class AgentSession {
 		maxDepth: number;
 		source: RlmMaxDepthSource;
 	} {
+		const base = this._resolveConfiguredRlmMaxDepth();
+		// An explicit in-session `/rlm-max-depth` is the most specific thing the user has said about
+		// depth, so it stands even when the graph would want more; the graph then simply cannot use
+		// its deeper shapes. Every other source is a default the graph is entitled to raise, since
+		// turning the dial on is itself the statement of intent.
+		// An explicit pin stands, and so does an explicit zero: zero is the only value that states a
+		// prohibition rather than a default, and it is what a sandboxed or cost-capped run sets.
+		// Raising either would override the more specific instruction with the more general one.
+		if (base.source === "chat" || this._rlmMaxDepthPinned) return base;
+		if (base.maxDepth === 0 && base.source !== "default") return base;
+		const floor = graphMinDepth(this.settingsManager.getGraphResolver());
+		return floor > base.maxDepth ? { maxDepth: floor, source: "graph" } : base;
+	}
+
+	private _resolveConfiguredRlmMaxDepth(): {
+		maxDepth: number;
+		source: RlmMaxDepthSource;
+	} {
 		const persisted = this._loadPersistedRlmMaxDepthState();
 		if (persisted) {
 			return { maxDepth: persisted.maxDepth, source: "chat" };
@@ -1583,6 +1630,25 @@ export class AgentSession {
 		this._goalState = this._loadPersistedGoalState();
 		this._goalAccountingStartedAt = this._goalState.status === "active" ? Date.now() : undefined;
 		this._emitGoalUpdate();
+	}
+
+	/**
+	 * Change the graph budget for this session.
+	 *
+	 * The level feeds two cached things — the recursion-depth floor and the prompt block — so
+	 * writing the setting alone would leave the dial inert until the next process start. The prompt
+	 * is rebuilt unconditionally rather than only when the depth number moved, because turning the
+	 * dial on renders a block that was previously absent even when the floor changes nothing.
+	 */
+	setGraphResolver(level: GraphResolverLevel): GraphResolverLevel {
+		this.settingsManager.setGraphResolver(level);
+		const resolved = this._resolveRlmMaxDepth();
+		this._rlmMaxDepth = resolved.maxDepth;
+		this._rlmMaxDepthSource = resolved.source;
+		const oldBase = this._baseSystemPrompt;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._refreshExtensionSystemPrompt(this.agent.state.systemPrompt, oldBase);
+		return level;
 	}
 
 	private _reloadRlmMaxDepthFromBranch(): void {
@@ -4278,6 +4344,9 @@ export class AgentSession {
 			allowRecursion: this._rlmDepth < this._rlmMaxDepth,
 			rlmDepth: this._rlmDepth,
 			rlmParentAgent: this._rlmParentAgent,
+			// Read here rather than captured at construction so a `/graph` change during a session
+			// takes effect on the next prompt build, the way the other settings-derived blocks do.
+			graphResolver: this.settingsManager.getGraphResolver(),
 			harnessState: this._loadMergedHarnessState(),
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
@@ -4415,7 +4484,21 @@ export class AgentSession {
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
+	/**
+	 * Clear the graph budget for a new user turn.
+	 *
+	 * Deliberately not reset with the other per-run counters: those clear on `agent_start`, which
+	 * also fires for every follow-up, goal continuation and autonomous continuation. A budget that
+	 * refilled on each of those would let an autonomous run spend its ceiling once per continuation
+	 * while still reporting that it was bounded. The user turn is the window the ceiling names.
+	 */
+	private _resetGraphBudgetForTurn(): void {
+		this._graphChildTokensThisRun = 0;
+		this._graphNodesThisRun = 0;
+	}
+
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		this._resetGraphBudgetForTurn();
 		return this._prompt(text, options);
 	}
 
@@ -6949,6 +7032,20 @@ export class AgentSession {
 		this._effortToolErrorStreaks.clear();
 	}
 
+	/** Refuse a spawn the graph budget can no longer pay for. See `admitsGraphNode`. */
+	private _assertGraphBudgetAdmits(): void {
+		const level = this.settingsManager.getGraphResolver();
+		if (level === "off") return;
+		const budget = graphResolverBudget(level, this.settingsManager.getGraphMaxTokens());
+		if (!budget) return;
+		if (admitsGraphNode(this._graphChildTokensThisRun, budget, this._graphNodesThisRun)) return;
+		throw new Error(
+			`Graph budget exhausted (level=${level}, spent=${this._graphChildTokensThisRun}, ` +
+				`ceiling=${budget.ceilingTokens}, children=${this._graphNodesThisRun}/${budget.maxNodes}). ` +
+				`Finish with what the children already returned, or raise the budget with /graph.`,
+		);
+	}
+
 	private _recordEffortToolOutcome(toolName: string, isError: boolean): void {
 		if (!isError) {
 			this._effortToolErrorStreaks.delete(toolName);
@@ -8906,6 +9003,7 @@ export class AgentSession {
 					roster: async () =>
 						(await this.handleAgentMessageHostRequest("agent_message.list_agents")) as AgentFamilyRosterResult,
 					awaitPendingChildPublication: (selector) => this._awaitPendingRlmChildPublication(selector),
+					peerNames: this._peerNames,
 					sendAgentMessage: async (input) => {
 						const receipt = (await this.handleAgentMessageHostRequest("agent_message.send", {
 							target: input.target,
@@ -9126,6 +9224,7 @@ export class AgentSession {
 		sessionDir: string;
 		model: Model<any>;
 		effort?: ThinkingLevel;
+		peerNames?: string[];
 	}): CreateRlmSubagentRuntimeOptions {
 		return {
 			parentSession: this,
@@ -9146,6 +9245,11 @@ export class AgentSession {
 			includeCompactSkill: this._includeCompactSkill,
 			rlmDepth: this._rlmDepth + 1,
 			rlmMaxDepth: this._rlmMaxDepth,
+			// Carried explicitly: a child inherits the depth NUMBER, which reads as an ordinary
+			// default, so without this flag the graph floor would raise it again in the child and the
+			// user's pin would hold for exactly one level of the tree.
+			rlmMaxDepthPinned: this._rlmMaxDepthSource === "chat" || this._rlmMaxDepthPinned,
+			peerNames: options.peerNames,
 			rlmParentNodeId: options.id,
 		};
 	}
@@ -9286,7 +9390,23 @@ export class AgentSession {
 		return this._buildRlmSubagentList(await this._agentMessageController?.listAgents());
 	}
 
+	/**
+	 * Tokens each child has spent so far this session, keyed by child id.
+	 *
+	 * Read from the attribution entries the harness already writes on every child assistant turn,
+	 * rather than kept in a second counter that could drift from the billing record.
+	 */
+	private _rlmChildSpend(): Map<string, number> {
+		const spend = new Map<string, number>();
+		for (const entry of this.sessionManager.getEntries()) {
+			if (entry.type !== "child_usage_attributed" || !entry.rlmChildId) continue;
+			spend.set(entry.rlmChildId, (spend.get(entry.rlmChildId) ?? 0) + graphTokens(entry.childUsage));
+		}
+		return spend;
+	}
+
 	private _buildRlmSubagentList(listedAgents?: AgentSessionMessageListResult): RlmListSubagentsResult {
+		const spend = this._rlmChildSpend();
 		const daemonChildren = new Map<string, AgentSessionMessageAgentSummary>();
 		const parentActiveSessionId = listedAgents?.current?.activeSessionId;
 		if (parentActiveSessionId) {
@@ -9315,6 +9435,7 @@ export class AgentSession {
 				session_name: daemonChild?.sessionName ?? run.session?.sessionName ?? run.sessionName,
 				session_dir: run.sessionDir,
 				status: run.status === "done" ? "completed" : run.status === "error" ? "error" : "running",
+				tokens_spent: spend.get(run.id) ?? 0,
 			});
 			recorded.add(run.id);
 		}
@@ -9332,6 +9453,7 @@ export class AgentSession {
 				continue;
 			}
 			subagents.push({
+				tokens_spent: spend.get(childId) ?? 0,
 				rlm_child_id: childId,
 				active_session_id: daemonChild?.activeSessionId ?? null,
 				session_id: daemonChild?.sessionId ?? childSession.sessionId,
@@ -9353,6 +9475,7 @@ export class AgentSession {
 				continue;
 			}
 			subagents.push({
+				tokens_spent: spend.get(childId) ?? 0,
 				rlm_child_id: childId,
 				active_session_id: daemonChild.activeSessionId,
 				session_id: daemonChild.sessionId,
@@ -9796,11 +9919,12 @@ export class AgentSession {
 		kwargs: Record<string, unknown> = {},
 		spawnCode?: string,
 	): Promise<RlmSpawnHandle> {
-		const { name: rawName, model: rawModel, effort: rawEffort, ...unsupported } = kwargs;
+		const { name: rawName, model: rawModel, effort: rawEffort, peers: rawPeers, ...unsupported } = kwargs;
 		const unsupportedKwargs = Object.keys(unsupported);
 		if (unsupportedKwargs.length > 0) {
 			throw new Error(`Unsupported rlm.run kwargs: ${unsupportedKwargs.sort().join(", ")}`);
 		}
+		const requestedPeers = normalizeRequestedRlmPeers(rawPeers);
 		const requestedSessionName = normalizeRequestedRlmSubagentSessionName(rawName);
 		const requestedModel = normalizeRequestedRlmSubagentModel(rawModel);
 		const requestedEffort = this._bandLimitedChildEffort(normalizeRequestedRlmEffort(rawEffort));
@@ -9810,6 +9934,7 @@ export class AgentSession {
 				`RLM recursion depth limit reached (RLM_DEPTH=${this._rlmDepth}, RLM_MAX_DEPTH=${this._rlmMaxDepth})`,
 			);
 		}
+		this._assertGraphBudgetAdmits();
 		if (requestedSessionName) {
 			if (this._pendingRlmSubagentSessionNames.has(requestedSessionName)) {
 				throw new Error(formatAgentSessionNameUnavailable(requestedSessionName, this._rlmDepth + 1));
@@ -9829,6 +9954,9 @@ export class AgentSession {
 		const childNodeId = basename(childSessionDir);
 		const sessionName = requestedSessionName ?? createDefaultRlmSubagentSessionName(prompt, childNodeId);
 		if (!requestedSessionName) await this._assertRlmSubagentSessionNameAvailable(sessionName);
+		// Counted here, past every check that can still reject: a spawn refused for a duplicate name
+		// or an unresolvable model must not spend a slot the cohort never got.
+		this._graphNodesThisRun += 1;
 		const startedAt = Date.now();
 		const parentAssistantForUsage = this._findLastAssistantMessage();
 		const label = rlmChildLabel(prompt);
@@ -9897,6 +10025,7 @@ export class AgentSession {
 				sessionDir: childSessionDir,
 				model: modelSelection.model,
 				effort: requestedEffort,
+				peerNames: requestedPeers,
 			}),
 			onSessionPublished: publishChildSession,
 		};
@@ -9956,6 +10085,9 @@ export class AgentSession {
 						const assistant = event.message as AssistantMessage;
 						if (assistant.stopReason !== "error" && assistant.stopReason !== "aborted") {
 							attributeChildUsage(parentAssistantForUsage?.usage ?? emptyUsage(), assistant.usage);
+							// Same event that bills the parent also meters the graph, so the ceiling
+							// tracks real spend rather than an estimate made before the work ran.
+							this._graphChildTokensThisRun += graphTokens(assistant.usage);
 							if (parentAssistantForUsage) {
 								const parentEntry = this._findAssistantEntryForMessage(parentAssistantForUsage);
 								if (parentEntry) {
@@ -9976,6 +10108,7 @@ export class AgentSession {
 										assistant.usage,
 										parentAssistantForUsage.usage,
 										origin,
+										{ rlmChildId: run.id, sessionName: child.sessionName ?? sessionName },
 									);
 								}
 							}

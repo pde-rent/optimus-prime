@@ -158,6 +158,8 @@ export interface AgentSessionMessageController {
 	listAgents(): AgentSessionMessageListResult | Promise<AgentSessionMessageListResult>;
 	roster?(): AgentFamilyRosterResult | Promise<AgentFamilyRosterResult>;
 	awaitPendingChildPublication?(selector: string): Promise<string | undefined>;
+	/** Siblings this agent may message. Undefined means the family default: all of them. */
+	peerNames?: readonly string[];
 	assertSessionNameAvailable?(input: AgentSessionNameAvailabilityInput): void | Promise<void>;
 	setSessionName?(name: string): void | Promise<void>;
 	sendAgentMessage(input: AgentSessionMessageSendInput): Promise<AgentSessionMessageReceipt>;
@@ -574,7 +576,10 @@ class AgentMessageDuplicateFilter {
 }
 
 export function createAgentMessageHostHandlers(
-	controller: Pick<AgentSessionMessageController, "roster" | "sendAgentMessage" | "awaitPendingChildPublication">,
+	controller: Pick<
+		AgentSessionMessageController,
+		"roster" | "sendAgentMessage" | "awaitPendingChildPublication" | "peerNames"
+	>,
 ): Record<string, HostRequestHandler> {
 	// Scoped to these handlers on purpose: host-generated notices and human `/message`
 	// sends reach the controller by other paths and are never filtered.
@@ -660,7 +665,21 @@ export function createAgentMessageHostHandlers(
 							: `${role} selector ${JSON.stringify(receiverName)} is ambiguous`,
 					);
 				}
-				target = matches[0]!.id;
+				const matched = matches[0]!;
+				// Per-node edges. A cohort's communication pattern is whatever its spawner declared,
+				// so this is a named allowlist rather than a switch over "all siblings": listing B in
+				// A's peers does not let B reach A, which is what makes one-way edges expressible.
+				if (role === "sibling" && controller.peerNames) {
+					const allowed = controller.peerNames;
+					if (!allowed.includes(matched.name) && !allowed.includes(matched.id)) {
+						throw new Error(
+							allowed.length === 0
+								? `This agent has no sibling peers: it reports to its parent. To reach ${JSON.stringify(matched.name)}, ask the parent to relay.`
+								: `Sibling ${JSON.stringify(matched.name)} is not a declared peer. Reachable peers: ${allowed.join(", ")}.`,
+						);
+					}
+				}
+				target = matched.id;
 			}
 			return (await sendOnce({
 				target,

@@ -111,6 +111,11 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "settings", description: "Open settings menu" },
 	{ name: "model", description: "Select model (opens selector UI)", argumentHint: "[search]", takesArgument: true },
 	{ name: "effort", description: "Select reasoning/thinking level (opens selector UI)", argumentHint: "[level]" },
+	{
+		name: "graph",
+		description: "Multi-agent graph budget: off, low, medium, high, max",
+		argumentHint: "[level]",
+	},
 	{ name: "fast", description: "Toggle OpenAI Fast mode" },
 	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
 	{
@@ -235,6 +240,21 @@ const BUILTIN_SLASH_COMMAND_ALIASES: ReadonlyArray<BuiltinSlashCommandAlias> = [
 	{ name: "thinking", aliasFor: "effort" },
 	{ name: "rename", aliasFor: "name" },
 	{ name: "side", aliasFor: "btw" },
+	// Names the other coding CLIs use for the same thing, so muscle memory from any of them lands
+	// somewhere rather than on "unknown command".
+	{ name: "exit", aliasFor: "quit" },
+	{ name: "connect", aliasFor: "login" },
+	{ name: "signin", aliasFor: "login" },
+	{ name: "sign-in", aliasFor: "login" },
+	{ name: "auth", aliasFor: "login" },
+	{ name: "signout", aliasFor: "logout" },
+	{ name: "sign-out", aliasFor: "logout" },
+	{ name: "disconnect", aliasFor: "logout" },
+	{ name: "config", aliasFor: "settings" },
+	{ name: "cost", aliasFor: "context" },
+	{ name: "reasoning", aliasFor: "effort" },
+	{ name: "continue", aliasFor: "resume" },
+	{ name: "depth", aliasFor: "rlm-max-depth" },
 ];
 
 function buildBuiltinSlashCommands(): ReadonlyArray<BuiltinSlashCommand> {

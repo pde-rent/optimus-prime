@@ -320,6 +320,7 @@ const DAEMON_COMMAND_TYPES: ReadonlySet<string> = new Set([
 	"set_session_name",
 	"get_rlm_max_depth_status",
 	"set_rlm_max_depth",
+	"set_graph_resolver",
 	"rename_saved_session",
 	"delete_saved_session",
 	"get_session_context",
@@ -2610,6 +2611,8 @@ export class AgentDaemon {
 					},
 					rlmDepth: options.rlmDepth,
 					rlmMaxDepth: options.rlmMaxDepth,
+					rlmMaxDepthPinned: options.rlmMaxDepthPinned,
+					peerNames: options.peerNames,
 					rlmSessionDir: options.sessionDir,
 					rlmParentNodeId: options.rlmParentNodeId,
 					rlmParentAgent: options.parentSession.sessionName ?? options.parentSession.sessionId,
@@ -4751,6 +4754,11 @@ export class AgentDaemon {
 			case "get_rlm_max_depth_status": {
 				const state = this.getSessionState(command.activeSessionId);
 				return success(command.id, "get_rlm_max_depth_status", state.runtime.session.getRlmMaxDepthStatus());
+			}
+
+			case "set_graph_resolver": {
+				const state = this.getSessionState(command.activeSessionId);
+				return success(command.id, "set_graph_resolver", state.runtime.session.setGraphResolver(command.level));
 			}
 
 			case "set_rlm_max_depth": {

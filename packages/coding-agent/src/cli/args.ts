@@ -4,17 +4,17 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { APP_NAME } from "../config.js";
+import { applySettingsFlag, type SettingsFlagValues, THINKING_LEVELS } from "./settings-flags.js";
 
 export type Mode = "text" | "json" | "rpc" | "daemon";
 
-export interface Args {
+export interface Args extends SettingsFlagValues {
 	provider?: string;
 	model?: string;
 	apiKey?: string;
 	cwd?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
-	thinking?: ThinkingLevel;
 	continue?: boolean;
 	resume?: true | string;
 	help?: boolean;
@@ -59,14 +59,13 @@ export interface Args {
 	diagnostics: Array<{ type: "warning" | "error"; message: string }>;
 }
 
-const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const REMOVED_BUILTIN_TOOL_NAMES = new Set(["read", "write", "grep", "find", "ls"]);
 const BUILTIN_TOOL_NAMES = ["repl"];
 
 export const INTERNAL_RUNTIME_COMMAND_MARKER = "\0optimus-runtime-command";
 
 export function isValidThinkingLevel(level: string): level is ThinkingLevel {
-	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
+	return THINKING_LEVELS.includes(level as ThinkingLevel);
 }
 
 export function parseArgs(args: string[]): Args {
@@ -92,6 +91,12 @@ export function parseArgs(args: string[]): Args {
 		}
 		if (arg === "--") {
 			endOfOptions = true;
+			continue;
+		}
+
+		const settingsFlag = applySettingsFlag(arg, args[i + 1], result);
+		if (settingsFlag !== "none") {
+			if (settingsFlag === "value") i++;
 			continue;
 		}
 
@@ -163,16 +168,6 @@ export function parseArgs(args: string[]): Args {
 				result.diagnostics.push({
 					type: "error",
 					message: `Unknown built-in tool(s): ${removedTools.join(", ")}. Available built-in tools: ${BUILTIN_TOOL_NAMES.join(", ")}`,
-				});
-			}
-		} else if (arg === "--thinking" && i + 1 < args.length) {
-			const level = args[++i];
-			if (isValidThinkingLevel(level)) {
-				result.thinking = level;
-			} else {
-				result.diagnostics.push({
-					type: "warning",
-					message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_LEVELS.join(", ")}`,
 				});
 			}
 		} else if (arg === "--print" || arg === "-p") {

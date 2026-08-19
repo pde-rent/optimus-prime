@@ -1,3 +1,5 @@
+import { type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "../graph-resolver.js";
+
 /** Runtime capabilities the REPL sandbox exposes without any install step. */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
@@ -316,13 +318,19 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
  * harness-state block.
  */
 export function buildSubagentGuidance(
-	options: { includeRefineExamples?: boolean; hasAgentMessage?: boolean; hasAgentObserve?: boolean } = {},
+	options: {
+		includeRefineExamples?: boolean;
+		hasAgentMessage?: boolean;
+		hasAgentObserve?: boolean;
+		graphResolver?: GraphResolverLevel;
+	} = {},
 ): string {
 	// Judgement only. The mechanics -- admission, naming, replies, handles,
 	// observation -- are stated once in the recursion block this renders after, and
 	// restating them here cost every agent at every depth the same words twice.
 	void options.hasAgentMessage;
 	void options.hasAgentObserve;
+	const graphLevel: GraphResolverLevel = options.graphResolver ?? "off";
 	const lines = [
 		"# Delegating to sub-agents",
 		"",
@@ -331,7 +339,13 @@ export function buildSubagentGuidance(
 		// three times the tokens for no speedup, because the work does not divide; the measured
 		// equal-budget comparisons put a cohort behind one agent given the same spend, and a
 		// separate critic behind the same model critiquing its own work in context.
-		"Spawn children only when the task splits into independent units that do not share state — separate files, modules, or sources. Never spawn to get more opinions on one problem: another pass with more context beats a cohort on both tokens and wall-clock.",
+		// The second sentence is scoped, not absolute. At the default budget a cohort loses to one
+		// agent given the same spend, so it is the right rule. Once the operator raises the graph
+		// dial they have granted the extra spend deliberately, and the block rendered below sets
+		// out the narrow cases where a second opinion earns it.
+		graphLevel === "off"
+			? "Spawn children only when the task splits into independent units that do not share state — separate files, modules, or sources. Never spawn to get more opinions on one problem: another pass with more context beats a cohort on both tokens and wall-clock."
+			: "Spawn children when the task splits into independent units that do not share state — separate files, modules, or sources. Spawning for a second opinion on one indivisible problem is governed by the graph budget block below; without it, another pass with more context beats a cohort on both tokens and wall-clock.",
 		// Brief authoring is serialized in this agent's own token stream, so it is the fan-out
 		// latency bottleneck long before the children are.
 		"Keep each child's brief short and specific. Long briefs are written one token at a time here, so they delay every child that is waiting on one.",
@@ -344,5 +358,41 @@ export function buildSubagentGuidance(
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");
 	}
+	if (graphLevel !== "off") lines.push("", buildGraphResolverBlock(graphLevel));
 	return lines.join("\n");
+}
+
+/**
+ * Escalation rules, rendered only when the operator has raised the dial.
+ *
+ * Triggers are observable events, never a self-rating: the same forward pass that would answer the
+ * task also produces the confidence estimate, and only half the error is visible — over-escalating
+ * shows up in the bill, under-escalating looks like an ordinary wrong answer.
+ */
+function buildGraphResolverBlock(level: Exclude<GraphResolverLevel, "off">): string {
+	const budget = graphResolverBudget(level);
+	const maxNodes = budget?.maxNodes ?? 2;
+	const nests = graphMinDepth(level) > 1;
+	return [
+		`# Graph budget: ${level}`,
+		"",
+		`Up to ${maxNodes} children on one task. A ceiling, not a target: spend it when a trigger below has fired, not because a task feels hard or important.`,
+		"",
+		"Triggers:",
+		"- `check` failed twice on the same diagnostic.",
+		"- the change is hard to undo — a deploy, a migration, key handling, money movement, a delete.",
+		"- retrieval returned sources that contradict each other.",
+		"",
+		nests
+			? `Splits into units sharing no state: fan out, up to ${maxNodes}. A child whose own unit splits again may fan out once more.`
+			: `Splits into units sharing no state: fan out, up to ${maxNodes}.`,
+		"Does not split: do not fan out — an indivisible problem has no work to divide, so N children return N restatements at N times the cost. Take another pass with more context. Add one child only when the result cannot be checked mechanically and is hard to undo, and give it the problem statement alone: a child shown your answer agrees with it.",
+		"",
+		// Reach permits sibling messages generally; inside a cohort it is wrong, so the exception has
+		// to be stated or the model will follow the broader rule.
+		"Declare the cohort's edges when you spawn it: `rlm('task', { peers: ['other-child'] })` lets that child message those siblings and no others, and `peers: []` means it reports only to you. Edges are one-way — listing B in A's peers does not let B reach A — so a reviewer can be allowed to send a verdict without opening a debate.",
+		"Default to `peers: []`. A message interrupts the receiver mid-turn, so the first one to land reframes whoever gets it, and independent answers are the only reason to run more than one child. Open an edge when a child genuinely needs another's output, not so they can confer.",
+		"",
+		"Settle it with a check that already existed and that nobody being checked wrote. Otherwise surface disagreements with the differing lines rather than picking silently.",
+	].join("\n");
 }

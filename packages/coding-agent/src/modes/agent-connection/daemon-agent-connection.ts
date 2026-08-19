@@ -14,7 +14,9 @@ import type {
 	AgentHeartbeatManagementAction,
 	AgentHeartbeatUpdateAction,
 } from "../../core/cron-jobs.js";
+import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
+import type { RlmMaxDepthStatus, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
 import { SessionAlreadyActiveError } from "../../core/session-lease.js";
 import type { SessionStats } from "../../core/session-stats.js";
@@ -1181,19 +1183,24 @@ export class DaemonAgentConnection implements AgentConnection {
 	}
 
 	async getRlmMaxDepthStatus() {
-		return this.requestData<{ maxDepth: number; source: "default" | "env" | "global" | "inherited" | "chat" }>({
+		// Imported rather than re-spelled: a hand-copied union silently narrows as the real one
+		// grows, and the wire then claims a value it can actually carry is impossible.
+		return this.requestData<RlmMaxDepthStatus>({
 			type: "get_rlm_max_depth_status",
 			activeSessionId: this.activeSessionId,
 		});
 	}
 
+	async setGraphResolver(level: GraphResolverLevel) {
+		return this.requestData<GraphResolverLevel>({
+			type: "set_graph_resolver",
+			activeSessionId: this.activeSessionId,
+			level,
+		});
+	}
+
 	async setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }) {
-		return this.requestData<{
-			maxDepth: number;
-			source: "default" | "env" | "global" | "inherited" | "chat";
-			globalSaved: boolean;
-			globalError?: string;
-		}>({
+		return this.requestData<SetRlmMaxDepthResult>({
 			type: "set_rlm_max_depth",
 			activeSessionId: this.activeSessionId,
 			maxDepth,

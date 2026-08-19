@@ -223,8 +223,13 @@ Every one of them is async. The spawn handle returned by `rlm.run` carries `rlm_
 
 Supported `rlm.run` options are:
 
-- `name`: a unique readable child session name; and
-- `model`: an exact `provider/model` selector from `rlm.find_models()`.
+- `name`: a unique readable child session name;
+- `model`: an exact `provider/model` selector from `rlm.find_models()`;
+- `effort`: the child's reasoning level, clamped to what its model supports; and
+- `peers`: the sibling names this child may message. Edges are one-way, so listing `b` in `a`'s
+  peers does not let `b` reach `a`. `[]` means it reports only to its parent. Omitting the option
+  leaves the family default in place, where every sibling is reachable. The parent is always
+  reachable regardless.
 
 Unknown options fail instead of being ignored. Model search is bounded to active, non-expired credentials. If an exact selection is unavailable or fails auth preflight, spawn fails instead of silently falling back to another model. A child otherwise inherits the parent model.
 
@@ -263,7 +268,10 @@ The TypeScript parent maintains the authoritative direct-child registry. `await 
 
 This registry survives REPL restart, compaction, and parent restore — it lives in the host, not in the REPL namespace, so even a hard-killed REPL loses nothing from it. Successfully completed daemon-backed children are rehydrated from the parent artifact registry. Inline children remain inspectable in the current process but have no active-session ID.
 
-The parent can continue a retained daemon child with `await agent_message.send(message, { receiver_role: "child", receiver_name: child.session_name })`. `rlm.delete_subagent()` accepts an exact child ID, active-session ID, session ID, or unique name. Deletion cancels or closes the runtime, writes a durable tombstone, and removes the child from messaging and observation. It does not erase the transcript or artifacts on disk.
+The parent can continue a retained daemon child with `await agent_message.send(message, { receiver_role: "child", receiver_name: child.session_name })`. Each `rlm.list_subagents()` entry carries `tokens_spent`, read from the usage the harness already
+attributes per child, so a cohort's cost can be itemised rather than only totalled.
+
+`rlm.delete_subagent()` accepts an exact child ID, active-session ID, session ID, or unique name. Deletion cancels or closes the runtime, writes a durable tombstone, and removes the child from messaging and observation. It does not erase the transcript or artifacts on disk.
 
 Registry scope follows the parent transcript. An unrelated new parent session does not inherit children.
 

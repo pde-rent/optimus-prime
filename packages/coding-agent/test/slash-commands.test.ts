@@ -43,7 +43,7 @@ describe("built-in slash commands", () => {
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "effort")).toMatchObject({
 			description: "Select reasoning/thinking level (opens selector UI)",
 			argumentHint: "[level]",
-			aliases: ["thinking"],
+			aliases: ["thinking", "reasoning"],
 		});
 	});
 
@@ -102,7 +102,7 @@ describe("slash command aliases", () => {
 		});
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "context")).toMatchObject({
 			description: "Show token, cost, and context usage for agent and sub-agents",
-			aliases: ["usage"],
+			aliases: ["usage", "cost"],
 		});
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "name")).toMatchObject({
 			description: "Set or show the session display name",

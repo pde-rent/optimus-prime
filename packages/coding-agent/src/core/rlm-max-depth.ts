@@ -1,6 +1,7 @@
 /** Wire-safe types for the immediate /rlm-max-depth state APIs. */
 
-export type RlmMaxDepthSource = "default" | "env" | "global" | "inherited" | "chat";
+/** "graph" means the graph budget raised the configured value to what its shapes need. */
+export type RlmMaxDepthSource = "default" | "env" | "global" | "inherited" | "chat" | "graph";
 
 export interface RlmMaxDepthStatus {
 	maxDepth: number;

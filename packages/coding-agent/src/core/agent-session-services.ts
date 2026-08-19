@@ -56,6 +56,8 @@ export interface AgentSessionCreationOptions {
 	agentObserveController?: AgentObserveController;
 	rlmDepth?: number;
 	rlmMaxDepth?: number;
+	rlmMaxDepthPinned?: boolean;
+	peerNames?: readonly string[];
 	rlmSessionDir?: string;
 	rlmParentNodeId?: string;
 	rlmParentAgent?: string;
@@ -227,6 +229,8 @@ export async function createAgentSessionFromServices(
 		agentObserveController: options.agentObserveController,
 		rlmDepth: options.rlmDepth,
 		rlmMaxDepth: options.rlmMaxDepth,
+		rlmMaxDepthPinned: options.rlmMaxDepthPinned,
+		peerNames: options.peerNames,
 		rlmSessionDir: options.rlmSessionDir,
 		rlmParentNodeId: options.rlmParentNodeId,
 		rlmParentAgent: options.rlmParentAgent,

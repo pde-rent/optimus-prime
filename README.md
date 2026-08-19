@@ -12,6 +12,8 @@
 <p align="center">
   <a href="packages/coding-agent/docs/index.md">Docs</a> &bull;
   <a href="#numbers">Numbers</a> &bull;
+  <a href="#the-graph-resolver">Graph resolver</a> &bull;
+  <a href="#settings">Settings</a> &bull;
   <a href="#what-changed">What changed</a> &bull;
   <a href="#supply-chain">Supply chain</a> &bull;
   <a href="#credits">Credits</a>
@@ -74,6 +76,10 @@ Bun REPL, which takes an interpreter, a native module and a socket hop out of ev
 | Session upload | `/traces` uploaded whole transcripts | removed |
 | Highlighting | highlight.js, ~350 ms import | rule data with a local tokenizer |
 | Charts | none | braille terminal charts |
+| Delegation shape | assembled by the agent | resolved for it, under a budget dial |
+| Cohort messaging | every sibling reachable | edges declared per child, one-way |
+| Child token cost | folded into the parent's total | itemised per child, in the roster |
+| Settings from the CLI | a few flags | every session setting, from one declarative table |
 
 ## The REPL
 
@@ -106,6 +112,8 @@ arrive as messages or files, so a parent is never blocked on a child.
 | Reasoning effort per child | `rlm.get_effort` / `rlm.set_effort` |
 | Roster and teardown | `rlm.list_subagents` / `rlm.delete_subagent` |
 | Talk to family | `agent_message.send(msg, { receiver_role })` — parent, child, sibling |
+| Restrict who a child may reach | `rlm(task, { peers: [...] })` — one-way, `[]` for none |
+| What each child has spent | `tokens_spent` on every `rlm.list_subagents` entry |
 | Watch without mutating | `agent_observe.list_agents` / `get_agent` / `recent_messages` |
 | Reusable roles | subagent specs in the harness, promoted by `refine` |
 
@@ -114,8 +122,117 @@ reconcile without routing everything through the coordinator, and a repeated del
 becomes a saved subagent spec instead of prompt text retyped each session. The agents view
 draws the live graph.
 
-Not built: automatic topology selection, where the coordinator picks the shape per task.
-Depth is dynamic; the graph is still assembled by the agent rather than resolved for it.
+## The graph resolver
+
+Every published comparison that holds spend constant puts one agent ahead of a cohort, and the
+top SWE-bench systems are single loops with strong scaffolding. So the default here is one agent,
+and this is **off unless you turn it on**.
+
+What it changes when you do: a task may be resolved by several agents instead of one, and you set
+how much that is allowed to cost.
+
+```sh
+optimus --graph medium "audit every route handler for missing authz"
+```
+
+| Level | Ceiling | Cohort | Depth |
+|---|---|---|---|
+| `off` | — | — | unchanged |
+| `low` | 3x | 2 | 1 |
+| `medium` | 10x | 4 | 1 |
+| `high` | 25x | 6 | 2 |
+| `max` | 100x | 8 | 2 |
+
+One dial, not two. A strategy enum plus a spend multiplier contradict each other — "aggressive at
+2x" means nothing — and the intent moves both together: more budget means more tasks earn a
+cohort. `graphMaxTokens` is a clamp that only ever lowers a level's ceiling.
+
+**Depth is reconciled, not left to collide.** A cohort's children sit one level below whoever
+spawned them, so a level whose shapes need depth 2 raises `rlmMaxDepth` to 2 for as long as that
+level is set. Without this the dial would appear to work and every worker spawn would throw
+against the default depth of 1. It is resolved once, with the depth setting itself, rather than
+raised and restored around each graph: raising depth mid-run rebuilds the system prompt and voids
+that agent's prompt cache, and a child captures its depth budget when it is spawned, so a restore
+could not reach children already running. An explicit `/rlm-max-depth` pin still wins — the graph
+then simply cannot use its deeper shapes.
+
+**Escalation is triggered by evidence, never by a prediction.** `check` failed twice on the same
+diagnostic; the change touches something hard to undo; a shared symbol has more call sites than
+fit in one head; retrieval returned contradictory sources. Asking a model to rate its own chance
+of missing something yields a number from the same forward pass that would have produced the
+answer. Worse, only half that error is observable — escalating trivia shows up in the bill, while
+failing to escalate looks exactly like an ordinary wrong answer, so tuning against the visible
+half alone drifts toward under-escalating, the failure the dial exists to prevent.
+
+**Two shapes.** Work that splits into units sharing no state fans out, one child per unit, fanning
+in through files. Work that does not split does **not** fan out — fan-out divides work, and an
+indivisible problem has none to divide, so N children return N restatements of one line of
+reasoning at N times the price. That case gets another pass with more context, plus at most one
+child when the result cannot be checked mechanically and is hard to undo. That child is given the
+problem statement alone, never the parent's answer, because a child shown an answer agrees with
+it.
+
+**Each cohort declares its own edges.** Communication is a property of the graph, not a global
+switch, so the spawner says who may reach whom:
+
+```js
+await rlm('review the auth diff', { peers: ['worker-b'] });  // may message worker-b, nobody else
+await rlm('audit the routes',     { peers: [] });            // reports only to the parent
+```
+
+Edges are one-way. Listing B in A's peers does not let B reach A, so a reviewer can return a
+verdict without opening a debate. Omitting `peers` leaves the family default alone; `peers: []` is
+an explicit silence. The parent is always reachable.
+
+The default the prompt teaches is `[]`, because of how the message layer behaves. Delivery is
+`steer`, so a message interrupts the receiver mid-turn: the first critique to land reframes
+whoever gets it, which is a serial anchoring cascade, and it destroys the independence that was
+the only reason to run more than one child. The rate limiter (3/s per pair) and the 20-message
+pending cap make a wide mesh throw rather than merely slow, and the duplicate filter drops an
+exact repeat while returning a success receipt, so agreement in a later round would vanish from
+the transcript and from any tally. Open an edge when a child needs another's output, not so they
+can confer — otherwise let the parent relay it as the input of a second spawn.
+
+**Reconciling.** A check that already existed, written by someone other than whoever is being
+checked, settles it; a test written by the same agent whose work it validates proves nothing.
+Otherwise disagreement is the finding, surfaced with the differing lines rather than averaged away
+by a vote — three diffs against one file do not fall into buckets to count.
+
+Set it with `--graph`, `/graph`, `GRAPH_RESOLVER`, or the Graph budget row in `/settings`. At
+`off` the prompt block is not rendered at all, so the default path pays nothing for it and the
+cached prefix is untouched.
+
+Three honest limits. The ceiling is soft by one child, because `rlm()` returns at admission and
+tokens already committed cannot be recovered by refusing later. It is metered per agent and per
+user turn, so a worker that splits again draws on its own ceiling rather than its parent's, and the
+reachable worst case is the ceiling times the number of spawners. And the 1x baseline is a fixed
+constant rather than a measurement — the single-agent run it compares against never happens — so
+the multiples are spend authority, not a prediction.
+
+## Settings
+
+Every session setting is reachable three ways — a flag for one run, a slash command mid-session,
+and a row in `/settings` that persists — and they are generated from one table, so a flag cannot
+exist that the runtime quietly ignores.
+
+| Flag | Also | Sets |
+|---|---|---|
+| `--thinking`, `--effort <level>` | `/effort` | reasoning level |
+| `--graph <level>` | `/graph` | multi-agent budget |
+| `--graph-max-tokens <n>` | | lowers the graph ceiling |
+| `--rlm-max-depth <n>` | `/rlm-max-depth` | recursion depth |
+| `--dynamic-depth` / `--no-` | | let the agent raise its own depth |
+| `--dynamic-effort <mode>` | | `off`, `banded`, `free` |
+| `--service-tier <tier>` | | `auto`, `default`, `flex`, `scale`, `priority` |
+| `--compact` / `--no-` | `/compact` | automatic context compaction |
+| `--retry` / `--no-` | | retry on transient API failures |
+
+Commands answer to the names other CLIs use for them: `/exit`, `/config`, `/cost`, `/connect`,
+`/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`.
+
+Opening a new session lights the brand mark under a red scan and plays a five-second sting. It
+never gates input — the prompt is live from the first frame and the first keystroke ends it — and
+`"ignition": false` in settings, or `quietStartup`, turns it off.
 
 ## Skills
 

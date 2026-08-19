@@ -1,9 +1,9 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { type SettingsFlagValues, settingsFlagValues } from "../cli/settings-flags.js";
 import type { AgentAutonomousConfig } from "./autonomous.js";
 
 export type AgentExecutionMode = "interactive" | "print" | "json" | "rpc";
 
-export interface AgentSessionRuntimeConfig {
+export interface AgentSessionRuntimeConfig extends SettingsFlagValues {
 	cwd?: string;
 	agentDir?: string;
 	sessionDir?: string;
@@ -12,7 +12,8 @@ export interface AgentSessionRuntimeConfig {
 	apiKey?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
-	thinking?: ThinkingLevel;
+	/** The inherited depth was pinned by the user, so the graph floor must not raise it again. */
+	rlmMaxDepthPinned?: boolean;
 	models?: string[];
 	tools?: string[];
 	noTools?: boolean;
@@ -60,7 +61,8 @@ export function mergeAgentSessionRuntimeConfig(
 		apiKey: override.apiKey ?? base.apiKey,
 		systemPrompt: override.systemPrompt ?? base.systemPrompt,
 		appendSystemPrompt: cloneArray(override.appendSystemPrompt ?? base.appendSystemPrompt),
-		thinking: override.thinking ?? base.thinking,
+		...settingsFlagValues(base, override),
+		rlmMaxDepthPinned: override.rlmMaxDepthPinned ?? base.rlmMaxDepthPinned,
 		models: cloneArray(override.models ?? base.models),
 		tools: cloneArray(override.tools ?? base.tools),
 		noTools: override.noTools ?? base.noTools,

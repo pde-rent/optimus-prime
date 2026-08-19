@@ -33,9 +33,11 @@ const config: SettingsConfig = {
 	showTerminalProgress: false,
 	fullscreen: true,
 	warnings: {},
+	graphResolver: "off",
 };
 
 const callbacks: SettingsCallbacks = {
+	onGraphResolverChange: () => {},
 	onAutoCompactChange: () => {},
 	onIdleEvictionMinutesChange: () => {},
 	onShowImagesChange: () => {},

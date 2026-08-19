@@ -15,6 +15,7 @@ import type {
 import type { ReplayBuiltInToolName } from "../../core/extensions/index.js";
 import type { InputSource } from "../../core/extensions/types.js";
 import type { GoalState } from "../../core/goals.js";
+import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
 import type { RlmMaxDepthStatus, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
 import type {
@@ -735,6 +736,7 @@ export interface AgentConnection {
 	setSessionName(name: string): Promise<void>;
 	getRlmMaxDepthStatus(): Promise<RlmMaxDepthStatus>;
 	setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }): Promise<SetRlmMaxDepthResult>;
+	setGraphResolver(level: GraphResolverLevel): Promise<GraphResolverLevel>;
 	renameSavedSession(sessionPath: string, name: string): Promise<void>;
 	deleteSavedSession(sessionPath: string): Promise<DeleteSessionFileResult>;
 

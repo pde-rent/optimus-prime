@@ -14,6 +14,7 @@ import type {
 	AgentHeartbeatUpdateAction,
 } from "../../core/cron-jobs.js";
 import type { ExtensionUIContext } from "../../core/extensions/types.js";
+import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
 import { type DeleteSessionFileResult, deleteSessionFile } from "../../core/session-file-actions.js";
 import { SessionManager } from "../../core/session-manager.js";
@@ -539,6 +540,10 @@ export class InProcessAgentConnection implements AgentConnection {
 
 	async setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }) {
 		return this.session.setRlmMaxDepth(maxDepth, options);
+	}
+
+	async setGraphResolver(level: GraphResolverLevel) {
+		return this.session.setGraphResolver(level);
 	}
 
 	async renameSavedSession(sessionPath: string, name: string): Promise<void> {

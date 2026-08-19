@@ -298,6 +298,10 @@ function hexTo256(hex: string): number {
 	return rgbTo256(hexToRgb(hex));
 }
 
+export function fgAnsiFor(color: string | number, mode: ColorMode): string {
+	return fgAnsi(color, mode);
+}
+
 function fgAnsi(color: string | number, mode: ColorMode): string {
 	if (color === "") return "\x1b[39m";
 	if (typeof color === "number") return `\x1b[38;5;${color}m`;

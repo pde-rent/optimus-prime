@@ -31,6 +31,7 @@ import {
 	SessionSelectorError,
 	SessionSelectorNotFoundError,
 } from "./cli/session-resolver.js";
+import { settingsFlagValues } from "./cli/settings-flags.js";
 import { APP_NAME, expandTildePath, getAgentDir, getSessionDirEnvOverride, VERSION } from "./config.js";
 import {
 	type AgentExecutionMode,
@@ -67,7 +68,7 @@ import {
 } from "./core/session-cwd.js";
 import { canonicalSessionPath, SessionAlreadyActiveError } from "./core/session-lease.js";
 import { SessionManager } from "./core/session-manager.js";
-import { SettingsManager } from "./core/settings-manager.js";
+import { type Settings, SettingsManager } from "./core/settings-manager.js";
 import { printTimings, resetTimings, time } from "./core/timings.js";
 import { runMigrations, showDeprecationWarnings } from "./migrations.js";
 import { isDaemonCatalogProcess, runDaemonCatalogProcess } from "./modes/daemon/daemon-catalog-process.js";
@@ -551,6 +552,25 @@ function buildSessionOptions(
 	}
 
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
+	// Per-run overrides, not saved preferences. The two that children must inherit go through the
+	// environment, because a child session builds its own settings manager and would not otherwise
+	// see an in-memory override; the rest are local to this process.
+	if (config.graphResolver) {
+		process.env.GRAPH_RESOLVER = config.graphResolver;
+	}
+	if (config.rlmMaxDepth !== undefined) {
+		process.env.RLM_MAX_DEPTH = String(config.rlmMaxDepth);
+	}
+	const settingsOverrides: Partial<Settings> = {};
+	if (config.graphMaxTokens !== undefined) settingsOverrides.graphMaxTokens = config.graphMaxTokens;
+	if (config.dynamicDepth !== undefined) settingsOverrides.dynamicDepth = config.dynamicDepth;
+	if (config.dynamicEffort !== undefined) settingsOverrides.dynamicEffort = config.dynamicEffort;
+	if (config.serviceTier !== undefined) settingsOverrides.defaultServiceTier = config.serviceTier;
+	if (config.compaction !== undefined) settingsOverrides.compaction = { enabled: config.compaction };
+	if (config.retry !== undefined) settingsOverrides.retry = { enabled: config.retry };
+	if (Object.keys(settingsOverrides).length > 0) {
+		settingsManager.applyOverrides(settingsOverrides);
+	}
 	if (config.thinking) {
 		options.thinkingLevel = config.thinking;
 	}
@@ -621,7 +641,7 @@ function runtimeAutonomousConfigFromArgs(parsed: Args): AgentSessionRuntimeConfi
 	};
 }
 
-function runtimeConfigFromArgs(
+export function runtimeConfigFromArgs(
 	parsed: Args,
 	cwd: string,
 	agentDir: string,
@@ -637,7 +657,7 @@ function runtimeConfigFromArgs(
 		apiKey: parsed.apiKey,
 		systemPrompt: parsed.systemPrompt,
 		appendSystemPrompt: parsed.appendSystemPrompt,
-		thinking: parsed.thinking,
+		...settingsFlagValues(parsed),
 		models: parsed.models,
 		tools: parsed.tools,
 		noTools: parsed.noTools,

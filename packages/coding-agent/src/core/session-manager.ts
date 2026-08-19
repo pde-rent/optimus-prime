@@ -162,6 +162,9 @@ export interface ChildUsageAttributionEntry extends SessionEntryBase {
 	childUsage: Usage;
 	aggregateUsage: Usage;
 	origin?: "spawn_task" | "agent_message" | "direct_user";
+	/** Which child spent it. Without this the ledger totals a cohort but cannot itemise it. */
+	rlmChildId?: string;
+	childSessionName?: string;
 }
 
 export interface LabelEntry extends SessionEntryBase {
@@ -1489,6 +1492,7 @@ export class SessionManager {
 		childUsage: Usage,
 		aggregateUsage: Usage,
 		origin?: ChildUsageAttributionEntry["origin"],
+		child?: { rlmChildId?: string; sessionName?: string },
 	): string {
 		const target = this.byId.get(targetId);
 		if (target?.type !== "message" || target.message.role !== "assistant") {
@@ -1505,6 +1509,8 @@ export class SessionManager {
 			childUsage: cloneUsage(childUsage),
 			aggregateUsage: cloneUsage(aggregateUsage),
 			...(origin ? { origin } : {}),
+			...(child?.rlmChildId ? { rlmChildId: child.rlmChildId } : {}),
+			...(child?.sessionName ? { childSessionName: child.sessionName } : {}),
 		};
 		this._appendEntry(entry);
 		return entry.id;

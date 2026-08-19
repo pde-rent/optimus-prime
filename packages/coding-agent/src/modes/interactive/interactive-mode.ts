@@ -79,6 +79,12 @@ import type {
 } from "../../core/extensions/index.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
 import { emptyGoalState, formatGoalUsage, GOAL_CONTEXT_PREVIEW_LABEL, type GoalState } from "../../core/goals.js";
+import {
+	GRAPH_RESOLVER_LEVELS,
+	type GraphResolverLevel,
+	graphResolverBudget,
+	isGraphResolverLevel,
+} from "../../core/graph-resolver.js";
 import { reloadHarnessModules } from "../../core/harness-reloader.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import {
@@ -211,6 +217,7 @@ import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
 import { FeatureHintDeck } from "./feature-hints.js";
 import { scopeHeartbeatsToSession } from "./heartbeat-scope.js";
+import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionRowColor, playIgnitionSound } from "./ignition.js";
 import {
 	collectMarkedImages,
 	evictImagesToBudget,
@@ -228,6 +235,7 @@ import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./pr
 import { QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
 import {
+	fgAnsiFor,
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
 	getEditorTheme,
@@ -408,6 +416,8 @@ export interface BrandSplashHeaderOptions {
 	getExtraMetadata?: () => readonly BrandSplashMetadataLine[];
 	getHideStartHint?: () => boolean;
 	getStartHint?: () => string;
+	/** Milliseconds since ignition began, or undefined once it is over. */
+	getIgnitionElapsedMs?: () => number | undefined;
 }
 
 export class BrandSplashHeader implements Component {
@@ -471,6 +481,15 @@ export class BrandSplashHeader implements Component {
 		};
 	}
 
+	/** Theme colour normally; the ignition ramp while the scan is running. */
+	private paintArt(line: string, row: number): string {
+		const elapsed = this.options.getIgnitionElapsedMs?.();
+		if (elapsed === undefined) return theme.fg("text", line);
+		const color = ignitionRowColor(row, this.logoRaw.length, elapsed);
+		if (!color) return theme.fg("text", line);
+		return `${fgAnsiFor(color, theme.colorMode)}${line}\x1b[39m`;
+	}
+
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const paddingX = safeWidth > 1 ? 1 : 0;
@@ -490,7 +509,7 @@ export class BrandSplashHeader implements Component {
 				...this.logoRaw.map((line, index) => {
 					const meta = block.lines[index - firstBlockRow];
 					if (meta === undefined) {
-						return frame(theme.fg("text", line));
+						return frame(this.paintArt(line, index));
 					}
 					// Trailing blanks are trimmed from the art, so pad before slicing.
 					const padded = line + " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line)));
@@ -998,6 +1017,8 @@ export class InteractiveMode {
 	// Serializes session event handling; see subscribeToAgent
 	private sessionEventQueue: Promise<void> = Promise.resolve();
 	private sessionEventGeneration = 0;
+	private ignitionStartedAt?: number;
+	private ignitionTimer?: ReturnType<typeof setInterval>;
 	private fastModeToggleQueue: Promise<void> = Promise.resolve();
 
 	private pendingTools = new Map<string, ToolExecutionComponent>();
@@ -1453,8 +1474,10 @@ export class InteractiveMode {
 					topPadding: true,
 					getHideStartHint: () => !this.isNewChat(),
 					getStartHint: () => this.startHint,
+					getIgnitionElapsedMs: () => this.ignitionElapsedMs(),
 				},
 			);
+			this.startIgnition();
 			this.headerContainer.addChild(this.builtInHeader);
 			this.headerContainer.addChild(new Spacer(1));
 		} else {
@@ -4100,6 +4123,8 @@ export class InteractiveMode {
 		this.defaultEditor.onMoveBelowPrompt = () => this.focusSubagentSummary();
 
 		this.defaultEditor.onChange = (text: string) => {
+			// Someone who starts typing has seen enough of the animation.
+			if (this.ignitionStartedAt !== undefined) this.stopIgnition();
 			if (text.length > 0 && !this.isApplyingQueueSelectionText) {
 				this.latestEditorPromptStash = this.snapshotPromptStashFrom(this.editor, text);
 			}
@@ -4591,6 +4616,11 @@ export class InteractiveMode {
 				if (commandName === "effort") {
 					this.editor.setText("");
 					this.handleEffortCommand(commandArgs);
+					return;
+				}
+				if (commandName === "graph") {
+					this.editor.setText("");
+					this.handleGraphCommand(commandArgs);
 					return;
 				}
 				if (commandName === "fast") {
@@ -7454,6 +7484,7 @@ export class InteractiveMode {
 					availableThemes: getAvailableThemes(),
 					hideThinkingBlock: this.hideThinkingBlock,
 					treeFilterMode: this.settingsManager.getTreeFilterMode(),
+					graphResolver: this.settingsManager.getGraphResolver(),
 					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 					editorPaddingX: this.settingsManager.getEditorPaddingX(),
 					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
@@ -7557,6 +7588,13 @@ export class InteractiveMode {
 					},
 					onTreeFilterModeChange: (mode) => {
 						this.settingsManager.setTreeFilterMode(mode);
+					},
+					onGraphResolverChange: (level) => {
+						// Same reason as `/graph`: the session caches a depth floor and a prompt block
+						// derived from this, and in daemon mode it is a different process.
+						void this.agentConnection.setGraphResolver(level).catch((error: unknown) => {
+							this.showError(error instanceof Error ? error.message : String(error));
+						});
 					},
 					onShowHardwareCursorChange: (enabled) => {
 						this.settingsManager.setShowHardwareCursor(enabled);
@@ -7878,6 +7916,80 @@ export class InteractiveMode {
 	private currentModelSupportsFastMode(): boolean {
 		const model = this.getCurrentModel();
 		return model !== undefined && supportsFastMode(model);
+	}
+
+	/**
+	 * Show or set the graph budget dial.
+	 *
+	 * Raising it does not make the agent spawn more; it authorises a wider cohort for the tasks
+	 * that trip an escalation trigger, so most sessions look unchanged at any level.
+	 */
+	private handleGraphCommand(args?: string): void {
+		if (!args) {
+			const level = this.settingsManager.getGraphResolver();
+			const hint =
+				level === "off"
+					? `/graph ${GRAPH_RESOLVER_LEVELS.filter((l) => l !== "off").join("|")} to enable.`
+					: "/graph off to disable.";
+			this.showStatus(this.describeGraphBudget(level, hint));
+			return;
+		}
+		const requested = args.trim().toLowerCase();
+		if (!isGraphResolverLevel(requested)) {
+			this.showError(`Usage: /graph [${GRAPH_RESOLVER_LEVELS.join("|")}]`);
+			return;
+		}
+		// Routed through the connection rather than written straight to settings: the level feeds a
+		// cached depth floor and a prompt block on the session, which in daemon mode lives in another
+		// process. Writing the file alone leaves the dial inert until restart.
+		void this.agentConnection
+			.setGraphResolver(requested)
+			.then(() => this.showStatus(this.describeGraphBudget(requested, "Active now.")))
+			.catch((error: unknown) => {
+				this.showError(error instanceof Error ? error.message : String(error));
+			});
+	}
+
+	private describeGraphBudget(level: GraphResolverLevel, suffix: string): string {
+		const budget = graphResolverBudget(level, this.settingsManager.getGraphMaxTokens());
+		if (!budget) return `Graph budget: off — single-agent path. ${suffix}`;
+		const ceiling = `${Math.round(budget.ceilingTokens / 1000)}k tokens`;
+		return `Graph budget: ${level} — up to ${budget.maxNodes} children, ceiling ${ceiling}. ${suffix}`;
+	}
+
+	/**
+	 * Light the brand mark and play the ignition sound.
+	 *
+	 * Only for a fresh interactive session with the splash on screen: resuming a conversation or
+	 * starting quiet skips it, because the flourish belongs to opening the tool, not to every
+	 * render of the header.
+	 */
+	private startIgnition(): void {
+		if (!this.settingsManager.getIgnition()) return;
+		this.ignitionStartedAt = Date.now();
+		playIgnitionSound();
+		// Drives the sweep. Cleared by `stopIgnition`, which also runs on the first keystroke, so a
+		// user who starts typing immediately is never animating in the background.
+		this.ignitionTimer = setInterval(() => {
+			if (this.ignitionElapsedMs() === undefined) {
+				this.stopIgnition();
+			}
+			this.ui.requestRender();
+		}, IGNITION_FRAME_MS);
+		this.ignitionTimer.unref?.();
+	}
+
+	private ignitionElapsedMs(): number | undefined {
+		if (this.ignitionStartedAt === undefined) return undefined;
+		const elapsed = Date.now() - this.ignitionStartedAt;
+		return elapsed < IGNITION_DURATION_MS ? elapsed : undefined;
+	}
+
+	private stopIgnition(): void {
+		if (this.ignitionTimer) clearInterval(this.ignitionTimer);
+		this.ignitionTimer = undefined;
+		this.ignitionStartedAt = undefined;
+		this.ui.requestRender();
 	}
 
 	private handleFastCommand(): void {

@@ -2,6 +2,7 @@
  * System prompt construction and project context loading
  */
 
+import type { GraphResolverLevel } from "./graph-resolver.js";
 import {
 	buildChildAgentDoctrine,
 	buildRlmPrompt,
@@ -36,6 +37,8 @@ export interface BuildSystemPromptOptions {
 	rlmDepth?: number;
 	/** Human-readable parent name or id for child communication doctrine. */
 	rlmParentAgent?: string;
+	/** Graph budget dial. Omitted or "off" renders no graph block and costs no prefix tokens. */
+	graphResolver?: GraphResolverLevel;
 	/** Global harness state to inject as compact persistent context. */
 	harnessState?: HarnessState;
 }
@@ -146,6 +149,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			includeRefineExamples: hasRefineSkill,
 			hasAgentMessage: visibleJsSkillNames.has("agent_message"),
 			hasAgentObserve: visibleJsSkillNames.has("agent_observe"),
+			graphResolver: options.graphResolver,
 		})}`;
 	}
 

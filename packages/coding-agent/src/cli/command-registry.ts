@@ -1,4 +1,5 @@
 import { APP_NAME } from "../config.js";
+import { SETTINGS_FLAG_HELP_ROWS } from "./settings-flags.js";
 
 export interface CommandSpec {
 	path: readonly string[];
@@ -179,7 +180,7 @@ const TOP_LEVEL_OPTION_GROUPS: ReadonlyArray<{ heading: string; options: readonl
 			["--model <id>", "Select a model"],
 			["--api-key <key>", "Use an API key for this run"],
 			["--models <patterns>", "Set comma-separated models for cycling"],
-			["--thinking <level>", "Set reasoning: off, minimal, low, medium, high, xhigh, max"],
+			...SETTINGS_FLAG_HELP_ROWS,
 		],
 	},
 	{

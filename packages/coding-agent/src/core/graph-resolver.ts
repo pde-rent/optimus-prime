@@ -1,0 +1,75 @@
+/**
+ * Budget dial for resolving one task with several agents instead of one.
+ *
+ * Off by default: the agent spawns children as it always has, up to `rlmMaxDepth`. Raising the
+ * dial grants a spend multiple deliberately, and tasks become eligible for a cohort.
+ *
+ * One dial, not two. A strategy enum plus a spend multiplier would contradict each other —
+ * "aggressive at 2x" has no meaning — and the intent moves both together, so it is one degree of
+ * freedom. `graphMaxTokens` is a clamp: it only ever lowers a level's ceiling.
+ */
+
+export type GraphResolverLevel = "off" | "low" | "medium" | "high" | "max";
+
+export const DEFAULT_GRAPH_RESOLVER_LEVEL: GraphResolverLevel = "off";
+
+export const GRAPH_RESOLVER_LEVELS: readonly GraphResolverLevel[] = ["off", "low", "medium", "high", "max"] as const;
+
+/**
+ * Reference cost of one solo run, in tokens. A fixed constant, not a measurement: the ceiling is a
+ * multiple of what one agent would have cost, and that run never happens.
+ */
+const GRAPH_BASELINE_TOKENS = 60_000;
+
+export interface GraphResolverBudget {
+	ceilingTokens: number;
+	maxNodes: number;
+}
+
+const LEVEL_BUDGETS: Record<Exclude<GraphResolverLevel, "off">, { multiplier: number; maxNodes: number }> = {
+	low: { multiplier: 3, maxNodes: 2 },
+	medium: { multiplier: 10, maxNodes: 4 },
+	high: { multiplier: 25, maxNodes: 6 },
+	max: { multiplier: 100, maxNodes: 8 },
+};
+
+export function graphResolverBudget(
+	level: GraphResolverLevel,
+	maxTokensClamp?: number,
+): GraphResolverBudget | undefined {
+	if (level === "off") return undefined;
+	const { multiplier, maxNodes } = LEVEL_BUDGETS[level];
+	const ceiling = multiplier * GRAPH_BASELINE_TOKENS;
+	return {
+		ceilingTokens: maxTokensClamp !== undefined ? Math.min(ceiling, maxTokensClamp) : ceiling,
+		maxNodes,
+	};
+}
+
+export function isGraphResolverLevel(value: unknown): value is GraphResolverLevel {
+	return typeof value === "string" && (GRAPH_RESOLVER_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * Recursion depth the level's shapes need, or 0 when off. Children sit one level below their
+ * spawner, so any level needs 1 or every spawn throws and the dial is silently inert; wide levels
+ * need 2 because their prompt lets a worker split its own unit again.
+ *
+ * Folded into the depth setting rather than raised and restored per graph: raising mid-run voids
+ * the prompt cache, and a child captures its depth at spawn so a restore cannot reach it.
+ */
+export function graphMinDepth(level: GraphResolverLevel): number {
+	if (level === "off") return 0;
+	return LEVEL_BUDGETS[level].maxNodes >= 6 ? 2 : 1;
+}
+
+/**
+ * Whether one more child may be admitted. Admission is the only synchronous chokepoint — `rlm()`
+ * returns before a child has done anything — so the ceiling is soft by the work already in flight.
+ *
+ * Counters are per-agent: a worker that splits again draws on its own ceiling, not its parent's, so
+ * the reachable worst case is the ceiling times the number of spawners.
+ */
+export function admitsGraphNode(spentTokens: number, budget: GraphResolverBudget, admittedNodes: number): boolean {
+	return admittedNodes < budget.maxNodes && spentTokens < budget.ceilingTokens;
+}
