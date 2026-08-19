@@ -359,13 +359,22 @@ Per the [Agent Skills specification](https://agentskills.io/specification#frontm
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Max 64 chars. Lowercase a-z, 0-9, hyphens. Must match parent directory. |
+| `name` | Yes (per spec) | Max 64 chars. Lowercase a-z, 0-9, hyphens. Should match the parent directory; Optimus Prime falls back to the directory name when it is missing and warns rather than refusing when it differs. |
 | `description` | Yes | Max 1024 chars. What the skill does and when to use it. |
 | `license` | No | License name or reference to bundled file. |
 | `compatibility` | No | Max 500 chars. Environment requirements. |
 | `metadata` | No | Arbitrary key-value mapping. |
-| `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). |
+| `allowed-tools` | No | Accepted for spec compatibility and ignored. Optimus Prime exposes one model tool, `repl`, so there is nothing to pre-approve. |
 | `disable-model-invocation` | No | When `true`, skill is hidden from system prompt. Users must use `/skill:name`. |
+
+Optimus Prime reads `name`, `description`, and `disable-model-invocation`. The remaining
+fields are parsed and carried on the skill's frontmatter but are not otherwise
+interpreted, so a skill written for another harness loads here unchanged. Only a missing
+or empty `description` prevents a skill from loading.
+
+The portable location is `.agents/skills/`, which every harness implementing the
+convention reads; Optimus Prime searches it both under the home directory and up the
+directory tree from the working directory.
 
 ### Name Rules
 
