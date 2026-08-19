@@ -522,9 +522,74 @@ export class AgentSessionMessageRateLimiter {
 	}
 }
 
+/**
+ * Suppress a repeat of a message this sender already delivered to this target.
+ *
+ * Agent messaging is the channel a child returns its answer on, so a filter here
+ * must never lose a message that carried information. Two properties keep that
+ * true. Only an exact repeat is suppressed -- the first send of any text always
+ * goes through, so a child whose complete answer is "no issues found" is
+ * delivered, and a message differing by one character is a different message.
+ * And a suppressed send returns the receipt the original delivery produced, so
+ * the sender is told it succeeded, which it did: the target has that text.
+ *
+ * Returning success rather than an error is deliberate. A sender told "rejected
+ * as duplicate" rephrases and sends again, which is the loop this prevents.
+ *
+ * Word-overlap near-duplicate matching is the wrong tool here and is not used: a
+ * short reply carries too few word trigrams to fingerprint at all, and the
+ * near-duplicate guard is built to keep single-token substitutions apart --
+ * exactly the case where two agent messages differ by the one number that matters.
+ */
+class AgentMessageDuplicateFilter {
+	/** Recent deliveries per sender->target pair, newest last. */
+	readonly #seen = new Map<string, Map<string, AgentSessionMessageReceipt>>();
+
+	/** Distinct messages remembered per pair. Small: this catches a stuck loop, not a long history. */
+	static readonly #MAX_PER_PAIR = 32;
+
+	/** Case and whitespace are not what makes two agent messages different. */
+	static #identity(message: string): string {
+		return message.replace(/\s+/g, " ").trim().toLowerCase();
+	}
+
+	/** The receipt of an earlier identical delivery, if this send repeats one. */
+	previousReceipt(pairKey: string, message: string): AgentSessionMessageReceipt | undefined {
+		return this.#seen.get(pairKey)?.get(AgentMessageDuplicateFilter.#identity(message));
+	}
+
+	record(pairKey: string, message: string, receipt: AgentSessionMessageReceipt): void {
+		let pair = this.#seen.get(pairKey);
+		if (!pair) {
+			pair = new Map();
+			this.#seen.set(pairKey, pair);
+		}
+		pair.set(AgentMessageDuplicateFilter.#identity(message), receipt);
+		while (pair.size > AgentMessageDuplicateFilter.#MAX_PER_PAIR) {
+			const oldest = pair.keys().next().value;
+			if (oldest === undefined) break;
+			pair.delete(oldest);
+		}
+	}
+}
+
 export function createAgentMessageHostHandlers(
 	controller: Pick<AgentSessionMessageController, "roster" | "sendAgentMessage" | "awaitPendingChildPublication">,
 ): Record<string, HostRequestHandler> {
+	// Scoped to these handlers on purpose: host-generated notices and human `/message`
+	// sends reach the controller by other paths and are never filtered.
+	const duplicates = new AgentMessageDuplicateFilter();
+
+	/** Deliver, unless this exact text already reached this target from this sender. */
+	const sendOnce = async (input: AgentSessionMessageSendInput): Promise<AgentSessionMessageReceipt> => {
+		const pairKey = `${input.receiverRole ?? "unknown"}\u0000${input.target}`;
+		const previous = duplicates.previousReceipt(pairKey, input.message);
+		if (previous) return previous;
+		const receipt = await controller.sendAgentMessage(input);
+		duplicates.record(pairKey, input.message, receipt);
+		return receipt;
+	};
+
 	return {
 		"agent_message.list_agents": async () => {
 			if (!controller.roster) throw new Error("agent family roster is not available in this session");
@@ -548,7 +613,7 @@ export function createAgentMessageHostHandlers(
 				const roster = await controller.roster();
 				const results = await Promise.allSettled(
 					roster.entries.map((entry) =>
-						controller.sendAgentMessage({
+						sendOnce({
 							target: entry.id,
 							message: payload.message as string,
 							receiverRole: entry.relationship,
@@ -597,7 +662,7 @@ export function createAgentMessageHostHandlers(
 				}
 				target = matches[0]!.id;
 			}
-			return (await controller.sendAgentMessage({
+			return (await sendOnce({
 				target,
 				message: payload.message,
 				receiverRole: payload.receiver_role as AgentFamilyRelationship,

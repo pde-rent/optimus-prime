@@ -449,3 +449,70 @@ describe("agent session bus", () => {
 		expect(limiter.tryConsume("sender")).toEqual({ ok: true });
 	});
 });
+
+describe("duplicate agent messages", () => {
+	function makeHandlers() {
+		let counter = 0;
+		const sendAgentMessage = vi.fn(async (input: { target: string; message: string }) => ({
+			id: input.target,
+			deliveryStatus: "delivered" as const,
+			deliveredAt: new Date(++counter).toISOString(),
+		}));
+		const handlers = createAgentMessageHostHandlers({
+			roster: () => ({
+				current: { name: "builder", id: "builder", depth: 1 },
+				entries: [
+					{ relationship: "parent", name: "root", id: "root", depth: 0, status: "running" as const },
+					{ relationship: "sibling", name: "reviewer", id: "sibling", depth: 1, status: "idle" as const },
+				],
+			}),
+			sendAgentMessage,
+			// biome-ignore lint/suspicious/noExplicitAny: partial controller is enough here
+		} as any);
+		return { handlers, sendAgentMessage };
+	}
+
+	it("delivers the first send of any text, including a terse one", async () => {
+		// A child's complete and correct answer may legitimately be "no issues found".
+		// Nothing may suppress a first delivery.
+		const { handlers, sendAgentMessage } = makeHandlers();
+		await handlers["agent_message.send"]!({ message: "no issues found", receiver_role: "parent" });
+		expect(sendAgentMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not deliver the same text twice to the same target", async () => {
+		const { handlers, sendAgentMessage } = makeHandlers();
+		await handlers["agent_message.send"]!({ message: "Stop.", receiver_role: "parent" });
+		await handlers["agent_message.send"]!({ message: "Stop.", receiver_role: "parent" });
+		await handlers["agent_message.send"]!({ message: "  stop.  ", receiver_role: "parent" });
+		expect(sendAgentMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it("reports the original receipt for a suppressed repeat, so the sender sees success", async () => {
+		// Telling the sender it failed makes it rephrase and send again, which is the
+		// loop this exists to stop. The target does have the text, so success is true.
+		const { handlers } = makeHandlers();
+		const first = await handlers["agent_message.send"]!({ message: "same", receiver_role: "parent" });
+		const second = await handlers["agent_message.send"]!({ message: "same", receiver_role: "parent" });
+		expect(second).toEqual(first);
+	});
+
+	it("treats a one-character difference as a different message", async () => {
+		// Two reports differing only by the number that matters must both land.
+		const { handlers, sendAgentMessage } = makeHandlers();
+		await handlers["agent_message.send"]!({ message: "3 tests failed", receiver_role: "parent" });
+		await handlers["agent_message.send"]!({ message: "4 tests failed", receiver_role: "parent" });
+		expect(sendAgentMessage).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps targets independent", async () => {
+		const { handlers, sendAgentMessage } = makeHandlers();
+		await handlers["agent_message.send"]!({ message: "done", receiver_role: "parent" });
+		await handlers["agent_message.send"]!({
+			message: "done",
+			receiver_role: "sibling",
+			receiver_name: "reviewer",
+		});
+		expect(sendAgentMessage).toHaveBeenCalledTimes(2);
+	});
+});

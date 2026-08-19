@@ -436,7 +436,6 @@ export const VERSION: string = pkg.version || "0.0.0";
 export const ENV_AGENT_DIR = `${envPrefix}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${envPrefix}_SESSION_DIR`;
 
-
 export function expandTildePath(path: string): string {
 	if (path === "~") return homedir();
 	if (path.startsWith("~/")) return homedir() + path.slice(1);

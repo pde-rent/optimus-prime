@@ -1,11 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import {
-	resetCapabilitiesCache,
-	setCapabilities,
-	setKeybindings,
-	type TUI,
-	visibleWidth,
-} from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilities, setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +18,6 @@ vi.mock("../src/utils/clipboard.js", () => ({
 const { KeybindingsManager } = await import("../src/core/keybindings.js");
 const { LoginDialogComponent } = await import("../src/modes/interactive/components/login-dialog.js");
 const { initTheme } = await import("../src/modes/interactive/theme/theme.js");
-const { OPTIMUS_LOGO } = await import("../src/themes/optimus-logo.js");
 
 function createFakeTui(): TUI {
 	return {
@@ -141,14 +134,12 @@ describe("LoginDialogComponent", () => {
 	});
 
 	it("renders verification codes as a distinct field", () => {
-		const dialog = new LoginDialogComponent(createFakeTui(), "prime-inference", () => {}, "Prime Inference");
+		const dialog = new LoginDialogComponent(createFakeTui(), "openrouter", () => {}, "OpenRouter");
 
 		dialog.showAuth("https://example.com/challenge", "Code: abc-123");
 		const output = stripAnsi(dialog.render(88).join("\n"));
-		const firstLogoLine = OPTIMUS_LOGO.split("\n")[0]?.trim() ?? "";
 
-		expect(output).toContain("Login to Prime Inference");
-		expect(output).toContain(firstLogoLine);
+		expect(output).toContain("Login to OpenRouter");
 		expect(output).toContain("Verification code");
 		expect(output).toContain("abc-123");
 		expect(output).not.toContain("click to open");
@@ -164,23 +155,6 @@ describe("LoginDialogComponent", () => {
 
 		expect(output).toContain("Waiting for browser authentication...");
 		expect(output).not.toContain("Status");
-	});
-
-	it("keeps the Prime Inference brand header centered and within the panel", () => {
-		const dialog = new LoginDialogComponent(createFakeTui(), "prime-inference", () => {}, "Prime Inference");
-
-		dialog.showProgress("Checking existing Prime CLI credentials...");
-		const lines = dialog.render(88);
-		const output = stripAnsi(lines.join("\n"));
-		const titleLine = output.split("\n").find((line) => line.includes("Login to Prime Inference"));
-		const titleOffset = titleLine?.indexOf("Login to Prime Inference") ?? -1;
-
-		expect(titleOffset).toBeGreaterThan(20);
-		expect(output).toContain("Connect your Prime Intellect account to enable Prime Inference models.");
-		expect(output).toContain("Preparing authentication");
-		for (const line of lines) {
-			expect(visibleWidth(line)).toBe(88);
-		}
 	});
 
 	it("cancels the prompt with esc and ctrl+c", async () => {

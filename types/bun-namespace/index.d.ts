@@ -57,6 +57,18 @@ declare namespace Bun {
 		height: number;
 	}
 
+	interface BunFile extends Blob {
+		text(): Promise<string>;
+		json(): Promise<unknown>;
+		bytes(): Promise<Uint8Array>;
+		arrayBuffer(): Promise<ArrayBuffer>;
+		exists(): Promise<boolean>;
+		readonly name?: string;
+		readonly size: number;
+	}
+
+	function file(path: string | URL, options?: { type?: string }): BunFile;
+
 	const YAML: {
 		parse(input: string): unknown;
 		stringify(value: unknown, replacer?: unknown, space?: string | number): string;

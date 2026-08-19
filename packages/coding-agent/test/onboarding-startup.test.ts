@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AuthStatus } from "../src/core/auth-storage.js";
-import { PRIME_INFERENCE_PROVIDER_ID } from "../src/core/prime-inference-auth.js";
-import {
-	type OnboardingStartupState,
-	shouldRunOnboarding,
-	shouldRunOptimusCliOnboardingSplash,
-} from "../src/modes/interactive/onboarding.js";
+import { type OnboardingStartupState, shouldRunOnboarding } from "../src/modes/interactive/onboarding.js";
 
 function makeModel(provider: string): Model<Api> {
 	return { id: "test-model", provider } as Model<Api>;
@@ -35,17 +30,6 @@ function makeState(overrides: {
 }
 
 describe("startup onboarding decision", () => {
-	test("runs onboarding on first launch with Prime CLI auth", () => {
-		const state = makeState({
-			onboardingShown: false,
-			model: makeModel(PRIME_INFERENCE_PROVIDER_ID),
-			modelHasAuth: true,
-			primeAuthSource: "prime_cli",
-		});
-		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(true);
-		expect(shouldRunOnboarding(state)).toBe(true);
-	});
-
 	test("runs onboarding on first launch when no model is available", () => {
 		expect(shouldRunOnboarding(makeState({ onboardingShown: false, model: undefined }))).toBe(true);
 	});
@@ -58,27 +42,5 @@ describe("startup onboarding decision", () => {
 
 	test("does not reopen onboarding after dismissal when no model is available", () => {
 		expect(shouldRunOnboarding(makeState({ onboardingShown: true, model: undefined }))).toBe(false);
-	});
-
-	test("skips onboarding once completed with a ready model", () => {
-		const state = makeState({
-			onboardingShown: true,
-			model: makeModel(PRIME_INFERENCE_PROVIDER_ID),
-			modelHasAuth: true,
-			primeAuthSource: "prime_cli",
-		});
-		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(false);
-		expect(shouldRunOnboarding(state)).toBe(false);
-	});
-
-	test("skips the Prime CLI splash for non-Prime providers with ready auth", () => {
-		const state = makeState({
-			onboardingShown: false,
-			model: makeModel("anthropic"),
-			modelHasAuth: true,
-			primeAuthSource: "stored",
-		});
-		expect(shouldRunOptimusCliOnboardingSplash(state)).toBe(false);
-		expect(shouldRunOnboarding(state)).toBe(false);
 	});
 });

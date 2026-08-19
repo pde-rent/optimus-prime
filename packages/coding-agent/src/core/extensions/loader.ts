@@ -525,9 +525,7 @@ function discoverExtensionsInDir(dir: string): string[] {
 		// Sorted by name: readdir order is filesystem-dependent, and extensions run in discovery
 		// order, so an unsorted scan makes the result of chained handlers — each one appending to
 		// the system prompt, say — depend on which order the directory happens to return.
-		const entries = fs
-			.readdirSync(dir, { withFileTypes: true })
-			.sort((a, b) => a.name.localeCompare(b.name));
+		const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 
 		for (const entry of entries) {
 			const entryPath = path.join(dir, entry.name);

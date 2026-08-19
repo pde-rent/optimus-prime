@@ -51,8 +51,9 @@ Optimus Prime ships with built-in skills that load by default:
 - `agent-message` - JS-backed. Message an agent's parent, siblings, or direct children through the daemon (`await agent_message.send(...)`).
 - `agent-observe` - JS-backed. Read-only observation of the agent's family: status and bounded recent-message previews.
 - `attach-image` - JS-backed. Load an on-disk image into the model's context as a viewable attachment (`await attach_image.run("diagram.png")`).
+- `check` - JS-backed. Run the project's own checker (`await check()`), detected from root markers searched upward, so a package inherits the repository's config.
 - `compact` - JS-backed. Check context usage and schedule compaction from the REPL.
-- `edit` - JS-backed. Replace one exact, unique string in a file: `await edit(path, oldStr, newStr)`.
+- `edit` - JS-backed. Replace one exact, unique string (`await edit(path, oldStr, newStr)`), or edit by line against a content tag (`await edit.src(path)` then `await edit.patch(path, tag, hunks)`).
 - `goal` - JS-backed. Read, create, and complete the persistent thread goal.
 - `linear` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.
 - `notion` - JS-backed [MCP integration](mcp-integrations.md). Ships disabled until you log in.

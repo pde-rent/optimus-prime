@@ -14,9 +14,8 @@ import {
 	statSync,
 	writeFileSync,
 } from "fs";
-import { homedir } from "os";
 import { basename, dirname, join } from "path";
-import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, getAgentDir, getBinDir, getSessionsDir } from "./config.js";
+import { CONFIG_DIR_NAME, getAgentDir, getBinDir, getSessionsDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
 import { color as chalk } from "./utils/ansi.js";
 import { readFirstLineSync } from "./utils/file-lines.js";

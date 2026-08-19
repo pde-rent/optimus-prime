@@ -9,7 +9,7 @@ const SWEEP_INTERVAL_MS = 25_000;
 // Collapse a tool-use loop's rapid turn_end bursts into one summarization.
 const SETTLE_DEBOUNCE_MS = 2_000;
 
-const SUMMARY_MODEL_PROVIDER = "prime-inference";
+const SUMMARY_MODEL_PROVIDER = "openrouter";
 const SUMMARY_MODEL_ID = "qwen/qwen3-30b-a3b-instruct-2507";
 
 const SUMMARY_CONTEXT_MESSAGES = 8;

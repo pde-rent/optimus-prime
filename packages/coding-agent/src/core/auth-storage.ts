@@ -19,30 +19,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "f
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.js";
-import {
-	clearOptimusCliCredentials,
-	getOptimusCliConfigPath,
-	loadOptimusCliConfig,
-	type OptimusCliConfig,
-	PRIME_INFERENCE_PROVIDER_ID,
-	type PrimeTeam,
-	saveOptimusCliApiKey,
-	saveOptimusCliTeamSelection,
-} from "./prime-inference-auth.js";
 import { resolveConfigValue, resolveConfigValueUncached } from "./resolve-config-value.js";
-
-export type PrimeTeamCredential = {
-	teamId: string;
-	name: string;
-	slug?: string;
-	role?: string;
-	createdAt?: string;
-};
 
 export type ApiKeyCredential = {
 	type: "api_key";
 	key: string;
-	primeTeam?: PrimeTeamCredential | null;
 };
 
 export type OAuthCredential = {
@@ -254,7 +235,7 @@ export class AuthStorage {
 
 	private constructor(
 		private storage: AuthStorageBackend,
-		private options: AuthStorageOptions = {},
+		_options: AuthStorageOptions = {},
 	) {
 		this.reload();
 	}
@@ -375,22 +356,6 @@ export class AuthStorage {
 		};
 	}
 
-	private getOptimusCliAuthCandidate(provider: string): AuthSourceCandidate | undefined {
-		const apiKey = this.getOptimusCliApiKey(provider);
-		if (!apiKey) {
-			return undefined;
-		}
-		return {
-			label: "Prime CLI",
-			...this.createAuthSourceCandidate({
-				configured: false,
-				source: "prime_cli",
-				identityMaterial: provider,
-				valueMaterial: apiKey,
-			}),
-		};
-	}
-
 	private getStoredAuthCandidate(
 		provider: string,
 		options?: { resolveCommandValue?: boolean; resolvedCommandValue?: string },
@@ -459,21 +424,12 @@ export class AuthStorage {
 	private getAuthSourceCandidates(provider: string, options?: { includeFallback?: boolean }): AuthSourceCandidate[] {
 		const fallbackCandidate =
 			options?.includeFallback === false ? undefined : this.getFallbackAuthCandidate(provider);
-		const candidates =
-			provider === PRIME_INFERENCE_PROVIDER_ID
-				? [
-						this.getRuntimeAuthCandidate(provider),
-						this.getEnvironmentAuthCandidate(provider),
-						this.getOptimusCliAuthCandidate(provider),
-						this.getStoredAuthCandidate(provider),
-						fallbackCandidate,
-					]
-				: [
-						this.getRuntimeAuthCandidate(provider),
-						this.getStoredAuthCandidate(provider),
-						this.getEnvironmentAuthCandidate(provider),
-						fallbackCandidate,
-					];
+		const candidates = [
+			this.getRuntimeAuthCandidate(provider),
+			this.getStoredAuthCandidate(provider),
+			this.getEnvironmentAuthCandidate(provider),
+			fallbackCandidate,
+		];
 		return candidates.filter((candidate): candidate is AuthSourceCandidate => candidate !== undefined);
 	}
 
@@ -721,15 +677,6 @@ export class AuthStorage {
 	 * Logout from a provider.
 	 */
 	logout(provider: string): void {
-		if (provider === PRIME_INFERENCE_PROVIDER_ID && this.isOptimusCliConfigEnabled()) {
-			try {
-				clearOptimusCliCredentials(this.getEnabledOptimusCliConfigPath());
-				this.clearStaleAuthSource(provider, "prime_cli");
-			} catch (error) {
-				this.recordError(error);
-				throw error;
-			}
-		}
 		this.remove(provider);
 	}
 
@@ -807,28 +754,6 @@ export class AuthStorage {
 
 		const envCandidate = this.getEnvironmentAuthCandidate(providerId);
 		const envKey = getEnvApiKey(providerId);
-		if (
-			providerId === PRIME_INFERENCE_PROVIDER_ID &&
-			envKey &&
-			envCandidate &&
-			!this.isAuthSourceStale(providerId, envCandidate)
-		) {
-			return {
-				apiKey: envKey,
-				sourceToken: this.getAuthSourceTokenForCandidate(providerId, envCandidate),
-			};
-		}
-
-		if (providerId === PRIME_INFERENCE_PROVIDER_ID) {
-			const optimusCliCandidate = this.getOptimusCliAuthCandidate(providerId);
-			const optimusCliKey = this.getOptimusCliApiKey(providerId);
-			if (optimusCliKey && optimusCliCandidate && !this.isAuthSourceStale(providerId, optimusCliCandidate)) {
-				return {
-					apiKey: optimusCliKey,
-					sourceToken: this.getAuthSourceTokenForCandidate(providerId, optimusCliCandidate),
-				};
-			}
-		}
 
 		const cred = this.data[providerId];
 
@@ -903,13 +828,8 @@ export class AuthStorage {
 				}
 			}
 		}
-		// Stored auth wins over environment variables for non-Prime-Inference providers.
-		if (
-			providerId !== PRIME_INFERENCE_PROVIDER_ID &&
-			envKey &&
-			envCandidate &&
-			!this.isAuthSourceStale(providerId, envCandidate)
-		) {
+		// Stored auth wins over environment variables.
+		if (envKey && envCandidate && !this.isAuthSourceStale(providerId, envCandidate)) {
 			return {
 				apiKey: envKey,
 				sourceToken: this.getAuthSourceTokenForCandidate(providerId, envCandidate),
@@ -938,165 +858,5 @@ export class AuthStorage {
 	 */
 	getOAuthProviders() {
 		return getOAuthProviders();
-	}
-
-	setPrimeInferenceTeamSelection(team: PrimeTeam | null): void {
-		if (this.isOptimusCliConfigEnabled()) {
-			try {
-				saveOptimusCliTeamSelection(team, this.getEnabledOptimusCliConfigPath());
-			} catch (error) {
-				this.recordError(error);
-				throw error;
-			}
-			return;
-		}
-
-		const credential = this.data[PRIME_INFERENCE_PROVIDER_ID];
-		if (credential?.type !== "api_key") {
-			return;
-		}
-		this.set(PRIME_INFERENCE_PROVIDER_ID, {
-			...credential,
-			primeTeam: team ? this.toPrimeTeamCredential(team) : null,
-		});
-	}
-
-	setPrimeInferenceApiKey(apiKey: string): void {
-		if (this.isOptimusCliConfigEnabled()) {
-			try {
-				const configPath = this.getEnabledOptimusCliConfigPath();
-				const config = loadOptimusCliConfig(configPath);
-				const existingCredential = this.data[PRIME_INFERENCE_PROVIDER_ID];
-				const legacyPrimeTeam = existingCredential?.type === "api_key" ? existingCredential.primeTeam : undefined;
-				if (config.apiKey !== apiKey) {
-					saveOptimusCliApiKey(apiKey, configPath);
-				} else if (!config.teamIdFromEnv && (legacyPrimeTeam === null || (!config.teamId && legacyPrimeTeam))) {
-					saveOptimusCliTeamSelection(legacyPrimeTeam, configPath);
-				}
-				this.clearStaleAuthSource(PRIME_INFERENCE_PROVIDER_ID, "prime_cli");
-			} catch (error) {
-				this.recordError(error);
-				throw error;
-			}
-			if (this.data[PRIME_INFERENCE_PROVIDER_ID]) {
-				this.remove(PRIME_INFERENCE_PROVIDER_ID);
-			}
-			return;
-		}
-
-		const existingCredential = this.data[PRIME_INFERENCE_PROVIDER_ID];
-		const existingPrimeTeam = existingCredential?.type === "api_key" ? existingCredential.primeTeam : undefined;
-		this.set(PRIME_INFERENCE_PROVIDER_ID, {
-			type: "api_key",
-			key: apiKey,
-			...(existingPrimeTeam !== undefined ? { primeTeam: existingPrimeTeam } : {}),
-		});
-	}
-
-	getPrimeInferenceTeamSelection(): PrimeTeamCredential | null | undefined {
-		let config: OptimusCliConfig | undefined;
-		if (this.isOptimusCliConfigEnabled()) {
-			config = this.getOptimusCliConfig(PRIME_INFERENCE_PROVIDER_ID);
-			if (config?.teamIdFromEnv) {
-				return undefined;
-			}
-		}
-
-		const credential = this.data[PRIME_INFERENCE_PROVIDER_ID];
-		const authSource = this.getAuthStatus(PRIME_INFERENCE_PROVIDER_ID).source;
-		if (authSource === "runtime" || authSource === "environment") {
-			return undefined;
-		}
-		if (authSource === "prime_cli") {
-			if (credential?.type === "api_key" && credential.primeTeam === null) {
-				return null;
-			}
-			if (config?.teamId) {
-				return this.toPrimeTeamCredential({
-					teamId: config.teamId,
-					name: config.teamName ?? "Prime CLI team",
-					...(config.teamRole ? { role: config.teamRole } : {}),
-				});
-			}
-			if (credential?.type === "api_key" && credential.primeTeam) {
-				return credential.primeTeam;
-			}
-			return null;
-		}
-		if (credential?.type === "api_key" && credential.primeTeam !== undefined) {
-			return credential.primeTeam;
-		}
-		if (!config?.apiKey && config?.teamId) {
-			return this.toPrimeTeamCredential({
-				teamId: config.teamId,
-				name: config.teamName ?? "Prime CLI team",
-				...(config.teamRole ? { role: config.teamRole } : {}),
-			});
-		}
-		return undefined;
-	}
-
-	getProviderHeaders(providerId: string): Record<string, string> | undefined {
-		if (providerId !== PRIME_INFERENCE_PROVIDER_ID) {
-			return undefined;
-		}
-
-		const optimusCliConfig = this.getOptimusCliConfig(providerId);
-		if (optimusCliConfig?.teamIdFromEnv) {
-			return optimusCliConfig.teamId ? { "X-Prime-Team-ID": optimusCliConfig.teamId } : undefined;
-		}
-
-		const teamId = this.getPrimeInferenceTeamSelection()?.teamId;
-		return teamId ? { "X-Prime-Team-ID": teamId } : undefined;
-	}
-
-	getOptimusCliConfigPath(): string | undefined {
-		if (!this.isOptimusCliConfigEnabled()) {
-			return undefined;
-		}
-		return getOptimusCliConfigPath(this.options.optimusCliConfigPath);
-	}
-
-	private toPrimeTeamCredential(team: PrimeTeam): PrimeTeamCredential {
-		const credential: PrimeTeamCredential = {
-			teamId: team.teamId,
-			name: team.name,
-		};
-		if (team.slug) {
-			credential.slug = team.slug;
-		}
-		if (team.role) {
-			credential.role = team.role;
-		}
-		if (team.createdAt) {
-			credential.createdAt = team.createdAt;
-		}
-		return credential;
-	}
-
-	private getOptimusCliConfig(providerId: string): OptimusCliConfig | undefined {
-		if (providerId !== PRIME_INFERENCE_PROVIDER_ID) {
-			return undefined;
-		}
-		if (!this.isOptimusCliConfigEnabled()) {
-			return undefined;
-		}
-		return loadOptimusCliConfig(this.options.optimusCliConfigPath);
-	}
-
-	private getOptimusCliApiKey(providerId: string): string | undefined {
-		return this.getOptimusCliConfig(providerId)?.apiKey;
-	}
-
-	private getEnabledOptimusCliConfigPath(): string {
-		const configPath = this.getOptimusCliConfigPath();
-		if (!configPath) {
-			throw new Error("Prime CLI config is not enabled");
-		}
-		return configPath;
-	}
-
-	private isOptimusCliConfigEnabled(): boolean {
-		return Boolean(this.options.useOptimusCliConfig || this.options.optimusCliConfigPath);
 	}
 }

@@ -8,7 +8,6 @@ import {
 	TruncatedText,
 } from "@earendil-works/pi-tui";
 import type { AuthStatus, AuthStorage } from "../../../core/auth-storage.js";
-import { PRIME_INFERENCE_PROVIDER_ID } from "../../../core/prime-inference-auth.js";
 import { theme } from "../theme/theme.js";
 import {
 	getMenuListLayout,
@@ -200,8 +199,6 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 				return rankDelta;
 			}
 			if (this.mode === "login" && a.id !== b.id) {
-				if (a.id === PRIME_INFERENCE_PROVIDER_ID) return -1;
-				if (b.id === PRIME_INFERENCE_PROVIDER_ID) return 1;
 			}
 			return compareAuthSelectorProviders(a, b);
 		});

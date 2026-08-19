@@ -74,7 +74,6 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 	const envMap: Record<string, string> = {
 		openai: "OPENAI_API_KEY",
 		"azure-openai-responses": "AZURE_OPENAI_API_KEY",
-		"prime-inference": "PRIME_API_KEY",
 		deepseek: "DEEPSEEK_API_KEY",
 		google: "GEMINI_API_KEY",
 		groq: "GROQ_API_KEY",
@@ -134,24 +133,5 @@ export function getEnvApiKey(provider: string): string | undefined {
 		return process.env[envKeys[0]] || getProcEnv(envKeys[0]);
 	}
 
-	return undefined;
-}
-
-export function getPrimeTeamId(): string | undefined {
-	const fromEnv = process.env.PRIME_TEAM_ID || getProcEnv("PRIME_TEAM_ID");
-	if (fromEnv?.trim()) return fromEnv.trim();
-
-	if (!_existsSync || !_readFileSync || !_homedir || !_join) return undefined;
-	const configPath = _join(_homedir(), ".prime", "config.json");
-	if (!_existsSync(configPath)) return undefined;
-	try {
-		const parsed = JSON.parse(_readFileSync(configPath, "utf-8")) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			const teamId = (parsed as Record<string, unknown>).team_id;
-			if (typeof teamId === "string" && teamId.trim()) return teamId.trim();
-		}
-	} catch {
-		// Treat unreadable or malformed config as no configured team.
-	}
 	return undefined;
 }

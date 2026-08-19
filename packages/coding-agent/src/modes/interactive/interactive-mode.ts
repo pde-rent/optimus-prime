@@ -96,7 +96,6 @@ import {
 } from "../../core/messages.js";
 import { findExactModelReferenceMatch, resolveModelScopeFromModels } from "../../core/model-resolver.js";
 import { parseNewSessionCommand } from "../../core/new-session-command.js";
-import { resolvePrimeInferencePostLoginModelAction } from "../../core/prime-inference-model-selection.js";
 import { parseCommandArgs } from "../../core/prompt-templates.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { SessionImportFileNotFoundError } from "../../core/session-import-errors.js";
@@ -152,7 +151,7 @@ import {
 	formatUpdateAvailableNotice,
 } from "../shared/startup-notices.js";
 import { AGENT_ACTIVITY_LABELS, AgentActivityTracker, formatTokenCount } from "./agent-activity.js";
-import { type AuthenticationResult, getAnthropicSubscriptionAuthWarning, ProviderAuthFlows } from "./auth-flows.js";
+import { getAnthropicSubscriptionAuthWarning, ProviderAuthFlows } from "./auth-flows.js";
 import { AgentMessageComponent } from "./components/agent-message.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
@@ -190,7 +189,6 @@ import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
 import { formatKeyText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import type { AuthSelectorProvider } from "./components/oauth-selector.js";
-import { PrimeOnboardingSplashComponent } from "./components/prime-onboarding-splash.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { SideQuestionComponent } from "./components/side-question.js";
@@ -226,7 +224,7 @@ import type {
 	InteractiveModeLocalToolRendererDefinition,
 	InteractiveModeUiServices,
 } from "./interactive-mode-services.js";
-import { type OnboardingStartupState, shouldRunOnboarding, shouldRunOptimusCliOnboardingSplash } from "./onboarding.js";
+import { type OnboardingStartupState, shouldRunOnboarding } from "./onboarding.js";
 import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
 import { QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
@@ -573,11 +571,6 @@ type GoalAnnouncementSnapshot = {
 };
 
 type ModelFallbackWarningAction = "show" | "suppress";
-
-interface OnboardingSplashHandle {
-	showProgress(message: string): void;
-	dismiss(): void;
-}
 
 const THINKING_LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
@@ -1760,10 +1753,6 @@ export class InteractiveMode {
 		return shouldRunOnboarding(this.getOnboardingState());
 	}
 
-	private shouldRunOptimusCliOnboardingSplash(): boolean {
-		return shouldRunOptimusCliOnboardingSplash(this.getOnboardingState());
-	}
-
 	private markOnboardingShown(): void {
 		if (!this.settingsManager.getOnboardingShown()) {
 			this.settingsManager.setOnboardingShown(true);
@@ -1775,54 +1764,15 @@ export class InteractiveMode {
 			return false;
 		}
 
-		const showOptimusCliSplash = this.shouldRunOptimusCliOnboardingSplash();
 		this.markOnboardingShown();
 		await this.settingsManager.flush();
-		await this.runOnboardingFlow(showOptimusCliSplash);
+		await this.runOnboardingFlow();
 		return true;
 	}
 
-	private async showOnboardingModelSelection(splash: OnboardingSplashHandle): Promise<void> {
-		try {
-			await this.showConfigurationMenu("models");
-		} finally {
-			splash.dismiss();
-		}
-	}
-
-	private async runOnboardingFlow(showOptimusCliSplash = this.shouldRunOptimusCliOnboardingSplash()): Promise<void> {
+	private async runOnboardingFlow(): Promise<void> {
 		this.modelRegistry.refresh();
-		if (showOptimusCliSplash) {
-			const splash = await this.showOnboardingSplash("choose a model");
-			if (!splash) {
-				return;
-			}
-
-			await this.showOnboardingModelSelection(splash);
-			return;
-		}
-
-		const availableModels = await this.getModelCandidates();
-		if (availableModels.length > 0) {
-			await this.showConfigurationMenu("models");
-			return;
-		}
-
-		const splash = await this.showOnboardingSplash();
-		if (!splash) {
-			return;
-		}
-
-		splash.showProgress("Signing in to Prime Intellect...");
-		const authResult = await this.createAuthFlows().runPrimeInferenceLogin();
-		if (authResult.status !== "success") {
-			splash.dismiss();
-			return;
-		}
-
-		splash.showProgress("Preparing models...");
-		await this.prepareForModelSelectionAfterLogin(authResult);
-		await this.showOnboardingModelSelection(splash);
+		await this.showConfigurationMenu("models");
 	}
 
 	private getMarkdownThemeWithSettings(): MarkdownTheme {
@@ -8100,7 +8050,6 @@ export class InteractiveMode {
 							return;
 						}
 
-						await this.prepareForModelSelectionAfterLogin(authResult);
 						menu.updateModels(
 							this.getCurrentModel(),
 							this.getCachedModelCandidates(),
@@ -8504,55 +8453,6 @@ export class InteractiveMode {
 		}
 	}
 
-	private showOnboardingSplash(continueActionLabel?: string): Promise<OnboardingSplashHandle | undefined> {
-		return new Promise((resolve) => {
-			let settled = false;
-			let dismissed = false;
-			let handle: OverlayHandle | undefined;
-			let selector: PrimeOnboardingSplashComponent | undefined;
-			const settle = (result: OnboardingSplashHandle | undefined) => {
-				if (settled) {
-					return;
-				}
-				settled = true;
-				resolve(result);
-			};
-			const dismiss = () => {
-				if (dismissed) {
-					return;
-				}
-				dismissed = true;
-				selector?.dispose();
-				handle?.hide();
-				this.ui.requestRender();
-			};
-			selector = new PrimeOnboardingSplashComponent(
-				() => {
-					selector?.dispose();
-					settle({
-						showProgress: (message) => selector?.showProgress(message),
-						dismiss,
-					});
-				},
-				() => {
-					dismiss();
-					settle(undefined);
-				},
-				{
-					getRows: () => this.ui.terminal.rows,
-					requestRender: () => this.ui.requestRender(),
-					...(continueActionLabel ? { continueActionLabel } : {}),
-				},
-			);
-			handle = this.ui.showOverlay(selector, {
-				width: "100%",
-				maxHeight: "100%",
-				row: 0,
-				col: 0,
-			});
-		});
-	}
-
 	private createAuthFlows(): ProviderAuthFlows {
 		return new ProviderAuthFlows({
 			ui: this.ui,
@@ -8570,45 +8470,6 @@ export class InteractiveMode {
 				void this.maybeWarnAboutAnthropicSubscriptionAuth();
 			},
 		});
-	}
-
-	private async prepareForModelSelectionAfterLogin(authResult: AuthenticationResult): Promise<boolean> {
-		const currentModel = this.getCurrentModel();
-		// The agent core uses unknown/unknown as its no-model sentinel.
-		const selectedModel =
-			currentModel?.provider === "unknown" && currentModel.id === "unknown" ? undefined : currentModel;
-		let action = resolvePrimeInferencePostLoginModelAction(authResult, selectedModel, this.modelRegistry);
-		if (!action.openModelPicker) {
-			return false;
-		}
-
-		if (!selectedModel) {
-			try {
-				const availableModels = await this.getConnectionAvailableModels();
-				action = resolvePrimeInferencePostLoginModelAction(authResult, selectedModel, {
-					find: (provider, modelId) =>
-						availableModels.find((model) => model.provider === provider && model.id === modelId) ??
-						this.modelRegistry.find(provider, modelId),
-				});
-			} catch {
-				// Preserve the registry fallback so selection can still report a specific failure below.
-			}
-		}
-
-		if (action.fallbackModel) {
-			try {
-				await this.applySelectedModel(action.fallbackModel);
-				await this.settingsManager.flush();
-			} catch (error) {
-				this.showError(
-					`Prime Inference login succeeded, but the default model could not be selected: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-		} else if (!selectedModel) {
-			this.showError("Prime Inference login succeeded, but the default GLM 5.2 model is unavailable.");
-		}
-
-		return true;
 	}
 
 	private async handleMcpCommand(args: string | undefined): Promise<void> {
