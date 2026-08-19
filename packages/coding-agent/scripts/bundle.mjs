@@ -55,5 +55,24 @@ await build({
 	logLevel: "warning",
 });
 
+// The REPL child is spawned by path from the directory holding this bundle, and is
+// reachable from no import in cli.js — esbuild therefore never emits it. Without this
+// second build the bundled daemon spawns a file that does not exist, every cell waits
+// on a kernel that will never say `ready`, and no `%%bash` or JS cell ever returns.
+// `bun:*` builtins stay external: they resolve inside the child's Bun runtime.
+await build({
+	entryPoints: [join(packageDir, "dist", "core", "bun-repl", "repl-script.js")],
+	outfile: join(outdir, "repl-script.js"),
+	bundle: true,
+	format: "esm",
+	platform: "node",
+	external: ["koffi", "@mariozechner/clipboard", "bun:sqlite", "bun:ffi", "bun:jsc", "bun:test"],
+	define: { __PI_BUNDLED__: "true", __PI_BUILD_ID__: JSON.stringify(buildId) },
+	banner: {
+		js: "import { createRequire as __piBundleCreateRequire } from 'node:module'; const require = __piBundleCreateRequire(import.meta.url);",
+	},
+	logLevel: "warning",
+});
+
 chmodSync(join(outdir, "cli.js"), 0o755);
 console.log("bundled dist/cli.js -> dist/bundle/");

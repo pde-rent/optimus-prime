@@ -24,6 +24,18 @@ const CHILD_STDERR_TAIL_CHARS = 4096;
 /** Cap on the final snapshot taken during dispose. */
 const SNAPSHOT_DISPOSE_TIMEOUT_MS = 5000;
 
+/**
+ * Ceiling on how long the child may take to announce `ready`.
+ *
+ * A kernel that never announces itself used to wedge the session forever: the tool awaits
+ * `start()`, `start()` awaits a promise nothing settles, and no cell ever returns. Any
+ * startup failure has to surface as an error the model can read and retry past.
+ */
+const STARTUP_TIMEOUT_MS = 60_000;
+
+/** Grace for the child's `idle` frame once its `result` is already in hand. */
+const IDLE_SETTLE_TIMEOUT_MS = 5000;
+
 /** Per-stream capture cap, matching the old kernel's DEFAULT_MAX_OUTPUT_CHARS. */
 export const DEFAULT_MAX_OUTPUT_CHARS = 65536;
 
@@ -166,6 +178,7 @@ export class BunReplManager {
 	private _exitPromise: Promise<void> | null = null;
 	private _resolveExit: (() => void) | null = null;
 	private _readyResolve: (() => void) | null = null;
+	private _readyReject: ((error: Error) => void) | null = null;
 	private _readyPromise: Promise<void> | null = null;
 	/** exec id -> caller correlation id, bounded so a long session cannot grow it without limit. */
 	private _execCorrelationIds = new Map<string, string>();
@@ -192,9 +205,22 @@ export class BunReplManager {
 		}
 
 		this._state = "starting";
-		this._readyPromise = new Promise<void>((resolve) => {
+		this._readyPromise = new Promise<void>((resolve, reject) => {
 			this._readyResolve = resolve;
+			this._readyReject = reject;
 		});
+
+		// Settled exactly once, by whichever comes first: the `ready` frame, the child dying,
+		// or the deadline. The stderr tail carries the reason (a missing script, a skill that
+		// threw on load), so it goes to the model with the error.
+		const failStart = (reason: string): void => {
+			const reject = this._readyReject;
+			this._readyResolve = null;
+			this._readyReject = null;
+			if (!reject) return;
+			const tail = this._childStderr.trim();
+			reject(new Error(`REPL kernel failed to start: ${reason}${tail ? `\n${tail}` : ""}`));
+		};
 
 		const bunPath = this._options.bunPath ?? "bun";
 		// Prefer the source `.ts` when running from the tree (tests/dev), falling back
@@ -222,7 +248,7 @@ export class BunReplManager {
 		// Guard on child identity: during a deliberate restart (`_restartForRunaway`)
 		// the old child is SIGKILLed and respawned; the old process's async `exit` event
 		// must not clobber the new child's state.
-		child.on("exit", () => {
+		child.on("exit", (code, sig) => {
 			if (this._child !== child) return;
 			this._state = "shutdown";
 			this._child = null;
@@ -230,13 +256,15 @@ export class BunReplManager {
 				pending.reject(new Error("REPL process exited"));
 			}
 			this._pendingRequests.clear();
+			failStart(sig ? `bun was killed by ${sig}` : `bun exited with code ${code}`);
 			this._resolveExit?.();
 		});
 
-		child.on("error", () => {
+		child.on("error", (err: Error) => {
 			if (this._child !== child) return;
 			this._state = "shutdown";
 			this._child = null;
+			failStart(`bun could not be spawned: ${err.message}`);
 			this._resolveExit?.();
 		});
 
@@ -270,13 +298,36 @@ export class BunReplManager {
 			return;
 		}
 
-		await this._readyPromise;
+		const startupTimer = setTimeout(() => {
+			if (this._child === child) {
+				try {
+					child.kill("SIGKILL");
+				} catch {
+					// already dead; the exit handler settles it
+				}
+			}
+			failStart(`no ready signal within ${STARTUP_TIMEOUT_MS / 1000}s`);
+		}, STARTUP_TIMEOUT_MS);
+		if (typeof startupTimer === "object" && "unref" in startupTimer) startupTimer.unref();
+
+		try {
+			await this._readyPromise;
+		} catch (err) {
+			this._state = "shutdown";
+			this._readyPromise = null;
+			throw err;
+		} finally {
+			clearTimeout(startupTimer);
+		}
 		this._state = "running";
 	}
 
 	private _handleMessage(msg: BunReplReplToHost): void {
 		if (msg.type === "idle" && msg.id === "ready") {
-			this._readyResolve?.();
+			const resolve = this._readyResolve;
+			this._readyResolve = null;
+			this._readyReject = null;
+			resolve?.();
 			return;
 		}
 
@@ -383,7 +434,10 @@ export class BunReplManager {
 			if (this._state !== "running") {
 				if (this._state === "starting") {
 					await this._readyPromise;
-				} else {
+				}
+				// Re-checked rather than chained: the startup we just waited on may have failed,
+				// and sending a cell to a dead child would hang until the runaway timer.
+				if (!this.isRunning) {
 					this._state = "idle";
 					this._readyPromise = null;
 					await this.start();
@@ -487,8 +541,17 @@ export class BunReplManager {
 				const resultMsg = await resultPromise;
 				settled = true;
 
-				// Wait until the child signals idle (execution fully settled).
-				await idlePromise;
+				// Wait until the child signals idle (execution fully settled). Bounded: the result
+				// is already in hand, so a child that never sends `idle` must not hold the cell —
+				// `settled` has disarmed the runaway timer by this point, and nothing else would
+				// ever end the wait.
+				await Promise.race([
+					idlePromise,
+					new Promise<void>((resolve) => {
+						const t = setTimeout(resolve, IDLE_SETTLE_TIMEOUT_MS);
+						if (typeof t === "object" && "unref" in t) t.unref();
+					}),
+				]);
 
 				this._activeCollector = null;
 				clearTimeout(timer);
@@ -597,6 +660,7 @@ export class BunReplManager {
 		this._state = "idle";
 		this._readyPromise = null;
 		this._readyResolve = null;
+		this._readyReject = null;
 		// The namespace died with the old process; the next result has to say so.
 		this._pendingRestartNotice = true;
 		try {
