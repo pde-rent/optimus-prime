@@ -27,6 +27,36 @@ declare namespace Bun {
 		transformSync(code: string): string;
 	}
 
+	interface ImageMetadata {
+		width: number;
+		height: number;
+		format?: string;
+	}
+
+	/**
+	 * Native image decode/transform/encode. Operations chain onto an instance and are applied
+	 * when an encoder is awaited, so a fresh instance is needed per independent encode.
+	 */
+	class Image {
+		constructor(data: ArrayBufferLike | Uint8Array | Blob | string);
+		metadata(): Promise<ImageMetadata>;
+		resize(width: number, height?: number, options?: { fit?: string }): Image;
+		rotate(degrees: number): Image;
+		flip(): Image;
+		flop(): Image;
+		png(options?: { quality?: number }): Image;
+		jpeg(options?: { quality?: number }): Image;
+		webp(options?: { quality?: number }): Image;
+		avif(options?: { quality?: number }): Image;
+		bytes(): Promise<Uint8Array>;
+		buffer(): Promise<Buffer>;
+		blob(): Promise<Blob>;
+		dataurl(): Promise<string>;
+		toBase64(): Promise<string>;
+		width: number;
+		height: number;
+	}
+
 	const YAML: {
 		parse(input: string): unknown;
 		stringify(value: unknown, replacer?: unknown, space?: string | number): string;

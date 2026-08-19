@@ -5,7 +5,6 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 import { clipboard } from "./clipboard-native.js";
-import { loadPhoton } from "./photon.js";
 
 export type ClipboardImage = {
 	bytes: Uint8Array;
@@ -50,22 +49,12 @@ function isSupportedImageMimeType(mimeType: string): boolean {
 }
 
 /**
- * Convert unsupported image formats to PNG using Photon.
- * Returns null if conversion is unavailable or fails.
+ * Convert unsupported image formats to PNG.
+ * Returns null if the bytes are not a decodable image.
  */
 async function convertToPng(bytes: Uint8Array): Promise<Uint8Array | null> {
-	const photon = await loadPhoton();
-	if (!photon) {
-		return null;
-	}
-
 	try {
-		const image = photon.PhotonImage.new_from_byteslice(bytes);
-		try {
-			return image.get_bytes();
-		} finally {
-			image.free();
-		}
+		return await new Bun.Image(bytes).png().bytes();
 	} catch {
 		return null;
 	}

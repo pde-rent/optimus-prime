@@ -18,13 +18,14 @@ actually look at it.
 ## When NOT to use this
 
 For *programmatic* work on an image — measuring pixels, cropping, resizing,
-computing a hash, comparing files byte-by-byte — open it in the REPL with an
-image library instead:
+computing a hash, comparing files byte-by-byte — open it in the REPL with
+`Bun.Image` instead:
 
 ```js
-const photon = await import("@silvia-odwyer/photon-node");
-const img = photon.PhotonImage.new_from_byteslice(await Bun.file("diagram.png").bytes());
-console.log(img.get_width(), img.get_height());
+const img = new Bun.Image(await Bun.file("diagram.png").bytes());
+const { width, height, format } = await img.metadata();
+console.log(width, height, format);
+await img.resize(320).webp().write("thumb.webp");
 ```
 
 That path does not put the image in the model's context; it only lets you

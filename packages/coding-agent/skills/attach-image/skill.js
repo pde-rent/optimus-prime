@@ -18,8 +18,6 @@ const MAX_SOURCE_IMAGE_BYTES = 20_000_000;
 const MAX_SOURCE_IMAGE_PIXELS = 36_000_000;
 const MAX_ATTACHMENT_DATA_CHARS = 350_000;
 const MAX_ATTACHMENT_DIMENSION = 1200;
-const TRANSPARENCY_BACKGROUND = [0x88, 0x88, 0x88];
-const TRANSPARENCY_BACKGROUND_LABEL = "#888888";
 const JPEG_QUALITIES = [82, 72, 60, 48, 36];
 
 // Matches IMAGE_MIME_TYPES in src/utils/mime.ts.
@@ -113,105 +111,37 @@ function isAnimated(bytes, mime) {
 	return false;
 }
 
-/** JPEG EXIF orientation tag (1-8), or 1 when absent/unreadable. */
-function exifOrientation(bytes, mime) {
-	if (mime !== "image/jpeg") return 1;
-	let offset = 2;
-	while (offset + 4 < bytes.length) {
-		if (bytes[offset] !== 0xff) {
-			offset++;
-			continue;
-		}
-		const marker = bytes[offset + 1];
-		if (marker === 0xda) return 1; // start of scan: no EXIF found
-		const length = bytes.readUInt16BE(offset + 2);
-		if (marker === 0xe1 && bytes.toString("ascii", offset + 4, offset + 10) === "Exif\0\0") {
-			return readExifOrientation(bytes, offset + 10);
-		}
-		offset += 2 + length;
-	}
-	return 1;
-}
-
-function readExifOrientation(bytes, tiff) {
-	if (tiff + 8 > bytes.length) return 1;
-	const endian = bytes.toString("ascii", tiff, tiff + 2);
-	if (endian !== "II" && endian !== "MM") return 1;
-	const little = endian === "II";
-	const u16 = (at) => (little ? bytes.readUInt16LE(at) : bytes.readUInt16BE(at));
-	const u32 = (at) => (little ? bytes.readUInt32LE(at) : bytes.readUInt32BE(at));
-	const ifd = tiff + u32(tiff + 4);
-	if (ifd + 2 > bytes.length) return 1;
-	const count = u16(ifd);
-	for (let i = 0; i < count; i++) {
-		const entry = ifd + 2 + i * 12;
-		if (entry + 12 > bytes.length) break;
-		if (u16(entry) === 0x0112) {
-			const value = u16(entry + 8);
-			return value >= 1 && value <= 8 ? value : 1;
-		}
-	}
-	return 1;
-}
-
-async function loadPhoton() {
+/**
+ * Decode with `Bun.Image`, which applies EXIF orientation and takes the first frame of an
+ * animation while decoding, so the rotate/flip and frame handling that used to live here is
+ * no longer needed.
+ */
+function decode(bytes, label) {
 	try {
-		return await import("@silvia-odwyer/photon-node");
-	} catch (error) {
-		throw new Error(
-			`attach_image needs the photon image library to inspect this image before loading it into context: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		);
-	}
-}
-
-function decode(photon, bytes, label) {
-	try {
-		return photon.PhotonImage.new_from_byteslice(new Uint8Array(bytes));
+		return new Bun.Image(bytes);
 	} catch {
 		throw new Error(`${label} is not a readable supported image (PNG, JPEG, GIF, WebP).`);
 	}
 }
 
-function rotate90Steps(photon, image, orientation) {
-	// EXIF orientations 5-8 are the transposed quadrants; 3/4 are the 180 pair.
-	const angle = orientation === 3 || orientation === 4 ? 180 : orientation === 5 || orientation === 6 ? 90 : 270;
-	const rotated = photon.rotate(image, angle);
-	image.free();
-	return rotated;
-}
-
-/** Apply an EXIF orientation in place / by replacement, returning the upright image. */
-function applyOrientation(photon, image, orientation) {
-	if (orientation <= 1) return image;
-	let out = image;
-	if (orientation !== 2) out = rotate90Steps(photon, out, orientation);
-	if (orientation === 2 || orientation === 4 || orientation === 5 || orientation === 7) photon.fliph(out);
-	return out;
-}
-
-/** True when any pixel carries partial or full transparency. */
-function hasTransparency(pixels) {
-	for (let i = 3; i < pixels.length; i += 4) if (pixels[i] !== 255) return true;
-	return false;
-}
-
-function compositeOnBackground(photon, image) {
-	const pixels = image.get_raw_pixels();
-	const [bgR, bgG, bgB] = TRANSPARENCY_BACKGROUND;
-	for (let i = 0; i < pixels.length; i += 4) {
-		const a = pixels[i + 3];
-		if (a === 255) continue;
-		const k = a / 255;
-		pixels[i] = Math.round(pixels[i] * k + bgR * (1 - k));
-		pixels[i + 1] = Math.round(pixels[i + 1] * k + bgG * (1 - k));
-		pixels[i + 2] = Math.round(pixels[i + 2] * k + bgB * (1 - k));
-		pixels[i + 3] = 255;
+/**
+ * True when the container declares an alpha channel.
+ *
+ * Read from the header rather than scanned per pixel: the decoder no longer exposes raw
+ * pixels, and this only drives a note, so a declared-but-unused alpha channel is acceptable.
+ */
+function hasAlphaChannel(bytes, mimeType) {
+	if (mimeType === "image/png") {
+		// PNG colour type lives at byte 25 of the IHDR chunk: 4 and 6 carry alpha.
+		const colorType = bytes[25];
+		return colorType === 4 || colorType === 6;
 	}
-	const flattened = new photon.PhotonImage(pixels, image.get_width(), image.get_height());
-	image.free();
-	return flattened;
+	if (mimeType === "image/gif") return true;
+	if (mimeType === "image/webp") {
+		// Extended WebP flags the alpha bit in the VP8X chunk.
+		return bytes.length > 20 && bytes.toString("latin1", 12, 16) === "VP8X" && (bytes[20] & 0x10) !== 0;
+	}
+	return false;
 }
 
 function base64Chars(byteLength) {
@@ -233,20 +163,19 @@ async function resizeForAttachment(filepath, mimeType, size, dimensions, bytes) 
 		return [bytes.toString("base64"), mimeType, null];
 	}
 
-	const photon = await loadPhoton();
 	const notes = [];
 	if (isAnimated(bytes, mimeType)) notes.push("animated image flattened to first frame");
-
-	let image = applyOrientation(photon, decode(photon, bytes, filepath), exifOrientation(bytes, mimeType));
-	if (hasTransparency(image.get_raw_pixels())) {
-		notes.push(`transparent pixels composited on ${TRANSPARENCY_BACKGROUND_LABEL} background`);
-		image = compositeOnBackground(photon, image);
+	if (hasAlphaChannel(bytes, mimeType)) {
+		// JPEG has no alpha, so the encoder flattens it; say so rather than let the colours
+		// change silently.
+		notes.push("transparent pixels flattened by the JPEG encoder");
 	}
 	const conversionNote = notes.length > 0 ? notes.join("; ") : null;
 
-	try {
-		const originalWidth = image.get_width();
-		const originalHeight = image.get_height();
+	{
+		const meta = await decode(bytes, filepath).metadata();
+		const originalWidth = meta.width;
+		const originalHeight = meta.height;
 		const scale = Math.min(1, MAX_ATTACHMENT_DIMENSION / Math.max(originalWidth, originalHeight));
 		let targetWidth = Math.max(1, Math.round(originalWidth * scale));
 		let targetHeight = Math.max(1, Math.round(originalHeight * scale));
@@ -255,23 +184,22 @@ async function resizeForAttachment(filepath, mimeType, size, dimensions, bytes) 
 		let lastHeight = targetHeight;
 
 		while (targetWidth >= 1 && targetHeight >= 1) {
-			const resized = photon.resize(image, targetWidth, targetHeight, photon.SamplingFilter.Lanczos3);
-			try {
-				for (const quality of JPEG_QUALITIES) {
-					const candidate = Buffer.from(resized.get_bytes_jpeg(quality));
-					lastLength = candidate.length;
-					lastWidth = targetWidth;
-					lastHeight = targetHeight;
-					if (base64Chars(candidate.length) <= MAX_ATTACHMENT_DATA_CHARS) {
-						let note =
-							`original ${originalWidth}x${originalHeight}; attached ` +
-							`${targetWidth}x${targetHeight} JPEG at quality ${quality}`;
-						if (conversionNote) note += `; ${conversionNote}`;
-						return [candidate.toString("base64"), "image/jpeg", note];
-					}
+			for (const quality of JPEG_QUALITIES) {
+				// A fresh instance per encode: operations chain onto one, so reusing it
+				// would resize the already-resized result.
+				const candidate = Buffer.from(
+					await new Bun.Image(bytes).resize(targetWidth, targetHeight).jpeg({ quality }).bytes(),
+				);
+				lastLength = candidate.length;
+				lastWidth = targetWidth;
+				lastHeight = targetHeight;
+				if (base64Chars(candidate.length) <= MAX_ATTACHMENT_DATA_CHARS) {
+					let note =
+						`original ${originalWidth}x${originalHeight}; attached ` +
+						`${targetWidth}x${targetHeight} JPEG at quality ${quality}`;
+					if (conversionNote) note += `; ${conversionNote}`;
+					return [candidate.toString("base64"), "image/jpeg", note];
 				}
-			} finally {
-				resized.free();
 			}
 
 			const nextWidth = Math.max(1, Math.trunc(targetWidth * 0.75));
@@ -285,8 +213,6 @@ async function resizeForAttachment(filepath, mimeType, size, dimensions, bytes) 
 			`${filepath} could not be compressed below ${Math.floor(MAX_ATTACHMENT_DATA_CHARS / 1000)}KB base64 payload ` +
 				`(smallest was ${Math.floor(base64Chars(lastLength) / 1000)}KB at ${lastWidth}x${lastHeight}).`,
 		);
-	} finally {
-		image.free();
 	}
 }
 
@@ -337,14 +263,8 @@ async function validateImage(path, cwd) {
 	}
 
 	// Full decode: proves the file is really readable, and yields authoritative dimensions.
-	const photon = await loadPhoton();
-	const image = decode(photon, bytes, path);
-	let dimensions;
-	try {
-		dimensions = [image.get_width(), image.get_height()];
-	} finally {
-		image.free();
-	}
+	const meta = await decode(bytes, path).metadata();
+	const dimensions = [meta.width, meta.height];
 	const pixelCount = dimensions[0] * dimensions[1];
 	if (pixelCount > MAX_SOURCE_IMAGE_PIXELS) {
 		throw new Error(
