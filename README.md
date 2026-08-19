@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+<h1 align="center">Optimus Prime</h1>
+
 <p align="center">
   A coding agent whose primary tool is a persistent Bun REPL.
 </p>
@@ -143,71 +145,47 @@ optimus --graph medium "audit every route handler for missing authz"
 | `high` | 25x | 6 | 2 |
 | `max` | 100x | 8 | 2 |
 
-One dial, not two. A strategy enum plus a spend multiplier contradict each other — "aggressive at
-2x" means nothing — and the intent moves both together: more budget means more tasks earn a
-cohort. `graphMaxTokens` is a clamp that only ever lowers a level's ceiling.
+One dial, not two: more budget means more tasks earn a cohort. `graphMaxTokens` only ever lowers
+a level's ceiling, and a level needing depth 2 raises `rlmMaxDepth` with it, so a spawn cannot
+throw against a depth the dial itself asked for. An explicit `/rlm-max-depth` pin still wins.
 
-**Depth is reconciled, not left to collide.** A cohort's children sit one level below whoever
-spawned them, so a level whose shapes need depth 2 raises `rlmMaxDepth` to 2 for as long as that
-level is set. Without this the dial would appear to work and every worker spawn would throw
-against the default depth of 1. It is resolved once, with the depth setting itself, rather than
-raised and restored around each graph: raising depth mid-run rebuilds the system prompt and voids
-that agent's prompt cache, and a child captures its depth budget when it is spawned, so a restore
-could not reach children already running. An explicit `/rlm-max-depth` pin still wins — the graph
-then simply cannot use its deeper shapes.
+**Escalation is evidence-led, never predicted.** `check` failed twice on the same diagnostic; the
+change is hard to undo; a shared symbol has more call sites than fit in one head; retrieval
+returned contradictory sources. A model's self-rated chance of being wrong comes from the same
+forward pass as the answer, and only half that error is observable — over-escalation shows up in
+the bill, under-escalation looks like an ordinary wrong answer.
 
-**Escalation is triggered by evidence, never by a prediction.** `check` failed twice on the same
-diagnostic; the change touches something hard to undo; a shared symbol has more call sites than
-fit in one head; retrieval returned contradictory sources. Asking a model to rate its own chance
-of missing something yields a number from the same forward pass that would have produced the
-answer. Worse, only half that error is observable — escalating trivia shows up in the bill, while
-failing to escalate looks exactly like an ordinary wrong answer, so tuning against the visible
-half alone drifts toward under-escalating, the failure the dial exists to prevent.
+**Two shapes.** Work that splits into independent units fans out, one child per unit, fanning in
+through files. Work that does not split gets another pass with more context instead — N children
+on an indivisible problem return N restatements at N times the price — plus at most one checker
+when the result cannot be verified mechanically. That checker sees the problem, never the
+parent's answer.
 
-**Two shapes.** Work that splits into units sharing no state fans out, one child per unit, fanning
-in through files. Work that does not split does **not** fan out — fan-out divides work, and an
-indivisible problem has none to divide, so N children return N restatements of one line of
-reasoning at N times the price. That case gets another pass with more context, plus at most one
-child when the result cannot be checked mechanically and is hard to undo. That child is given the
-problem statement alone, never the parent's answer, because a child shown an answer agrees with
-it.
-
-**Each cohort declares its own edges.** Communication is a property of the graph, not a global
-switch, so the spawner says who may reach whom:
+**Each cohort declares its own edges.** The spawner says who may reach whom:
 
 ```js
 await rlm('review the auth diff', { peers: ['worker-b'] });  // may message worker-b, nobody else
 await rlm('audit the routes',     { peers: [] });            // reports only to the parent
 ```
 
-Edges are one-way. Listing B in A's peers does not let B reach A, so a reviewer can return a
-verdict without opening a debate. Omitting `peers` leaves the family default alone; `peers: []` is
-an explicit silence. The parent is always reachable.
+Edges are one-way, so a reviewer returns a verdict without opening a debate. Omitting `peers`
+leaves the family default alone; `peers: []` is explicit silence. The parent is always reachable.
+The prompt teaches `[]` by default: delivery is `steer`, so a message interrupts the receiver
+mid-turn and the first critique to land reframes whoever gets it — an anchoring cascade that
+destroys the independence the cohort was for. Open an edge when a child needs another's output,
+not so they can confer.
 
-The default the prompt teaches is `[]`, because of how the message layer behaves. Delivery is
-`steer`, so a message interrupts the receiver mid-turn: the first critique to land reframes
-whoever gets it, which is a serial anchoring cascade, and it destroys the independence that was
-the only reason to run more than one child. The rate limiter (3/s per pair) and the 20-message
-pending cap make a wide mesh throw rather than merely slow, and the duplicate filter drops an
-exact repeat while returning a success receipt, so agreement in a later round would vanish from
-the transcript and from any tally. Open an edge when a child needs another's output, not so they
-can confer — otherwise let the parent relay it as the input of a second spawn.
-
-**Reconciling.** A check that already existed, written by someone other than whoever is being
-checked, settles it; a test written by the same agent whose work it validates proves nothing.
-Otherwise disagreement is the finding, surfaced with the differing lines rather than averaged away
-by a vote — three diffs against one file do not fall into buckets to count.
+**Reconciling.** A pre-existing check written by someone other than the agent under review settles
+it; a test written by the agent whose work it validates proves nothing. Otherwise disagreement is
+the finding, surfaced with the differing lines rather than averaged away by a vote.
 
 Set it with `--graph`, `/graph`, `GRAPH_RESOLVER`, or the Graph budget row in `/settings`. At
-`off` the prompt block is not rendered at all, so the default path pays nothing for it and the
-cached prefix is untouched.
+`off` the prompt block is not rendered at all, so the default path pays nothing for it.
 
-Three honest limits. The ceiling is soft by one child, because `rlm()` returns at admission and
-tokens already committed cannot be recovered by refusing later. It is metered per agent and per
-user turn, so a worker that splits again draws on its own ceiling rather than its parent's, and the
-reachable worst case is the ceiling times the number of spawners. And the 1x baseline is a fixed
-constant rather than a measurement — the single-agent run it compares against never happens — so
-the multiples are spend authority, not a prediction.
+Three limits, stated plainly: the ceiling is soft by one child (`rlm()` returns at admission, and
+committed tokens cannot be refused retroactively); it is metered per agent per user turn, so the
+worst case is the ceiling times the number of spawners; and the 1x baseline is a constant, not a
+measurement, so the multiples are spend authority rather than a prediction.
 
 ## Settings
 
@@ -230,11 +208,9 @@ exist that the runtime quietly ignores.
 Commands answer to the names other CLIs use for them: `/exit`, `/config`, `/cost`, `/connect`,
 `/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`.
 
-Opening a new session blinks the mark's eyes green and plays a five-second sting. It never gates
-input — the prompt is live from the first frame and the first keystroke ends it — and
-`"ignition": false` in settings, or `quietStartup`, turns it off. Playback shells out to whatever
-the platform already has: `afplay` on macOS, PowerShell on Windows, `ffplay`/`mpv`/`gst-play`/`cvlc`
-on Linux. No player, no sound, same startup time.
+Opening a session blinks the mark's eyes and plays a short sting. It never gates input, and
+`"ignition": false` (or `quietStartup`) turns it off. Playback uses whatever the platform already
+has; no player, no sound, same startup time.
 
 ## Skills
 
@@ -296,22 +272,17 @@ Tools are **not** flattened into the model's tool list. A server exposing eighty
 costs nothing until it is asked, which is also why a server's tool names cannot collide
 with the harness's own or with another server's.
 
-The client speaks both eras of the protocol: the stateless revision (`2026-07-28`) and
-the handshake revisions (`2025-11-25` and earlier), detected per endpoint and cached.
-That matters more than it sounds — roughly seven in eight client connections were still
-handshake-era three weeks after the stateless revision shipped. Transport is Streamable
-HTTP. A `"type": "stdio"` entry is accepted and listed, but reports that the transport
-is not reachable rather than going missing.
+The client speaks both eras of the protocol — the stateless revision (`2026-07-28`) and
+the handshake revisions (`2025-11-25` and earlier) — detected per endpoint and cached, over
+Streamable HTTP. A `"type": "stdio"` entry is accepted and listed, but reports that the
+transport is not reachable rather than going missing.
 
 ## Supply chain
 
-Every dependency is code that runs with your credentials, in your repositories, and updates
-without you reading the diff. In 2026 that is the realistic attack surface for a developer tool
-— not the model, the install graph. It is also the startup cost: everything that has to be
-found, parsed and evaluated before the first prompt renders.
-
-So a dependency earns its place or gets written out. Nineteen packages instead of a hundred and
-twenty-five is an audit a person can actually perform.
+Every dependency runs with your credentials and updates without you reading the diff, and it is
+also startup cost — everything parsed before the first prompt renders. So a dependency earns its
+place or gets written out. Nineteen packages instead of a hundred and twenty-five is an audit a
+person can actually perform.
 
 | Kept | Why |
 |---|---|
