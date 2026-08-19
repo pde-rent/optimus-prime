@@ -435,19 +435,7 @@ export const VERSION: string = pkg.version || "0.0.0";
 // e.g., PI_CODING_AGENT_DIR or OPTIMUS_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${envPrefix}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${envPrefix}_SESSION_DIR`;
-export const ENV_LEGACY_SESSION_DIR = `${envPrefix}_CODING_AGENT_SESSION_DIR`;
 
-/**
- * Names these variables had before the app was renamed.
- *
- * The prefix is derived from the app name, so renaming it silently moved every variable. Both
- * spellings are read, newest first, so an existing shell profile keeps working.
- */
-// Literal on purpose: this is the *old* prefix, so it must not track the app name.
-const RENAMED_ENV_PREFIX = "PRIME_AGENT";
-export const ENV_AGENT_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_CODING_AGENT_DIR`;
-export const ENV_SESSION_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_SESSION_DIR`;
-export const ENV_LEGACY_SESSION_DIR_LEGACY = `${RENAMED_ENV_PREFIX}_CODING_AGENT_SESSION_DIR`;
 
 export function expandTildePath(path: string): string {
 	if (path === "~") return homedir();
@@ -469,7 +457,7 @@ export function getShareViewerUrl(gistId: string): string {
 
 /** Get the agent config directory (e.g., ~/.optimus/agent/) */
 export function getAgentDir(): string {
-	const envDir = process.env[ENV_AGENT_DIR] ?? process.env[ENV_AGENT_DIR_LEGACY];
+	const envDir = process.env[ENV_AGENT_DIR];
 	if (envDir) {
 		return expandTildePath(envDir);
 	}
@@ -567,11 +555,7 @@ export function getSessionsDir(agentDir: string = getAgentDir()): string {
 }
 
 export function getSessionDirEnvOverride(): string | undefined {
-	const envDir =
-		process.env[ENV_SESSION_DIR] ??
-		process.env[ENV_LEGACY_SESSION_DIR] ??
-		process.env[ENV_SESSION_DIR_LEGACY] ??
-		process.env[ENV_LEGACY_SESSION_DIR_LEGACY];
+	const envDir = process.env[ENV_SESSION_DIR];
 	return envDir ? expandTildePath(envDir) : undefined;
 }
 

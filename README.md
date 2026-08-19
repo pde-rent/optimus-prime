@@ -26,8 +26,7 @@ bun run build
 cd packages/coding-agent && bun link --global
 ```
 
-That puts three equivalent commands on your PATH — `optimus`, `optimus-prime`, and `pi` (kept so
-existing muscle memory and scripts keep working):
+That puts two equivalent commands on your PATH — `optimus` and `optimus-prime`:
 
 ```sh
 optimus                       # interactive session in the current directory
@@ -35,9 +34,9 @@ optimus "explain src/main.ts" # one-shot with a message
 optimus -p "list the tools"   # print a response and exit
 ```
 
-Configuration, sessions, auth and installed packages live in `~/.optimus/agent`. An install that
-predates the rename is moved from `~/.prime/agent` on first run; if that move fails you are told
-rather than started with an empty profile.
+Configuration, sessions, auth and installed packages live in `~/.optimus/agent`. Nothing is
+inherited from an earlier install: there are no compatibility aliases for the old command names,
+environment variables, or directories.
 
 ## What is different here
 

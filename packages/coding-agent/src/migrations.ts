@@ -402,34 +402,6 @@ export async function showDeprecationWarnings(warnings: string[]): Promise<void>
 	console.log();
 }
 
-/** Config directory used before the app was renamed from optimus to optimus. */
-// Literal on purpose: this is the *old* directory, so it must not track the app name.
-const RENAMED_CONFIG_DIR_NAME = ".prime/agent";
-
-/**
- * Move the pre-rename config directory to the current one.
- *
- * The directory name is derived from the app name, so renaming the app moved it. Everything
- * lives there — sessions, auth, settings, installed packages — so it is relocated rather than
- * abandoned. A rename on the same filesystem is atomic and instant regardless of size; if it
- * fails (a separate mount, or a permission problem) the old directory is left untouched and the
- * caller is told, rather than the agent silently starting with an empty profile.
- */
-export function migrateRenamedAgentDir(): string | undefined {
-	const current = getAgentDir();
-	if (existsSync(current)) return undefined;
-	const legacy = join(homedir(), RENAMED_CONFIG_DIR_NAME);
-	if (!existsSync(legacy)) return undefined;
-	try {
-		ensureDir(dirname(current));
-		renameSync(legacy, current);
-		return `Moved ${legacy} to ${current} after the rename to ${APP_NAME}.`;
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		return `Could not move ${legacy} to ${current} (${reason}). Move it by hand, or set ${ENV_AGENT_DIR}.`;
-	}
-}
-
 /**
  * Run all migrations. Called once on startup.
  *
@@ -439,14 +411,11 @@ export function runMigrations(cwd: string): {
 	migratedAuthProviders: string[];
 	deprecationWarnings: string[];
 } {
-	// Before anything else: every other migration reads the agent directory.
-	const renameNotice = migrateRenamedAgentDir();
 	const migratedAuthProviders = migrateAuthToAuthJson();
 	migrateSessionsFromAgentRoot();
 	migrateLegacySessionDirsToSessionRoot();
 	migrateToolsToBin();
 	migrateKeybindingsConfigFile();
 	const deprecationWarnings = migrateExtensionSystem(cwd);
-	if (renameNotice) deprecationWarnings.unshift(renameNotice);
 	return { migratedAuthProviders, deprecationWarnings };
 }
