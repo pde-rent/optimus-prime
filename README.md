@@ -79,9 +79,12 @@ fields (`core/refinement/memory-search.ts`) — no embedding service, no network
 Twelve skills ship in the REPL by default: `chart`, `edit`, `websearch`, `agent-message`,
 `agent-observe`, `attach-image`, `compact`, `goal`, `refine`, `skill-creator`, `linear`, `notion`.
 
-`chart` renders line, scatter, bar, column, candlestick, sparkline and histogram output straight to
-the terminal using braille (2×4 dots per character cell) and eighth-block elements. It is written
-here, not installed — the drawing is the small part of any library that does this.
+`chart` renders line, bar, scatter, candlestick, sparkline, gauge, donut and histogram output
+straight to the terminal, drawn by [`@crafter/charts`](https://www.npmjs.com/package/@crafter/charts)
+(braille, 2×4 dots per character cell, zero dependencies of its own). The skill is the ergonomic
+layer: it takes the shapes an agent actually has to hand — bare numbers, `[x, y]` pairs, `{x, y}`
+objects, named series — and exposes the library's composable builder as `chart.builder` for
+anything the wrappers do not cover.
 
 `websearch` defaults to a self-hosted [SearXNG](deploy/searxng/) instance (free, keyless, no
 third party sees your queries) and falls back to Serper by flag or environment variable. It emits
@@ -102,9 +105,9 @@ what actually ships rather than developer tooling.
 
 | | prime-agent | pi | **Optimus Prime** |
 |---|---|---|---|
-| Direct runtime dependencies | 33 | 27 | **5** |
-| Packages in a production install | 125 | 84 | **18** |
-| Production `node_modules` | 197 MB | 140 MB | **11 MB** |
+| Direct runtime dependencies | 33 | 27 | **6** |
+| Packages in a production install | 125 | 84 | **19** |
+| Production `node_modules` | 197 MB | 140 MB | **34 MB** |
 | Entries in the lockfile | 443 | 395 | **93** |
 | Shipped bundle | 13 MB | 11 MB | **6.7 MB** |
 | `--version` cold start, mean of 5 | 230 ms | 350 ms | **74 ms** |
@@ -123,11 +126,12 @@ it is auditable, tree-shaken and typed against the rest of the codebase. Anyone 
 "fewer dependencies" and "less code" is usually counting one of them wrong. What shrank is the
 code you did not write and cannot see: **93 lockfile entries instead of 443**.
 
-### The five remaining dependencies
+### The six remaining dependencies
 
 | Package | Why it stays |
 |---|---|
 | `@speed-highlight/core` | Syntax highlighting rule data, zero dependencies of its own. Its matcher is re-implemented here synchronously so highlighting runs inside the render pass and uses the active theme |
+| `@crafter/charts` | Terminal chart rendering for the `chart` skill. Zero dependencies, but it declares a `typescript` peer that package managers install automatically — 23 MB of the 34 MB production install is that peer, for type declarations nothing uses at runtime |
 | `jiti` | Module loading for extensions. Bun handles TS and cache-busting natively, but `Bun.plugin` does not intercept bare specifiers for runtime dynamic imports, which extensions need to resolve workspace packages and bundled virtual modules |
 | `proper-lockfile` | Cross-process file locking |
 | `extract-zip` | Zip extraction; Bun's archive API is write-only |
@@ -141,14 +145,14 @@ schemas, 26/26 identical checks), Myers line diff (exact, plus 400 randomised re
 ## Why this matters
 
 **Performance.** Startup cost is dominated by how much code has to be found, parsed and evaluated
-before the first prompt renders. Eighteen packages parse faster than a hundred and twenty-five.
+before the first prompt renders. Nineteen packages parse faster than a hundred and twenty-five.
 Replacing `cli-highlight` alone removed a ~350 ms import of the whole of highlight.js.
 
 **Supply-chain control.** Every one of the 443 packages a `prime-agent` install pulls in is code
 that runs with your credentials, in your repositories, on your machine, and that updates without
 you reading the diff. In 2026 that is the realistic attack surface for a developer tool — not the
 model, the install graph. Ninety-three entries is not zero, but it is an audit a person can
-actually perform. The five direct dependencies above each earn their place with a reason, and
+actually perform. The six direct dependencies above each earn their place with a reason, and
 provider SDKs — `openai`, `@anthropic-ai/sdk`, `@mistralai/mistralai`, `@aws-sdk/*`, `@google/genai`
 — are all gone: one fetch client speaks every provider, with the wire types vendored.
 

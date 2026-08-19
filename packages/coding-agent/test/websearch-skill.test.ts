@@ -211,6 +211,35 @@ describe("websearch: cleaning and dedupe", () => {
 		expect(out).toHaveLength(1);
 	});
 
+	it("collapses syndicated copies truncated at different lengths", () => {
+		const body =
+			"The release adds a bundler, a test runner and a package manager to the runtime, all shipped in a single binary.";
+		const out = dedupeResults([
+			{ title: "Bun 1.0 released", url: "https://news-a.test/bun", content: body },
+			{ title: "Bun ships 1.0", url: "https://news-b.test/bun", content: body.slice(0, 92) },
+			{ title: "Bun hits 1.0", url: "https://news-c.test/bun", content: `(Reuters) - ${body}` },
+		]);
+		expect(out).toHaveLength(1);
+	});
+
+	it("keeps two stories that merely cover the same event", () => {
+		const out = dedupeResults([
+			{
+				title: "Bun 1.0 shipped",
+				url: "https://news-a.test/1",
+				content:
+					"Bun 1.0 shipped today with a bundler, a test runner and a package manager bundled into one binary.",
+			},
+			{
+				title: "Reaction to the release",
+				url: "https://news-b.test/2",
+				content:
+					"Maintainers debated whether shipping a single binary helps developers or further fragments the tooling.",
+			},
+		]);
+		expect(out).toHaveLength(2);
+	});
+
 	it("keeps distinct pages whose snippets are too short to fingerprint", () => {
 		const out = dedupeResults([
 			{ title: "Alpha", url: "https://a.test/1", content: "Read more" },

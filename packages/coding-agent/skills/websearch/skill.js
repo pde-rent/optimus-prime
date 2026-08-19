@@ -370,26 +370,60 @@ function urlIdentity(url) {
 }
 
 /**
- * Comparable form of a snippet, for collapsing syndicated copies of one article.
- * Mirrors publish identical text under different domains, which URL and title dedupe
- * cannot see. Returns "" for bodies too short to identify a page by.
+ * Order-sensitive fingerprint of a snippet, for collapsing syndicated copies of one
+ * article. Mirrors republish the same body under different domains, and each copy is
+ * usually truncated differently or carries a wire-service prefix, so exact matching
+ * sees three distinct strings and pays for the same text three times.
  *
- * The whole body is the key, not a prefix: two unrelated pages can share a long
- * boilerplate lede, and snippets are short enough that hashing a prefix buys nothing.
+ * This mirrors `src/utils/near-duplicate.ts`. Skills are copied wholesale into the
+ * bundle and cannot import from `src`, so the logic exists on both sides of that
+ * boundary; `test/websearch-skill.test.ts` asserts the two agree on a shared fixture
+ * so they cannot drift apart silently.
  *
  * @param {string} snippet
- * @returns {string} Normalised key, or "" when the snippet is too short to trust.
+ * @returns {Set<string>|undefined} Word 3-grams, or undefined when too short to trust.
  */
-function snippetKey(snippet) {
-	const normalized = String(snippet ?? "")
+export function snippetFingerprint(snippet) {
+	const text = String(snippet ?? "");
+	if (text.length < MIN_DEDUPE_SNIPPET_CHARS) return undefined;
+	const words = text
 		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, " ")
-		.trim();
-	return normalized.length >= MIN_DEDUPE_SNIPPET_CHARS ? normalized : "";
+		.replace(/[^\p{L}\p{N}]+/gu, " ")
+		.trim()
+		.split(" ")
+		.filter(Boolean);
+	if (words.length < SHINGLE_SIZE) return undefined;
+	const shingles = new Set();
+	for (let index = 0; index + SHINGLE_SIZE <= words.length; index++) {
+		shingles.add(words.slice(index, index + SHINGLE_SIZE).join(" "));
+	}
+	return shingles.size >= MIN_SHINGLES ? shingles : undefined;
+}
+
+/**
+ * Jaccard overlap of two snippet fingerprints.
+ *
+ * @param {Set<string>|undefined} left
+ * @param {Set<string>|undefined} right
+ * @returns {number} 0 when either side is missing.
+ */
+export function snippetSimilarity(left, right) {
+	if (!left || !right || left.size === 0 || right.size === 0) return 0;
+	const [small, large] = left.size <= right.size ? [left, right] : [right, left];
+	let intersection = 0;
+	for (const shingle of small) {
+		if (large.has(shingle)) intersection += 1;
+	}
+	return intersection / (left.size + right.size - intersection);
 }
 
 /** Below this, a snippet is too generic to treat as a page fingerprint. */
 const MIN_DEDUPE_SNIPPET_CHARS = 80;
+
+/** Word 3-grams; see src/utils/near-duplicate.ts for why order-sensitivity matters. */
+const SHINGLE_SIZE = 3;
+const MIN_SHINGLES = 4;
+const NEAR_DUPLICATE_THRESHOLD = 0.5;
 
 /** Comparable form of a title, for collapsing near-identical engine results. */
 function titleKey(title) {
@@ -411,7 +445,8 @@ function titleKey(title) {
 export function dedupeResults(results) {
 	const seenUrl = new Set();
 	const seenTitle = new Set();
-	const seenSnippet = new Set();
+	/** Fingerprints of the snippets already kept, for the near-duplicate scan. */
+	const keptSnippets = [];
 	const perDomain = new Map();
 	const out = [];
 
@@ -434,14 +469,20 @@ export function dedupeResults(results) {
 		if (seenTitle.has(tKey) || count >= 2) continue;
 
 		// Last gate, and the only one that catches syndication: same body, different
-		// site. Skipped for short snippets, which are too generic to fingerprint.
+		// site, usually truncated differently. Skipped for short snippets, which are
+		// too generic to fingerprint.
 		const snippet = stripHtml(raw?.content);
-		const sKey = snippetKey(snippet);
-		if (sKey && seenSnippet.has(sKey)) continue;
+		const fingerprint = snippetFingerprint(snippet);
+		if (
+			fingerprint &&
+			keptSnippets.some((kept) => snippetSimilarity(fingerprint, kept) >= NEAR_DUPLICATE_THRESHOLD)
+		) {
+			continue;
+		}
 
 		seenUrl.add(identity);
 		seenTitle.add(tKey);
-		if (sKey) seenSnippet.add(sKey);
+		if (fingerprint) keptSnippets.push(fingerprint);
 		perDomain.set(domain, count + 1);
 		out.push({ title, url, snippet });
 	}

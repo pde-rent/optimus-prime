@@ -1,3 +1,4 @@
+import { isNearDuplicate, textFingerprint } from "../../utils/near-duplicate.js";
 import type { HarnessEntry, HarnessScope } from "./refinement.js";
 
 /**
@@ -383,6 +384,13 @@ function applyRatioGate(ranked: readonly ScoredDoc[]): ScoredDoc[] {
 const MIN_DEDUPE_CONTENT_CHARS = 40;
 
 /**
+ * Near-duplicate comparison is pairwise against the winners kept so far, so it is
+ * bounded to the head of the ranking. `topK` is capped at 10, so anything past this
+ * could never be shown anyway, and beyond the window exact matching still applies.
+ */
+const NEAR_DUPLICATE_SCAN_LIMIT = 50;
+
+/**
  * Two entries holding the same lesson under different ids -- a local memory promoted
  * to global, or the same fact re-saved after a reword -- would otherwise each spend a
  * result slot and a snippet on identical text. Keep the best-ranked copy and carry the
@@ -401,15 +409,35 @@ function collapseDuplicateBodies(ranked: readonly ScoredDoc[]): {
 	const winnerByBody = new Map<string, ScoredDoc>();
 	let duplicatesCollapsed = 0;
 
-	for (const candidate of ranked) {
+	// Kept in ranking order alongside their fingerprints, so a candidate is only ever
+	// compared against entries that already won a slot.
+	const winnerFingerprints: { doc: ScoredDoc; fingerprint: Set<string> | undefined }[] = [];
+
+	for (const [index, candidate] of ranked.entries()) {
 		const body = candidate.doc.content.replace(/\s+/g, " ").trim().toLowerCase();
 		if (body.length < MIN_DEDUPE_CONTENT_CHARS) {
 			deduped.push(candidate);
 			continue;
 		}
-		const winner = winnerByBody.get(body);
+		let winner = winnerByBody.get(body);
+		// Exact match is the common case and costs a hash lookup; the pairwise scan only
+		// runs when the body is new, and only over the head of the ranking.
+		if (!winner && index < NEAR_DUPLICATE_SCAN_LIMIT) {
+			const fingerprint = textFingerprint(body);
+			if (fingerprint) {
+				for (const kept of winnerFingerprints) {
+					if (isNearDuplicate(fingerprint, kept.fingerprint)) {
+						winner = kept.doc;
+						break;
+					}
+				}
+			}
+		}
 		if (!winner) {
 			winnerByBody.set(body, candidate);
+			if (index < NEAR_DUPLICATE_SCAN_LIMIT) {
+				winnerFingerprints.push({ doc: candidate, fingerprint: textFingerprint(body) });
+			}
 			deduped.push(candidate);
 			continue;
 		}

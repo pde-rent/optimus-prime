@@ -437,3 +437,51 @@ describe("duplicate accounting", () => {
 		expect(response.results[0].duplicateTitles).toBeUndefined();
 	});
 });
+
+describe("near-duplicate collapsing", () => {
+	const base =
+		"Never run kubectl patch against the sitp workloads because Argo selfHeal reverts the change within sixty seconds.";
+
+	it("collapses a body that differs only by a corrected typo", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:a": makeEntry({ id: "a", title: "Argo rule", content: base.replace("reverts", "revrts") }),
+			"global:b": makeEntry({ id: "b", title: "Argo rule restated", content: base }),
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch sitp argo selfheal", topK: 5 });
+
+		expect(response.results).toHaveLength(1);
+		expect(response.duplicatesCollapsed).toBe(1);
+	});
+
+	it("collapses a body that only appended a sentence", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:a": makeEntry({ id: "a", title: "Argo rule", content: base }),
+			"global:b": makeEntry({ id: "b", title: "Argo rule plus", content: `${base} Annotate the app afterwards.` }),
+		};
+		const response = searchHarnessMemories(memories, { query: "kubectl patch sitp argo selfheal", topK: 5 });
+
+		expect(response.results).toHaveLength(1);
+		expect(response.duplicatesCollapsed).toBe(1);
+	});
+
+	it("keeps two rules that share wording but say different things", () => {
+		const memories: Record<string, HarnessEntry> = {
+			"global:aks": makeEntry({
+				id: "aks",
+				title: "DU routing",
+				content:
+					"Route DU workloads to the AKS cluster and never to the k0s node, since cross deployment is a breach.",
+			}),
+			"global:k0s": makeEntry({
+				id: "k0s",
+				title: "NXR routing",
+				content:
+					"Route NXR workloads to the k0s node and never to the AKS cluster, since cross deployment is a breach.",
+			}),
+		};
+		const response = searchHarnessMemories(memories, { query: "route workloads cluster node deployment", topK: 5 });
+
+		expect(response.results).toHaveLength(2);
+		expect(response.duplicatesCollapsed).toBe(0);
+	});
+});
