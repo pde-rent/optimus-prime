@@ -63,6 +63,7 @@ import {
 	type AgentCronJob,
 	type AgentHeartbeatManagementAction,
 	DEFAULT_HEARTBEAT_DELIVERY_MODE,
+	type ParsedHeartbeatCommand,
 	parseHeartbeatCommand,
 } from "../../core/cron-jobs.js";
 import { sessionJsonlToMarkdown } from "../../core/export-markdown.js";
@@ -110,6 +111,7 @@ import {
 	BUILTIN_SLASH_COMMANDS,
 	builtinSlashCommandTakesArgument,
 	isBuiltinSlashCommandName,
+	parseLoopCommand,
 	parseSlashCommand,
 	resolveBuiltinSlashCommandName,
 } from "../../core/slash-commands.js";
@@ -4712,6 +4714,11 @@ export class InteractiveMode {
 					this.editor.setText("");
 					return;
 				}
+				if (commandName === "loop") {
+					await this.handleHeartbeatCommand(canonicalCommandText, parseLoopCommand);
+					this.editor.setText("");
+					return;
+				}
 				if (commandName === "heartbeats") {
 					this.editor.setText("");
 					await this.showHeartbeatManager();
@@ -9305,9 +9312,12 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private async handleHeartbeatCommand(text: string): Promise<void> {
+	private async handleHeartbeatCommand(
+		text: string,
+		parse: (input: string) => ParsedHeartbeatCommand = parseHeartbeatCommand,
+	): Promise<void> {
 		try {
-			const command = parseHeartbeatCommand(text);
+			const command = parse(text);
 			switch (command.type) {
 				case "status": {
 					const heartbeat = await this.agentConnection.getHeartbeat();

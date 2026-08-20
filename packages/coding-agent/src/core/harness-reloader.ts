@@ -9,11 +9,11 @@
  * developer's edit is picked up on the next harness reload WITHOUT exiting and
  * relaunching the agent.
  *
- * Dead modules (currently unwired in the running app, e.g. refinement
- * orchestrator, autonomous-continuation-manager) are still re-imported so an
- * edit that is about to be wired up is validated for syntax/type/dependency
- * errors — but they are reported as NOT wired and are never activated here
- * (wiring dead modules is out of scope for the reload mechanism).
+ * Dead modules (present but not yet imported by the running app) are still
+ * re-imported so an edit that is about to be wired up is validated for
+ * syntax/type/dependency errors — but they are reported as NOT wired and are
+ * never activated here (wiring dead modules is out of scope for the reload
+ * mechanism). The manifest currently lists none.
  *
  * Safety boundary: call reload only OUTSIDE an active turn. The caller (the
  * `/reload:harness` command) refuses while the agent is streaming or
@@ -44,8 +44,6 @@ export interface HarnessModuleSpec {
  * re-imported for validation only and reported as not wired.
  */
 export const HARNESS_MODULE_MANIFEST: ReadonlyArray<HarnessModuleSpec> = [
-	{ id: "autonomous-continuation-manager", file: "autonomous-continuation-manager.ts", wired: false },
-	{ id: "refinement-orchestrator", file: "refinement-orchestrator.ts", wired: false },
 	{ id: "herdr-agent-state", file: "extensions/builtin/herdr-agent-state.ts", wired: true },
 	{ id: "cron-jobs", file: "cron-jobs.ts", wired: true },
 	{ id: "rlm-runtime", file: "rlm-runtime.ts", wired: true },

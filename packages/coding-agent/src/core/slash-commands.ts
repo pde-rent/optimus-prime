@@ -1,4 +1,10 @@
 import { APP_NAME } from "../config.js";
+import {
+	normalizeHeartbeatSchedule,
+	type ParsedHeartbeatCommand,
+	parseAgentCronSchedule,
+	parseHeartbeatCommand,
+} from "./cron-jobs.js";
 import type { SourceInfo } from "./source-info.js";
 
 export type SlashCommandSource = "extension" | "prompt" | "skill";
@@ -79,6 +85,42 @@ export function parseRefineCommandOptions(args: string): RefineCommandOptions {
 		return { rollbackId, global };
 	}
 	return { instructions: rest || undefined, global };
+}
+
+const LOOP_USAGE =
+	'Usage: /loop <interval> [--steer|--follow-up] <prompt>\nInterval: 30s, 5m, 2h (minimum 10s), @hourly, or a quoted five-field cron "*/5 * * * *".';
+
+/**
+ * `/loop` is a thin front-end over `/heartbeat`: it only makes the interval
+ * positional and mandatory, then hands the rest to `parseHeartbeatCommand` so
+ * there is exactly one heartbeat grammar. The synthesised `--every "<schedule>"`
+ * form is deliberate — it routes past the bare `status`/`pause`/`clear` control
+ * words so `/loop 30s status` loops the word "status" instead of being read as
+ * a heartbeat subcommand.
+ */
+export function parseLoopCommand(input: string, now = new Date()): ParsedHeartbeatCommand {
+	const text = input.replace(/^\/loop\b/, "").trim();
+	const match = /^(?:(?:every|each)\s+)?(?:"([^"]+)"|'([^']+)'|(\d+\s*[a-z]+|@\S+))(?:\s+([\s\S]*))?$/i.exec(text);
+	const interval = match?.[1] ?? match?.[2] ?? match?.[3];
+	const instruction = match?.[4]?.trim();
+	if (!interval || !instruction) {
+		throw new Error(LOOP_USAGE);
+	}
+	const schedule = normalizeHeartbeatSchedule(interval);
+	try {
+		// Validate eagerly: without this a typo'd interval silently becomes the
+		// first words of the looped prompt on a default schedule.
+		parseAgentCronSchedule(schedule, now);
+	} catch {
+		throw new Error(`Invalid loop interval "${interval}".\n${LOOP_USAGE}`);
+	}
+	const parsed = parseHeartbeatCommand(`/heartbeat --every "${schedule}" ${instruction}`);
+	if (parsed.type !== "set") {
+		throw new Error(LOOP_USAGE);
+	}
+	// A loop is background upkeep, so it waits for the running turn by default;
+	// `/heartbeat` keeps its interrupting "steer" default.
+	return { ...parsed, deliveryMode: parsed.deliveryMode ?? "follow_up" };
 }
 
 export interface BuiltinSlashCommand {
@@ -209,8 +251,15 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "heartbeat",
 		description:
-			"Set or view a persistent heartbeat; delivery defaults to steer, use --follow-up to queue; supports pause, resume, stop, and clear",
+			"Set or view a persistent heartbeat; by default it interrupts the running turn every 5 minutes, use --follow-up to queue behind it instead; supports pause, resume, stop, and clear",
 		argumentHint: "[status|pause|resume|stop|[every <duration>] [--steer|--follow-up] <instruction>]",
+		takesArgument: true,
+	},
+	{
+		name: "loop",
+		description:
+			"Re-run a prompt on a fixed interval; queues behind the running turn (unlike /heartbeat, which interrupts it) — pass --steer to interrupt instead. Manage it with /heartbeats",
+		argumentHint: "<interval> [--steer|--follow-up] <prompt>",
 		takesArgument: true,
 	},
 	{ name: "heartbeats", description: "View and manage all user and agent heartbeats" },

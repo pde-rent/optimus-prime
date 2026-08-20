@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { parseHeartbeatCommand } from "../src/core/cron-jobs.js";
 import { parseNewSessionCommand } from "../src/core/new-session-command.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
 	builtinSlashCommandTakesArgument,
 	isBuiltinSlashCommandName,
 	isSessionSlashCommandName,
+	parseLoopCommand,
 	parseRefineCommandOptions,
 	parseSessionSlashCommand,
 	parseSlashCommand,
@@ -30,13 +32,24 @@ describe("built-in slash commands", () => {
 		});
 	});
 
-	test("exposes heartbeat syntax guidance", () => {
+	test("exposes heartbeat syntax guidance that leads with the interrupting default", () => {
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "heartbeat")).toMatchObject({
 			description:
-				"Set or view a persistent heartbeat; delivery defaults to steer, use --follow-up to queue; supports pause, resume, stop, and clear",
+				"Set or view a persistent heartbeat; by default it interrupts the running turn every 5 minutes, use --follow-up to queue behind it instead; supports pause, resume, stop, and clear",
 			argumentHint: "[status|pause|resume|stop|[every <duration>] [--steer|--follow-up] <instruction>]",
 			takesArgument: true,
 		});
+	});
+
+	test("exposes /loop and says plainly that it queues where /heartbeat interrupts", () => {
+		const loop = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "loop");
+
+		expect(loop).toMatchObject({
+			argumentHint: "<interval> [--steer|--follow-up] <prompt>",
+			takesArgument: true,
+		});
+		expect(loop?.description).toContain("queues behind the running turn");
+		expect(loop?.description).toContain("/heartbeat");
 	});
 
 	test("exposes /effort for selecting the thinking level", () => {
@@ -255,5 +268,71 @@ describe("session slash commands", () => {
 		expect(parseSessionSlashCommand(" /compact")).toBeUndefined();
 		expect(parseSessionSlashCommand("/compaction")).toBeUndefined();
 		expect(parseSessionSlashCommand("/settings")).toBeUndefined();
+	});
+});
+
+describe("parseLoopCommand", () => {
+	const now = new Date("2026-01-01T12:00:00.000Z");
+
+	test("accepts every documented interval form and normalizes it like /heartbeat", () => {
+		for (const [input, schedule] of [
+			["/loop 30s tail the logs", "every 30s"],
+			["/loop 5m check the deploy", "every 5m"],
+			["/loop 2h sweep stale branches", "every 2h"],
+			["/loop every 10m check status", "every 10m"],
+			["/loop each 10 minutes check status", "every 10 minutes"],
+			["/loop @hourly check status", "@hourly"],
+			['/loop "*/5 * * * *" check status', "*/5 * * * *"],
+		] as const) {
+			expect(parseLoopCommand(input, now)).toMatchObject({ type: "set", schedule });
+		}
+	});
+
+	test("defaults to follow_up so a loop queues behind the running turn", () => {
+		expect(parseLoopCommand("/loop 5m check the deploy", now)).toEqual({
+			type: "set",
+			schedule: "every 5m",
+			instruction: "check the deploy",
+			deliveryMode: "follow_up",
+		});
+	});
+
+	test("still honours an explicit delivery flag on either side of the prompt", () => {
+		expect(parseLoopCommand("/loop 5m --steer check the deploy", now)).toMatchObject({ deliveryMode: "steer" });
+		expect(parseLoopCommand("/loop 5m check the deploy --steer", now)).toMatchObject({ deliveryMode: "steer" });
+		expect(parseLoopCommand("/loop 5m --follow-up check the deploy", now)).toMatchObject({
+			deliveryMode: "follow_up",
+		});
+	});
+
+	test("produces the same job shape /heartbeat does, apart from the delivery default", () => {
+		const loop = parseLoopCommand("/loop 10m check status", now);
+		const heartbeat = parseHeartbeatCommand("/heartbeat every 10m check status");
+
+		expect(loop).toEqual({ ...heartbeat, deliveryMode: "follow_up" });
+		expect(parseLoopCommand("/loop 10m --steer check status", now)).toEqual(
+			parseHeartbeatCommand("/heartbeat every 10m --steer check status"),
+		);
+	});
+
+	test("loops a prompt that happens to be a heartbeat subcommand word", () => {
+		expect(parseLoopCommand("/loop 30s status", now)).toMatchObject({ type: "set", instruction: "status" });
+	});
+
+	test("rejects a missing interval with the interval grammar rather than inventing one", () => {
+		for (const input of ["/loop", "/loop check the deploy", "/loop   "]) {
+			expect(() => parseLoopCommand(input, now)).toThrow("Usage: /loop <interval>");
+		}
+		expect(() => parseLoopCommand("/loop check the deploy", now)).toThrow("minimum 10s");
+	});
+
+	test("rejects an interval with no prompt", () => {
+		expect(() => parseLoopCommand("/loop 5m", now)).toThrow("Usage: /loop <interval>");
+	});
+
+	test("rejects invalid intervals instead of folding them into the prompt", () => {
+		expect(() => parseLoopCommand("/loop 5x do the thing", now)).toThrow('Invalid loop interval "5x"');
+		expect(() => parseLoopCommand("/loop 5s do the thing", now)).toThrow('Invalid loop interval "5s"');
+		expect(() => parseLoopCommand('/loop "* * *" do the thing', now)).toThrow('Invalid loop interval "* * *"');
 	});
 });
