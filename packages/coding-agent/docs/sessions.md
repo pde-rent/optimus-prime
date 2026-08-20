@@ -30,7 +30,7 @@ For the JSONL file format and SessionManager API, see [Session Format](session-f
 | `/fork` | Create a new session from a previous user message |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Summarize older context; see [Compaction](compaction.md) |
-| `/export [file]` | Export session to HTML |
+| `/export [file|--clipboard]` | Export session to HTML, or copy a Markdown transcript |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 
 ## Resuming and Deleting Sessions

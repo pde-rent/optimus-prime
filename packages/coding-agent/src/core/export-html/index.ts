@@ -126,7 +126,7 @@ function generateThemeVars(themeName?: string): string {
 
 interface SessionData {
 	header: ReturnType<SessionManager["getHeader"]>;
-	entries: ReturnType<SessionManager["getEntries"]>;
+	entries: SessionEntry[];
 	leafId: string | null;
 	systemPrompt?: string;
 	tools?: Array<Pick<ToolDefinition, "name" | "description" | "parameters">>;
@@ -167,8 +167,46 @@ function generateHtml(sessionData: SessionData, themeName?: string): string {
 		.replace("{{HIGHLIGHT_JS}}", hljsJs);
 }
 
-/** Tools rendered directly by the HTML template (not pre-rendered via TUI→ANSI→HTML pipeline) */
-const TEMPLATE_RENDERED_TOOLS = new Set(["bash", "edit"]);
+/**
+ * Entry types stripped from the exported payload. These record bookkeeping that
+ * template.js never reads, and on a long session they are a large share of the
+ * embedded base64 blob (69 `child_usage_attributed` entries = 49KB in one sample).
+ * The list is a denylist so an entry type added later survives the export instead
+ * of silently vanishing from it.
+ */
+const NON_CONVERSATIONAL_ENTRY_TYPES: ReadonlySet<string> = new Set([
+	"child_usage_attributed",
+	"session_info",
+	"session_state",
+	"agent_status",
+	"git_state",
+]);
+
+/**
+ * The conversation to embed: the leaf branch only, minus bookkeeping entries.
+ * parentIds are re-chained because template.js rebuilds the path by walking
+ * parentId and stops at the first id it cannot resolve, so a hole truncates the
+ * whole transcript.
+ */
+function collectExportEntries(sm: SessionManager): { entries: SessionEntry[]; leafId: string | null } {
+	const entries: SessionEntry[] = [];
+	let parentId: string | null = null;
+	for (const entry of sm.getBranch()) {
+		if (NON_CONVERSATIONAL_ENTRY_TYPES.has(entry.type)) continue;
+		entries.push({ ...entry, parentId });
+		parentId = entry.id;
+	}
+	return { entries, leafId: parentId };
+}
+
+/**
+ * Tools the export never pre-renders: the names `renderToolCall` in template.js
+ * draws itself, plus the harness built-ins that reach its default branch. Pre-rendering
+ * is for extension tools the template has never heard of; running it over a built-in
+ * embeds every one of its cells a second and third time as ANSI spans.
+ * export-payload.test.ts pins this against template.js and the built-in registry.
+ */
+export const NEVER_PRE_RENDERED_TOOLS: ReadonlySet<string> = new Set(["bash", "read", "write", "edit", "ls", "repl"]);
 
 /**
  * Pre-render custom tools to HTML using their TUI renderers.
@@ -184,7 +222,7 @@ function preRenderCustomTools(
 		const msg = entry.message;
 		if (msg.role === "assistant" && Array.isArray(msg.content)) {
 			for (const block of msg.content) {
-				if (block.type === "toolCall" && !TEMPLATE_RENDERED_TOOLS.has(block.name)) {
+				if (block.type === "toolCall" && !NEVER_PRE_RENDERED_TOOLS.has(block.name)) {
 					const callHtml = toolRenderer.renderCall(block.id, block.name, block.arguments);
 					if (callHtml) {
 						renderedTools[block.id] = { callHtml };
@@ -195,7 +233,7 @@ function preRenderCustomTools(
 		if (msg.role === "toolResult" && msg.toolCallId) {
 			const toolName = msg.toolName || "";
 			const existing = renderedTools[msg.toolCallId];
-			if (existing || !TEMPLATE_RENDERED_TOOLS.has(toolName)) {
+			if (existing || !NEVER_PRE_RENDERED_TOOLS.has(toolName)) {
 				const rendered = toolRenderer.renderResult(
 					msg.toolCallId,
 					toolName,
@@ -236,7 +274,7 @@ export async function exportSessionToHtml(
 		throw new Error("Nothing to export yet - start a conversation first");
 	}
 
-	const entries = sm.getEntries();
+	const { entries, leafId } = collectExportEntries(sm);
 	let renderedTools: Record<string, RenderedToolHtml> | undefined;
 	if (opts.toolRenderer) {
 		renderedTools = preRenderCustomTools(entries, opts.toolRenderer);
@@ -248,7 +286,7 @@ export async function exportSessionToHtml(
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
 		entries,
-		leafId: sm.getLeafId(),
+		leafId,
 		systemPrompt: state?.systemPrompt,
 		tools: state?.tools?.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
 		renderedTools,
@@ -278,11 +316,12 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 	}
 
 	const sm = SessionManager.open(inputPath);
+	const { entries, leafId } = collectExportEntries(sm);
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
-		entries: sm.getEntries(),
-		leafId: sm.getLeafId(),
+		entries,
+		leafId,
 		systemPrompt: undefined,
 		tools: undefined,
 	};

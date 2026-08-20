@@ -120,8 +120,8 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
 	{
 		name: "export",
-		description: "Export session (HTML default, or specify path: .html/.jsonl)",
-		argumentHint: "[path]",
+		description: "Export session (HTML default, path .html/.jsonl, or --clipboard for Markdown)",
+		argumentHint: "[path|--clipboard]",
 		takesArgument: true,
 	},
 	{

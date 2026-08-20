@@ -54,7 +54,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/refine [instructions]` | Refine or roll back session-backed harness state |
 | `/copy` | Copy last assistant message to clipboard |
 | `/btw <question>`, `/side <question>` | Ask an inline side question without adding it to the session; replies continue the side conversation, esc returns |
-| `/export [file]` | Export session to HTML |
+| `/export [file|--clipboard]` | Export session to HTML, or copy a Markdown transcript |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
@@ -151,7 +151,7 @@ Append to the default prompt without replacing it with `APPEND_SYSTEM.md` in eit
 
 ## Exporting and Sharing Sessions
 
-Use `/export [file]` to write a session to HTML.
+Use `/export [file]` to write a session to HTML, or `/export --clipboard` (`-c`) to copy a Markdown transcript of the current branch to the clipboard.
 
 Use `/share` to upload a private GitHub gist with a shareable HTML link.
 
