@@ -132,7 +132,7 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 	"",
-	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages).",
+	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages), but prefer a Bun API where one exists — `Bun.spawn` over `child_process`, `Bun.file` over `fs` reads, `$` over shelling out for a simple pipeline — because the Bun namespace is already loaded and needs no import.",
 	"",
 	"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 	"",
@@ -208,7 +208,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		// One capability per line. Joined with commas these ran together into a single paragraph
 		// whose own sentence-ending periods collided with the separators ("process control., Bun
 		// built-in modules"), and it sat beside a structured skills block in the same prompt.
-		`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
+		`REPL runtime — Bun, not Node (\`%%bash\` cells included): package and script commands are \`bun\`/\`bunx\`, never \`npm\`/\`npx\`/\`node\`. Available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 	];
 
 	const childDoctrine = buildChildAgentDoctrine(options);

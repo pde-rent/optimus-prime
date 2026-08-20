@@ -147,7 +147,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Working directory: /repo",
 				"Recursive agent depth: 0",
-				`REPL runtime, available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
+				`REPL runtime — Bun, not Node (\`%%bash\` cells included): package and script commands are \`bun\`/\`bunx\`, never \`npm\`/\`npx\`/\`node\`. Available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 				"",
 
 				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
@@ -167,7 +167,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 				"",
-				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages).",
+				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages), but prefer a Bun API where one exists — `Bun.spawn` over `child_process`, `Bun.file` over `fs` reads, `$` over shelling out for a simple pipeline — because the Bun namespace is already loaded and needs no import.",
 				"",
 				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)` and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
 				"",
@@ -185,6 +185,20 @@ describe("buildRlmPrompt", () => {
 				"Conversation log: /repo/.pi/sessions/session.jsonl",
 			].join("\n"),
 		);
+	});
+
+	test("states the runtime is Bun rather than Node", () => {
+		// Without the negative the model reaches for npm/npx/node and hand-rolls what Bun ships.
+		const prompt = buildRlmPrompt({
+			cwd: "/repo",
+			messagesPath: "/repo/.pi/sessions/session.jsonl",
+			activeTools: ["repl"],
+			allowRecursion: false,
+		});
+		expect(prompt).toContain("Bun, not Node");
+		expect(prompt).toContain("`bun`/`bunx`, never `npm`/`npx`/`node`");
+		// `node:` builtins still work; the Bun preference must not read as a prohibition.
+		expect(prompt).toContain("Load extra modules with `await import('<specifier>')` (node builtins");
 	});
 
 	test("keeps the per-agent conversation log out of the cacheable prefix", () => {
