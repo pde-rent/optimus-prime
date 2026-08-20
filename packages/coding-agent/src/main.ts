@@ -565,6 +565,7 @@ function buildSessionOptions(
 	const settingsOverrides: Partial<Settings> = {};
 	if (config.graphMaxTokens !== undefined) settingsOverrides.graphMaxTokens = config.graphMaxTokens;
 	if (config.dynamicDepth !== undefined) settingsOverrides.dynamicDepth = config.dynamicDepth;
+	if (config.degeneracyGuard !== undefined) settingsOverrides.degeneracyGuard = config.degeneracyGuard;
 	if (config.dynamicEffort !== undefined) settingsOverrides.dynamicEffort = config.dynamicEffort;
 	if (config.serviceTier !== undefined) settingsOverrides.defaultServiceTier = config.serviceTier;
 	if (config.compaction !== undefined) settingsOverrides.compaction = { enabled: config.compaction };

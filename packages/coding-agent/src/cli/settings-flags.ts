@@ -34,6 +34,7 @@ export interface SettingsFlagValues {
 	graphMaxTokens?: number;
 	rlmMaxDepth?: number;
 	dynamicDepth?: boolean;
+	degeneracyGuard?: boolean;
 	dynamicEffort?: DynamicEffortMode;
 	serviceTier?: ServiceTier;
 	compaction?: boolean;
@@ -110,6 +111,12 @@ export const SETTINGS_FLAGS = [
 		flag: "--dynamic-depth",
 		field: "dynamicDepth",
 		help: "Let the agent raise its own recursion depth",
+	}),
+	spec({
+		kind: "bool",
+		flag: "--degeneracy-guard",
+		field: "degeneracyGuard",
+		help: "Abort a turn whose output collapses into a repetition loop",
 	}),
 	spec({
 		kind: "enum",

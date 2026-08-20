@@ -12,6 +12,7 @@ import {
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import { DegeneracyDetector, type DegeneracyReport, degeneracyErrorMessage } from "./degeneracy.js";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -142,6 +143,28 @@ function createAbortedAssistantMessage(
 		usage: cloneUsage(partialMessage?.usage ?? EMPTY_USAGE),
 		stopReason: "aborted",
 		errorMessage: ABORT_ERROR_MESSAGE,
+		timestamp: Date.now(),
+	};
+}
+
+function createDegenerateAssistantMessage(
+	config: AgentLoopConfig,
+	partialMessage: AssistantMessage | null,
+	report: DegeneracyReport,
+): AssistantMessage {
+	return {
+		role: "assistant",
+		// The looped text is the payload of the bug: persisting it would make it permanent context
+		// for every later turn and can re-trigger the collapse, so the turn keeps no content.
+		content: [],
+		api: partialMessage?.api ?? config.model.api,
+		provider: partialMessage?.provider ?? config.model.provider,
+		model: partialMessage?.model ?? config.model.id,
+		usage: cloneUsage(partialMessage?.usage ?? EMPTY_USAGE),
+		// "aborted" and not "error": this is a stopped turn, not a provider failure, and the
+		// aborted path already drops the message from replayed context and skips auto-retry.
+		stopReason: "aborted",
+		errorMessage: degeneracyErrorMessage(report),
 		timestamp: Date.now(),
 	};
 }
@@ -457,8 +480,7 @@ async function streamAssistantResponse(
 ): Promise<AssistantMessage> {
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
-	const finishAbortedMessage = async () => {
-		const finalMessage = createAbortedAssistantMessage(config, partialMessage);
+	const finishStoppedMessage = async (finalMessage: AssistantMessage) => {
 		if (addedPartial) {
 			context.messages[context.messages.length - 1] = finalMessage;
 		} else {
@@ -468,6 +490,19 @@ async function streamAssistantResponse(
 		await emit({ type: "message_end", message: finalMessage });
 		return finalMessage;
 	};
+
+	const detector = config.degeneracyGuard === false ? undefined : new DegeneracyDetector();
+	// The provider needs a signal this function can trip on its own: a degenerate response has to
+	// be cancelled at the socket or the tokens keep being generated and billed to max_tokens.
+	const guardAbort = detector ? new AbortController() : undefined;
+	const forwardAbort = guardAbort ? () => guardAbort.abort() : undefined;
+	if (forwardAbort && signal) {
+		if (signal.aborted) {
+			forwardAbort();
+		} else {
+			signal.addEventListener("abort", forwardAbort, { once: true });
+		}
+	}
 
 	try {
 		throwIfAborted(signal);
@@ -495,7 +530,7 @@ async function streamAssistantResponse(
 			streamFunction(config.model, llmContext, {
 				...config,
 				apiKey: resolvedApiKey,
-				signal,
+				signal: guardAbort?.signal ?? signal,
 			}),
 			signal,
 		);
@@ -503,6 +538,7 @@ async function streamAssistantResponse(
 		const closeIterator = () => {
 			void Promise.resolve(iterator.return?.()).catch(() => undefined);
 		};
+		let degeneracy: DegeneracyReport | undefined;
 		while (true) {
 			const next = await raceWithAbort<IteratorResult<AssistantMessageEvent>>(
 				iterator.next(),
@@ -539,6 +575,11 @@ async function streamAssistantResponse(
 							message: { ...partialMessage },
 						});
 					}
+					// Assistant prose only. Tool-call arguments are code, diffs, JSON and base64,
+					// all legitimately repetitive, and a false positive there destroys real work.
+					if (detector && (event.type === "text_delta" || event.type === "thinking_delta")) {
+						degeneracy = detector.push(event.contentIndex, event.delta);
+					}
 					break;
 
 				case "done":
@@ -563,6 +604,11 @@ async function streamAssistantResponse(
 					return finalMessage;
 				}
 			}
+			if (degeneracy) {
+				guardAbort?.abort();
+				closeIterator();
+				return finishStoppedMessage(createDegenerateAssistantMessage(config, partialMessage, degeneracy));
+			}
 		}
 
 		const finalMessage = await maybePromiseWithAbort(response.result(), signal);
@@ -576,9 +622,13 @@ async function streamAssistantResponse(
 		return finalMessage;
 	} catch (error) {
 		if (signal?.aborted && isAbortError(error)) {
-			return finishAbortedMessage();
+			return finishStoppedMessage(createAbortedAssistantMessage(config, partialMessage));
 		}
 		throw error;
+	} finally {
+		if (forwardAbort) {
+			signal?.removeEventListener("abort", forwardAbort);
+		}
 	}
 }
 

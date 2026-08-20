@@ -114,6 +114,7 @@ export interface AgentOptions {
 	transport?: Transport;
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
+	degeneracyGuard?: boolean;
 }
 
 class PendingMessageQueue {
@@ -204,6 +205,7 @@ export class Agent {
 	public transport: Transport;
 	public maxRetryDelayMs?: number;
 	public toolExecution: ToolExecutionMode;
+	public degeneracyGuard: boolean;
 
 	constructor(options: AgentOptions = {}) {
 		this._state = createMutableAgentState(options.initialState);
@@ -225,6 +227,7 @@ export class Agent {
 		this.transport = options.transport ?? "auto";
 		this.maxRetryDelayMs = options.maxRetryDelayMs;
 		this.toolExecution = options.toolExecution ?? "parallel";
+		this.degeneracyGuard = options.degeneracyGuard ?? true;
 	}
 
 	/**
@@ -458,6 +461,7 @@ export class Agent {
 			thinkingBudgets: this.thinkingBudgets,
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			toolExecution: this.toolExecution,
+			degeneracyGuard: this.degeneracyGuard,
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,
 			shouldStopAfterTurn: async (context) => this.shouldStopAfterTurn?.(context) ?? false,

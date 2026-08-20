@@ -146,6 +146,8 @@ export interface Settings {
 	dynamicDepth?: boolean;
 	/** Show the live sub-agent graph while children are running. default: true */
 	subagentGraph?: boolean;
+	/** Abort a turn whose streamed text or reasoning collapses into a repetition loop. default: true */
+	degeneracyGuard?: boolean;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
 	/** Multi-agent graph budget dial. "off" keeps the single-agent path. default: "off" */
@@ -788,6 +790,17 @@ export class SettingsManager {
 	setDynamicDepth(enabled: boolean): void {
 		this.globalSettings.dynamicDepth = enabled;
 		this.markModified("dynamicDepth");
+		this.save();
+	}
+
+	/** Opt out only to inspect a collapse; the loop otherwise streams and is billed to max_tokens. */
+	getDegeneracyGuard(): boolean {
+		return this.settings.degeneracyGuard ?? true;
+	}
+
+	setDegeneracyGuard(enabled: boolean): void {
+		this.globalSettings.degeneracyGuard = enabled;
+		this.markModified("degeneracyGuard");
 		this.save();
 	}
 

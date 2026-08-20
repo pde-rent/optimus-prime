@@ -251,6 +251,12 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	toolExecution?: ToolExecutionMode;
 
 	/**
+	 * Abort a turn whose streamed text or reasoning collapses into a repetition loop, instead of
+	 * paying for it to max_tokens and persisting it as context. Defaults to `true`.
+	 */
+	degeneracyGuard?: boolean;
+
+	/**
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.

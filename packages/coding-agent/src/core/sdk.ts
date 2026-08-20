@@ -325,6 +325,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
+		degeneracyGuard: settingsManager.getDegeneracyGuard(),
 	});
 
 	if (hasExistingSession) {
