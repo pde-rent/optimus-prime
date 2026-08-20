@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AgentSession } from "../src/core/agent-session.js";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import { BunReplProvisioner } from "../src/core/bun-repl/provisioner.js";
 
@@ -226,6 +227,53 @@ describe("snapshot excludes live handles", () => {
 			// look callable to the model.
 			expect((await second.execute("typeof server")).result).toBe('"undefined"');
 			expect((await second.execute("typeof timer")).result).toBe('"undefined"');
+		} finally {
+			await second.dispose();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("reports the hazard of a restored function whose capture did not come back", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "repl-closure-"));
+		const snapshotDir = join(dir, "snap");
+		const first = new BunReplManager({ cwd: dir, snapshotDir });
+		await first.start();
+		// A live handle is dropped by the snapshot; the arrow function that closed over it is kept
+		// as source and re-evaluates cleanly, because evaluating a function does not run its body.
+		await first.execute(`const timer = setInterval(() => {}, 1000); const tick = () => timer.hasRef();`);
+		await first.dispose();
+
+		const second = new BunReplManager({ cwd: dir, snapshotDir });
+		await second.start();
+		try {
+			const restore = await second.restoreState();
+
+			expect(restore?.failed).toContain("timer");
+			// Functions ARE revived — by re-evaluating their source, not by cloning.
+			expect(restore?.restoredNames).toContain("tick");
+			// ...and this one is broken despite being reported as available.
+			const call = await second.execute("tick()");
+			expect(call.status).toBe("error");
+			expect(call.error?.evalue).toContain("timer is not defined");
+
+			// The notice the model actually reads must not contradict any of the above.
+			const sent: Array<{ content: string }> = [];
+			const stub = { sendCustomMessage: async (m: { content: string }) => void sent.push(m) };
+			(
+				AgentSession.prototype as unknown as {
+					_onReplStateRestored(this: unknown, restore: { restoredNames: string[]; failed: string[] }): void;
+				}
+			)._onReplStateRestored.call(stub, {
+				restoredNames: restore?.restoredNames ?? [],
+				failed: restore?.failed ?? [],
+			});
+			const notice = sent.at(-1)?.content ?? "";
+
+			expect(notice).toContain("timer");
+			// The lie this guards: telling the model functions and classes are never revived, so it
+			// redefines helpers it still has and trusts the ones it should not.
+			expect(notice).not.toContain("never revived");
+			expect(notice).toContain("is not defined");
 		} finally {
 			await second.dispose();
 			rmSync(dir, { recursive: true, force: true });

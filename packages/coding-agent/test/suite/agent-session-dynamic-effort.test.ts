@@ -116,6 +116,17 @@ describe("rlm.run effort kwarg", () => {
 		expect(spawned.effort).toBe("minimal");
 	});
 
+	test("off mode refuses the level instead of spawning the child above the dial", async () => {
+		harness = await createEffortHarness({ dynamicEffort: "off", floor: "minimal" });
+		harness.setResponses([fauxAssistantMessage("child answer")]);
+
+		// "off" means static effort for the whole family: spawning must not be the way around it.
+		const spawned = await harness.session.runRlmChild("spawn above the dial", { effort: "max" });
+
+		expect(spawned.effort_refused).toBe("disabled");
+		expect(spawned.effort).toBe("minimal");
+	});
+
 	test("still rejects unknown kwargs", async () => {
 		harness = await createHarness({ models: reasoningModels });
 
@@ -371,5 +382,31 @@ describe("dynamic depth and graph settings", () => {
 		).setModelRequestedMaxDepth.call(session, 2);
 		expect(result.refused).toBeUndefined();
 		expect(result.max_depth).toBe(2);
+	});
+
+	test("a graph depth floor survives a model-initiated depth change", async () => {
+		harness = await createHarness({ models: reasoningModels, settings: { graphResolver: "high" } });
+		const session = harness.session;
+		// The dial's wide shapes need depth 2, so the floor raises the default of 1.
+		expect(session.getRlmMaxDepthStatus()).toEqual({ maxDepth: 2, source: "graph" });
+
+		session.markEffortEscalationTrigger();
+		expect(await session.setModelRequestedMaxDepth(3)).toEqual({ max_depth: 3, capped: false });
+		expect(session.getRlmMaxDepthStatus()).toEqual({ maxDepth: 3, source: "model" });
+
+		// The regression this guards: the model's own change recorded as a user pin, which retires
+		// the floor for the rest of the session and makes a later spawn throw against a depth the
+		// dial itself asked for. Only `/rlm-max-depth` pins.
+		expect(await session.setModelRequestedMaxDepth(1)).toEqual({ max_depth: 2, capped: false });
+		expect(session.getRlmMaxDepthStatus()).toEqual({ maxDepth: 2, source: "graph" });
+	});
+
+	test("a user pin still overrides the graph floor", async () => {
+		harness = await createHarness({ models: reasoningModels, settings: { graphResolver: "high" } });
+		const session = harness.session;
+
+		await session.setRlmMaxDepth(1);
+
+		expect(session.getRlmMaxDepthStatus()).toEqual({ maxDepth: 1, source: "chat" });
 	});
 });

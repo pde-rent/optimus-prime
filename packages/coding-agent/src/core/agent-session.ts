@@ -217,6 +217,7 @@ import {
 	normalizeRequestedRlmSubagentModel,
 	normalizeRequestedRlmSubagentSessionName,
 	type RlmDeleteSubagentResult,
+	type RlmEffortRefusal,
 	type RlmFindModelsResult,
 	type RlmGetEffortResult,
 	type RlmListSubagentsResult,
@@ -871,6 +872,8 @@ export type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from 
 
 interface PersistedRlmMaxDepthState {
 	maxDepth: number;
+	/** Absent on entries written before the model could set depth; those were all user pins. */
+	source?: "chat" | "model";
 }
 
 type AutonomousRuntimeSnapshot = Pick<
@@ -1557,7 +1560,8 @@ export class AgentSession {
 		// An explicit in-session `/rlm-max-depth` is the most specific thing the user has said about
 		// depth, so it stands even when the graph would want more; the graph then simply cannot use
 		// its deeper shapes. Every other source is a default the graph is entitled to raise, since
-		// turning the dial on is itself the statement of intent.
+		// turning the dial on is itself the statement of intent. `source === "model"` is deliberately
+		// not a pin: the model's own depth request must not silently retire the user's graph floor.
 		// An explicit pin stands, and so does an explicit zero: zero is the only value that states a
 		// prohibition rather than a default, and it is what a sandboxed or cost-capped run sets.
 		// Raising either would override the more specific instruction with the more general one.
@@ -1573,7 +1577,7 @@ export class AgentSession {
 	} {
 		const persisted = this._loadPersistedRlmMaxDepthState();
 		if (persisted) {
-			return { maxDepth: persisted.maxDepth, source: "chat" };
+			return { maxDepth: persisted.maxDepth, source: persisted.source === "model" ? "model" : "chat" };
 		}
 		if (this._configuredRlmMaxDepth !== undefined) {
 			return { maxDepth: this._configuredRlmMaxDepth, source: "inherited" };
@@ -7074,33 +7078,42 @@ export class AgentSession {
 	}
 
 	/**
-	 * Model-initiated effort change, taking effect on the next turn. It never
-	 * persists the user's global default and never throws: a refusal is reported
-	 * back so the model can observe the policy instead of losing a turn to an error.
+	 * Apply the dynamic-effort policy to a level requested for a CHILD. Spawning was
+	 * otherwise an escape hatch around the policy: a parent capped at `high` could
+	 * hand a child `max` and buy unbounded reasoning through the back door, and a
+	 * parent under `dynamicEffort: "off"` could buy the whole dial that way. "off"
+	 * means static effort for the family, not just for self, so the level is dropped
+	 * and the child inherits.
+	 *
+	 * Band clamping stays silent by design (portable spawn code must not become
+	 * model-specific) and is echoed back through the handle's effective level; an
+	 * "off" refusal is reported explicitly, matching `setModelRequestedThinkingLevel`,
+	 * because a silently ignored kwarg reads as an applied one.
 	 */
-	/**
-	 * Apply the dynamic-effort band to a level requested for a CHILD. Spawning was
-	 * otherwise an escape hatch around the band: a parent capped at `high` could
-	 * hand a child `max` and buy unbounded reasoning through the back door. Clamping
-	 * is silent by design here (portable spawn code must not become model-specific),
-	 * so the caller echoes the effective level back in the admission handle.
-	 */
-	private _bandLimitedChildEffort(requested: ThinkingLevel | undefined): ThinkingLevel | undefined {
-		if (requested === undefined) return undefined;
-		if (this.settingsManager.getDynamicEffort() !== "banded") return requested;
+	private _admitChildEffort(requested: ThinkingLevel | undefined): {
+		effort: ThinkingLevel | undefined;
+		refused?: RlmEffortRefusal;
+	} {
+		if (this.settingsManager.getDynamicEffort() === "off") {
+			return requested === undefined ? { effort: undefined } : { effort: undefined, refused: "disabled" };
+		}
+		if (requested === undefined) return { effort: undefined };
+		if (this.settingsManager.getDynamicEffort() !== "banded") return { effort: requested };
 		const rank = this._thinkingLevelRank(requested);
 		if (rank > this._thinkingLevelRank(BANDED_EFFORT_MAX) && !this._effortEscalationTriggered) {
-			return BANDED_EFFORT_MAX;
+			return { effort: BANDED_EFFORT_MAX };
 		}
 		if (rank < this._thinkingLevelRank(BANDED_EFFORT_MIN)) {
-			return BANDED_EFFORT_MIN;
+			return { effort: BANDED_EFFORT_MIN };
 		}
-		return requested;
+		return { effort: requested };
 	}
 
 	/**
 	 * Model-initiated recursion-depth change. Session-scoped: it never writes the
-	 * user's global `rlmMaxDepth`, mirroring the effort gate.
+	 * user's global `rlmMaxDepth`, mirroring the effort gate, and it records
+	 * `source: "model"` so it is not mistaken for the user pin that retires the
+	 * graph depth floor for the rest of the session and for every child.
 	 *
 	 * Raising is gated on the same observed-failure triggers as effort rather than
 	 * on predicted task shape, and capped at MODEL_MAX_RLM_DEPTH. Note the cost:
@@ -7130,10 +7143,15 @@ export class AgentSession {
 			return { max_depth: current, capped: true, refused: "thrash" };
 		}
 		this._depthChangesThisRun += 1;
-		await this.setRlmMaxDepth(maxDepth);
+		await this.setRlmMaxDepth(maxDepth, { source: "model" });
 		return { max_depth: this._rlmMaxDepth, capped: false };
 	}
 
+	/**
+	 * Model-initiated effort change, taking effect on the next turn. It never
+	 * persists the user's global default and never throws: a refusal is reported
+	 * back so the model can observe the policy instead of losing a turn to an error.
+	 */
 	setModelRequestedThinkingLevel(level: ThinkingLevel): RlmSetEffortResult {
 		const current = this.thinkingLevel;
 		if (this.settingsManager.getDynamicEffort() === "off") {
@@ -7236,15 +7254,22 @@ export class AgentSession {
 				"Your previous REPL state could not be revived; the REPL is starting fresh, so re-create any variables, imports, or loaded data you need.",
 			);
 		}
-		// Naming what did *not* come back is the load-bearing half: the snapshot is JSON, so
-		// every function and closure is gone, and a model told only what was restored will
-		// happily call something that no longer exists.
+		// Naming what did *not* come back is the load-bearing half: a model told only what was
+		// restored will happily call something that no longer works. The snapshot is a v8
+		// structured clone plus captured function source, so functions and classes ARE revived by
+		// re-evaluating that source; what a revived one captured may not be, and that only fails
+		// when it is called. Detecting it would mean parsing every restored source against the
+		// live namespace — no parser here without a dependency, and a regex would condemn working
+		// functions — so the hazard is stated rather than guessed at.
 		if (failed.length > 0) {
 			lines.push(
-				`These did NOT survive and are gone: ${failed.join(", ")}. Functions, classes and closures are never revived — redefine any you still need before using them.`,
+				`These did NOT survive and are gone: ${failed.join(", ")}. Redefine any you still need before using them.`,
 			);
-		} else if (restoredNames.length > 0) {
-			lines.push("Functions and closures are not revived — redefine any you need.");
+		}
+		if (restoredNames.length > 0) {
+			lines.push(
+				'Functions and classes come back by re-evaluating their source, not by cloning, so a restored one is only as good as what it captured: if it closed over a name that did not come back it is listed as available above but throws "<name> is not defined" when you call it. Re-run its definition, and the definition of whatever it captured, before relying on it.',
+			);
 		}
 		lines.push("</repl_state_restored>");
 		void this.sendCustomMessage(
@@ -9939,7 +9964,9 @@ export class AgentSession {
 		const requestedPeers = normalizeRequestedRlmPeers(rawPeers);
 		const requestedSessionName = normalizeRequestedRlmSubagentSessionName(rawName);
 		const requestedModel = normalizeRequestedRlmSubagentModel(rawModel);
-		const requestedEffort = this._bandLimitedChildEffort(normalizeRequestedRlmEffort(rawEffort));
+		const { effort: requestedEffort, refused: effortRefused } = this._admitChildEffort(
+			normalizeRequestedRlmEffort(rawEffort),
+		);
 		if (requestedSessionName) assertDirectAgentMessageTarget(requestedSessionName);
 		if (this._rlmDepth >= this._rlmMaxDepth) {
 			throw new Error(
@@ -10297,6 +10324,7 @@ export class AgentSession {
 			session_dir: childSessionDir,
 			model: `${modelSelection.model.provider}/${modelSelection.model.id}`,
 			effort: subagentOptions.thinkingLevel,
+			...(effortRefused ? { effort_refused: effortRefused } : {}),
 		};
 	}
 
@@ -10850,14 +10878,24 @@ export class AgentSession {
 		return { maxDepth: this._rlmMaxDepth, source: this._rlmMaxDepthSource };
 	}
 
-	async setRlmMaxDepth(maxDepth: number, options: { global?: boolean } = {}): Promise<SetRlmMaxDepthResult> {
+	async setRlmMaxDepth(
+		maxDepth: number,
+		options: { global?: boolean; source?: "chat" | "model" } = {},
+	): Promise<SetRlmMaxDepthResult> {
 		if (!isNonNegativeInteger(maxDepth)) {
 			throw new Error("RLM max depth must be a non-negative integer.");
 		}
 
-		this.sessionManager.appendCustomEntryWithRollback(RLM_MAX_DEPTH_STATE_CUSTOM_TYPE, { maxDepth });
-		this._rlmMaxDepth = maxDepth;
-		this._rlmMaxDepthSource = "chat";
+		const source = options.source === "model" ? "model" : "chat";
+		this.sessionManager.appendCustomEntryWithRollback(RLM_MAX_DEPTH_STATE_CUSTOM_TYPE, {
+			maxDepth,
+			...(source === "model" ? { source } : {}),
+		});
+		// Re-resolve instead of assigning: a model-set depth is not a pin, so the graph floor still
+		// applies to it, and the caller must be told the depth that actually took effect.
+		const resolved = this._resolveRlmMaxDepth();
+		this._rlmMaxDepth = resolved.maxDepth;
+		this._rlmMaxDepthSource = resolved.source;
 		const oldBase = this._baseSystemPrompt;
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
 		this.agent.state.systemPrompt = this._refreshExtensionSystemPrompt(this.agent.state.systemPrompt, oldBase);

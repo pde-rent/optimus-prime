@@ -479,13 +479,13 @@ Content`,
 			}
 		});
 
-		it("should load the bundled rpc and stats skills as JS skills", async () => {
+		it("should load the bundled web3 and stats skills as JS skills", async () => {
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
 
 			const { skills } = loader.getSkills();
 			for (const [name, marker] of [
-				["rpc", "JSON-RPC 2.0"],
+				["web3", "JSON-RPC 2.0"],
 				["stats", "number[]"],
 			] as const) {
 				const skill = skills.find((s) => s.name === name);
@@ -511,7 +511,7 @@ Content`,
 				.skills.filter((s) => s.kind === "js")
 				.map((s) => (s.kind === "js" ? s.js.importName : ""));
 			expect(new Set(bindings).size).toBe(bindings.length);
-			expect(bindings).toContain("rpc");
+			expect(bindings).toContain("web3");
 			expect(bindings).toContain("stats");
 		});
 

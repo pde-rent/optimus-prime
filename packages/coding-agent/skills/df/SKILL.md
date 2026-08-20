@@ -9,7 +9,7 @@ A dataframe for the shape data actually arrives in here: an array of objects out
 The names are polars', with pandas aliases where the two differ, so whichever one you already
 know is the one that works.
 
-    const chains = df(await defi.chains({ limit: 10 }))
+    const chains = df(await web3.defi.chains({ limit: 10 }))
     chains.sort("tvl", { descending: true }).head(5)
     chains.group_by("symbol").agg({ tvl: "sum", name: "count" })
     chains.filter((r) => r.tvl > 1e9).with_columns({ share: (r) => r.tvl / total })
@@ -186,11 +186,11 @@ cells are truncated.
 
 ## The recipe: API -> frame -> table + chart
 
-The default move for "rank these and show me the trend". Raw data from `defi`, shaped by `df`,
+The default move for "rank these and show me the trend". Raw data from `web3.defi`, shaped by `df`,
 drawn by `chart`. This runs as written:
 
     // 1. raw rows -> frame, with a derived column
-    const chains = df(await defi.chains({ limit: 8 }))
+    const chains = df(await web3.defi.chains({ limit: 8 }))
       .drop_nulls("volume24h")
       .with_columns({ turnover: (r) => r.volume24h / r.tvl })
       .sort("tvl", { descending: true });
@@ -200,7 +200,7 @@ drawn by `chart`. This runs as written:
 
     // 3. history for the top three, long -> wide
     const top = chains.head(3).get_column("name");
-    const series = await Promise.all(top.map((n) => defi.chain(n, { history: 90, points: 30 })));
+    const series = await Promise.all(top.map((n) => web3.defi.chain(n, { history: 90, points: 30 })));
     const wide = df
       .concat(series.map((s) => df(s.history).with_columns({ chain: s.name })))
       .pivot("chain", { index: "date", values: "tvl" });

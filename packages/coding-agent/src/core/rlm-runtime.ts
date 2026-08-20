@@ -18,6 +18,12 @@ export interface RlmSpawnHandle {
 	model: string;
 	/** Level the child actually got, after clamping to its model's supported set. */
 	effort: string;
+	/**
+	 * Present when a requested `effort` was not applied at all. Band clamping is not a
+	 * refusal — `effort` already reports it — but a level dropped by policy has to be
+	 * visible, or the model reads its own ignored kwarg as honored.
+	 */
+	effort_refused?: RlmEffortRefusal;
 }
 
 export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
