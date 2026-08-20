@@ -89,6 +89,14 @@ import {
 	setAutonomousEnabled,
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
+import {
+	expandInjectionRefs,
+	type InjectionRefSite,
+	isPlainInjectionName,
+	MAX_INJECTED_MESSAGE_CHARS,
+	scanInjectionRefs,
+} from "./bun-repl/index.js";
+import type { BunReplResolvedRef } from "./bun-repl/protocol.js";
 import { BunReplProvisioner } from "./bun-repl/provisioner.js";
 import {
 	COMPACT_SKILL_NAME,
@@ -922,6 +930,13 @@ const BANDED_EFFORT_MIN: ThinkingLevel = "low";
 const BANDED_EFFORT_MAX: ThinkingLevel = "high";
 
 const KERNEL_STATE_LISTING_TIMEOUT_MS = 5000;
+
+/**
+ * Ceiling on reading referenced REPL values while a finished answer waits to be shown.
+ * Tighter than the listing timeout because this one sits between the model finishing and
+ * the user seeing anything.
+ */
+const REPL_INJECTION_TIMEOUT_MS = 3000;
 const RLM_MAX_DEPTH_STATE_CUSTOM_TYPE = "rlm_max_depth_state";
 
 /**
@@ -3573,6 +3588,10 @@ export class AgentSession {
 				this.agent.state.messages = this.agent.state.messages.filter((message) => !captured.has(message));
 				return;
 			}
+		}
+
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			await this._expandReplReferences(event.message);
 		}
 
 		this._addLoginGuidanceToAuthError(event);
@@ -7191,6 +7210,65 @@ export class AgentSession {
 		this._effortChangesThisRun++;
 		if (isRaise) this._effortRaisedThisRun = true;
 		return { effort: this.thinkingLevel, clamped };
+	}
+
+	/**
+	 * Substitute `{{repl:name}}` in a finished assistant message with the value's rendered
+	 * text from the live REPL.
+	 *
+	 * Expansion runs here, once, on the finalized message object that agent state, the TUI,
+	 * and the session JSONL all share, so the stored record is the expanded text. Expanding
+	 * at render time instead would keep the transcript permanently smaller, but an export, a
+	 * resume, or a compaction summary would then point at a value the kernel no longer holds.
+	 * The win being chased is the model writing twelve characters instead of eight hundred,
+	 * and that is already banked by the time the message reaches here.
+	 */
+	private async _expandReplReferences(message: AssistantMessage): Promise<void> {
+		const sitesByBlock = message.content.map((block) => (block.type === "text" ? scanInjectionRefs(block.text) : []));
+		const sites = sitesByBlock.flat();
+		if (sites.length === 0) return;
+
+		// A malformed reference is still expanded -- into its explanation. Filtering it out here
+		// instead would leave raw syntax in the answer with nothing saying why.
+		const names = [...new Set(sites.map((site) => site.name).filter(isPlainInjectionName))];
+		const refs =
+			names.length === 0
+				? []
+				: ((await this._replKernelProvisioner?.manager?.resolveInjectionRefs(names, REPL_INJECTION_TIMEOUT_MS)) ??
+					names.map(
+						(name): BunReplResolvedRef => ({ name, error: "could not be read: the REPL is not answering" }),
+					));
+		const resolved = new Map(refs.map((ref) => [ref.name, ref]));
+
+		const failed: Array<{ name: string; reason: string }> = [];
+		let budget = MAX_INJECTED_MESSAGE_CHARS;
+		message.content.forEach((block, index) => {
+			const sites: InjectionRefSite[] = sitesByBlock[index] ?? [];
+			if (block.type !== "text" || sites.length === 0) return;
+			const expansion = expandInjectionRefs(block.text, sites, resolved, budget);
+			block.text = expansion.text;
+			budget = expansion.remainingBudget;
+			failed.push(...expansion.failed);
+		});
+
+		if (failed.length === 0) return;
+		// The user already sees a marker where the value should have been; this is the other
+		// half, so the model learns the reference failed instead of assuming it landed.
+		const detail = failed.map((failure) => `\`${failure.name}\` ${failure.reason}`).join("; ");
+		void this.sendCustomMessage(
+			{
+				customType: "repl_injection_failed",
+				content: [
+					"<repl_injection_failed>",
+					`Your last message referenced REPL values that could not be injected: ${detail}. The user saw a "[repl:<name> unavailable: ...]" marker where each one should have been. Assign the rendered value to a plain REPL variable and send the reference again; do not retype the content by hand.`,
+					"</repl_injection_failed>",
+				].join("\n"),
+				display: false,
+			},
+			{ deliverAs: "nextTurn" },
+		).catch(() => {
+			// A next-turn delivery only fails on a disposed session, where there is no next turn to warn.
+		});
 	}
 
 	private async _notifyKernelStateAfterCompaction(): Promise<void> {

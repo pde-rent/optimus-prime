@@ -260,3 +260,20 @@ the report.
 No lazy evaluation, no query planner, no Arrow, no file IO, no SQL. Frames here are under about a
 million rows and everything is eager; past that, reach for a real engine. Plotting belongs to
 `chart`, single-series statistics to `stats`.
+
+## Putting a table in your answer
+
+Reference the frame by name instead of retyping it. Assign it, then put the reference alone on a
+line inside a fence:
+
+    const tvlTable = chains.sort("tvl", { descending: true }).head(10);
+
+    ```
+    {{repl:tvlTable}}
+    ```
+
+The host substitutes the frame's `toString()` when the message is sent, so the user reads the
+same box table the cell printed - same columns, same display rounding, same order. Reformatting
+it into markdown by hand costs hundreds of output tokens and is where numbers get transposed. A
+name that does not resolve becomes a visible `[repl:tvlTable unavailable: ...]` marker and is
+reported back to you.

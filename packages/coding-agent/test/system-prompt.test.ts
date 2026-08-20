@@ -166,6 +166,8 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 				"",
+				"Inject REPL values into your answer instead of retyping them: `{{repl:name}}` is replaced at send time by that variable's rendered text (a `df` frame's table, a `chart` string). Put it alone on a line inside a fence for block output; inside `code` spans, and anywhere else inside a fence, it stays literal. An unresolvable name becomes a visible `[repl:name unavailable: ...]` marker and is reported back to you.",
+				"",
 				"REPL state, by contrast, persists across cells: `const`/`let`/`function`/`class` declarations, imports, notes, parsed outputs, and helper data structures all remain available in every later turn. Tool calls are themselves `await` expressions, so their return values can be bound to variables and composed into program logic just like any other call.",
 				"",
 				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages), but prefer a Bun API where one exists — `Bun.spawn` over `child_process`, `Bun.file` over `fs` reads, `$` over shelling out for a simple pipeline — because the Bun namespace is already loaded and needs no import.",

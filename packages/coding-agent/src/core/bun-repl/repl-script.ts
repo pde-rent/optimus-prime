@@ -19,6 +19,7 @@ import type {
 	BunReplHostResponse,
 	BunReplHostToRepl,
 	BunReplReplToHost,
+	BunReplResolvedRef,
 } from "./protocol.js";
 import { hasStaticImport, transformTopLevel } from "./transform.js";
 
@@ -1114,6 +1115,68 @@ function listNames(): string[] {
 	return Object.keys(context).filter((k) => !k.startsWith("__") && !INJECTED.has(k));
 }
 
+/** `Object.prototype.toString`'s output: the absence of a render, not a render. */
+const DEFAULT_OBJECT_TEXT = /^\[object [A-Za-z]+\]$/;
+
+/**
+ * Render a namespace value as the text an answer will carry.
+ *
+ * `toString` is the contract, because it is already what the artifacts render through: a
+ * `df` frame prints its box table and every `chart` call returns a string. Object's and
+ * Array's inherited `toString` are excluded on purpose -- `[object Object]` and `1,2,3`
+ * are not renders, they are the absence of one, and pasting either into a user's answer
+ * is the mistake this whole path exists to remove.
+ */
+function renderForInjection(value: unknown): { text: string } | { error: string } {
+	if (value === undefined) return { error: "is declared but holds no value yet" };
+	if (value === null) return { error: "is null" };
+	const kind = typeof value;
+	if (kind === "function") return { error: "is a function; call it and reference the result" };
+	if (kind === "symbol") return { error: "is a symbol and has no text form" };
+	if (kind === "string") return { text: value as string };
+	if (kind === "number" || kind === "boolean" || kind === "bigint") return { text: String(value) };
+	try {
+		// Identity checks against Object.prototype.toString would miss here: cell values live in
+		// the vm realm and carry its prototypes, not this module's. The default renders are
+		// recognised by their output instead, which crosses realms for free.
+		const rendered = Array.isArray(value) ? "" : String(value);
+		if (rendered !== "" && !DEFAULT_OBJECT_TEXT.test(rendered)) return { text: rendered };
+		const json = JSON.stringify(value, null, 2);
+		if (typeof json !== "string") return { error: "has no text form" };
+		return { text: json };
+	} catch (err: unknown) {
+		return { error: `could not be rendered: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+/**
+ * Resolve names for response injection.
+ *
+ * Addressable set is exactly `listNames()`: what the agent itself defined. Host helpers
+ * and skill bindings are excluded so a reference can never dump an internal or a preloaded
+ * function into a transcript.
+ */
+function resolveRefs(names: string[], maxChars: number): BunReplResolvedRef[] {
+	const defined = new Set(listNames());
+	return names.map((name): BunReplResolvedRef => {
+		if (!defined.has(name)) return { name, error: "is not a variable you defined in the REPL" };
+		let rendered: { text: string } | { error: string };
+		try {
+			rendered = renderForInjection(context[name]);
+		} catch (err: unknown) {
+			// Reading the name can run a getter, and a throwing getter must not take the answer with it.
+			rendered = { error: `threw while being read: ${err instanceof Error ? err.message : String(err)}` };
+		}
+		if ("error" in rendered) return { name, error: rendered.error };
+		const { text } = rendered;
+		if (text.trim() === "") return { name, error: "rendered as empty text" };
+		if (text.length > maxChars) {
+			return { name, error: `rendered ${text.length} chars, over the ${maxChars}-char injection limit` };
+		}
+		return { name, text };
+	});
+}
+
 // ---------------------------------------------------------------------------
 // stdin protocol pump.
 // ---------------------------------------------------------------------------
@@ -1193,6 +1256,10 @@ process.stdin.on("data", (chunk: string) => {
 			}
 			case "listNames": {
 				send({ id: msg.id, type: "listNamesResult", names: listNames() });
+				break;
+			}
+			case "resolveRefs": {
+				send({ id: msg.id, type: "resolveRefsResult", refs: resolveRefs(msg.names, msg.maxChars) });
 				break;
 			}
 			case "hostResponse": {

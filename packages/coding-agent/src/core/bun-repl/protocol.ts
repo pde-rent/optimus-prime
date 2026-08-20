@@ -41,6 +41,15 @@ export interface BunReplListNamesRequest {
 	type: "listNames";
 }
 
+/** Read rendered namespace values so an assistant message can reference them by name. */
+export interface BunReplResolveRefsRequest {
+	id: string;
+	type: "resolveRefs";
+	names: string[];
+	/** Per-name ceiling on the rendered string. The host owns the policy, so it travels with the ask. */
+	maxChars: number;
+}
+
 export type BunReplHostToRepl =
 	| BunReplExecuteRequest
 	| BunReplInterruptRequest
@@ -48,6 +57,7 @@ export type BunReplHostToRepl =
 	| BunReplSnapshotRequest
 	| BunReplRestoreRequest
 	| BunReplListNamesRequest
+	| BunReplResolveRefsRequest
 	| BunReplHostResponse;
 
 export interface BunReplStdoutChunk {
@@ -120,6 +130,23 @@ export interface BunReplListNamesResult {
 	names: string[];
 }
 
+/**
+ * One resolved reference: either the text to splice in, or why there is none.
+ * Never both, and never neither -- a reference that resolves to nothing has to
+ * name its reason, because a silently dropped table is the failure being fixed.
+ */
+export interface BunReplResolvedRef {
+	name: string;
+	text?: string;
+	error?: string;
+}
+
+export interface BunReplResolveRefsResult {
+	id: string;
+	type: "resolveRefsResult";
+	refs: BunReplResolvedRef[];
+}
+
 /** A sent agent message that arrived after its cell's result frame. */
 export interface BunReplLateSentAgentMessage {
 	/** Execute id of the cell that issued the send. */
@@ -152,6 +179,7 @@ export type BunReplReplToHost =
 	| BunReplSnapshotResult
 	| BunReplRestoreResult
 	| BunReplListNamesResult
+	| BunReplResolveRefsResult
 	| BunReplLateSentAgentMessage
 	| BunReplHostRequest
 	| BunReplHostResponse;

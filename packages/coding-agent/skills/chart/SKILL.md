@@ -172,3 +172,19 @@ a file that will be `cat`-ed.
 Reach for a chart when the shape of the data is the answer: a latency distribution, a trend over
 time, a benchmark comparison, a price series. For three numbers, a sentence is better. Charts are
 for when a table would make the reader do the work of seeing the pattern.
+
+## Putting a chart in your answer
+
+Reference it by name instead of retyping it. Assign what `show()` returned, then put the
+reference alone on a line inside a fence so the renderer does not reflow the braille:
+
+    const tvlChart = plt.show();
+
+    ```
+    {{repl:tvlChart}}
+    ```
+
+The host substitutes the variable's text as the message is sent, so the chart the user reads is
+byte-for-byte the one the cell drew. A name that does not resolve becomes a visible
+`[repl:tvlChart unavailable: ...]` marker and is reported back to you - so a chart is never
+silently dropped, and never worth hand-truncating.

@@ -12,6 +12,8 @@ import type {
 	BunReplLateSentAgentMessage,
 	BunReplListNamesResult,
 	BunReplReplToHost,
+	BunReplResolvedRef,
+	BunReplResolveRefsResult,
 	BunReplRestoreResult,
 	BunReplResult,
 	BunReplSnapshotResult,
@@ -47,6 +49,197 @@ export const DEFAULT_MAX_OUTPUT_CHARS = 65536;
  * result and into the transcript.
  */
 export const MAX_ATTACHMENT_DATA_CHARS = 10_000_000;
+
+// ---------------------------------------------------------------------------
+// Response injection: a finished answer references REPL values by name instead
+// of the model retyping them. See scanInjectionRefs for the syntax rule.
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on one injected value.
+ *
+ * A few hundred `df` rows render near 20k chars and a terminal chart near 2k, so this
+ * clears the artifacts anyone actually injects while keeping a mistaken reference to a
+ * multi-megabyte buffer out of a transcript that is permanent and replayed every turn.
+ */
+export const MAX_INJECTED_REF_CHARS = 32_768;
+
+/** The same ceiling applied to a whole message, so ten references cannot do what one may not. */
+export const MAX_INJECTED_MESSAGE_CHARS = 65_536;
+
+/**
+ * The `repl:` namespace is load-bearing. Bare `{{name}}` is what a model writes when it
+ * explains Handlebars, Vue or Jinja, and it is already the placeholder form this repo uses
+ * for slash-command templates; the prefix costs five characters and makes a collision with
+ * text the model meant literally essentially impossible.
+ *
+ * The capture is deliberately looser than the names that resolve: `{{repl:rows[0].table}}`
+ * has to be caught and explained, not left in the user's answer as raw syntax because it
+ * failed to match.
+ */
+const INJECT_REF_SOURCE = "\\{\\{repl\\s*:\\s*([^}\\n]*?)\\s*\\}\\}";
+const INJECT_REF_ALONE_ON_LINE = new RegExp(`^${INJECT_REF_SOURCE}$`);
+const FENCE_MARKER = /^(`{3,}|~{3,})/;
+const PLAIN_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** Names the kernel can be asked for; everything else fails with its reason stated. */
+export function isPlainInjectionName(name: string): boolean {
+	return PLAIN_NAME.test(name);
+}
+
+export interface InjectionRefSite {
+	name: string;
+	start: number;
+	end: number;
+}
+
+export interface InjectionExpansion {
+	text: string;
+	injected: string[];
+	failed: Array<{ name: string; reason: string }>;
+	/** Chars of the per-message budget still unspent, so a multi-block message shares one. */
+	remainingBudget: number;
+}
+
+/** Backtick-delimited spans on one line. A reference inside one was meant literally. */
+function inlineCodeSpans(line: string): Array<[number, number]> {
+	const spans: Array<[number, number]> = [];
+	let i = 0;
+	while (i < line.length) {
+		if (line[i] !== "`") {
+			i++;
+			continue;
+		}
+		const openStart = i;
+		while (line[i] === "`") i++;
+		const runLength = i - openStart;
+		let j = i;
+		let closed = false;
+		while (j < line.length) {
+			if (line[j] !== "`") {
+				j++;
+				continue;
+			}
+			const closeStart = j;
+			while (line[j] === "`") j++;
+			if (j - closeStart === runLength) {
+				spans.push([openStart, j]);
+				closed = true;
+				break;
+			}
+		}
+		// An unterminated run is literal backticks, so resume just past it rather than skipping the rest.
+		i = closed ? j : openStart + runLength;
+	}
+	return spans;
+}
+
+/**
+ * Locate the references a message wants substituted.
+ *
+ * Two pressures pull opposite ways. Code a model quotes has to survive verbatim, including
+ * a sample that mentions this very syntax. But a terminal chart or a box table has to sit
+ * inside a fence or the markdown renderer reflows it into ruin -- and that is the entire
+ * use case, so blanket fence protection would kill the feature it was meant to protect.
+ *
+ * The split: inside a fence a reference is substituted only when it is the whole line, and
+ * never inside an inline code span. A fenced sample that mentions the syntax within code
+ * (`const t = "{{repl:x}}"`) is untouched; a fence holding just the reference renders the
+ * artifact as a code block. Indented (four-space) code blocks are not tracked: they are
+ * vanishingly rare in model prose next to fences, and treating indentation as protection
+ * would silently break a reference the model indented under a list item.
+ */
+export function scanInjectionRefs(text: string): InjectionRefSite[] {
+	if (!text.includes("{{repl")) return [];
+	const pattern = new RegExp(INJECT_REF_SOURCE, "g");
+	const sites: InjectionRefSite[] = [];
+	let offset = 0;
+	let fence: { char: string; length: number } | null = null;
+
+	for (const line of text.split("\n")) {
+		const lineStart = offset;
+		offset += line.length + 1;
+		const trimmed = line.trim();
+
+		const marker = FENCE_MARKER.exec(trimmed)?.[1];
+		if (marker) {
+			if (!fence) {
+				fence = { char: marker[0], length: marker.length };
+			} else if (marker[0] === fence.char && marker.length >= fence.length && trimmed.length === marker.length) {
+				fence = null;
+			}
+			continue;
+		}
+
+		if (fence) {
+			const alone = INJECT_REF_ALONE_ON_LINE.exec(trimmed);
+			if (alone) {
+				const start = lineStart + line.indexOf(trimmed);
+				sites.push({ name: alone[1], start, end: start + trimmed.length });
+			}
+			continue;
+		}
+
+		const spans = inlineCodeSpans(line);
+		pattern.lastIndex = 0;
+		for (let m = pattern.exec(line); m; m = pattern.exec(line)) {
+			const start = m.index;
+			const end = start + m[0].length;
+			if (spans.some(([from, to]) => start >= from && end <= to)) continue;
+			sites.push({ name: m[1], start: lineStart + start, end: lineStart + end });
+		}
+	}
+	return sites;
+}
+
+/** What the user reads in place of a reference that could not be resolved. */
+export function injectionFailureMarker(name: string, reason: string): string {
+	return `[repl:${name} unavailable: ${reason}]`;
+}
+
+/**
+ * Splice resolved values into the text.
+ *
+ * An unresolvable reference becomes a visible marker rather than vanishing or being left
+ * as raw syntax: the user has to see that something was meant to be there and why it is not.
+ */
+export function expandInjectionRefs(
+	text: string,
+	sites: readonly InjectionRefSite[],
+	resolved: ReadonlyMap<string, BunReplResolvedRef>,
+	budget: number = MAX_INJECTED_MESSAGE_CHARS,
+): InjectionExpansion {
+	const injected: string[] = [];
+	const failed: Array<{ name: string; reason: string }> = [];
+	let out = "";
+	let cursor = 0;
+	let remainingBudget = budget;
+
+	for (const site of sites) {
+		out += text.slice(cursor, site.start);
+		cursor = site.end;
+		const ref = resolved.get(site.name);
+		const value = ref?.text;
+		let reason: string | undefined;
+		if (!isPlainInjectionName(site.name)) {
+			reason = "is not a plain variable name; assign the value to one and reference that";
+		} else if (value === undefined) {
+			reason = ref?.error ?? "was not resolved";
+		} else if (value.length > remainingBudget) {
+			reason = `is ${value.length} chars, over the ${remainingBudget} left in this message's injection budget`;
+		}
+		if (reason !== undefined) {
+			failed.push({ name: site.name, reason });
+			out += injectionFailureMarker(site.name, reason);
+			continue;
+		}
+		remainingBudget -= (value as string).length;
+		injected.push(site.name);
+		out += value;
+	}
+	out += text.slice(cursor);
+	return { text: out, injected, failed, remainingBudget };
+}
 
 export interface BunReplExecuteOptions {
 	signal?: AbortSignal;
@@ -412,11 +605,28 @@ export class BunReplManager {
 		this._child.stdin.write(`${JSON.stringify(msg)}\n`);
 	}
 
-	private _sendAndWait<T extends BunReplReplToHost>(msg: BunReplHostToRepl): Promise<T> {
+	private _sendAndWait<T extends BunReplReplToHost>(msg: BunReplHostToRepl, timeoutMs?: number): Promise<T> {
 		return new Promise<T>((resolve, reject) => {
+			// The child answers these on its stdin pump, which a synchronously wedged cell can
+			// starve indefinitely. Callers on a latency-sensitive path pass a ceiling; the rest
+			// keep the original unbounded wait.
+			const timer =
+				timeoutMs === undefined
+					? undefined
+					: setTimeout(() => {
+							this._pendingRequests.delete(msg.id);
+							reject(new Error(`REPL did not answer "${msg.type}" within ${timeoutMs}ms`));
+						}, timeoutMs);
+			if (typeof timer === "object" && "unref" in timer) timer.unref();
 			this._pendingRequests.set(msg.id, {
-				resolve: resolve as (value: BunReplReplToHost) => void,
-				reject,
+				resolve: (value) => {
+					clearTimeout(timer);
+					(resolve as (v: BunReplReplToHost) => void)(value);
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					reject(error);
+				},
 			});
 			this._sendToChild(msg as unknown as Record<string, unknown>);
 		});
@@ -776,6 +986,26 @@ export class BunReplManager {
 		});
 
 		return result.names;
+	}
+
+	/**
+	 * Read rendered values out of the live namespace for response injection.
+	 *
+	 * Bounded on purpose: this runs while a finished answer is held back from the screen,
+	 * so a wedged or dead child resolves to null and every reference is reported unavailable
+	 * rather than stranding the message.
+	 */
+	async resolveInjectionRefs(names: readonly string[], timeoutMs: number): Promise<BunReplResolvedRef[] | null> {
+		if (!this.isRunning || names.length === 0) return null;
+		try {
+			const result = await this._sendAndWait<BunReplResolveRefsResult>(
+				{ id: randomUUID(), type: "resolveRefs", names: [...names], maxChars: MAX_INJECTED_REF_CHARS },
+				timeoutMs,
+			);
+			return result.refs;
+		} catch {
+			return null;
+		}
 	}
 
 	async dispose(): Promise<void> {
