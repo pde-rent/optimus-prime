@@ -529,6 +529,7 @@ async function streamAssistantResponse(
 		const response = await maybePromiseWithAbort(
 			streamFunction(config.model, llmContext, {
 				...config,
+				reasoning: config.getReasoning?.() ?? config.reasoning,
 				apiKey: resolvedApiKey,
 				signal: guardAbort?.signal ?? signal,
 			}),

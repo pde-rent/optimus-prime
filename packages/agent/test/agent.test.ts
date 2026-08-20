@@ -704,6 +704,44 @@ describe("Agent", () => {
 		expect(receivedSessionId).toBe("session-def");
 	});
 
+	it("sends a reasoning level changed mid-run on the next turn of that run", async () => {
+		const received: Array<string | undefined> = [];
+		let agent!: Agent;
+		const raiseEffort: AgentTool = {
+			label: "Raise effort",
+			name: "raise_effort",
+			description: "Raise the reasoning level",
+			parameters: Type.Object({}),
+			execute: async () => {
+				agent.state.thinkingLevel = "high";
+				return { content: [{ type: "text", text: "raised" }], details: undefined };
+			},
+		};
+		let turn = 0;
+		agent = new Agent({
+			initialState: { thinkingLevel: "low", tools: [raiseEffort] },
+			streamFn: (_model, _context, options) => {
+				received.push(options?.reasoning);
+				const stream = new MockAssistantStream();
+				const first = turn++ === 0;
+				queueMicrotask(() => {
+					if (first) {
+						stream.push({ type: "done", reason: "toolUse", message: createToolUseMessage("raise_effort") });
+					} else {
+						stream.push({ type: "done", reason: "stop", message: createAssistantMessage("done") });
+					}
+				});
+				return stream;
+			},
+		});
+
+		await agent.prompt("hello");
+
+		// A run-start snapshot would send "low" twice and defer the change to the next run,
+		// while the tool has already told the model it applies from the next turn.
+		expect(received).toEqual(["low", "high"]);
+	});
+
 	it("forwards the service tier to streamFn options", async () => {
 		let receivedServiceTier: string | null | undefined;
 		const agent = new Agent({

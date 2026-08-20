@@ -173,6 +173,15 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	getSystemPrompt?: () => string;
 
 	/**
+	 * Resolves the reasoning level immediately before each LLM call.
+	 *
+	 * A level chosen mid-run has to reach the very next turn: tools that raise or lower effort
+	 * tell the model the change applies from its next turn onward, and a run-start snapshot
+	 * would defer it to the next run instead. Falls back to `reasoning` when omitted.
+	 */
+	getReasoning?: () => ThinkingLevel;
+
+	/**
 	 * Resolves an API key dynamically for each LLM call.
 	 *
 	 * Useful for short-lived OAuth tokens (e.g., GitHub Copilot) that may expire
