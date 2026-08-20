@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run the project's own checker with `await check()` and read what it reports. Detects the project by its root marker (tsconfig.json, Cargo.toml, pyproject.toml, go.mod, foundry.toml) and runs that toolchain's check. Use after edits, and before claiming a change builds.
+description: Run the project's own checker. `await check()` -> `{ ok, results }`, each result `{ checker, ok, command, exitCode, tookMs, output }`; `await check("rust")` runs one; `await check.detect()` -> what would run, without running it. A missing toolchain is skipped, not failed. Use after edits, before claiming a change builds.
 ---
 
 # Check

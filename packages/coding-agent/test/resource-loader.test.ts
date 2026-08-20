@@ -492,7 +492,7 @@ Content`,
 				expect(skill).toBeDefined();
 				expect(skill?.description).toContain(marker);
 				// Descriptions land in every request's system prompt, so keep them well under the cap.
-				expect(skill?.description.length).toBeLessThan(700);
+				expect(skill?.description.length).toBeLessThan(680);
 				expect(skill?.kind).toBe("js");
 				if (skill?.kind === "js") {
 					// The REPL binding name: it must not collide with an existing global or skill.

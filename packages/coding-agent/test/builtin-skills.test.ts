@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getBundledSkillsDir } from "../src/config.js";
@@ -224,6 +224,14 @@ describe("builtin skills", () => {
 			expect(diagnostics).toEqual([]);
 			expect(skills.length).toBeGreaterThan(0);
 			expect(skills.map((s) => s.name)).toContain("skill-creator");
+			// Every directory must yield a skill. `length > 0` cannot tell you which one vanished,
+			// and a frontmatter that fails to parse drops one silently — twice now, both times
+			// from a `: ` inside an unquoted description.
+			const dirs = readdirSync(getBundledSkillsDir(), { withFileTypes: true })
+				.filter((e) => e.isDirectory())
+				.map((e) => e.name)
+				.sort();
+			expect(skills.map((s) => s.name).sort()).toEqual(dirs);
 		});
 
 		it("loads the bundled goal skill as a js skill", () => {

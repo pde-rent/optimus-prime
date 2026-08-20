@@ -1,6 +1,6 @@
 ---
 name: compact
-description: Check context usage with `await compact.status()` and compact the conversation with `await compact.run(instructions?)` from the REPL. Use when context is filling up and substantial work remains, so the session is summarized and you keep working instead of stopping early.
+description: Compact the conversation to free context. `await compact.status()` -> `{ tokens, context_window, percent, scheduled }`; `await compact.run(instructions?)` -> `{ scheduled }`, plus `reason` when false. It runs when the turn ends, never mid-cell, and the REPL survives it. Use when context is filling and substantial work remains.
 ---
 
 # Compact

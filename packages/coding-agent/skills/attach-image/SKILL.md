@@ -1,6 +1,6 @@
 ---
 name: attach-image
-description: Load on-disk images (PNG, JPEG, GIF, WebP) into the model's context as viewable attachments with `await attach_image.run(...paths)`, so the model can directly SEE them — screenshots, diagrams, charts, photos, or scanned pages. Use this when you need to perceive an image's visual contents. Requires a vision-capable model; errors clearly otherwise.
+description: Load on-disk images (PNG, JPEG, GIF, WebP) into context as attachments you can actually SEE — screenshots, diagrams, charts, scans. `await attach_image.run(...paths)` -> a status string; throws on a non-image file or a model without vision. For pixel work use `Bun.Image`, which does not put the image in context.
 ---
 
 # Attach Image

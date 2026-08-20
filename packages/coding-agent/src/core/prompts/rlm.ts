@@ -1,19 +1,21 @@
 import { type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "../graph-resolver.js";
 
-/** Runtime capabilities the REPL sandbox exposes without any install step. */
+/**
+ * Runtime capabilities the REPL sandbox exposes without any install step.
+ *
+ * Every request pays for this list, so a label earns its place only by naming something
+ * the model would otherwise install, hand-roll, or not know exists. The `read`/`write`
+ * globals used to head it and were dropped: REPL_CONTROL_PROMPT documents them with their
+ * arguments and return shape, and both blocks render together whenever the REPL exists.
+ */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
-	"`read(path, { from?, to? })` and `write(path, content)` — synchronous file IO: `read` returns raw text, a 1-based inclusive line slice when bounded and the whole file otherwise; `write` creates parent directories, replaces atomically, and returns `{ path, bytes }`",
-	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
-	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control.",
+	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Image, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
+	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring)",
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
-	"databases with no driver to install: `bun:sqlite` (`new Database(path)` — local state, indexed history, full-text search over your own notes), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), and `Bun.redis`/`Bun.RedisClient` (caching, queues, shared state). Reach for sqlite before anything networked: it needs no server and survives a restart",
-	"`Bun.S3Client` for S3-compatible object storage, and `Bun.connect`/`Bun.listen` for raw TCP and TLS when a protocol has no HTTP client",
+	"databases with no driver to install: `bun:sqlite` (`new Database(path)`, local and durable — reach for it before anything networked), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), `Bun.redis`/`Bun.RedisClient`",
+	"networking with nothing to install: `fetch` and `WebSocket` clients, `Bun.serve` for an HTTP/WebSocket server with static file routes, `HTMLRewriter` for streaming HTML parsing, `Bun.connect`/`Bun.listen` for raw TCP and TLS, `Bun.S3Client` for S3-compatible object storage",
 	"`pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
-	"native fetch, WebSocket, and HTMLRewriter for streaming HTML parsing",
-	"Web Crypto (crypto.randomUUID, crypto.subtle)",
-	"Buffer",
-	"TextEncoder/TextDecoder, Compression/DecompressionStream",
-	"URL/URLSearchParams/URLPattern",
+	"Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern",
 	"a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel",
 ];
 
@@ -37,7 +39,9 @@ export interface RlmPromptOptions {
  */
 const OUTPUT_FORM_PROMPT = [
 	"Choose the shape that carries the result, not prose by default. Prose for judgements and next steps. A table for a handful of labelled values the reader will compare exactly. Code or a diff for anything they will copy or apply. A chart when the shape of the data is the answer.",
-	"When the `chart` skill is loaded, its output is plain text and can go anywhere your prose goes — a reply, a report, a file. `chart(values)` for a trend, `chart.bar` to compare magnitudes, `chart.spark(values)` inline inside a sentence or table cell, `chart.gauge(ratio)` for progress or a percentage, `chart.histogram` for a distribution, `chart.candle` for OHLC series.",
+	// Which shape to reach for, not what the calls do: the skill's own roster entry
+	// carries the API, and this line is paid by every root agent whether or not it charts.
+	"When the `chart` skill is loaded its output is plain text, so it goes anywhere prose goes. `chart(values)` for a trend, `chart.bar` for magnitudes, `chart.spark` inline in a sentence or table cell, `chart.gauge(ratio)` for progress, `chart.histogram` for a distribution, `chart.candle` for OHLC.",
 	"Reach for a chart on latency and timing distributions, token or cost trends over a run, benchmark comparisons, error-rate movement, file-size or coverage changes, and anything you would otherwise describe as rising, falling, or spiky. Three numbers do not need a chart; twenty usually do.",
 	"Do not chart and then restate the same numbers in prose. Lead with the shape, then say what it means and what follows from it.",
 ].join("\n");
@@ -229,7 +233,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		const rendersSkillRoster = hasRepl || activeTools.includes("bash");
 		if (rendersSkillRoster) {
 			skillLines.push(
-				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
+				"Inspect a preloaded binding with `Object.keys(<skill>)` when its SKILL.md leaves an argument contract unclear.",
 			);
 		} else {
 			const installed = installedSkills.map((skill) => `\`${skill}\``).join(", ");
@@ -244,7 +248,9 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		}
 		if (hasRepl && installedSkills.includes("edit")) {
 			skillLines.push(
-				'For targeted existing-file edits, prefer the preloaded async `edit` skill. `await edit("pkg/file.ts", oldText, newText)` replaces one unique string; build the strings from inspected file slices when the text contains backticks or template placeholders. For anything longer than a line or two, and for pure insertions, read with `await edit.src("pkg/file.ts")` -- which prints `[path#TAG]` then `N:text` -- and edit by line with `await edit.patch("pkg/file.ts", TAG, [{ at: [2, 3], text }, { after: 4, text }])`. Numbers index the tagged snapshot and never shift between hunks in one call, the tag is rejected if the file moved underneath it, and `edit.patch` returns the next tag so a chain of edits needs one read.',
+				// The two call shapes and when to prefer `patch` are in the skill's roster entry;
+				// only the snapshot mechanics, which do not fit a one-line description, are here.
+				'For targeted existing-file edits prefer the preloaded `edit` skill. `await edit.src("pkg/file.ts")` prints `[path#TAG]` then `N:text`; pass TAG to `await edit.patch("pkg/file.ts", TAG, [{ at: [2, 3], text }, { after: 4, text }])`. Numbers index that snapshot and never shift between hunks in one call, and a file that moved underneath the tag is rejected rather than corrupted. Build `oldText`/`newText` from inspected slices when the text contains backticks or template placeholders.',
 			);
 		}
 	}
@@ -294,7 +300,9 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		if (installedSkills.includes("refine")) {
 			parts.push(
 				"",
-				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable facts/preferences into memories, and narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
+				// The trigger, the call and its timing are in the skill's roster entry; what
+				// only this block states is which component a given observation belongs in.
+				"Continual harness refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole harness.",
 			);
 		}
 	}

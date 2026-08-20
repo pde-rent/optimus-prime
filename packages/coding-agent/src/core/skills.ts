@@ -431,8 +431,12 @@ function loadSkillFromFile(
 
 /**
  * Format skills for inclusion in a system prompt.
- * Uses XML format per Agent Skills standard.
- * See: https://agentskills.io/integrate-skills
+ *
+ * One line per skill. The Agent Skills standard suggests a per-skill XML block
+ * (https://agentskills.io/integrate-skills) and this deviates from it: nothing reads this
+ * text back -- it is prompt prefix, paid on every request, and consumed only by the model --
+ * so the tags, the repeated absolute paths and the entity escaping were charging ~4.5KB for
+ * the same four facts a line carries. The SKILL.md files themselves still follow the spec.
  *
  * Skills with disableModelInvocation=true are excluded from the prompt
  * (they can only be invoked explicitly via /skill:name commands).
@@ -444,39 +448,41 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 		return "";
 	}
 
+	// Grouped by skills root so a path is stated once per directory: every skill file is
+	// `<root>/<name>/SKILL.md`, which made 16 absolute paths cost more than 16 descriptions'
+	// worth of structure. A skill whose path does not follow that shape carries its own.
+	const groups = new Map<string, string[]>();
+	for (const skill of visibleSkills) {
+		const skillDir = dirname(skill.filePath);
+		const root =
+			basename(skill.filePath) === "SKILL.md" && basename(skillDir) === skill.name ? dirname(skillDir) : "";
+		const binding = skill.kind === "js" ? ` [${skill.js.importName}]` : "";
+		const location = root ? "" : ` (${skill.filePath})`;
+		// A folded or multi-line YAML description would otherwise break one-line-per-skill.
+		const description = skill.description.replace(/\s+/g, " ").trim();
+		const entry = `- ${skill.name}${binding}${location}: ${description}`;
+		const group = groups.get(root);
+		if (group) group.push(entry);
+		else groups.set(root, [entry]);
+	}
+
 	const lines = [
-		"\n\nThe following skills provide specialized instructions for specific tasks.",
-		"Use the repl tool (a JavaScript REPL) to inspect a skill's file when the task matches its description.",
-		"Skills with a js_binding are preloaded into the persistent JavaScript REPL and can be called directly by that binding name.",
-		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+		"\n\nSkills are specialized instructions for specific tasks. Read a skill's SKILL.md with the repl tool when the task matches its description, and resolve relative paths inside it against that skill's directory.",
+		"Entries are `name [binding]: description`; a binding is preloaded into the persistent JavaScript REPL and callable directly.",
 		"",
 		"<available_skills>",
 	];
-
-	for (const skill of visibleSkills) {
-		lines.push("  <skill>");
-		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-		lines.push(`    <type>${skill.kind}</type>`);
-		if (skill.kind === "js") {
-			lines.push(`    <js_binding>${escapeXml(skill.js.importName)}</js_binding>`);
-		}
-		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-		lines.push("  </skill>");
+	// Entries carrying their own path go first, so no `Files:` template line can claim them.
+	lines.push(...(groups.get("") ?? []));
+	for (const [root, entries] of groups) {
+		if (!root) continue;
+		lines.push(`Files: ${join(root, "{name}", "SKILL.md")}`);
+		lines.push(...entries);
 	}
 
 	lines.push("</available_skills>");
 
 	return lines.join("\n");
-}
-
-function escapeXml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&apos;");
 }
 
 export interface LoadSkillsOptions {

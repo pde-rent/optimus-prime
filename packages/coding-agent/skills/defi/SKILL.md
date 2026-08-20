@@ -1,6 +1,6 @@
 ---
 name: defi
-description: Chain and protocol analytics, hard-trimmed so an answer is a few KB. TVL always from DefiLlama, DEX volume always from GeckoTerminal. `await defi.chains(opts?)` -> top 50 chains as `{name, chainId?, symbol, tvl, volume24h?}`, TVL-ordered unless `by` is "volume"; `chainId` feeds `rpc.pick`. `await defi.protocols({chain?, category?, limit?})` -> `{name, slug, category, tvl, chainTvl|chains, d1, d7}`, sorted by TVL ON THAT CHAIN when `chain` is set. `await defi.protocol(slug, opts?)` and `await defi.chain(name, opts?)` -> TVL now, global and per chain. History is opt-in via `{ history }` (true or days) and downsampled. Errors return `{error, status?}`; bad args throw TypeError.
+description: Chain and protocol analytics — DefiLlama TVL, GeckoTerminal DEX volume. `await defi.chains(opts?)` -> top 50 `{name, chainId?, symbol, tvl, volume24h?}`, TVL-ordered unless `by` is `"volume"`. `await defi.protocols({chain?, category?, limit?})` -> `{name, slug, category, tvl, chainTvl|chains, d1, d7}`, sorted by TVL on that chain when `chain` is set. `await defi.protocol(slug, opts?)` and `await defi.chain(name, opts?)` -> TVL now, global and per chain. History is opt-in via `{ history }` (true or days) and downsampled. Errors -> `{error, status?}`; bad args throw TypeError.
 ---
 
 # DeFi

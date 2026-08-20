@@ -1,6 +1,6 @@
 ---
 name: stats
-description: Array statistics `Math` lacks, on `number[]`. `stats.mean|median|sum|min|max(xs)` -> number (`sum` is compensated; `min`/`max` loop, so no spread-arg stack limit). `stats.variance|stddev(xs, {population}?)` -> number, sample (n-1) by default. `stats.quantile(xs, q)` -> number, q in 0..1, linear interpolation. `stats.corr(xs, ys)` -> Pearson r in -1..1. `stats.describe(xs)` -> `{n, min, max, mean, median, stddev, sum, q1, q3}`. Every call throws TypeError on a non-array, an empty array, or a non-finite element.
+description: Array statistics `Math` lacks, on `number[]`. `stats.mean|median|sum|min|max(xs)` -> number (`min`/`max` loop, so no spread-arg stack limit). `stats.variance|stddev(xs, {population}?)` -> number, sample (n-1) by default. `stats.quantile(xs, q)` -> number, `q` in 0..1, linear interpolation. `stats.corr(xs, ys)` -> Pearson r in -1..1. `stats.describe(xs)` -> `{n, min, max, mean, median, stddev, sum, q1, q3}`. Throws TypeError on a non-array, an empty array, or a non-finite element.
 ---
 
 # Stats

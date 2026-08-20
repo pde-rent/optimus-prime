@@ -1,6 +1,6 @@
 ---
 name: portfolio
-description: Token balances for one wallet across EVM chains, Solana and Tron, normalised to one item shape. `await portfolio.balances(address, opts?)` -> items sorted by valueUsd desc, each `{chain, symbol, name, address, native, decimals, amount, uiAmount, priceUsd, valueUsd, verified, spam, logo}`, or `{error, status?}` on network failure. `amount` is the EXACT raw integer as a string; `uiAmount` is the display float. Family comes from the address shape - `0x` EVM via Rabby, base58 Solana via Phantom, `T` Tron via TronGrid; anything else throws TypeError. Spam is dropped by default; `{ includeSpam }` keeps it. `await portfolio.raw(address, opts?)` -> the untouched upstream payload.
+description: Token balances for one wallet across EVM chains, Solana and Tron. `await portfolio.balances(address, opts?)` -> items sorted by `valueUsd` desc, each `{chain, symbol, name, address, native, decimals, amount, uiAmount, priceUsd, valueUsd, verified, spam, logo}`, or `{error, status?}` on network failure. `amount` is the EXACT raw integer as a string, `uiAmount` the display float. Family comes from the address shape — `0x` EVM, base58 Solana, `T` Tron; anything else throws TypeError. Spam is dropped unless `{ includeSpam }`. `await portfolio.raw(address, opts?)` -> the untouched upstream payload.
 ---
 
 # Portfolio

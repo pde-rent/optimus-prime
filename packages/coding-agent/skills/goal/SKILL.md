@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Manage the persistent thread goal from the REPL — `await goal.get()` for status and budget usage, `await goal.create(objective, tokenBudget?)` to start one when the user explicitly asks, `await goal.complete()` once its objective is fully achieved.
+description: Manage the persistent thread goal. `await goal.get()` -> `{ goal, remaining_tokens, completion_budget_report }`, `goal` null when none. `await goal.create(objective, tokenBudget?)` starts one, only when the user explicitly asks. `await goal.complete()` marks it achieved — the harness keeps re-prompting you until that call arrives.
 ---
 
 # Goal

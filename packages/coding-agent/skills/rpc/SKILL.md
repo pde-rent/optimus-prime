@@ -1,6 +1,6 @@
 ---
 name: rpc
-description: JSON-RPC 2.0 over HTTP for any chain. `await rpc.call(chain|url, method, params?, opts?)` -> the `result`, or `{error, code?, status?}`. Given a chain (EVM id/name, `"solana"`, `"tron"`) it picks a live endpoint and rolls to the next on a timeout, 429 or 5xx, so rate limits handle themselves. `await rpc.batch(chain|url, [{method, params}, ...])` -> results in order, ONE round trip. `await rpc.endpoints(chain)` -> `[{url, ok, ms, detail, tier}]`, healthiest first. `await rpc.pick(chain)` -> best URL. `await rpc.tron(chain|base, "wallet/getnowblock", body?)` -> Tron REST. Exact `rpc.toBigInt(hex)`, `rpc.fromUnits(raw, dec)` -> string, `rpc.toUnits(v, dec)` -> BigInt. No ABI or signing.
+description: JSON-RPC 2.0 over HTTP. `chain` is an EVM id/name, `"solana"` or `"tron"`; endpoints are picked live and rolled on a timeout, 429 or 5xx. `await rpc.call(chain|url, method, params?, opts?)` -> the `result`, or `{error, code?, status?}`. `await rpc.batch(chain|url, [{method, params}, ...])` -> results in order, ONE round trip. `await rpc.endpoints(chain)` -> `[{url, ok, ms, detail, tier}]`, healthiest first. `await rpc.pick(chain)` -> best URL. `await rpc.tron(chain|base, path, body?)` -> Tron REST. Sync `rpc.toBigInt(hex)`, `rpc.fromUnits(raw, dec)` -> string, `rpc.toUnits(v, dec)` -> BigInt. No ABI or signing.
 ---
 
 # RPC

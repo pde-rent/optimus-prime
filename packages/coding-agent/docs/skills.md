@@ -181,8 +181,8 @@ For project-level Claude Code skills, add to `.optimus/agent/settings.json`:
 
 ## How Skills Work
 
-1. At startup, Optimus Prime scans skill locations and extracts names, descriptions, type, and file locations
-2. The system prompt includes visible skills in XML format per the [specification](https://agentskills.io/integrate-skills)
+1. At startup, Optimus Prime scans skill locations and extracts names, descriptions, and JS bindings
+2. The system prompt lists visible skills one per line as `name [binding]: description` — the SKILL.md files themselves follow the [Agent Skills spec](https://agentskills.io/integrate-skills), but the prompt roster is compacted, since nothing parses it and tags cost prefix on every request
 3. When a task matches, the agent uses the `repl` tool — a persistent Bun JavaScript/TypeScript REPL — to load the full `SKILL.md` (models don't always do this; use prompting or `/skill:name` to force it)
 4. The agent follows the instructions, using relative paths to reference scripts and assets
 

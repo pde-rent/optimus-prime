@@ -132,7 +132,7 @@ describe("buildRlmPrompt", () => {
 				"As the user-facing root agent, when work follows a plan, uses many subagents, or spans multiple turns, proactively give regular concise progress updates so the user does not have to ask. State the current plan, what has completed, any blockers, the proposed fixes, and the next actions. Lead with user-visible outcomes rather than internal process or gate names. Mention internal details only when they explain a blocker or decision. Send an update at meaningful milestones and before ending a turn while work is still running. Do not repeat unchanged status or interrupt short work with unnecessary updates.",
 				"",
 				"Choose the shape that carries the result, not prose by default. Prose for judgements and next steps. A table for a handful of labelled values the reader will compare exactly. Code or a diff for anything they will copy or apply. A chart when the shape of the data is the answer.",
-				"When the `chart` skill is loaded, its output is plain text and can go anywhere your prose goes — a reply, a report, a file. `chart(values)` for a trend, `chart.bar` to compare magnitudes, `chart.spark(values)` inline inside a sentence or table cell, `chart.gauge(ratio)` for progress or a percentage, `chart.histogram` for a distribution, `chart.candle` for OHLC series.",
+				"When the `chart` skill is loaded its output is plain text, so it goes anywhere prose goes. `chart(values)` for a trend, `chart.bar` for magnitudes, `chart.spark` inline in a sentence or table cell, `chart.gauge(ratio)` for progress, `chart.histogram` for a distribution, `chart.candle` for OHLC.",
 				"Reach for a chart on latency and timing distributions, token or cost trends over a run, benchmark comparisons, error-rate movement, file-size or coverage changes, and anything you would otherwise describe as rising, falling, or spiky. Three numbers do not need a chart; twenty usually do.",
 				"Do not chart and then restate the same numbers in prose. Lead with the shape, then say what it means and what follows from it.",
 				"",
@@ -150,7 +150,7 @@ describe("buildRlmPrompt", () => {
 				`REPL runtime — Bun, not Node (\`%%bash\` cells included): package and script commands are \`bun\`/\`bunx\`, never \`npm\`/\`npx\`/\`node\`. Available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 				"",
 
-				"Read each skill's SKILL.md for its API. Inspect a binding with `Object.keys(<skill>)`, then read its SKILL.md for the argument contract.",
+				"Inspect a preloaded binding with `Object.keys(<skill>)` when its SKILL.md leaves an argument contract unclear.",
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 				"",
 				"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
@@ -178,7 +178,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 				"",
-				"Treat continual harness refinement as a small, evidence-backed update after observing a repeated failure or reusable tactic: diagnose the issue, update the smallest relevant continual harness component, validate on the next action, then record the outcome. Use `await refine.run()` to turn repeated delegation patterns into reusable subagent specs, repeated procedures into skills, durable facts/preferences into memories, and narrow behavioral policies into prompt addendums. It returns immediately and runs when the current turn ends, so continue working normally after calling it. Do not rewrite the whole continual harness when a focused memory, skill, prompt note, or subagent spec is enough.",
+				"Continual harness refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole harness.",
 				"",
 				// Last on purpose: the only per-agent-unique line, kept out of the
 				// cacheable prefix so siblings share it.
@@ -237,7 +237,7 @@ describe("buildRlmPrompt", () => {
 			installedSkills: ["websearch"],
 		});
 
-		expect(prompt).toContain("Read each skill's SKILL.md for its API");
+		expect(prompt).toContain("Inspect a preloaded binding with `Object.keys(<skill>)`");
 		// The names live in the <available_skills> roster, emitted once by buildSystemPrompt.
 		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("A callable `rlm` is already in your global namespace");
@@ -281,7 +281,7 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 		expect(withBash).not.toContain("Installed skills: `websearch`.");
-		expect(withBash).toContain("Read each skill's SKILL.md for its API");
+		expect(withBash).toContain("Inspect a preloaded binding with `Object.keys(<skill>)`");
 
 		// With no file access there is no roster, so this is the only place they appear.
 		const withoutTools = buildRlmPrompt({
@@ -398,11 +398,12 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(withEdit).toContain('await edit("pkg/file.ts", oldText, newText)');
-		expect(withEdit).toContain("from inspected file slices");
-		// Both entry points are advertised: the string replace and the line-addressed patch.
+		expect(withEdit).toContain("from inspected slices");
 		expect(withEdit).toContain('await edit.src("pkg/file.ts")');
 		expect(withEdit).toContain("never shift between hunks in one call");
+		// Only the snapshot mechanics belong here. Both call shapes are in the skill's
+		// roster entry, which buildSystemPrompt renders alongside this block.
+		expect(withEdit).not.toContain('await edit("pkg/file.ts", oldText, newText)');
 
 		const withoutEdit = buildRlmPrompt({
 			cwd: "/repo",
@@ -981,9 +982,9 @@ describe("buildSystemPrompt", () => {
 
 		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("<available_skills>");
-		expect(prompt).toContain("<name>websearch</name>");
-		expect(prompt).toContain("<type>markdown</type>");
-		expect(prompt).toContain("<location>/skills/websearch/SKILL.md</location>");
+		// No binding: a markdown skill is read, not called.
+		expect(prompt).toContain("- websearch: websearch description");
+		expect(prompt).toContain("Files: /skills/{name}/SKILL.md");
 	});
 
 	test("JS skills are preloaded into the REPL and included in skill metadata", () => {
@@ -995,11 +996,9 @@ describe("buildSystemPrompt", () => {
 		});
 
 		// The binding is stated once, in the <available_skills> roster.
-		expect(prompt).toContain("<js_binding>web_search</js_binding>");
 		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
-		expect(prompt).toContain("<name>web-search</name>");
-		expect(prompt).toContain("<type>js</type>");
-		expect(prompt).toContain("<js_binding>web_search</js_binding>");
+		expect(prompt).toContain("- web-search [web_search]: web-search description");
+		expect(prompt.match(/web_search/g)).toHaveLength(1);
 	});
 
 	test("prompt guidelines are appended and deduplicated", () => {

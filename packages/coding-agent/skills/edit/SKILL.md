@@ -1,6 +1,6 @@
 ---
 name: edit
-description: Edit an existing file two ways — `await edit(path, oldStr, newStr)` replaces a unique string, and `await edit.patch(path, tag, hunks)` replaces lines by number against a tag from `await edit.src(path)`. Prefer patch for anything larger than a line or two, and for pure insertions.
+description: Edit an existing file two ways. `await edit(path, oldStr, newStr)` replaces one unique string; `await edit.patch(path, tag, hunks)` replaces lines by number against a tag from `await edit.src(path)` and returns the next tag. Prefer patch for more than a line or two, and for pure insertions.
 ---
 
 # Edit

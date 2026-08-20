@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Trigger continual harness refinement from the REPL with `await refine.run({ instructions?, global? })`, and read pending state with `await refine.status()`. Use when you notice a repeated failure, reusable tactic, delegation role, or behavior policy that should be persisted as a harness entry. Returns immediately; refinement runs when the current turn ends.
+description: Persist a lesson into the continual harness. `await refine.run({ instructions?, global? })` -> `{ scheduled }`, plus `reason` when false; `await refine.status()` -> `{ pending, in_flight }`. Use after a repeated failure, reusable tactic, delegation role, or behavior policy worth keeping. Runs when the turn ends, so keep working.
 ---
 
 # Refine

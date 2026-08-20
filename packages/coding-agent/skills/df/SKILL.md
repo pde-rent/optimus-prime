@@ -1,6 +1,6 @@
 ---
 name: df
-description: A dataframe over an array of objects, polars-named with pandas aliases. `df(rows)` -> frame; every predicate and expression is a plain JS closure, free to capture. `.filter(r=>r.tvl>cutoff)`, `.with_columns({share:r=>r.tvl/total})` (`assign`), `.select/.drop(...cols)`, `.rename(map)`, `.sort("tvl",{descending:true})` (`sort_values`), `.head/.tail/.slice/.unique/.drop_nulls`, `.group_by("chain").agg({tvl:"sum"})` (`groupby`), `.join(o,{on:"chain",how:"left"})`, `.pivot("chain",{index:"date",values:"tvl"})`, `.describe()`, `.shape/.columns/.dtypes/.len()`, `.get_column(c)` -> array, `.to_dicts()` (`to_records`), `.to_columns()`, `toString()` -> polars box table. Bad args throw TypeError.
+description: A dataframe over an array of objects, polars-named with pandas aliases. `df(rows)` -> frame. Every predicate is a plain JS closure, free to capture outer variables - `.filter(r=>r.tvl>cut)`, `.with_columns({share:r=>r.tvl/tot})` (`assign`). Also `.select`/`.drop`/`.rename`/`.sort` (`sort_values`)/`.head`/`.tail`/`.slice`/`.unique`/`.drop_nulls`/`.pivot`/`.describe`, `.group_by(col).agg({tvl:"sum"})` (`groupby`), `.join(o,{on,how})`. Output via `.to_dicts()` (`to_records`), `.to_columns()`, `.get_column(c)` -> array, `.shape`/`.columns`/`.dtypes`, `toString()` -> box table. The row given to a closure is reused - spread it to keep one. Bad args throw TypeError.
 ---
 
 # df
