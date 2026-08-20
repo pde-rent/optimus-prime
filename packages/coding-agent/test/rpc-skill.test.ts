@@ -37,10 +37,11 @@ function stubFetch(handler: (url: string, body: any, init?: RequestInit) => unkn
 	return calls;
 }
 
-function response(body: unknown, { status = 200, json = true } = {}) {
+function response(body: unknown, { status = 200, json = true, headers = {} as Record<string, string> } = {}) {
 	return {
 		ok: status >= 200 && status < 300,
 		status,
+		headers: new Headers(headers),
 		json: async () => {
 			if (!json) throw new SyntaxError("not json");
 			return body;
@@ -665,6 +666,247 @@ describe("rpc.tron", () => {
 	});
 });
 
+const SOLANA_SEED = "https://api.mainnet-beta.solana.com";
+const TRON_SEED = "https://api.trongrid.io";
+
+/**
+ * Serve the registry, answer every health probe as a live chain-1 node, then route the call that
+ * follows to `answers[url]` - so an endpoint can pass discovery and fail the real request, which
+ * is exactly how a public endpoint degrades mid-session.
+ */
+function stubLadder(answers: Record<string, (body: any) => unknown> = {}) {
+	return stubFetch(async (url, body) => {
+		if (url === CHAINLIST) return response(REGISTRY);
+		const one = Array.isArray(body) ? body[0] : body;
+		if (one?.method === "eth_chainId") return response({ id: one.id, result: "0x1" });
+		const answer = answers[url];
+		return answer ? answer(body) : response({ id: one?.id, result: "0x10" });
+	});
+}
+
+/** The URLs the call itself hit: the registry fetch and the health probes filtered out. */
+function served(calls: { url: string; body: any }[]) {
+	return calls
+		.filter((c) => c.url !== CHAINLIST)
+		.filter((c) => (Array.isArray(c.body) ? c.body[0]?.method : c.body?.method) !== "eth_chainId")
+		.map((c) => c.url);
+}
+
+describe("rpc failover", () => {
+	it("rolls past a 429 and returns the next endpoint's result", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: () => response("rate limited", { status: 429 }),
+			[PROVIDER]: (body) => response({ id: body.id, result: "0x10" }),
+		});
+		const out = await rpc.call(1, "eth_blockNumber");
+
+		expect(out).toBe("0x10"); // the caller sees no failure at all
+		expect(rpc.lastEndpoint).toBe(PROVIDER);
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("rolls past a timeout", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: () => {
+				const e = new Error("The operation was aborted");
+				e.name = "TimeoutError";
+				throw e;
+			},
+		});
+		expect(await rpc.call(1, "eth_blockNumber")).toBe("0x10");
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("rolls past an HTTP 500", async () => {
+		const calls = stubLadder({ [OFFICIAL]: () => response("bad gateway", { status: 502 }) });
+		expect(await rpc.call(1, "eth_blockNumber")).toBe("0x10");
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("rolls past a 403, which is one node's paywall rather than the chain's answer", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: () => response("archive requests require a paid plan", { status: 403 }),
+		});
+		expect(await rpc.call(1, "trace_block", ["0x1"])).toBe("0x10");
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("returns a JSON-RPC error at once, without spending another endpoint", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: (body) => response({ id: body.id, error: { code: -32000, message: "execution reverted" } }),
+		});
+		const out = (await rpc.call(1, "eth_call", [{ to: "0xabc" }])) as ErrorValue;
+
+		expect(out.code).toBe(-32000);
+		expect(out.error).toContain("execution reverted");
+		expect(served(calls)).toEqual([OFFICIAL]); // the chain answered; ten nodes say the same
+	});
+
+	it("rolls a -32601 over, because a node's method list is its own choice", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: (body) => response({ id: body.id, error: { code: -32601, message: "method not found" } }),
+			[PROVIDER]: (body) => response({ id: body.id, result: ["trace"] }),
+		});
+		expect(await rpc.call(1, "trace_block", ["0x1"])).toEqual(["trace"]);
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("names every endpoint and its reason when the whole ladder is dead", async () => {
+		stubLadder({
+			[OFFICIAL]: () => response("rate limited", { status: 429 }),
+			[PROVIDER]: () => response("boom", { status: 500 }),
+			[OTHER]: () => {
+				throw new Error("ECONNREFUSED");
+			},
+		});
+		const out = (await rpc.call(1, "eth_blockNumber")) as ErrorValue;
+
+		expect(out.error).toContain("all 3 endpoints failed");
+		for (const [url, why] of [
+			[OFFICIAL, "HTTP 429"],
+			[PROVIDER, "HTTP 500"],
+			[OTHER, "ECONNREFUSED"],
+		]) {
+			expect(out.error).toContain(url);
+			expect(out.error).toContain(why);
+		}
+	});
+
+	it("evicts the endpoint it gave up on, so the memo cannot hand it back", async () => {
+		stubLadder({
+			[OFFICIAL]: () => response("rate limited", { status: 429 }),
+			[PROVIDER]: (body) => response({ id: body.id, result: "0x10" }),
+		});
+		expect(await rpc.pick(1)).toBe(OFFICIAL); // the memo starts on what is about to die
+		await rpc.call(1, "eth_blockNumber");
+		expect(await rpc.pick(1)).toBe(PROVIDER); // the bug: this used to stay OFFICIAL
+	});
+
+	it("re-ranks from scratch once every candidate has been evicted", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: () => response("boom", { status: 500 }),
+			[PROVIDER]: () => response("boom", { status: 500 }),
+			[OTHER]: () => response("boom", { status: 500 }),
+		});
+		await rpc.call(1, "eth_blockNumber");
+		const probes = calls.filter((c) => c.body?.method === "eth_chainId").length;
+
+		expect(await rpc.pick(1)).toBe(OFFICIAL);
+		expect(calls.filter((c) => c.body?.method === "eth_chainId").length).toBeGreaterThan(probes);
+	});
+
+	it("surfaces the first failure with { failover: false }", async () => {
+		const calls = stubLadder({ [OFFICIAL]: () => response("boom", { status: 500 }) });
+		const out = (await rpc.call(1, "eth_blockNumber", [], { failover: false })) as ErrorValue;
+
+		expect(out.status).toBe(500);
+		expect(served(calls)).toEqual([OFFICIAL]);
+	});
+
+	it("waits out a Retry-After inside the bound and keeps the endpoint", async () => {
+		let hits = 0;
+		const calls = stubLadder({
+			[OFFICIAL]: (body) => {
+				hits += 1;
+				return hits === 1
+					? response("slow down", { status: 429, headers: { "Retry-After": "0.05" } })
+					: response({ id: body.id, result: "0x11" });
+			},
+		});
+		expect(await rpc.call(1, "eth_blockNumber")).toBe("0x11");
+		expect(rpc.lastEndpoint).toBe(OFFICIAL);
+		expect(served(calls)).toEqual([OFFICIAL, OFFICIAL]); // never needed the fallback
+	});
+
+	it("skips an endpoint whose Retry-After is past the bound", async () => {
+		const started = Date.now();
+		const calls = stubLadder({
+			[OFFICIAL]: () => response("slow down", { status: 429, headers: { "Retry-After": "30" } }),
+			[PROVIDER]: (body) => response({ id: body.id, result: "0x12" }),
+		});
+		expect(await rpc.call(1, "eth_blockNumber")).toBe("0x12");
+
+		expect(Date.now() - started).toBeLessThan(1000); // a 30s sleep would eat the whole turn
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("resolves an EVM chain given as an id or a name", async () => {
+		const calls = stubLadder();
+		expect(await rpc.call(1, "eth_blockNumber")).toBe("0x10");
+		expect(await rpc.call("ethereum", "eth_blockNumber")).toBe("0x10");
+		expect(served(calls)).toEqual([OFFICIAL, OFFICIAL]);
+		expect(calls.filter((c) => c.url === CHAINLIST)).toHaveLength(1); // memoised
+	});
+
+	it("resolves solana through its seed list, never touching the registry", async () => {
+		const calls = stubFetch((_url, body) =>
+			body?.method === "getSlot"
+				? response({ id: body.id, result: 315_000_000 })
+				: response({ id: body.id, result: { value: 42 } }),
+		);
+		const out = await rpc.call("solana", "getBalance", ["addr"], { limit: 1 });
+
+		expect(out).toEqual({ value: 42 });
+		expect(rpc.lastEndpoint).toBe(SOLANA_SEED);
+		expect(calls.some((c) => c.url === CHAINLIST)).toBe(false);
+		expect(calls.at(-1)?.body.method).toBe("getBalance");
+	});
+
+	it("resolves tron to the EVM-compatible /jsonrpc its REST base hosts", async () => {
+		stubFetch((url, body) =>
+			url.endsWith("/wallet/getnowblock")
+				? response({ block_header: { raw_data: { number: 71_000_000 } } })
+				: response({ id: body.id, result: "0x2b6653dc" }),
+		);
+		const out = await rpc.call("tron", "eth_chainId", [], { limit: 1 });
+
+		expect(toBigInt(out)).toBe(728126428n); // Tron's EVM chain id
+		expect(rpc.lastEndpoint).toBe(`${TRON_SEED}/jsonrpc`);
+	});
+
+	it("gives rpc.tron the same chain argument and the same rollover", async () => {
+		stubFetch((url) => {
+			if (url.endsWith("/wallet/getnowblock"))
+				return response({ block_header: { raw_data: { number: 71_000_000 } } });
+			return url.startsWith(TRON_SEED) ? response("rate limited", { status: 429 }) : response({ balance: 5 });
+		});
+		const out = await rpc.tron("tron", "wallet/getaccount", { address: "TR7" }, { limit: 2 });
+
+		expect(out).toEqual({ balance: 5 });
+		expect(rpc.lastEndpoint).toBe("https://api.tronstack.io");
+	});
+
+	it("fails a batch over and still returns one entry per call", async () => {
+		const calls = stubLadder({
+			[OFFICIAL]: () => response("boom", { status: 502 }),
+			[PROVIDER]: (body) => response(body.map((r: any) => ({ id: r.id, result: r.method }))),
+		});
+		const out = await rpc.batch(1, ["eth_blockNumber", "eth_gasPrice"]);
+
+		expect(out).toEqual(["eth_blockNumber", "eth_gasPrice"]);
+		expect(rpc.lastEndpoint).toBe(PROVIDER);
+		expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
+	});
+
+	it("leaves an explicit URL alone - no discovery, no rollover", async () => {
+		const calls = stubFetch(() => response("rate limited", { status: 429 }));
+		const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
+
+		expect(out.status).toBe(429); // the endpoint's own error, unwrapped
+		expect(calls).toHaveLength(1);
+	});
+
+	it("passes a resolution failure through in each shape", async () => {
+		stubLadder();
+		expect(((await rpc.call(4242, "eth_blockNumber")) as ErrorValue).error).toContain("not in the registry");
+		expect(await rpc.batch(4242, ["a", "b"])).toEqual([
+			expect.objectContaining({ error: expect.stringContaining("not in the registry") }),
+			expect.objectContaining({ error: expect.stringContaining("not in the registry") }),
+		]);
+		expect(rpc.call(undefined as any, "m")).rejects.toThrow(TypeError);
+	});
+});
+
 describe("rpc skill surface", () => {
 	it("exposes exactly the documented API", () => {
 		expect(Object.keys(rpc).sort()).toEqual([
@@ -672,6 +914,7 @@ describe("rpc skill surface", () => {
 			"call",
 			"endpoints",
 			"fromUnits",
+			"lastEndpoint",
 			"pick",
 			"toBigInt",
 			"toUnits",

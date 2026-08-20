@@ -24,9 +24,21 @@
  * surrounding cell keeps running, while a bad argument -- a non-string URL, a fractional value
  * where an integer is required -- throws, because that is a bug in the caller, not a condition
  * to handle.
+ *
+ * Public endpoints degrade constantly -- a 429 here, a dead node there -- so `call` and `batch`
+ * also take a CHAIN and roll to the next ranked endpoint themselves. What must not be retried is
+ * the larger half of that: an answer from the chain is the same answer everywhere, and spending
+ * ten round trips to hear "execution reverted" ten times is worse than hearing it once. See
+ * `retryable`.
  */
 
 const DEFAULT_TIMEOUT_SECONDS = 15;
+
+/** Distinct endpoints one call may burn. Three covers a rate-limited head plus one flake. */
+const MAX_ATTEMPTS = 3;
+
+/** A turn cannot sit on a `Retry-After: 30`. Past this, another endpoint is the faster answer. */
+const MAX_RETRY_AFTER_MS = 2000;
 
 /** Beyond this, `10n ** BigInt(decimals)` is a denial of service rather than a unit. */
 const MAX_DECIMALS = 256;
@@ -46,12 +58,9 @@ function typeName(value) {
 /**
  * Validate the pieces every request shares.
  *
- * @throws {TypeError} On a bad url, method, or params - all caller bugs.
+ * @throws {TypeError} On a bad method or params - both caller bugs.
  */
-function checkRequest(url, method, params) {
-	if (typeof url !== "string" || url.trim() === "") {
-		throw new TypeError(`rpc: url must be a non-empty string, got ${typeName(url)}`);
-	}
+function checkCall(method, params) {
 	if (typeof method !== "string" || method === "") {
 		throw new TypeError(`rpc: method must be a non-empty string, got ${typeName(method)}`);
 	}
@@ -93,6 +102,28 @@ function failure(message, extra) {
 	return { error: message, ...extra };
 }
 
+/** `Retry-After` is a second count or an HTTP date; both reduce to a wait in ms, 0 when absent. */
+function retryAfterMs(value) {
+	if (!value) return 0;
+	const ms = Number.isFinite(Number(value)) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+	return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+/**
+ * Is this failure the ENDPOINT's fault, i.e. would another node plausibly answer?
+ *
+ * Transport, timeout, 429 and 5xx are. So are 401 and 403: a public node's key check or paywall
+ * is its own policy, not the chain's - `ethereum-rpc.publicnode.com` answers `trace_block` with
+ * `403 archive requests require a paid plan`, and its neighbours serve it. Any other status, and
+ * any well-formed JSON-RPC error, is the chain answering the question that was asked and the
+ * next node answers it identically - except `-32601`, which `call` raises as a throw because a
+ * node's method list is its own choice too.
+ */
+function retryable(e) {
+	if (typeof e?.status === "number") return e.status >= 500 || [401, 403, 429].includes(e.status);
+	return true;
+}
+
 /** Turn a thrown fetch/JSON error into the returned error value, naming the likely cause. */
 function transportFailure(url, error) {
 	// AbortSignal.timeout rejects with a TimeoutError; the bare message ("The operation was
@@ -121,6 +152,7 @@ async function post(url, body, options = {}) {
 		const detail = (await resp.text().catch(() => "")).trim().slice(0, 200);
 		const error = new Error(`rpc: ${url} returned HTTP ${resp.status}${detail ? `: ${detail}` : ""}`);
 		error.status = resp.status;
+		if (resp.status === 429) error.retryAfter = retryAfterMs(resp.headers?.get("retry-after"));
 		throw error;
 	}
 	try {
@@ -456,13 +488,31 @@ export function endpointTier(url, { tokens = [], providers = PUBLIC_PROVIDERS, o
  */
 let registryPromise = null;
 
-/** Session memo of `pick`'s answer, keyed by the normalised chain request. */
+/**
+ * Session memo of the healthy endpoints for a chain, best first, keyed by the normalised chain
+ * request. A ladder rather than a single winner: failover needs the runners-up, and `pick` is
+ * just its head.
+ */
 const pickCache = new Map();
+
+/** The endpoint that served the last completed `call` or `batch`. See `lastEndpoint`. */
+let lastServed = null;
 
 /** Drop both session memos. Exported for tests and for a long-lived REPL. */
 export function clearRpcCache() {
 	registryPromise = null;
 	pickCache.clear();
+	lastServed = null;
+}
+
+/**
+ * Drop a dead endpoint from the ladder, so the memo cannot hand it back. Emptying the ladder
+ * deletes the key, which makes the next lookup re-discover and re-rank from scratch.
+ */
+function evict(key, url) {
+	const rest = (pickCache.get(key) ?? []).filter((u) => u !== url);
+	if (rest.length > 0) pickCache.set(key, rest);
+	else pickCache.delete(key);
 }
 
 /**
@@ -712,37 +762,127 @@ async function discover(chain, opts = {}) {
 	return probes;
 }
 
+/* -------------------------------------------------------------------------------------------
+ * Failover
+ * ----------------------------------------------------------------------------------------- */
+
+/** A URL, as opposed to a chain: only a URL carries a scheme, so the two cannot collide. */
+function isUrl(value) {
+	return typeof value === "string" && value.trim().toLowerCase().startsWith("http");
+}
+
+/**
+ * Turn the first argument of `call`/`batch` into the endpoints to try, best first.
+ *
+ * An explicit URL is used exactly as given - a caller who already has one must not be dragged
+ * through discovery. A chain resolves through the same ranked, health-probed ladder `pick`
+ * returns the head of, memoised per session, so only the first call for a chain costs probes.
+ *
+ * @param {boolean} [jsonrpc] - The caller speaks JSON-RPC, which for Tron is a different URL
+ *   than the REST base the ladder holds; the two forms are memoised under separate keys.
+ * @returns {Promise<{urls: string[], key: string|null}|{error: string}>}
+ * @throws {TypeError} When the argument is neither a URL nor anything that can name a chain.
+ */
+async function resolveTarget(target, opts = {}, jsonrpc = false) {
+	if (isUrl(target)) return { urls: [target.trim()], key: null };
+	const request = chainRequest(target);
+	const tronRpc = jsonrpc && request.kind === "tron";
+	const key = tronRpc ? `${request.key}:jsonrpc` : request.key;
+	if (!opts.refresh) {
+		const cached = pickCache.get(key);
+		if (cached?.length) return { urls: cached, key };
+	}
+	const probes = await discover(target, opts);
+	if (!Array.isArray(probes)) return probes;
+	const healthy = probes.filter((p) => p.ok).map((p) => (tronRpc ? `${p.url}/jsonrpc` : p.url));
+	if (healthy.length === 0) return failure(`rpc: no healthy endpoint for ${request.key} (probed ${probes.length})`);
+	pickCache.set(key, healthy);
+	return { urls: healthy, key };
+}
+
+/**
+ * Run `attempt` against one endpoint after another until one answers.
+ *
+ * Only an endpoint's own failure advances the ladder (see `retryable`) and evicts it from the
+ * memo; anything the chain said comes straight back. With a single candidate - an explicit URL -
+ * that candidate's own error surfaces unchanged, so the URL form behaves as it always did.
+ *
+ * @param {{urls: string[], key: string|null}} resolved
+ * @param {(url: string) => Promise<unknown>} attempt - Throws to report a failed endpoint.
+ * @returns {Promise<unknown>} The answer, or an error value naming every endpoint tried.
+ */
+async function overEndpoints({ urls, key }, opts, attempt) {
+	const failover = opts.failover !== false;
+	const queue = urls.slice(0, failover ? MAX_ATTEMPTS : 1);
+	const tried = [];
+	let slept = false;
+	for (;;) {
+		const url = queue[0];
+		try {
+			const value = await attempt(url);
+			lastServed = url;
+			return value;
+		} catch (e) {
+			const value = e?.value ?? (e?.status ? failure(e.message, { status: e.status }) : transportFailure(url, e));
+			if (!failover || !retryable(e)) return value;
+			// The endpoint said when it will be free again; obeying beats burning a candidate, but
+			// only while the wait is shorter than a round trip somewhere else. One wait per call.
+			if (!slept && e?.retryAfter > 0 && e.retryAfter <= MAX_RETRY_AFTER_MS) {
+				slept = true;
+				await new Promise((resolve) => setTimeout(resolve, e.retryAfter));
+				continue;
+			}
+			if (key) evict(key, url);
+			tried.push(`${url} (${briefError(e)})`);
+			queue.shift();
+			if (queue.length === 0) {
+				return tried.length > 1
+					? failure(`rpc: all ${tried.length} endpoints failed - ${tried.join("; ")}`)
+					: value;
+			}
+		}
+	}
+}
+
 export default function createSkill() {
 	return {
 		/**
 		 * Call one JSON-RPC method and return its `result`.
 		 *
-		 * Chain-agnostic: `url` and `method` are whatever the node speaks -
-		 * `rpc.call(url, "eth_call", [{to, data}, "latest"])` on an EVM node,
-		 * `rpc.call(url, "getBalance", [address])` on Solana, `rpc.call(url, "getblockcount")`
-		 * on Bitcoin. Nothing here knows about chains.
+		 * Chain-agnostic: `method` is whatever the node speaks -
+		 * `rpc.call(1, "eth_call", [{to, data}, "latest"])` on an EVM node,
+		 * `rpc.call("solana", "getBalance", [address])`, `rpc.call(url, "getblockcount")` on
+		 * Bitcoin. Nothing here encodes calldata or knows a chain's methods.
+		 *
+		 * `target` is either an endpoint URL, used as given, or a chain (EVM id or name,
+		 * `"solana"`, `"tron"`), in which case the best endpoint is discovered, memoised, and
+		 * REPLACED on the fly when it rate-limits or dies - so a caller never has to notice.
 		 *
 		 * Never throws on a network, HTTP, or RPC-level failure: those come back as
 		 * `{error, code?, data?, status?}`, so check `.error` before using the value. Bad
-		 * arguments (non-string url or method) throw, because those are caller bugs.
+		 * arguments (an empty method, params that are not an object) throw, as caller bugs.
 		 *
-		 * @param {string} url - Node HTTP endpoint.
+		 * @param {string|number} target - Endpoint URL, or a chain to resolve one from.
 		 * @param {string} method - JSON-RPC method name.
 		 * @param {unknown[]|object} [params=[]] - Positional or named params.
 		 * @param {object} [opts]
 		 * @param {number} [opts.timeout=15] - Timeout in seconds.
 		 * @param {Record<string,string>} [opts.headers] - Extra headers, e.g. an API key.
+		 * @param {boolean} [opts.failover=true] - False stops after the first endpoint.
 		 * @returns {Promise<unknown>} The `result` value, or an error object.
 		 */
-		async call(url, method, params, opts = {}) {
-			checkRequest(url, method, params);
-			try {
-				const body = await post(url, envelope(nextId++, method, params), opts);
+		async call(target, method, params, opts = {}) {
+			checkCall(method, params);
+			const resolved = await resolveTarget(target, opts, true);
+			if (resolved.error) return resolved;
+			return overEndpoints(resolved, opts, async (url) => {
 				// A server may answer a single request with a one-element batch; accept both.
-				return unwrap(Array.isArray(body) ? body[0] : body, method);
-			} catch (e) {
-				return e?.status ? failure(e.message, { status: e.status }) : transportFailure(url, e);
-			}
+				const out = unwrap(single(await post(url, envelope(nextId++, method, params), opts)), method);
+				// The one JSON-RPC error worth another endpoint: which methods a node exposes
+				// (`trace_*`, `debug_*`) is that node's choice, not the chain's answer.
+				if (out?.code === -32601) throw Object.assign(new Error(out.error), { value: out });
+				return out;
+			});
 		},
 
 		/**
@@ -758,49 +898,51 @@ export default function createSkill() {
 		 * itself fails (network, timeout, HTTP status), every entry holds that one error, so
 		 * the return shape never changes.
 		 *
-		 * @param {string} url - Node HTTP endpoint.
+		 * @param {string|number} target - Endpoint URL, or a chain to resolve one from, as `call`.
 		 * @param {Array<{method: string, params?: unknown}|[string, unknown]|string>} calls
 		 * @param {object} [opts]
 		 * @param {number} [opts.timeout=15] - Timeout in seconds.
 		 * @param {Record<string,string>} [opts.headers] - Extra headers.
+		 * @param {boolean} [opts.failover=true] - False stops after the first endpoint.
 		 * @returns {Promise<unknown[]>} One entry per call: the `result`, or an error object.
 		 */
-		async batch(url, calls, opts = {}) {
+		async batch(target, calls, opts = {}) {
 			if (!Array.isArray(calls)) throw new TypeError(`rpc.batch: calls must be an array, got ${typeName(calls)}`);
 			if (calls.length === 0) return [];
 
 			const normalized = calls.map((entry, index) => normalizeCall(entry, index));
-			for (const { method, params } of normalized) checkRequest(url, method, params);
+			for (const { method, params } of normalized) checkCall(method, params);
 
-			const ids = normalized.map(() => nextId++);
-			const body = normalized.map(({ method, params }, i) => envelope(ids[i], method, params));
+			const resolved = await resolveTarget(target, opts, true);
+			const out = resolved.error
+				? resolved
+				: await overEndpoints(resolved, opts, async (url) => {
+						// Fresh ids per attempt: a retry is a new request, not a resend.
+						const ids = normalized.map(() => nextId++);
+						const body = normalized.map(({ method, params }, i) => envelope(ids[i], method, params));
+						const response = await post(url, body, opts);
 
-			let response;
-			try {
-				response = await post(url, body, opts);
-			} catch (e) {
-				const asValue = e?.status ? failure(e.message, { status: e.status }) : transportFailure(url, e);
-				return normalized.map(() => asValue);
-			}
+						if (!Array.isArray(response)) {
+							// A batch answered with a bare object is either a server-level error or a
+							// server that does not implement batching; either way, no call has a result.
+							const asValue = unwrap(response, "batch");
+							const wrapped =
+								asValue && typeof asValue === "object" && "error" in asValue
+									? asValue
+									: failure(`rpc: ${url} answered a batch with a single object, not an array`);
+							return normalized.map(() => wrapped);
+						}
 
-			if (!Array.isArray(response)) {
-				// A batch answered with a bare object is either a server-level error or a server
-				// that does not implement batching; either way no call produced a result.
-				const asValue = unwrap(response, "batch");
-				const wrapped =
-					asValue && typeof asValue === "object" && "error" in asValue
-						? asValue
-						: failure(`rpc: ${url} answered a batch with a single object, not an array`);
-				return normalized.map(() => wrapped);
-			}
-
-			const byId = new Map(response.filter((r) => r && typeof r === "object").map((r) => [r.id, r]));
-			return normalized.map(({ method }, i) => {
-				const found = byId.get(ids[i]);
-				return found === undefined
-					? failure(`rpc: ${method} had no matching response in the batch`)
-					: unwrap(found, method);
-			});
+						const byId = new Map(response.filter((r) => r && typeof r === "object").map((r) => [r.id, r]));
+						return normalized.map(({ method }, i) => {
+							const found = byId.get(ids[i]);
+							return found === undefined
+								? failure(`rpc: ${method} had no matching response in the batch`)
+								: unwrap(found, method);
+						});
+					});
+			// One failure for the whole request fans out to one entry per call: the shape is fixed.
+			return Array.isArray(out) ? out : normalized.map(() => out);
 		},
 
 		/**
@@ -840,8 +982,9 @@ export default function createSkill() {
 		 * The single best endpoint URL for a chain, memoised for the session.
 		 *
 		 * The first call discovers and probes; every later call for the same chain returns the
-		 * cached URL with no round trip at all. `{ refresh: true }` re-probes and replaces it -
-		 * reach for that when a picked endpoint starts failing mid-session.
+		 * cached URL with no round trip at all. A `call` or `batch` that fails over drops the
+		 * endpoint it gave up on from that memo, so this never hands back a URL already known to
+		 * be dead. `{ refresh: true }` re-probes from scratch.
 		 *
 		 * @param {number|string} chain - As `endpoints`.
 		 * @param {object} [opts] - As `endpoints`, plus `{ refresh }` to bypass the memo.
@@ -849,17 +992,19 @@ export default function createSkill() {
 		 *   healthy was found.
 		 */
 		async pick(chain, opts = {}) {
-			const request = chainRequest(chain);
-			if (!opts.refresh) {
-				const cached = pickCache.get(request.key);
-				if (cached) return cached;
-			}
-			const probes = await discover(chain, opts);
-			if (!Array.isArray(probes)) return probes;
-			const best = probes.find((p) => p.ok);
-			if (!best) return failure(`rpc.pick: no healthy endpoint for ${request.key} (probed ${probes.length})`);
-			pickCache.set(request.key, best.url);
-			return best.url;
+			const resolved = await resolveTarget(chain, opts);
+			return resolved.error ? resolved : resolved.urls[0];
+		},
+
+		/**
+		 * The endpoint that answered the last SUCCESSFUL `call`, `batch` or `tron`, or null - so a
+		 * caller that passed a chain can see which URL served it. Concurrent calls overwrite each
+		 * other, so read it right after the one you care about.
+		 *
+		 * @returns {string|null}
+		 */
+		get lastEndpoint() {
+			return lastServed;
 		},
 
 		/**
@@ -871,27 +1016,24 @@ export default function createSkill() {
 		 * `rpc.call` target - reach for it when the question is an EVM question (a contract read,
 		 * a block number) and for this when the question is a Tron-native one.
 		 *
-		 * @param {string} baseUrl - Full-node base, e.g. `https://api.trongrid.io`.
+		 * @param {string} baseUrl - Full-node base, e.g. `https://api.trongrid.io`, or `"tron"` to
+		 *   resolve one and fail over between them exactly as `call` does.
 		 * @param {string} path - Wallet path, e.g. `"wallet/getnowblock"`.
 		 * @param {object} [body={}] - JSON body; Tron wants one even when it is empty.
 		 * @param {object} [opts]
 		 * @param {number} [opts.timeout=15] - Timeout in seconds.
 		 * @param {Record<string,string>} [opts.headers] - Extra headers, e.g. `TRON-PRO-API-KEY`.
+		 * @param {boolean} [opts.failover=true] - False stops after the first endpoint.
 		 * @returns {Promise<unknown>} The parsed JSON body, or `{error, status?}`.
 		 */
 		async tron(baseUrl, path, body = {}, opts = {}) {
-			if (typeof baseUrl !== "string" || baseUrl.trim() === "") {
-				throw new TypeError(`rpc.tron: baseUrl must be a non-empty string, got ${typeName(baseUrl)}`);
-			}
 			if (typeof path !== "string" || path.trim() === "") {
 				throw new TypeError(`rpc.tron: path must be a non-empty string, got ${typeName(path)}`);
 			}
-			const url = `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-			try {
-				return await post(url, body ?? {}, opts);
-			} catch (e) {
-				return e?.status ? failure(e.message, { status: e.status }) : transportFailure(url, e);
-			}
+			const resolved = await resolveTarget(baseUrl, opts);
+			if (resolved.error) return resolved;
+			const tail = path.replace(/^\/+/, "");
+			return overEndpoints(resolved, opts, (base) => post(`${base.replace(/\/+$/, "")}/${tail}`, body ?? {}, opts));
 		},
 
 		toBigInt,

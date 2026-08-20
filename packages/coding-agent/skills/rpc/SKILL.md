@@ -1,6 +1,6 @@
 ---
 name: rpc
-description: JSON-RPC 2.0 over HTTP for any chain, plus endpoint discovery. `await rpc.call(url, method, params?, opts?)` -> the `result`, or `{error, code?, status?}` on RPC/HTTP/net failure. `await rpc.batch(url, [{method, params}, ...])` -> results in order, ONE round trip. `await rpc.endpoints(chain, opts?)` -> `[{url, ok, ms, detail, tier}]` sorted healthy, official-ish, fastest; chain is an EVM id/name, `"solana"`, `"tron"`. `await rpc.pick(chain)` -> best URL, memoised. `await rpc.tron(base, "wallet/getnowblock", body?)` -> Tron REST, not JSON-RPC. Exact `rpc.toBigInt(hex)`, `rpc.fromUnits(raw, decimals)` -> string, `rpc.toUnits(dec, decimals)` -> BigInt. No ABI or signing.
+description: JSON-RPC 2.0 over HTTP for any chain. `await rpc.call(chain|url, method, params?, opts?)` -> the `result`, or `{error, code?, status?}`. Given a chain (EVM id/name, `"solana"`, `"tron"`) it picks a live endpoint and rolls to the next on a timeout, 429 or 5xx, so rate limits handle themselves. `await rpc.batch(chain|url, [{method, params}, ...])` -> results in order, ONE round trip. `await rpc.endpoints(chain)` -> `[{url, ok, ms, detail, tier}]`, healthiest first. `await rpc.pick(chain)` -> best URL. `await rpc.tron(chain|base, "wallet/getnowblock", body?)` -> Tron REST. Exact `rpc.toBigInt(hex)`, `rpc.fromUnits(raw, dec)` -> string, `rpc.toUnits(v, dec)` -> BigInt. No ABI or signing.
 ---
 
 # RPC
@@ -10,13 +10,13 @@ big-number helpers that keep chain values exact.
 
 ## Chain-agnostic on purpose
 
-There is no bundled chain table, no ABI encoder, no signer, and no key handling. `url` and
-`method` are whatever the node speaks; you compose the params. Discovery (below) reads a live
-registry at call time rather than shipping a list that goes stale.
+There is no bundled chain table, no ABI encoder, no signer, and no key handling. `method` is
+whatever the node speaks; you compose the params. Discovery (below) reads a live registry at
+call time rather than shipping a list that goes stale.
 
-    await rpc.call(url, "eth_blockNumber")                            // EVM
+    await rpc.call(1, "eth_blockNumber")                              // by chain: endpoint handled for you
     await rpc.call(url, "eth_call", [{ to, data }, "latest"])         // EVM, pre-encoded calldata
-    await rpc.call(url, "getBalance", [address])                      // Solana
+    await rpc.call("solana", "getBalance", [address])                 // Solana
     await rpc.call(url, "getblockcount")                              // Bitcoin
     await rpc.call(url, "status")                                     // anything else
 
@@ -25,7 +25,12 @@ does not encode it, and does not sign or send transactions.
 
 ## Calls
 
-### `await rpc.call(url, method, params?, opts?)`
+### `await rpc.call(chain|url, method, params?, opts?)`
+
+The first argument is either an endpoint URL, used exactly as given, or a chain - an EVM id or
+name, `"solana"`, `"tron"` - in which case an endpoint is discovered, memoised and **replaced on
+the fly when it rate-limits or dies** (see Failover). Anything starting with `http` is a URL;
+everything else names a chain.
 
 Returns the `result` field of the response - which may legitimately be `null`, for an unknown
 transaction hash or an empty slot.
@@ -49,12 +54,12 @@ throws a `TypeError`. That is a bug in the call, not a condition to handle.
 `opts`: `{ timeout }` in seconds (default 15, enforced with `AbortSignal.timeout`) and
 `{ headers }` merged over the JSON content-type headers, for an API key or an auth token.
 
-### `await rpc.batch(url, calls, opts?)`
+### `await rpc.batch(chain|url, calls, opts?)`
 
 N calls, ONE round trip, using a JSON-RPC batch array. Fifty sequential calls cost fifty times
-the network latency; a batch costs it once.
+the network latency; a batch costs it once. Same first argument, same failover as `rpc.call`.
 
-    const [head, chainId, balance] = await rpc.batch(url, [
+    const [head, chainId, balance] = await rpc.batch(1, [
       { method: "eth_blockNumber" },
       { method: "eth_chainId" },
       { method: "eth_getBalance", params: [address, "latest"] },
@@ -75,22 +80,56 @@ so `results.map(r => r?.error ?? r)` is always valid.
       if (r?.error) console.log(`call ${i} failed: ${r.error}`);
     }
 
+## Failover
+
+Public endpoints degrade constantly. When you pass a **chain**, `call`, `batch` and `tron`
+advance to the next ranked endpoint on a failure that is the endpoint's fault, up to **3
+distinct endpoints**, and hand back the answer as if nothing happened. You do not check for
+`429` and re-pick; that is the whole point.
+
+What is *not* the endpoint's fault is the larger half:
+
+| Result | Retried? | Why |
+|---|---|---|
+| network error, non-JSON body, timeout | yes | the endpoint, not the question |
+| HTTP 429, HTTP 5xx | yes | rate limit or a sick node |
+| HTTP 401, HTTP 403 | yes | that node's key check or paywall - `403 archive requests require a paid plan` is one endpoint's policy, and its neighbours serve the same call |
+| JSON-RPC `error` object (reverted, bad params, `-32000`) | **no** | the chain answered; ten nodes give the same answer |
+| JSON-RPC `-32601 method not found` | yes | which methods a node exposes (`trace_*`, `debug_*`) is that node's choice |
+| any other HTTP status | no | the request is wrong, not the node |
+| bad arguments | no - throws `TypeError` | a bug in the call |
+
+A `Retry-After` on a 429 is obeyed only while it is **under 2 seconds** - long enough for a
+courtesy pause, short enough that it never costs more than trying somewhere else. A longer one
+skips straight to the next endpoint, and one call sleeps at most once.
+
+Failing over **evicts** the dead endpoint from `rpc.pick`'s memo, so nothing hands it back for
+the rest of the session; when every candidate has been evicted the next call re-probes and
+re-ranks from scratch. Only when all of them fail does an error surface, naming each one:
+
+    { error: "rpc: all 3 endpoints failed - https://a (HTTP 429); https://b (timed out); https://c (ECONNREFUSED)" }
+
+- `rpc.lastEndpoint` - the URL that answered the last successful call, when you want to see
+  which one actually served it. Free to read; concurrent calls overwrite it.
+- `{ failover: false }` - one endpoint only, surfacing its own error. An explicit URL already
+  behaves this way, since there is nothing to roll to.
+
 ## Finding an endpoint
 
 ### `await rpc.pick(chain, opts?)`
 
-The one you want most of the time. Returns a single URL string, or `{error}` when nothing
-healthy was found.
+For when you want the URL itself - to log it, to reuse it across many calls, or to hand it to
+something else. `rpc.call(1, ...)` already does this internally, so reach for it there. Returns
+a single URL string, or `{error}` when nothing healthy was found.
 
     const url = await rpc.pick(1);              // Ethereum mainnet
     const url = await rpc.pick("arbitrum");     // by name
     const sol = await rpc.pick("solana");
     if (url?.error) throw new Error(url.error);
-    const head = await rpc.call(url, "eth_blockNumber");
 
 The answer is memoised for the session, so the second `rpc.pick(1)` costs no round trip at all.
-Pass `{ refresh: true }` to re-probe and replace it - do that when an endpoint that worked
-starts failing mid-session.
+A failover drops the endpoint it gave up on from that memo, so this never returns a URL already
+known to be dead. `{ refresh: true }` re-probes from scratch.
 
 ### `await rpc.endpoints(chain, opts?)`
 
@@ -168,27 +207,26 @@ It decides ordering and nothing else, and it is overridable:
 
 The EVM registry is ~2 MB covering ~2900 chains, so it is fetched **at most once per session**
 and shared by every later lookup; `{ registryRefresh: true }` re-downloads it. It is never
-fetched for `"solana"` or `"tron"`. `rpc.pick` separately memoises its winning URL per chain,
-bypassed with `{ refresh: true }`.
+fetched for `"solana"` or `"tron"`. `rpc.pick` separately memoises the healthy endpoints per
+chain, best first; `{ refresh: true }` re-probes them.
 
 ## Tron
 
 Tron's main API is **not** JSON-RPC. It is REST - `POST /wallet/<method>` with a JSON body - so
 `rpc.call` cannot reach it:
 
-    const base = await rpc.pick("tron");                       // e.g. https://api.trongrid.io
-    const block = await rpc.tron(base, "wallet/getnowblock");
+    const block = await rpc.tron("tron", "wallet/getnowblock");   // chain, or a base URL
     block.block_header.raw_data.number;
-    await rpc.tron(base, "wallet/getaccount", { address: "TR7...", visible: true });
+    await rpc.tron("tron", "wallet/getaccount", { address: "TR7...", visible: true });
 
-Tron nodes **also** expose an EVM-compatible JSON-RPC at `<base>/jsonrpc`, which is an ordinary
-`rpc.call` target:
+Tron nodes **also** expose an EVM-compatible JSON-RPC at `<base>/jsonrpc`, which is where
+`rpc.call` sends a `"tron"` chain argument:
 
-    await rpc.call(`${base}/jsonrpc`, "eth_blockNumber");
+    await rpc.call("tron", "eth_blockNumber");                    // -> <base>/jsonrpc
 
 Which to reach for: `rpc.tron` for anything Tron-native - accounts, resources, TRC-10, the
-`/wallet` API in general - and `rpc.call` on `/jsonrpc` for EVM-shaped questions such as block
-numbers and TRC-20 `eth_call` reads. Note that `rpc.endpoints("tron")` returns REST full-node
+`/wallet` API in general - and `rpc.call` for EVM-shaped questions such as block numbers and
+TRC-20 `eth_call` reads. Note that `rpc.endpoints("tron")` returns REST full-node
 bases, while `rpc.endpoints(728126428)` - Tron's EVM chain id - returns JSON-RPC URLs from the
 chain registry, ready for `rpc.call` as they are.
 
@@ -230,9 +268,7 @@ These throw rather than return an error value, because each case is a caller bug
 
 ## Composing a read
 
-    const url = await rpc.pick(1);              // or your own endpoint
-    if (url?.error) throw new Error(url.error);
-    const [head, raw] = await rpc.batch(url, [
+    const [head, raw] = await rpc.batch(1, [    // or your own endpoint URL
       { method: "eth_blockNumber" },
       { method: "eth_getBalance", params: ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "latest"] },
     ]);
