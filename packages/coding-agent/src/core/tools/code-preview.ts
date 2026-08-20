@@ -52,6 +52,21 @@ const JS_LITERAL_ASSIGN_PATTERN =
 const HEREDOC_PATTERN = /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/;
 const JS_PATH_ASSIGN_PATTERN = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*Bun\.file\(\s*["']([^"']+)["']/;
 const JS_STRING_ASSIGN_PATTERN = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*["']([^"']+)["']/;
+const JS_DECLARATION_PATTERN =
+	/(?:^|[^\w$.])(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*|[{[][^}\]]*[}\]])|^\s*import\s+([\s\S]*?)\s+from\b/g;
+const JS_ASSIGNMENT_PREFIX_PATTERN = /^(?:(?:const|let|var)\s+)?[A-Za-z_${[][\w$,:{}\s[\]]*=(?!=)\s*/;
+// Skill bindings are user-installable and the bundled set changes, so any literal list
+// here rots silently: match the shape instead. Receiver is lower_snake_case because
+// every binding is, while locals are camelCase and runtime namespaces are PascalCase.
+const JS_CAPABILITY_CALL_PATTERN = /^(?:await\s+)?([a-z][a-z0-9_]*)\.([A-Za-z_$][\w$]*)\s*\(([\s\S]*)$/;
+// Arguments before the descriptor must be plain references or numbers: refusing to look
+// inside an object or array literal is what keeps `{ text: "hi" }` out of the label.
+const JS_CAPABILITY_ARGUMENT_PATTERN = /^\s*(?:(?:[A-Za-z_$][\w$.]*|-?\d[\w.]*)\s*,\s*)*(["'`])([^"'`\r\n]*)\1\s*[,)]/;
+// ECMAScript prototype/host names, fixed by the language rather than by what is installed.
+const JS_PROTOTYPE_METHOD_PATTERN =
+	/^(?:map|filter|forEach|reduce|reduceRight|find|findIndex|findLast|some|every|includes|indexOf|lastIndexOf|slice|splice|concat|join|sort|reverse|flat|flatMap|at|push|pop|shift|unshift|fill|keys|values|entries|has|then|catch|finally|toString|toJSON|valueOf|trim|trimStart|trimEnd|split|replace|replaceAll|match|matchAll|test|startsWith|endsWith|padStart|padEnd|repeat|toUpperCase|toLowerCase|toFixed)$/;
+const JS_HOST_RECEIVER_PATTERN =
+	/^(?:console|process|globalThis|self|module|exports|require|crypto|performance|navigator|document|window|localStorage|sessionStorage|fetch)$/;
 
 export type CodePreviewLanguage = "bash" | "js";
 
@@ -319,6 +334,18 @@ function jsPathVars(lines: readonly string[]): Map<string, string> {
 	return vars;
 }
 
+function jsLocalNames(lines: readonly string[]): Set<string> {
+	const names = new Set<string>();
+	for (const line of lines) {
+		for (const match of line.matchAll(JS_DECLARATION_PATTERN)) {
+			for (const identifier of (match[1] ?? match[2] ?? "").match(/[A-Za-z_$][\w$]*/g) ?? []) {
+				names.add(identifier);
+			}
+		}
+	}
+	return names;
+}
+
 function resolvePathArgument(argument: string, paths: ReadonlyMap<string, string>): string | undefined {
 	const trimmed = argument.trim();
 	const literal = trimmed.match(/^["'`]([^"'`]+)["'`]$/);
@@ -438,9 +465,30 @@ function jsSubprocessCommand(line: string): string | undefined {
 	return undefined;
 }
 
-function simplifyJsPreviewLine(line: string, paths: ReadonlyMap<string, string>): string {
+function jsCapabilityCall(line: string, locals: ReadonlySet<string>): string | undefined {
+	const call = stripStatementEnd(line).replace(JS_ASSIGNMENT_PREFIX_PATTERN, "").match(JS_CAPABILITY_CALL_PATTERN);
+	const receiver = call?.[1];
+	const method = call?.[2];
+	if (!receiver || !method) return undefined;
+	// A receiver declared in this cell is the user's own object, whatever it is named.
+	if (locals.has(receiver) || JS_HOST_RECEIVER_PATTERN.test(receiver) || JS_PROTOTYPE_METHOD_PATTERN.test(method)) {
+		return undefined;
+	}
+	const label = `${receiver}.${method}`;
+	const argument = (call[3] ?? "").match(JS_CAPABILITY_ARGUMENT_PATTERN)?.[2]?.replace(/\$\{[^}]*\}/g, "…");
+	if (!argument) return label;
+	// Quote only when the value would otherwise read as two arguments; descriptor()
+	// trims the tail, so the label itself always survives a long one.
+	return `${label} ${/\s/.test(argument) ? `"${argument}"` : argument}`;
+}
+
+function simplifyJsPreviewLine(line: string, paths: ReadonlyMap<string, string>, locals: ReadonlySet<string>): string {
 	return (
-		jsSubprocessCommand(line) ?? jsFileOperation(line, paths) ?? consoleLogInnerCall(line) ?? stripStatementEnd(line)
+		jsSubprocessCommand(line) ??
+		jsFileOperation(line, paths) ??
+		jsCapabilityCall(line, locals) ??
+		consoleLogInnerCall(line) ??
+		stripStatementEnd(line)
 	);
 }
 
@@ -459,7 +507,12 @@ function firstJsChildLine(lines: readonly string[], parentIndex: number): number
 	return undefined;
 }
 
-function jsPreviewLine(lines: readonly string[], index: number, paths: ReadonlyMap<string, string>): string {
+function jsPreviewLine(
+	lines: readonly string[],
+	index: number,
+	paths: ReadonlyMap<string, string>,
+	locals: ReadonlySet<string>,
+): string {
 	const line = lines[index] ?? "";
 	if (index > 0 && JS_DEFINITION_PATTERN.test(line)) {
 		const previous = lines[index - 1] ?? "";
@@ -470,13 +523,18 @@ function jsPreviewLine(lines: readonly string[], index: number, paths: ReadonlyM
 	if (JS_CONTROL_PATTERN.test(line)) {
 		const childIndex = firstJsChildLine(lines, index);
 		if (childIndex !== undefined) {
-			return `${line.trim()} ${simplifyJsPreviewLine(lines[childIndex] ?? "", paths)}`;
+			return `${line.trim()} ${simplifyJsPreviewLine(lines[childIndex] ?? "", paths, locals)}`;
 		}
 	}
-	return simplifyJsPreviewLine(line, paths);
+	return simplifyJsPreviewLine(line, paths, locals);
 }
 
-function jsLineScore(lines: readonly string[], index: number, paths: ReadonlyMap<string, string>): number {
+function jsLineScore(
+	lines: readonly string[],
+	index: number,
+	paths: ReadonlyMap<string, string>,
+	locals: ReadonlySet<string>,
+): number {
 	const line = lines[index] ?? "";
 	const trimmed = line.trim();
 	if (isSkippableJsLine(line) || JS_DECORATOR_PATTERN.test(trimmed)) {
@@ -491,6 +549,11 @@ function jsLineScore(lines: readonly string[], index: number, paths: ReadonlyMap
 	if (jsSubprocessCommand(line)) {
 		return 90;
 	}
+	// Between a file read and a subprocess: calling a capability is the point of such a
+	// cell, but a cell that also writes a file is best labelled by the write.
+	if (jsCapabilityCall(line, locals)) {
+		return 88;
+	}
 	if (JS_MAIN_PATTERN.test(line)) {
 		return 70;
 	}
@@ -502,7 +565,7 @@ function jsLineScore(lines: readonly string[], index: number, paths: ReadonlyMap
 	}
 	if (JS_CONTROL_PATTERN.test(line)) {
 		const childIndex = firstJsChildLine(lines, index);
-		return childIndex === undefined ? 20 : Math.max(20, jsLineScore(lines, childIndex, paths) - 5);
+		return childIndex === undefined ? 20 : Math.max(20, jsLineScore(lines, childIndex, paths, locals) - 5);
 	}
 	if (JS_LOW_SIGNAL_ASSIGNMENT_CALL_PATTERN.test(line)) {
 		return 25;
@@ -538,11 +601,12 @@ function jsPreviewIndex(lines: readonly string[], index: number): number {
 export function previewJsCode(code: string): CodePreview {
 	const lines = code.split("\n");
 	const paths = jsPathVars(lines);
+	const locals = jsLocalNames(lines);
 	let bestIndex: number | undefined;
 	let bestScore = -1;
 
 	for (let i = 0; i < lines.length; i++) {
-		const score = jsLineScore(lines, i, paths);
+		const score = jsLineScore(lines, i, paths, locals);
 		if (score > bestScore) {
 			bestIndex = i;
 			bestScore = score;
@@ -553,7 +617,7 @@ export function previewJsCode(code: string): CodePreview {
 		const previewIndex = jsPreviewIndex(lines, bestIndex);
 		return {
 			language: "js",
-			text: descriptor(jsPreviewLine(lines, previewIndex, paths)),
+			text: descriptor(jsPreviewLine(lines, previewIndex, paths, locals)),
 		};
 	}
 	return { language: "js", text: "" };

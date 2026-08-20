@@ -56,6 +56,7 @@ export interface SettingsConfig {
 	editorPaddingX: number;
 	autocompleteMaxVisible: number;
 	quietStartup: boolean;
+	degeneracyGuard: boolean;
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
 	fullscreen: boolean;
@@ -84,6 +85,7 @@ export interface SettingsCallbacks {
 	onEditorPaddingXChange: (padding: number) => void;
 	onAutocompleteMaxVisibleChange: (maxVisible: number) => void;
 	onQuietStartupChange: (enabled: boolean) => void;
+	onDegeneracyGuardChange: (enabled: boolean) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
 	onFullscreenChange: (enabled: boolean) => void;
@@ -254,6 +256,13 @@ export class SettingsSelectorComponent extends Container {
 				label: "Quiet startup",
 				description: "Disable verbose printing at startup",
 				currentValue: config.quietStartup ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "degeneracy-guard",
+				label: "Degeneracy guard",
+				description: "Stop a turn whose output collapses into a repetition loop",
+				currentValue: config.degeneracyGuard ? "true" : "false",
 				values: ["true", "false"],
 			},
 			{
@@ -496,6 +505,9 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "quiet-startup":
 						callbacks.onQuietStartupChange(newValue === "true");
+						break;
+					case "degeneracy-guard":
+						callbacks.onDegeneracyGuardChange(newValue === "true");
 						break;
 					case "rlm-max-depth":
 						callbacks.onRlmMaxDepthChange(Number.parseInt(newValue, 10));

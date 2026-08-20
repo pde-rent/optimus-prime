@@ -129,16 +129,68 @@ const src = await read(p);`;
 	});
 
 	it("does not label member calls as bare read/write", () => {
-		expect(previewJsCode("edit.src('f.ts');")).toEqual({ language: "js", text: "edit.src('f.ts')" });
-		expect(previewJsCode("obj.read('f');")).toEqual({ language: "js", text: "obj.read('f')" });
+		// Still not read/write labels; they now read as the capability calls they are.
+		expect(previewJsCode("edit.src('f.ts');")).toEqual({ language: "js", text: "edit.src f.ts" });
+		expect(previewJsCode("obj.read('f');")).toEqual({ language: "js", text: "obj.read f" });
 		expect(previewJsCode("agent_observe.recent_messages('f.ts');")).toEqual({
 			language: "js",
-			text: "agent_observe.recent_messages('f.ts')",
+			text: "agent_observe.recent_messages f.ts",
 		});
 		// A path variable in scope must not turn an unrelated method call into a read.
 		const code = `const p = "packages/coding-agent/src/foo.ts";
 spread(p);`;
 		expect(previewJsCode(code)).toEqual({ language: "js", text: "spread(p)" });
+	});
+
+	it("labels capability calls by binding, method and first string argument", () => {
+		expect(previewJsCode('await websearch.run("bun test runner");')).toEqual({
+			language: "js",
+			text: 'websearch.run "bun test runner"',
+		});
+		const rpcCode = `const url = "https://eth.llamarpc.com";
+const chainId = await rpc.call(url, "eth_chainId", []);`;
+		expect(previewJsCode(rpcCode)).toEqual({ language: "js", text: "rpc.call eth_chainId" });
+		expect(previewJsCode('await mcp.call("playwright", "browser_navigate");')).toEqual({
+			language: "js",
+			text: "mcp.call playwright",
+		});
+	});
+
+	it("omits an argument it cannot summarise", () => {
+		// An object literal describes fields, not the call; nothing beats a dumped brace.
+		expect(previewJsCode('await agent_message.send({ text: "done", to: "lead" });')).toEqual({
+			language: "js",
+			text: "agent_message.send",
+		});
+		expect(previewJsCode("await chart.render(series, options);")).toEqual({ language: "js", text: "chart.render" });
+	});
+
+	it("ranks capability calls above reads and below file mutations", () => {
+		const writeCode = `const hits = await websearch.run("bun test runner");
+await Bun.write("notes/search.md", hits);`;
+		expect(previewJsCode(writeCode)).toEqual({ language: "js", text: "write notes/search.md" });
+
+		const readCode = `const src = await read("packages/foo.ts");
+await check.run("packages/foo.ts");`;
+		expect(previewJsCode(readCode)).toEqual({ language: "js", text: "check.run packages/foo.ts" });
+
+		const soleCode = `import { readFileSync } from "node:fs";
+// swap the flag
+const limit = 10;
+await edit.str_replace("packages/foo.ts", "old", "new");`;
+		expect(previewJsCode(soleCode)).toEqual({ language: "js", text: "edit.str_replace packages/foo.ts" });
+	});
+
+	it("leaves ordinary method calls alone", () => {
+		// Shape match, not a binding list: locals, host globals and prototype methods
+		// are what keep every `x.y()` in a cell from reading as a capability.
+		expect(previewJsCode("JSON.parse(x);")).toEqual({ language: "js", text: "JSON.parse(x)" });
+		expect(previewJsCode("arr.map(f);")).toEqual({ language: "js", text: "arr.map(f)" });
+		expect(previewJsCode("console.log(x);")).toEqual({ language: "js", text: "console.log(x)" });
+		expect(previewJsCode("myClient.send('hi');")).toEqual({ language: "js", text: "myClient.send('hi')" });
+		const localCode = `const foo = makeThing();
+foo.bar();`;
+		expect(previewJsCode(localCode)).toEqual({ language: "js", text: "foo.bar()" });
 	});
 
 	it("resolves simple path variables", () => {
