@@ -207,3 +207,22 @@ describe("assistant message expansion", () => {
 		expect(notices[0]?.content).toContain("do not retype the content by hand");
 	});
 });
+
+// The first pattern paired a lazy `[^}\n]*?` with `\s*`; both match whitespace, so an
+// unterminated reference backtracked cubically — 2000 spaces measured at 416ms, blocking the
+// event loop before any timeout applies. Every quantifier is bounded now.
+describe("injection scanner cost", () => {
+	it("stays linear on an unterminated reference", () => {
+		const timeFor = (n: number) => {
+			const started = performance.now();
+			scanInjectionRefs(`{{repl:${" ".repeat(n)}`);
+			return performance.now() - started;
+		};
+		timeFor(1000); // warm
+		expect(timeFor(200_000)).toBeLessThan(250);
+	});
+
+	it("still trims a padded name", () => {
+		expect(scanInjectionRefs("x {{repl:  tbl  }} y").map((r) => r.name)).toEqual(["tbl"]);
+	});
+});

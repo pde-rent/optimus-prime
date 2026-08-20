@@ -12,6 +12,7 @@
 </p>
 
 <p align="center">
+  <a href="#install">Install</a> &bull;
   <a href="packages/coding-agent/docs/index.md">Docs</a> &bull;
   <a href="#numbers">Numbers</a> &bull;
   <a href="#the-graph-resolver">Graph resolver</a> &bull;
@@ -25,23 +26,54 @@
 
 ## Install
 
-Requires [Bun](https://bun.sh) 1.4+. No Node, npm, or Python in the toolchain or the runtime.
+Prerequisites: [Bun](https://bun.sh) 1.4+ and `git`. No Node, npm, or Python in the toolchain
+or the runtime — `bun`, `bunx`, `bun run`, `bun install`, never `npm`/`npx`/`node`.
 
 ```sh
 git clone https://github.com/pde-rent/optimus-prime.git
-cd optimus-prime && bun install && bun run build
+cd optimus-prime
+bun install
+bun run build          # typecheck + bundle, ~1 min the first time
 cd packages/coding-agent && bun link --global
 ```
 
-Gives you `optimus` and `optimus-prime`:
+`bun link --global` symlinks the global `optimus` at this checkout, so a rebuild here updates
+the command in place — there is no second copy to keep in sync.
+
+### Authenticate
+
+Nothing works until a provider is configured. Either run `/login` inside the app, or export a
+key before starting:
+
+```sh
+export ANTHROPIC_API_KEY=...      # or OPENAI_API_KEY, OPENROUTER_API_KEY, ...
+```
+
+`/login` stores credentials in `~/.optimus/agent/auth.json`; environment variables are read as a
+fallback. `/models` picks the model, `/settings` everything else.
+
+### Run
 
 ```sh
 optimus                        # interactive
 optimus "explain src/main.ts"  # one-shot
 optimus -p "list the tools"    # print and exit
+optimus --help                 # every flag
 ```
 
 State lives in `~/.optimus/agent`. Nothing is inherited from an earlier install.
+
+### Update
+
+```sh
+git pull && bun install && bun run build
+```
+
+Restart afterwards: the daemon caches the previous bundle and keeps serving it until its
+workers are retired. There is no automatic update check yet.
+
+`install.sh` at the repo root is a release installer for published tarballs. It is not wired up
+for this fork, so build from source as above.
 
 ## Numbers
 

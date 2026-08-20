@@ -77,7 +77,12 @@ export const MAX_INJECTED_MESSAGE_CHARS = 65_536;
  * has to be caught and explained, not left in the user's answer as raw syntax because it
  * failed to match.
  */
-const INJECT_REF_SOURCE = "\\{\\{repl\\s*:\\s*([^}\\n]*?)\\s*\\}\\}";
+// The capture is greedy and untrimmed on purpose. A lazy `[^}\n]*?` followed by `\s*`
+// overlaps it on whitespace, and with no closing braces the two backtrack against each other
+// cubically — 2000 spaces measured at 416ms, blocking the event loop before any timeout can
+// apply. Every quantifier is bounded, so the work per start position is constant: an
+// identifier is short, and an unbounded run of whitespace or text is not a reference.
+const INJECT_REF_SOURCE = "\\{\\{repl[ \\t]{0,8}:[ \\t]{0,8}([^}\\n]{0,128})\\}\\}";
 const INJECT_REF_ALONE_ON_LINE = new RegExp(`^${INJECT_REF_SOURCE}$`);
 const FENCE_MARKER = /^(`{3,}|~{3,})/;
 const PLAIN_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -175,7 +180,7 @@ export function scanInjectionRefs(text: string): InjectionRefSite[] {
 			const alone = INJECT_REF_ALONE_ON_LINE.exec(trimmed);
 			if (alone) {
 				const start = lineStart + line.indexOf(trimmed);
-				sites.push({ name: alone[1], start, end: start + trimmed.length });
+				sites.push({ name: alone[1].trim(), start, end: start + trimmed.length });
 			}
 			continue;
 		}
@@ -186,7 +191,7 @@ export function scanInjectionRefs(text: string): InjectionRefSite[] {
 			const start = m.index;
 			const end = start + m[0].length;
 			if (spans.some(([from, to]) => start >= from && end <= to)) continue;
-			sites.push({ name: m[1], start: lineStart + start, end: lineStart + end });
+			sites.push({ name: m[1].trim(), start: lineStart + start, end: lineStart + end });
 		}
 	}
 	return sites;
