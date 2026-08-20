@@ -2,9 +2,19 @@ import { afterEach, describe, expect, it } from "bun:test";
 // @ts-expect-error - bundled skill is plain JS with JSDoc types, no .d.ts
 import * as rpcSkill from "../skills/rpc/skill.js";
 
-const { default: createSkill, fromUnits, normalizeCall, toBigInt, toUnits } = rpcSkill;
+const {
+	default: createSkill,
+	clearRpcCache,
+	domainLabel,
+	endpointTier,
+	fromUnits,
+	normalizeCall,
+	toBigInt,
+	toUnits,
+} = rpcSkill;
 
 type ErrorValue = { error: string; code?: number; status?: number; data?: unknown };
+type Probe = { url: string; ok: boolean; ms: number; detail: string; tier: string };
 
 const rpc = createSkill();
 const URL_ = "https://node.test/rpc";
@@ -12,6 +22,8 @@ const URL_ = "https://node.test/rpc";
 const realFetch = globalThis.fetch;
 afterEach(() => {
 	globalThis.fetch = realFetch;
+	// The registry and pick memos live at module scope, i.e. for the whole session.
+	clearRpcCache();
 });
 
 /** Stub `fetch`, recording every request made. No test here touches the network. */
@@ -343,8 +355,327 @@ describe("rpc.toUnits", () => {
 	});
 });
 
+const CHAINLIST = "https://chainlist.org/rpcs.json";
+
+/**
+ * A registry fixture in the real document's shape: `rpc` entries as both plain strings and
+ * `{url}` objects, an API-key template, a `wss://` entry, and one of the malformed rows the live
+ * registry actually carries.
+ */
+const REGISTRY = [
+	{
+		chainId: 1,
+		name: "Ethereum Mainnet",
+		chain: "ETH",
+		shortName: "eth",
+		chainSlug: "ethereum",
+		isTestnet: false,
+		rpc: [
+			"https://rpc.ethereum.org",
+			{ url: "https://ethereum-rpc.publicnode.com", tracking: "none" },
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the registry ships this placeholder literally
+			{ url: "https://eth-mainnet.example.com/v2/${API_KEY}" },
+			"wss://ethereum-rpc.publicnode.com",
+			"website:https://not-a-node.example",
+			{ url: "https://nodes.example.net" },
+		],
+	},
+	{
+		chainId: 11417,
+		name: "Anq World Testnet",
+		shortName: "eth",
+		isTestnet: true,
+		rpc: [{ url: "https://testnet.example" }],
+	},
+	{ chainId: 999, name: "Twin", shortName: "twin", isTestnet: false, rpc: [] },
+	{ chainId: 998, name: "Twin", shortName: "twin2", isTestnet: false, rpc: [] },
+];
+
+const OFFICIAL = "https://rpc.ethereum.org";
+const PROVIDER = "https://ethereum-rpc.publicnode.com";
+const OTHER = "https://nodes.example.net";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Serve the registry, then answer every probe from `replies` (keyed by URL). A missing key
+ * answers `0x1`, i.e. a healthy Ethereum node.
+ */
+function stubChain(replies: Record<string, unknown> = {}) {
+	return stubFetch(async (url, body) => {
+		if (url === CHAINLIST) return response(REGISTRY);
+		const reply = replies[url];
+		if (typeof reply === "function") return (reply as (b: any) => unknown)(body);
+		return response({ id: body?.id, result: reply ?? "0x1" });
+	});
+}
+
+describe("rpc.endpoints", () => {
+	it("parses both registry entry shapes and drops templated, wss and malformed rows", async () => {
+		const calls = stubChain();
+		const out = (await rpc.endpoints(1)) as Probe[];
+
+		expect(calls[0].url).toBe(CHAINLIST);
+		expect(out.map((p) => p.url).sort()).toEqual([PROVIDER, OTHER, OFFICIAL].sort());
+		expect(out.every((p) => p.ok)).toBe(true);
+		expect(out[0].detail).toBe("chainId 1");
+		// eth_chainId, once per surviving endpoint.
+		expect(calls.slice(1).map((c) => c.body.method)).toEqual(["eth_chainId", "eth_chainId", "eth_chainId"]);
+	});
+
+	it("marks an endpoint on the wrong chain unhealthy and sorts it last", async () => {
+		stubChain({ [OTHER]: "0x5" });
+		const out = (await rpc.endpoints(1)) as Probe[];
+		const wrong = out.find((p) => p.url === OTHER) as Probe;
+
+		expect(wrong.ok).toBe(false);
+		expect(wrong.detail).toContain("wrong chain (5, want 1)");
+		expect(out.at(-1)?.url).toBe(OTHER);
+	});
+
+	it("ranks an official-looking domain above a known provider above anything else", async () => {
+		stubChain();
+		const out = (await rpc.endpoints(1)) as Probe[];
+
+		expect(out.map((p) => p.url)).toEqual([OFFICIAL, PROVIDER, OTHER]);
+		expect(out.map((p) => p.tier)).toEqual(["official", "provider", "other"]);
+	});
+
+	it("puts a healthy fallback above a dead official endpoint - health beats provenance", async () => {
+		stubChain({
+			[OFFICIAL]: () => {
+				throw new Error("ECONNREFUSED");
+			},
+		});
+		const out = (await rpc.endpoints(1)) as Probe[];
+
+		expect(out[0].url).toBe(PROVIDER);
+		expect(out.at(-1)).toMatchObject({ url: OFFICIAL, ok: false, tier: "official" });
+	});
+
+	it("sorts healthy-then-fastest with { rank: false }, still reporting the tier", async () => {
+		stubChain({
+			[OFFICIAL]: async (body: any) => {
+				await sleep(40);
+				return response({ id: body.id, result: "0x1" });
+			},
+		});
+		const out = (await rpc.endpoints(1, { rank: false })) as Probe[];
+
+		expect(out.at(-1)?.url).toBe(OFFICIAL); // slowest, despite being official
+		expect(out.find((p) => p.url === OFFICIAL)?.tier).toBe("official");
+	});
+
+	it("promotes a host named in officialHosts above the provider tier", async () => {
+		stubChain();
+		const out = (await rpc.endpoints(1, { officialHosts: ["nodes.example.net"] })) as Probe[];
+
+		expect(out.find((p) => p.url === OTHER)?.tier).toBe("official");
+		expect(out.map((p) => p.url)).toEqual([OFFICIAL, OTHER, PROVIDER]);
+	});
+
+	it("probes at most { limit } candidates, best-looking first", async () => {
+		const calls = stubChain();
+		const out = (await rpc.endpoints(1, { limit: 1 })) as Probe[];
+
+		expect(out.map((p) => p.url)).toEqual([OFFICIAL]);
+		expect(calls).toHaveLength(2); // registry + one probe
+	});
+
+	it("resolves a chain by name and prefers a mainnet over a testnet of the same short name", async () => {
+		const calls = stubChain();
+		const bySlug = (await rpc.endpoints("ethereum")) as Probe[];
+		expect(bySlug.map((p) => p.url).sort()).toEqual([PROVIDER, OTHER, OFFICIAL].sort());
+
+		const byShortName = (await rpc.endpoints("ETH")) as Probe[];
+		expect(byShortName.every((p) => p.ok)).toBe(true);
+		expect(calls.some((c) => c.url === "https://testnet.example")).toBe(false);
+	});
+
+	it("returns an error value for an unknown, ambiguous or empty chain", async () => {
+		stubChain();
+		expect(((await rpc.endpoints(4242)) as ErrorValue).error).toContain("not in the registry");
+		expect(((await rpc.endpoints("nosuchchain")) as ErrorValue).error).toContain("no chain named");
+
+		const ambiguous = (await rpc.endpoints("twin")) as ErrorValue;
+		expect(ambiguous.error).toContain("matches 2 chains");
+		expect(ambiguous.error).toContain("999 (Twin)");
+
+		expect(((await rpc.endpoints(999)) as ErrorValue).error).toContain("no keyless http endpoint");
+	});
+
+	it("fetches the registry once per session and re-fetches only on registryRefresh", async () => {
+		const calls = stubChain();
+		await rpc.endpoints(1);
+		await rpc.endpoints("ethereum");
+		expect(calls.filter((c) => c.url === CHAINLIST)).toHaveLength(1);
+
+		await rpc.endpoints(1, { registryRefresh: true });
+		expect(calls.filter((c) => c.url === CHAINLIST)).toHaveLength(2);
+	});
+
+	it("returns a registry failure as a value without poisoning the session", async () => {
+		let attempt = 0;
+		stubFetch(async (url, body) => {
+			if (url !== CHAINLIST) return response({ id: body?.id, result: "0x1" });
+			attempt += 1;
+			return attempt === 1 ? response("upstream down", { status: 503 }) : response(REGISTRY);
+		});
+
+		expect(((await rpc.endpoints(1)) as ErrorValue).error).toContain("chain registry");
+		expect(((await rpc.endpoints(1)) as Probe[]).every((p) => p.ok)).toBe(true);
+		expect(attempt).toBe(2);
+	});
+
+	it("probes Solana seeds with getSlot and never reads the registry", async () => {
+		const calls = stubFetch((_url, body) => response({ id: body.id, result: 315_000_000 }));
+		const out = (await rpc.endpoints("solana", { limit: 2 })) as Probe[];
+
+		expect(calls.some((c) => c.url === CHAINLIST)).toBe(false);
+		expect(calls[0].body.method).toBe("getSlot");
+		expect(out[0]).toMatchObject({ url: "https://api.mainnet-beta.solana.com", ok: true, tier: "official" });
+		expect(out[0].detail).toBe("slot 315000000");
+	});
+
+	it("probes Tron seeds over REST and never reads the registry", async () => {
+		const calls = stubFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
+		const out = (await rpc.endpoints("tron", { limit: 1 })) as Probe[];
+
+		expect(calls.some((c) => c.url === CHAINLIST)).toBe(false);
+		expect(calls[0].url).toBe("https://api.trongrid.io/wallet/getnowblock");
+		expect(calls[0].body).toEqual({}); // Tron wants a body even when it is empty
+		expect(out[0]).toMatchObject({ url: "https://api.trongrid.io", ok: true, tier: "official" });
+		expect(out[0].detail).toBe("block 71000000");
+	});
+
+	it("reports an unusable Tron reply as unhealthy", async () => {
+		stubFetch(() => response({ Error: "nope" }));
+		const out = (await rpc.endpoints("tron", { limit: 1 })) as Probe[];
+		expect(out[0]).toMatchObject({ ok: false, detail: "no block in reply" });
+	});
+
+	it("throws a TypeError on an argument that cannot name a chain", async () => {
+		expect(rpc.endpoints(undefined as any)).rejects.toThrow(TypeError);
+		expect(rpc.endpoints(0)).rejects.toThrow(TypeError);
+		expect(rpc.endpoints(-1)).rejects.toThrow(TypeError);
+		expect(rpc.endpoints(1.5)).rejects.toThrow(TypeError);
+		expect(rpc.endpoints("  ")).rejects.toThrow(TypeError);
+		expect(rpc.endpoints({} as any)).rejects.toThrow(TypeError);
+	});
+});
+
+describe("endpointTier", () => {
+	it("judges the registrable domain, not the subdomain", () => {
+		expect(endpointTier("https://api.mainnet-beta.solana.com", { tokens: ["solana"] })).toBe("official");
+		expect(endpointTier("https://api.trongrid.io", { tokens: ["tron"] })).toBe("official");
+		// The failure the heuristic exists to avoid: any host can name a chain in a subdomain.
+		expect(endpointTier("https://ethereum-rpc.publicnode.com", { tokens: ["ethereum"] })).toBe("provider");
+		expect(endpointTier("https://solana.drpc.org", { tokens: ["solana"] })).toBe("provider");
+		expect(endpointTier("https://nodes.example.net", { tokens: ["ethereum"] })).toBe("other");
+		expect(endpointTier("not a url", { tokens: ["ethereum"] })).toBe("other");
+		expect(domainLabel("https://arb1.arbitrum.io/rpc")).toBe("arbitrum");
+	});
+});
+
+describe("rpc.pick", () => {
+	it("returns the best URL and memoises it for the session", async () => {
+		const calls = stubChain();
+		expect(await rpc.pick(1)).toBe(OFFICIAL);
+
+		const after = calls.length;
+		expect(await rpc.pick(1)).toBe(OFFICIAL); // no round trip at all
+		expect(calls).toHaveLength(after);
+	});
+
+	it("re-probes with { refresh: true }", async () => {
+		const calls = stubChain();
+		await rpc.pick(1);
+		const after = calls.length;
+
+		await rpc.pick(1, { refresh: true });
+		expect(calls.length).toBeGreaterThan(after);
+	});
+
+	it("skips a dead endpoint and picks the healthy one", async () => {
+		stubChain({
+			[OFFICIAL]: () => {
+				throw new Error("ECONNREFUSED");
+			},
+		});
+		expect(await rpc.pick(1)).toBe(PROVIDER);
+	});
+
+	it("returns an error value when nothing is healthy, and does not cache it", async () => {
+		const calls = stubChain({ [OFFICIAL]: "0x5", [PROVIDER]: "0x5", [OTHER]: "0x5" });
+		const out = (await rpc.pick(1)) as ErrorValue;
+
+		expect(out.error).toContain("no healthy endpoint");
+		const after = calls.length;
+		await rpc.pick(1);
+		expect(calls.length).toBeGreaterThan(after);
+	});
+
+	it("passes a registry error straight through", async () => {
+		stubFetch(() => response("gone", { status: 503 }));
+		expect(((await rpc.pick(1)) as ErrorValue).error).toContain("chain registry");
+	});
+});
+
+describe("rpc.tron", () => {
+	it("posts a JSON body to the wallet REST path and returns the parsed reply", async () => {
+		const calls = stubFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
+		const block = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as any;
+
+		expect(calls[0].url).toBe("https://api.trongrid.io/wallet/getnowblock");
+		expect(calls[0].init?.method).toBe("POST");
+		expect(calls[0].body).toEqual({});
+		expect(block.block_header.raw_data.number).toBe(71_000_000);
+	});
+
+	it("normalises slashes and passes the body and headers through", async () => {
+		const calls = stubFetch(() => response({ balance: 1 }));
+		await rpc.tron(
+			"https://api.trongrid.io/",
+			"/wallet/getaccount",
+			{ address: "TR7", visible: true },
+			{ headers: { "TRON-PRO-API-KEY": "k" } },
+		);
+
+		expect(calls[0].url).toBe("https://api.trongrid.io/wallet/getaccount");
+		expect(calls[0].body).toEqual({ address: "TR7", visible: true });
+		expect((calls[0].init?.headers as Record<string, string>)["TRON-PRO-API-KEY"]).toBe("k");
+	});
+
+	it("returns transport and HTTP failures as values, and throws on bad arguments", async () => {
+		stubFetch(() => response("rate limited", { status: 429 }));
+		const out = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as ErrorValue;
+		expect(out.status).toBe(429);
+
+		expect(rpc.tron(undefined as any, "wallet/getnowblock")).rejects.toThrow(TypeError);
+		expect(rpc.tron("https://api.trongrid.io", "")).rejects.toThrow(TypeError);
+	});
+
+	it("leaves Tron's EVM-compatible /jsonrpc to rpc.call", async () => {
+		const calls = stubFetch((_url, body) => response({ id: body.id, result: "0x2b6653dc" }));
+		const chainId = await rpc.call("https://api.trongrid.io/jsonrpc", "eth_chainId");
+
+		expect(calls[0].url).toBe("https://api.trongrid.io/jsonrpc");
+		expect(calls[0].body.method).toBe("eth_chainId");
+		expect(toBigInt(chainId)).toBe(728126428n); // Tron's EVM chain id
+	});
+});
+
 describe("rpc skill surface", () => {
 	it("exposes exactly the documented API", () => {
-		expect(Object.keys(rpc).sort()).toEqual(["batch", "call", "fromUnits", "toBigInt", "toUnits"]);
+		expect(Object.keys(rpc).sort()).toEqual([
+			"batch",
+			"call",
+			"endpoints",
+			"fromUnits",
+			"pick",
+			"toBigInt",
+			"toUnits",
+			"tron",
+		]);
 	});
 });
