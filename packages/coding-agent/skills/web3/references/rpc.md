@@ -1,8 +1,3 @@
----
-name: rpc
-description: JSON-RPC 2.0 over HTTP. `chain` is an EVM id/name, `"solana"` or `"tron"`; endpoints are picked live and rolled on a timeout, 429 or 5xx. `await rpc.call(chain|url, method, params?, opts?)` -> the `result`, or `{error, code?, status?}`. `await rpc.batch(chain|url, [{method, params}, ...])` -> results in order, ONE round trip. `await rpc.endpoints(chain)` -> `[{url, ok, ms, detail, tier}]`, healthiest first. `await rpc.pick(chain)` -> best URL. `await rpc.tron(chain|base, path, body?)` -> Tron REST. Sync `rpc.toBigInt(hex)`, `rpc.fromUnits(raw, dec)` -> string, `rpc.toUnits(v, dec)` -> BigInt. No ABI or signing.
----
-
 # RPC
 
 A JSON-RPC 2.0 client that is one `fetch` POST and nothing else, plus endpoint discovery and the
@@ -14,18 +9,18 @@ There is no bundled chain table, no ABI encoder, no signer, and no key handling.
 whatever the node speaks; you compose the params. Discovery (below) reads a live registry at
 call time rather than shipping a list that goes stale.
 
-    await rpc.call(1, "eth_blockNumber")                              // by chain: endpoint handled for you
-    await rpc.call(url, "eth_call", [{ to, data }, "latest"])         // EVM, pre-encoded calldata
-    await rpc.call("solana", "getBalance", [address])                 // Solana
-    await rpc.call(url, "getblockcount")                              // Bitcoin
-    await rpc.call(url, "status")                                     // anything else
+    await web3.rpc.call(1, "eth_blockNumber")                              // by chain: endpoint handled for you
+    await web3.rpc.call(url, "eth_call", [{ to, data }, "latest"])         // EVM, pre-encoded calldata
+    await web3.rpc.call("solana", "getBalance", [address])                 // Solana
+    await web3.rpc.call(url, "getblockcount")                              // Bitcoin
+    await web3.rpc.call(url, "status")                                     // anything else
 
-`eth_call` takes calldata you build yourself (a 4-byte selector plus 32-byte words). This skill
+`eth_call` takes calldata you build yourself (a 4-byte selector plus 32-byte words). This module
 does not encode it, and does not sign or send transactions.
 
 ## Calls
 
-### `await rpc.call(chain|url, method, params?, opts?)`
+### `await web3.rpc.call(chain|url, method, params?, opts?)`
 
 The first argument is either an endpoint URL, used exactly as given, or a chain - an EVM id or
 name, `"solana"`, `"tron"` - in which case an endpoint is discovered, memoised and **replaced on
@@ -44,9 +39,9 @@ instead of throwing:
 
 So check for it before using the value:
 
-    const head = await rpc.call(url, "eth_blockNumber");
+    const head = await web3.rpc.call(url, "eth_blockNumber");
     if (head?.error) return head.error;
-    const height = rpc.toBigInt(head);
+    const height = web3.rpc.toBigInt(head);
 
 A bad argument - a non-string `url` or `method`, params that are not an array or object -
 throws a `TypeError`. That is a bug in the call, not a condition to handle.
@@ -54,12 +49,12 @@ throws a `TypeError`. That is a bug in the call, not a condition to handle.
 `opts`: `{ timeout }` in seconds (default 15, enforced with `AbortSignal.timeout`) and
 `{ headers }` merged over the JSON content-type headers, for an API key or an auth token.
 
-### `await rpc.batch(chain|url, calls, opts?)`
+### `await web3.rpc.batch(chain|url, calls, opts?)`
 
 N calls, ONE round trip, using a JSON-RPC batch array. Fifty sequential calls cost fifty times
-the network latency; a batch costs it once. Same first argument, same failover as `rpc.call`.
+the network latency; a batch costs it once. Same first argument, same failover as `web3.rpc.call`.
 
-    const [head, chainId, balance] = await rpc.batch(1, [
+    const [head, chainId, balance] = await web3.rpc.batch(1, [
       { method: "eth_blockNumber" },
       { method: "eth_chainId" },
       { method: "eth_getBalance", params: [address, "latest"] },
@@ -103,35 +98,35 @@ A `Retry-After` on a 429 is obeyed only while it is **under 2 seconds** - long e
 courtesy pause, short enough that it never costs more than trying somewhere else. A longer one
 skips straight to the next endpoint, and one call sleeps at most once.
 
-Failing over **evicts** the dead endpoint from `rpc.pick`'s memo, so nothing hands it back for
+Failing over **evicts** the dead endpoint from `web3.rpc.pick`'s memo, so nothing hands it back for
 the rest of the session; when every candidate has been evicted the next call re-probes and
 re-ranks from scratch. Only when all of them fail does an error surface, naming each one:
 
     { error: "rpc: all 3 endpoints failed - https://a (HTTP 429); https://b (timed out); https://c (ECONNREFUSED)" }
 
-- `rpc.lastEndpoint` - the URL that answered the last successful call, when you want to see
+- `web3.rpc.lastEndpoint` - the URL that answered the last successful call, when you want to see
   which one actually served it. Free to read; concurrent calls overwrite it.
 - `{ failover: false }` - one endpoint only, surfacing its own error. An explicit URL already
   behaves this way, since there is nothing to roll to.
 
 ## Finding an endpoint
 
-### `await rpc.pick(chain, opts?)`
+### `await web3.rpc.pick(chain, opts?)`
 
 For when you want the URL itself - to log it, to reuse it across many calls, or to hand it to
-something else. `rpc.call(1, ...)` already does this internally, so reach for it there. Returns
+something else. `web3.rpc.call(1, ...)` already does this internally, so reach for it there. Returns
 a single URL string, or `{error}` when nothing healthy was found.
 
-    const url = await rpc.pick(1);              // Ethereum mainnet
-    const url = await rpc.pick("arbitrum");     // by name
-    const sol = await rpc.pick("solana");
+    const url = await web3.rpc.pick(1);              // Ethereum mainnet
+    const url = await web3.rpc.pick("arbitrum");     // by name
+    const sol = await web3.rpc.pick("solana");
     if (url?.error) throw new Error(url.error);
 
-The answer is memoised for the session, so the second `rpc.pick(1)` costs no round trip at all.
+The answer is memoised for the session, so the second `web3.rpc.pick(1)` costs no round trip at all.
 A failover drops the endpoint it gave up on from that memo, so this never returns a URL already
 known to be dead. `{ refresh: true }` re-probes from scratch.
 
-### `await rpc.endpoints(chain, opts?)`
+### `await web3.rpc.endpoints(chain, opts?)`
 
 The full ranked list, when you want a fallback chain or want to see what discovery found.
 
@@ -163,7 +158,7 @@ no registry at all, so they use a small curated seed list of keyless public endp
 
 That filter is not enough on its own: the registry mostly does not use placeholders, it inlines
 somebody's demo API key into the URL, and those answer `HTTP 401` today. Probing is what
-actually removes them, which is the argument for `rpc.pick` over reading a URL out of the list.
+actually removes them, which is the argument for `web3.rpc.pick` over reading a URL out of the list.
 
 **How they are checked**: concurrently, `{ limit }` at a time (default 12 - Ethereum lists 88).
 EVM probes `eth_chainId` **and verifies the answer matches the chain you asked for**, because an
@@ -199,36 +194,36 @@ correctly does not.
 
 It decides ordering and nothing else, and it is overridable:
 
-    await rpc.endpoints(56, { officialHosts: ["binance.org"] })  // pin what you know
-    await rpc.endpoints(1,  { rank: false })                     // healthy, then fastest, only
-    await rpc.endpoints(1,  { providers: ["ankr", "drpc"] })     // replace the gateway list
+    await web3.rpc.endpoints(56, { officialHosts: ["binance.org"] })  // pin what you know
+    await web3.rpc.endpoints(1,  { rank: false })                     // healthy, then fastest, only
+    await web3.rpc.endpoints(1,  { providers: ["ankr", "drpc"] })     // replace the gateway list
 
 ### Caching
 
 The EVM registry is ~2 MB covering ~2900 chains, so it is fetched **at most once per session**
 and shared by every later lookup; `{ registryRefresh: true }` re-downloads it. It is never
-fetched for `"solana"` or `"tron"`. `rpc.pick` separately memoises the healthy endpoints per
+fetched for `"solana"` or `"tron"`. `web3.rpc.pick` separately memoises the healthy endpoints per
 chain, best first; `{ refresh: true }` re-probes them.
 
 ## Tron
 
 Tron's main API is **not** JSON-RPC. It is REST - `POST /wallet/<method>` with a JSON body - so
-`rpc.call` cannot reach it:
+`web3.rpc.call` cannot reach it:
 
-    const block = await rpc.tron("tron", "wallet/getnowblock");   // chain, or a base URL
+    const block = await web3.rpc.tron("tron", "wallet/getnowblock");   // chain, or a base URL
     block.block_header.raw_data.number;
-    await rpc.tron("tron", "wallet/getaccount", { address: "TR7...", visible: true });
+    await web3.rpc.tron("tron", "wallet/getaccount", { address: "TR7...", visible: true });
 
 Tron nodes **also** expose an EVM-compatible JSON-RPC at `<base>/jsonrpc`, which is where
-`rpc.call` sends a `"tron"` chain argument:
+`web3.rpc.call` sends a `"tron"` chain argument:
 
-    await rpc.call("tron", "eth_blockNumber");                    // -> <base>/jsonrpc
+    await web3.rpc.call("tron", "eth_blockNumber");                    // -> <base>/jsonrpc
 
-Which to reach for: `rpc.tron` for anything Tron-native - accounts, resources, TRC-10, the
-`/wallet` API in general - and `rpc.call` for EVM-shaped questions such as block numbers and
-TRC-20 `eth_call` reads. Note that `rpc.endpoints("tron")` returns REST full-node
-bases, while `rpc.endpoints(728126428)` - Tron's EVM chain id - returns JSON-RPC URLs from the
-chain registry, ready for `rpc.call` as they are.
+Which to reach for: `web3.rpc.tron` for anything Tron-native - accounts, resources, TRC-10, the
+`/wallet` API in general - and `web3.rpc.call` for EVM-shaped questions such as block numbers and
+TRC-20 `eth_call` reads. Note that `web3.rpc.endpoints("tron")` returns REST full-node
+bases, while `web3.rpc.endpoints(728126428)` - Tron's EVM chain id - returns JSON-RPC URLs from the
+chain registry, ready for `web3.rpc.call` as they are.
 
 Both take `{ headers }`, so a `TRON-PRO-API-KEY` goes in when free-tier limits bite.
 
@@ -241,15 +236,15 @@ three helpers contain no floating-point arithmetic at all: BigInt and string sur
 
 | Call | Returns |
 |---|---|
-| `rpc.toBigInt(value)` | `BigInt`. Accepts `"0x1f"`, `"31"`, a BigInt, or a safe-integer Number. |
-| `rpc.fromUnits(raw, decimals)` | Exact decimal `string`, e.g. `"1.5"`. |
-| `rpc.toUnits(decimal, decimals)` | `BigInt` raw amount. |
+| `web3.rpc.toBigInt(value)` | `BigInt`. Accepts `"0x1f"`, `"31"`, a BigInt, or a safe-integer Number. |
+| `web3.rpc.fromUnits(raw, decimals)` | Exact decimal `string`, e.g. `"1.5"`. |
+| `web3.rpc.toUnits(decimal, decimals)` | `BigInt` raw amount. |
 
-    rpc.toBigInt("0xde0b6b3a7640000")                  // 1000000000000000000n
-    rpc.fromUnits("0xde0b6b3a7640000", 18)             // "1"
-    rpc.fromUnits(123456789n, 6)                       // "123.456789"
-    rpc.toUnits("0.000001", 6)                         // 1n
-    rpc.toUnits("1e-6", 6)                             // 1n  (exponent form is accepted)
+    web3.rpc.toBigInt("0xde0b6b3a7640000")                  // 1000000000000000000n
+    web3.rpc.fromUnits("0xde0b6b3a7640000", 18)             // "1"
+    web3.rpc.fromUnits(123456789n, 6)                       // "123.456789"
+    web3.rpc.toUnits("0.000001", 6)                         // 1n
+    web3.rpc.toUnits("1e-6", 6)                             // 1n  (exponent form is accepted)
 
 `fromUnits` returns the shortest exact decimal: trailing fractional zeros are dropped, and an
 integral value carries no decimal point.
@@ -268,9 +263,9 @@ These throw rather than return an error value, because each case is a caller bug
 
 ## Composing a read
 
-    const [head, raw] = await rpc.batch(1, [    // or your own endpoint URL
+    const [head, raw] = await web3.rpc.batch(1, [    // or your own endpoint URL
       { method: "eth_blockNumber" },
       { method: "eth_getBalance", params: ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "latest"] },
     ]);
     if (raw?.error) throw new Error(raw.error);
-    console.log(`block ${rpc.toBigInt(head)}: ${rpc.fromUnits(raw, 18)} ETH`);
+    console.log(`block ${web3.rpc.toBigInt(head)}: ${web3.rpc.fromUnits(raw, 18)} ETH`);

@@ -363,7 +363,7 @@ export function renderHistory(series, valueKey, history, points) {
 	return downsample(kept, points);
 }
 
-export default function createSkill() {
+export function createDefi() {
 	return {
 		/**
 		 * The chains worth caring about, by TVL, carrying DEX volume alongside.
@@ -372,7 +372,7 @@ export default function createSkill() {
 		 * `volume24h` is GeckoTerminal's 24h DEX volume - the field name is the source, always.
 		 * `name` is the DefiLlama spelling, which is what `defi.chain` and
 		 * `defi.protocols({ chain })` take; `chainId` is present only for EVM chains, where it
-		 * feeds `rpc.pick(chainId)` from the sibling skill directly.
+		 * feeds `web3.rpc.pick(chainId)` from the sibling module directly.
 		 *
 		 * The universe is DefiLlama's 459 chains and GeckoTerminal's first page covers 44 of them,
 		 * so `volume24h` is ABSENT on roughly a third of a default 50-row answer - both for chains
@@ -445,7 +445,7 @@ export default function createSkill() {
 			const key = norm(wanted);
 			const rows = foldChains(doc);
 			const row = rows.find((r) => r.names.includes(key)) ?? rows.find((r) => norm(r.gecko) === key);
-			if (!row) return failure(`defi.chain: no DefiLlama chain named ${wanted} (defi.chains() lists them)`);
+			if (!row) return failure(`defi.chain: no DefiLlama chain named ${wanted} (web3.defi.chains() lists them)`);
 			const out = chainRow(row, undefined);
 			if (!history) return out;
 
@@ -497,7 +497,7 @@ export default function createSkill() {
 				if (isFailure(chainsDoc)) return chainsDoc;
 				aliases = chainAliases(chainsDoc, chain);
 				if (!aliases)
-					return failure(`defi.protocols: no DefiLlama chain named ${chain} (defi.chains() lists them)`);
+					return failure(`defi.protocols: no DefiLlama chain named ${chain} (web3.defi.chains() lists them)`);
 			}
 			const wantedCategory = category === undefined ? undefined : singular(category);
 
@@ -554,7 +554,7 @@ export default function createSkill() {
 			const key = norm(wanted);
 			const entry =
 				list.find((p) => p?.slug === wanted) ?? list.find((p) => norm(p?.slug) === key || norm(p?.name) === key);
-			if (!entry) return failure(`defi.protocol: no protocol matching ${wanted} (defi.protocols() lists them)`);
+			if (!entry) return failure(`defi.protocol: no protocol matching ${wanted} (web3.defi.protocols() lists them)`);
 
 			/** @type {Record<string, unknown>} */
 			const out = {

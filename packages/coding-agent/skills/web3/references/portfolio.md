@@ -1,16 +1,11 @@
----
-name: portfolio
-description: Token balances for one wallet across EVM chains, Solana and Tron. `await portfolio.balances(address, opts?)` -> items sorted by `valueUsd` desc, each `{chain, symbol, name, address, native, decimals, amount, uiAmount, priceUsd, valueUsd, verified, spam, logo}`, or `{error, status?}` on network failure. `amount` is the EXACT raw integer as a string, `uiAmount` the display float. Family comes from the address shape — `0x` EVM, base58 Solana, `T` Tron; anything else throws TypeError. Spam is dropped unless `{ includeSpam }`. `await portfolio.raw(address, opts?)` -> the untouched upstream payload.
----
-
 # Portfolio
 
 Token balances for one wallet, from three third-party portfolio services, in one item shape.
 
 Reading a wallet from nodes alone is the wrong tool: a balance sweep over EVM is one `eth_call`
 per token per chain and you still need the token list, the decimals, and a price. These services
-already did that and answer keylessly, so this skill is the fetch, the routing, and the
-normalisation. No keys, no signing, no node access - `rpc` is the skill for talking to a node.
+already did that and answer keylessly, so this module is the fetch, the routing, and the
+normalisation. No keys, no signing, no node access - `web3.rpc` is the module for talking to a node.
 
 ## Read this first: the endpoints are not infrastructure
 
@@ -32,11 +27,11 @@ way to get blocked, not a courtesy.
 
 ## Calls
 
-### `await portfolio.balances(address, opts?)`
+### `await web3.portfolio.balances(address, opts?)`
 
 The normalised list, sorted by USD value, largest first.
 
-    const held = await portfolio.balances("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+    const held = await web3.portfolio.balances("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
     if (held.error) throw new Error(held.error);
     for (const t of held.slice(0, 10)) console.log(t.chain, t.symbol, t.uiAmount, t.valueUsd);
 
@@ -47,7 +42,7 @@ the `Accept` header.
 **Output size is not small.** A busy EVM wallet really does return thousands of rows -
 Vitalik's returned 2289 across 61 chains - so slice or reduce before printing one into context.
 
-### `await portfolio.raw(address, opts?)`
+### `await web3.portfolio.raw(address, opts?)`
 
 The upstream payload, exactly as the service returned it, for the per-service signal
 normalisation drops. A `balances` call in the last 30 seconds is served from the same memo, so
@@ -59,15 +54,22 @@ this costs no second round trip.
 | `solana` | `{success, data, tokenPrices?, sparkCharts?}` | `tokenPrices[mint]`: realised and unrealised PnL, cost basis, 5m..24h price changes. `sparkCharts[mint]`: price history |
 | `tron` | `{data: [account], success, meta}` | `frozenV2` staked TRX, `assetV2` TRC-10 balances, `account_resource` energy and bandwidth |
 
-### `portfolio.family(address)`
+### `web3.portfolio.family(address)`
 
 Which service an address would route to - `"evm"`, `"solana"`, or `"tron"` - with no request.
 Throws the same `TypeError` as `balances` on an unrecognised shape.
 
-### `portfolio.fromUnits(raw, decimals)`
+### `web3.portfolio.fromUnits(raw, decimals)`
 
-Exact raw-to-decimal string conversion, the same function as `rpc.fromUnits`. Present so a Tron
-TRC-20 amount can be scaled once you have looked its `decimals` up.
+Exact raw-to-decimal string conversion, so a Tron TRC-20 amount can be scaled once you have
+looked its `decimals` up.
+
+**Not the same function as `web3.rpc.fromUnits`**, despite the name. That one goes through
+`toBigInt`, so it accepts hex and REJECTS a Number past `2^53`. This one refuses hex and
+ACCEPTS that unsafe Number, truncating it, because two of the three services send exactly
+that (Phantom's native SOL row, TronGrid's `balance`) and refusing it would drop the row.
+Use `web3.rpc.fromUnits` on anything that came off a node, this one on anything that came
+out of `balances` or `raw`.
 
 ## Routing by address shape
 
@@ -112,7 +114,7 @@ shuffled into an arbitrary one.
 
 ## Precision
 
-`amount` is an exact decimal string and every scaling in this skill is BigInt and string
+`amount` is an exact decimal string and every scaling in this module is BigInt and string
 surgery. There is no division by `10 ** decimals` anywhere, because a token balance passes
 `Number.MAX_SAFE_INTEGER` at about 9 tokens with 18 decimals and the loss is silent.
 
@@ -128,7 +130,7 @@ rounded double of the true value rather than a double of an already-lossy intege
 
 **The one place exactness is impossible**: TronGrid sends the native `balance` as a JSON *number*
 of SUN, and Phantom sends the native SOL `amount` as a number too. `JSON.parse` has already
-produced a double by the time this skill sees it, so the string it emits is exact for that double
+produced a double by the time this module sees it, so the string it emits is exact for that double
 and, past 2^53 SUN (about 9.0e9 TRX), is not the integer the server meant. Nothing downstream can
 repair that; only a bigint-aware parse of the response text could.
 
@@ -178,18 +180,18 @@ No price is invented for TRX, and no decimals are guessed for a TRC-20. Expect a
 used Tron account accumulates hundreds of airdropped contracts (357 on the account probed) and
 none of them can be filtered, ranked, or scaled from this response alone.
 
-To fill a row in, read the contract with the sibling `rpc` skill - Tron nodes expose an
-EVM-compatible JSON-RPC, and `rpc.batch` does N reads in one round trip:
+To fill a row in, read the contract with the sibling `web3.rpc` module - Tron nodes expose an
+EVM-compatible JSON-RPC, and `web3.rpc.batch` does N reads in one round trip:
 
-    const base = await rpc.pick("tron");                       // https://api.trongrid.io
-    const [dec, sym] = await rpc.batch(`${base}/jsonrpc`, [
+    const base = await web3.rpc.pick("tron");                       // https://api.trongrid.io
+    const [dec, sym] = await web3.rpc.batch(`${base}/jsonrpc`, [
       { method: "eth_call", params: [{ to: evmForm, data: "0x313ce567" }, "latest"] },  // decimals()
       { method: "eth_call", params: [{ to: evmForm, data: "0x95d89b41" }, "latest"] },  // symbol()
     ]);
-    portfolio.fromUnits(amount, Number(rpc.toBigInt(dec)));
+    web3.portfolio.fromUnits(amount, Number(web3.rpc.toBigInt(dec)));
 
 Staked TRX (`frozenV2`) and TRC-10 assets (`assetV2`) are **not** counted as balances; both are
-in `portfolio.raw`.
+in `web3.portfolio.raw`.
 
 ## Observed drift from the published shapes
 

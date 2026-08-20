@@ -5,7 +5,7 @@
  * `eth_call` per token per chain and you still need the token list, the decimals, and a price.
  * These three services already did that work and answer keylessly, so this skill is the fetch,
  * the address-family routing, and the normalisation - nothing else. No keys, no signing, no
- * node access. `rpc` is the skill for talking to a node.
+ * node access. `web3.rpc` is the sibling module for talking to a node.
  *
  * The three payloads disagree about almost everything: field names, native-token markers, which
  * flags mean spam, and whether an amount is a string or a number. A model should not have to
@@ -112,9 +112,11 @@ export function addressFamily(address) {
  * Scale a raw integer amount down by `decimals`, exactly.
  *
  * String surgery on the digits: no division, no `Number`, so a uint256 balance survives intact.
- * `rpc.fromUnits` is the same function in the sibling skill; it is repeated here rather than
- * imported because a bundled skill's module is loaded by absolute path and may not reach across
- * skill directories.
+ * NOT `rpc.fromUnits`, which now sits one module away in `./rpc.js`. That one goes through
+ * `toBigInt`, which accepts hex and REJECTS an unsafe Number; this one accepts the unsafe
+ * Number two of the three portfolio APIs actually send (Phantom's native SOL row, TronGrid's
+ * `balance`) and truncates it, because refusing it would drop the row. Different contracts,
+ * so both exist on purpose - see the precision note in SKILL.md.
  *
  * @param {string|number|bigint} value - Raw integer amount.
  * @param {number} decimals - Unit scale, e.g. 18.
@@ -422,7 +424,7 @@ function fetchPortfolio(address, opts = {}) {
 	return promise;
 }
 
-export default function createSkill() {
+export function createPortfolio() {
 	return {
 		/**
 		 * Token balances for one wallet, normalised to a single item shape and sorted by USD

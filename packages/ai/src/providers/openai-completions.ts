@@ -281,6 +281,17 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) {
 					output.responseModel ||= chunk.model;
 				}
+				// Aggregators (OpenRouter) name the backend that served the request in a
+				// top-level `provider`, and it can arrive on the first chunk only. `??=`
+				// rather than `||=`: a backend reporting "" is not the same as reporting
+				// nothing, and absent must stay absent so garbage responses are traceable.
+				const chunkExtras = chunk as { provider?: unknown; system_fingerprint?: unknown };
+				if (typeof chunkExtras.provider === "string") {
+					output.upstreamProvider ??= chunkExtras.provider;
+				}
+				if (typeof chunkExtras.system_fingerprint === "string") {
+					output.systemFingerprint ??= chunkExtras.system_fingerprint;
+				}
 				if (chunk.usage) {
 					output.usage = parseChunkUsage(chunk.usage, model, cacheWriteCost);
 				}

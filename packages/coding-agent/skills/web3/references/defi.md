@@ -1,8 +1,3 @@
----
-name: defi
-description: Chain and protocol analytics — DefiLlama TVL, GeckoTerminal DEX volume. `await defi.chains(opts?)` -> top 50 `{name, chainId?, symbol, tvl, volume24h?}`, TVL-ordered unless `by` is `"volume"`. `await defi.protocols({chain?, category?, limit?})` -> `{name, slug, category, tvl, chainTvl|chains, d1, d7}`, sorted by TVL on that chain when `chain` is set. `await defi.protocol(slug, opts?)` and `await defi.chain(name, opts?)` -> TVL now, global and per chain. History is opt-in via `{ history }` (true or days) and downsampled. Errors -> `{error, status?}`; bad args throw TypeError.
----
-
 # DeFi
 
 Which chains matter, which protocols are biggest on one, and what TVL is now and was before.
@@ -18,7 +13,7 @@ Every number here has exactly one authority, and the field name tells you which:
 | `d1`, `d7`, `mcap` | **DefiLlama** | percent change over 1 and 7 days, market cap |
 | `volume24h` | **GeckoTerminal** | DEX swap volume over 24h, USD |
 
-There is no crossover and no fallback across that seam. No `tvl` in this skill was ever sourced
+There is no crossover and no fallback across that seam. No `tvl` in `web3.defi` was ever sourced
 from GeckoTerminal and no `volume24h` from DefiLlama, so a row needs no source tag - the name
 carries it. When you quote a number, quote it against the source in this table.
 
@@ -30,10 +25,10 @@ sized so an answer fits in a model's context:
 
 | call | observed result |
 |---|---|
-| `defi.chains()` | 3.5 KB, 50 rows |
-| `defi.protocols({ chain, category })` | 2.3 KB, 20 rows (115 B a row, against 1.5 KB raw) |
-| `defi.protocol(slug)` | 0.6 KB |
-| `defi.chain(name, { history: true })` | 3.6 KB, 90 points out of 3250 |
+| `web3.defi.chains()` | 3.5 KB, 50 rows |
+| `web3.defi.protocols({ chain, category })` | 2.3 KB, 20 rows (115 B a row, against 1.5 KB raw) |
+| `web3.defi.protocol(slug)` | 0.6 KB |
+| `web3.defi.chain(name, { history: true })` | 3.6 KB, 90 points out of 3250 |
 
 Logos, audits, twitter handles, urls, descriptions, methodology, oracles, parent metadata, raise
 history and hacks are dropped. `{ raw: true }` on `chains` and `protocols` returns the untrimmed
@@ -42,23 +37,23 @@ document again.
 
 ## Calls
 
-### `await defi.chains(opts?)`
+### `await web3.defi.chains(opts?)`
 
 Top chains by TVL, carrying 24h DEX volume alongside.
 
-    await defi.chains()                          // 50 rows, TVL order
-    await defi.chains({ limit: 10, by: "volume" })
+    await web3.defi.chains()                          // 50 rows, TVL order
+    await web3.defi.chains({ limit: 10, by: "volume" })
 
     { name: "BSC", chainId: 56, symbol: "BNB", tvl: 5262000000, volume24h: 2954000000 }
 
 `tvl` is DefiLlama's, `volume24h` is GeckoTerminal's, both in whole USD - so `volume24h / tvl` is
-a turnover ratio as the two stand. `name` is the DefiLlama spelling and is what `defi.chain` and
-`defi.protocols({ chain })` take. `chainId` is present only for EVM chains, and pairs directly
-with the sibling `rpc` skill:
+a turnover ratio as the two stand. `name` is the DefiLlama spelling and is what `web3.defi.chain` and
+`web3.defi.protocols({ chain })` take. `chainId` is present only for EVM chains, and pairs directly
+with the sibling `web3.rpc` module:
 
-    const [top] = await defi.chains({ limit: 1 })
-    const url = await rpc.pick(top.chainId)          // EVM chains only
-    await rpc.call(url, "eth_blockNumber")
+    const [top] = await web3.defi.chains({ limit: 1 })
+    const url = await web3.rpc.pick(top.chainId)          // EVM chains only
+    await web3.rpc.call(url, "eth_blockNumber")
 
 **`by` defaults to `"tvl"`; `"volume"` is opt-in.** TVL is the complete axis - DefiLlama covers
 459 chains against GeckoTerminal's 44 - so a TVL sort ranks everything while a volume sort ranks
@@ -90,11 +85,11 @@ throws. It counts raw pool reserve, so it ranks Solana first on $389B of "reserv
 Ethereum's $5.2B and seats Near ($0.1B TVL) above Tron ($5.0B) - the wrong field from the right
 source. `volume24h`, out of that same payload, is the right one.
 
-### `await defi.protocols(opts?)`
+### `await web3.defi.protocols(opts?)`
 
 The biggest protocols, filtered by chain and category. This is one cheap call:
 
-    await defi.protocols({ chain: "BSC", category: "Dexes" })
+    await web3.defi.protocols({ chain: "BSC", category: "Dexes" })
 
     { name: "PancakeSwap AMM", slug: "pancakeswap-amm", category: "Dexs",
       tvl: 1879886208, chainTvl: 1876308470, d1: 9.13, d7: 11.17 }
@@ -107,13 +102,13 @@ actually there. Without `chain`, rows carry the `chains` array instead and sort 
 finds the `"Dexs"` DefiLlama actually returns. An unknown chain name is an error, not an empty
 list.
 
-### `await defi.protocol(slug, opts?)`
+### `await web3.defi.protocol(slug, opts?)`
 
 One protocol, current TVL globally and per chain.
 
-    await defi.protocol("pancakeswap-amm")
-    await defi.protocol("pancakeswap-amm", { history: 365, points: 12 })
-    await defi.protocol("aave-v3", { history: 90, chain: "Base" })
+    await web3.defi.protocol("pancakeswap-amm")
+    await web3.defi.protocol("pancakeswap-amm", { history: 365, points: 12 })
+    await web3.defi.protocol("aave-v3", { history: 90, chain: "Base" })
 
     { name, slug, category, symbol, tvl, chains, chainTvls, d1, d7, mcap? }
 
@@ -127,13 +122,13 @@ here that is never memoised. `{ chain }` narrows the series to one chain.
 There is no `raw` here on purpose - the untrimmed detail would be megabytes in your answer. Read
 `https://api.llama.fi/protocol/{slug}` yourself if you truly want all of it.
 
-### `await defi.chain(name, opts?)`
+### `await web3.defi.chain(name, opts?)`
 
 One chain's TVL, and its history only when asked for.
 
-    await defi.chain("Ethereum")
-    await defi.chain("Ethereum", { history: 90 })     // last 90 days
-    await defi.chain("BSC", { history: true })        // whole series, from 2020
+    await web3.defi.chain("Ethereum")
+    await web3.defi.chain("Ethereum", { history: 90 })     // last 90 days
+    await web3.defi.chain("BSC", { history: true })        // whole series, from 2020
 
 `"Binance"` and `"BSC"` both resolve here; `volume24h` does not, it is a `chains()` concern.
 
@@ -178,12 +173,12 @@ These are live observations, not documentation:
 Network, timeout and HTTP failures return a value so the cell keeps running:
 
     { error: "defi.protocols: https://api.llama.fi/protocols returned HTTP 429", status: 429 }
-    { error: "defi.chain: no DefiLlama chain named NopeChain (defi.chains() lists them)" }
+    { error: "defi.chain: no DefiLlama chain named NopeChain (web3.defi.chains() lists them)" }
 
 A bad argument - a non-string slug, a `limit` that is not a positive integer, a `history` that is
 neither `true` nor a day count - throws a TypeError, because that is a bug in the caller.
 
-## Not this skill
+## Not this module
 
-No prices, no pools, no swap routing, no yields, no node access, no signing. `rpc` talks to
-nodes; `portfolio` reads a wallet.
+No prices, no pools, no swap routing, no yields, no node access, no signing. `web3.rpc` talks to
+nodes; `web3.portfolio` reads a wallet.

@@ -1856,7 +1856,9 @@ async function generateModels() {
 					? {
 							requiresReasoningContentOnAssistantMessages:
 								DEEPSEEK_V4_COMPAT.requiresReasoningContentOnAssistantMessages,
-							thinkingFormat: DEEPSEEK_V4_COMPAT.thinkingFormat,
+							// OpenRouter normalizes reasoning controls into `reasoning: { effort }`;
+							// DeepSeek's native `thinking: { type }` is not its wire format.
+							thinkingFormat: "openrouter" as const,
 						}
 					: DEEPSEEK_V4_COMPAT),
 			};

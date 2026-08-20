@@ -537,6 +537,8 @@ Every `AssistantMessage` includes a `stopReason` field that indicates how the ge
 
 `AssistantMessage` may also include `responseId`, a provider-specific upstream response or message identifier when the underlying API exposes one. Do not assume it is always present across providers.
 
+For `openai-completions` models, `AssistantMessage` may also carry `upstreamProvider` and `systemFingerprint`. Aggregators such as OpenRouter multiplex one model across many backends and report the one that served the request in a top-level `provider` field; `upstreamProvider` records it, and `systemFingerprint` records the response's `system_fingerprint`. Both are omitted when the endpoint reports nothing, so a bad response can be traced back to the backend that produced it. To steer routing away from a backend, see `compat.openRouterRouting` in [OpenAI Compatibility Settings](#openai-compatibility-settings).
+
 ## Error Handling
 
 When a request ends with an error (including aborts and tool call validation errors), the streaming API emits an error event:

@@ -844,7 +844,7 @@ async function overEndpoints({ urls, key }, opts, attempt) {
 	}
 }
 
-export default function createSkill() {
+export function createRpc() {
 	return {
 		/**
 		 * Call one JSON-RPC method and return its `result`.
