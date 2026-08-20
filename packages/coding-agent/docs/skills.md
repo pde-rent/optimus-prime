@@ -57,7 +57,9 @@ Optimus Prime ships with built-in skills that load by default:
 - `edit` - JS-backed. Replace one exact, unique string (`await edit(path, oldStr, newStr)`), or edit by line against a content tag (`await edit.src(path)` then `await edit.patch(path, tag, hunks)`).
 - `goal` - JS-backed. Read, create, and complete the persistent thread goal.
 - `refine` - JS-backed. Trigger continual harness refinement from the REPL.
+- `rpc` - JS-backed. JSON-RPC 2.0 over HTTP for any node or chain (`await rpc.call(url, method, params)`, `await rpc.batch(...)` for N calls in one round trip), plus exact BigInt unit conversion. Transport only: no chain list, no ABI encoding, no signing.
 - `skill-creator` - markdown. Teaches the agent to create new skills: markdown skill layout, frontmatter rules, placement and precedence, and the full JS-backed skill contract (`skill.js` detection, the factory signature, the skill context, verification) with a working template in `references/js-skills.md`.
+- `stats` - JS-backed. Array statistics `Math` lacks (`stats.mean`, `median`, `quantile`, `stddev`, `corr`, `describe`), with compensated summation and loop-based `min`/`max`.
 - `websearch` - JS-backed web search and page reader. Backed by a self-hosted [SearXNG](https://docs.searxng.org) instance (free, keyless) or the [Serper](https://serper.dev) API.
 
 Built-in skills behave like any other skill but have the lowest precedence: a user, project, package, or `--skill` skill with the same name overrides the built-in one.

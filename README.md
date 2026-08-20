@@ -227,6 +227,8 @@ has; no player, no sound, same startup time.
 | `attach-image` | Put an image in context |
 | `skill-creator` | Write new skills |
 | `chart` | Terminal charts — line, bar, candlestick, gauge, sparkline |
+| `rpc` | JSON-RPC 2.0 over HTTP, any node or chain — batched, with exact BigInt units |
+| `stats` | Array statistics `Math` lacks — quantiles, stddev, correlation, describe |
 
 Memory retrieval is a local BM25F index: no embedding service, no network call.
 

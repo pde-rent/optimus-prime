@@ -417,7 +417,14 @@ function loadSkillFromFile(
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "failed to parse skill file";
-		diagnostics.push({ type: "warning", message, path: filePath });
+		// Bun's YAML failure is position-less ("Unexpected token"), and the consequence — the
+		// skill is absent from the session, bindings and all — is what a reader actually needs.
+		// `": "` is far and away the most common cause: it terminates a plain scalar, so a
+		// description mentioning a shape like `{ current, agents: [...] }` drops the whole skill.
+		const cause = /yaml/i.test(message)
+			? ' A plain (unquoted) YAML scalar cannot contain ": " — quote the value or drop the space after the colon.'
+			: "";
+		diagnostics.push({ type: "error", message: `${message}. Skill not loaded.${cause}`, path: filePath });
 		return { skill: null, diagnostics };
 	}
 }

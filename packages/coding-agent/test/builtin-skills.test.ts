@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getBundledSkillsDir } from "../src/config.js";
@@ -308,5 +308,32 @@ describe("builtin skills", () => {
 			const script = readFileSync(join(repoRoot, "scripts", "pack-optimus-release.mjs"), "utf-8");
 			expect(script).toContain('"skills"');
 		});
+	});
+});
+
+// A malformed SKILL.md drops the skill and every binding it provides. The failure used to
+// surface as a bare position-less "Unexpected token", which hid two broken bundled skills.
+describe("malformed skill frontmatter", () => {
+	it("reports the consequence and the usual cause", () => {
+		const dir = mkdtempSync(join(tmpdir(), "optimus-badskill-"));
+		try {
+			const skillDir = join(dir, "broken");
+			mkdirSync(skillDir, { recursive: true });
+			// `": "` inside a plain scalar terminates it — the exact shape that broke agent_message.
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				"---\nname: broken\ndescription: Returns `{ current, agents: [...] }` to the caller.\n---\n\nBody.\n",
+			);
+
+			const { skills, diagnostics } = loadSkillsFromDir({ dir, source: "project" });
+
+			expect(skills).toHaveLength(0);
+			const failure = diagnostics.find((d) => d.path?.includes("broken"));
+			expect(failure?.type).toBe("error");
+			expect(failure?.message).toContain("Skill not loaded");
+			expect(failure?.message).toContain('cannot contain ": "');
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

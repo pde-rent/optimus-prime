@@ -479,6 +479,42 @@ Content`,
 			}
 		});
 
+		it("should load the bundled rpc and stats skills as JS skills", async () => {
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const { skills } = loader.getSkills();
+			for (const [name, marker] of [
+				["rpc", "JSON-RPC 2.0"],
+				["stats", "number[]"],
+			] as const) {
+				const skill = skills.find((s) => s.name === name);
+				expect(skill).toBeDefined();
+				expect(skill?.description).toContain(marker);
+				// Descriptions land in every request's system prompt, so keep them well under the cap.
+				expect(skill?.description.length).toBeLessThan(700);
+				expect(skill?.kind).toBe("js");
+				if (skill?.kind === "js") {
+					// The REPL binding name: it must not collide with an existing global or skill.
+					expect(skill.js.importName).toBe(name);
+					expect(skill.js.entryPath.endsWith("skill.js")).toBe(true);
+				}
+			}
+		});
+
+		it("should give every bundled skill a distinct REPL binding name", async () => {
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const bindings = loader
+				.getSkills()
+				.skills.filter((s) => s.kind === "js")
+				.map((s) => (s.kind === "js" ? s.js.importName : ""));
+			expect(new Set(bindings).size).toBe(bindings.length);
+			expect(bindings).toContain("rpc");
+			expect(bindings).toContain("stats");
+		});
+
 		it("should not emit a SERPER_API_KEY warning when the key is unset", async () => {
 			const loader = new DefaultResourceLoader({ cwd, agentDir });
 			await loader.reload();
