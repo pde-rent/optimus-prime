@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAgentMessageHostHandlers } from "../src/core/agent-messages.js";
+import { createHarness } from "./suite/harness.js";
 
 const ROSTER = {
 	current: { name: "worker-a", id: "a", depth: 1 },
@@ -57,5 +58,36 @@ describe("cohort edges", () => {
 		const { send, sent } = handlers(["c"]);
 		await send(to("worker-c"));
 		expect(sent).toEqual(["c"]);
+	});
+});
+
+describe("cohort edge visibility", () => {
+	it("publishes each child's declared edges on its snapshot", async () => {
+		const harness = await createHarness({ provider: "faux-cohort-edges" });
+		try {
+			const undeclared = await harness.session.runRlmChild("summarize the repo", {});
+			const parentOnly = await harness.session.runRlmChild("audit the parser", { peers: [] });
+			const connected = await harness.session.runRlmChild("write the migration", {
+				peers: ["reviewer", "tester"],
+			});
+
+			// filter().at(-1) rather than findLast: the test lib target predates ES2023.
+			const snapshotFor = (childId: string) =>
+				harness
+					.eventsOfType("rlm_child_update")
+					.map((event) => event.child)
+					.filter((child) => child.id === childId)
+					.at(-1);
+
+			expect(snapshotFor(undeclared.rlm_child_id)?.peers).toBeUndefined();
+			expect(snapshotFor(parentOnly.rlm_child_id)?.peers).toEqual([]);
+			expect(snapshotFor(connected.rlm_child_id)?.peers).toEqual(["reviewer", "tester"]);
+			// Parent-only is a declaration; undeclared is not. Only the second may omit the key,
+			// because a snapshot merge spreads incoming over previous.
+			expect("peers" in snapshotFor(parentOnly.rlm_child_id)!).toBe(true);
+			expect("peers" in snapshotFor(undeclared.rlm_child_id)!).toBe(false);
+		} finally {
+			harness.cleanup();
+		}
 	});
 });

@@ -297,6 +297,12 @@ export interface RlmChildAgentSnapshot {
 	model?: string;
 	/** Effective reasoning level: the child's live level once it exists, else the requested one. */
 	effort?: string;
+	/**
+	 * Sibling names this child declared it may message. Edges are one-way: listing B here does not
+	 * let B reach A. `[]` means parent-only and is NOT the same as undefined, which means the child
+	 * declared nothing and keeps the family default. The parent is reachable either way.
+	 */
+	peers?: string[];
 	label: string;
 	status: RlmChildAgentStatus;
 	durationMs?: number;
@@ -4232,6 +4238,11 @@ export class AgentSession {
 
 	get rlmMaxDepth(): number {
 		return this._rlmMaxDepth;
+	}
+
+	/** Declared outbound sibling edges. `[]` (parent-only) is distinct from undefined (undeclared). */
+	get peerNames(): readonly string[] | undefined {
+		return this._peerNames;
 	}
 
 	get sessionName(): string | undefined {
@@ -9305,6 +9316,7 @@ export class AgentSession {
 			transport: this.settingsManager.getTransport(),
 			maxRetryDelayMs: this.settingsManager.getProviderRetrySettings().maxRetryDelayMs,
 			toolExecution: this.agent.toolExecution,
+			degeneracyGuard: this.agent.degeneracyGuard,
 		});
 
 		const child = new AgentSession({
@@ -9992,6 +10004,9 @@ export class AgentSession {
 					// `subagentOptions` is declared below this closure, so reading it here
 					// would be a TDZ crash on the first emit; requestedEffort is already bound.
 					effort: childSession?.thinkingLevel ?? requestedEffort,
+					// Spread, not `peers: requestedPeers`: an undeclared child must leave the key
+					// absent so a merge against an earlier snapshot cannot read as "declared empty".
+					...(requestedPeers ? { peers: requestedPeers } : {}),
 					label,
 					status: run.status,
 					durationMs,

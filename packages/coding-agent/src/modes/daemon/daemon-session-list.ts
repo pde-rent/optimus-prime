@@ -401,6 +401,9 @@ function rlmChildSnapshotForActiveSession(
 		activeSessionId: activeSession.activeSessionId,
 		sessionName: session.sessionName,
 		model: session.model ? `${session.model.provider}/${session.model.id}` : undefined,
+		// Spread, not a plain assignment: an undeclared child must leave the key absent so a
+		// reattaching client cannot read it back as "declared empty".
+		...(session.peerNames ? { peers: [...session.peerNames] } : {}),
 		label: rlmChildLabel(metadata.prompt ?? ""),
 		status,
 		answerPreview,

@@ -69,6 +69,35 @@ describe("rlm subagent display files", () => {
 		}
 	});
 
+	it("keeps declared parent-only edges distinct from undeclared ones across a round trip", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "prime-rlm-display-peers-"));
+		try {
+			const parentOnlyDir = join(tempDir, "sub-parent-only");
+			writeRlmSubagentDisplayEntry(makeEntry(parentOnlyDir, { peers: [] }));
+			const parentOnly = await readRlmSubagentDisplayEntry(parentOnlyDir);
+			expect(parentOnly?.peers).toEqual([]);
+
+			const connectedDir = join(tempDir, "sub-connected");
+			writeRlmSubagentDisplayEntry(makeEntry(connectedDir, { peers: ["reviewer", "tester"] }));
+			await expect(readRlmSubagentDisplayEntry(connectedDir)).resolves.toMatchObject({
+				peers: ["reviewer", "tester"],
+			});
+
+			const undeclaredDir = join(tempDir, "sub-undeclared");
+			writeRlmSubagentDisplayEntry(makeEntry(undeclaredDir));
+			expect((await readRlmSubagentDisplayEntry(undeclaredDir))?.peers).toBeUndefined();
+
+			mkdirSync(join(tempDir, "sub-bad"), { recursive: true });
+			writeFileSync(
+				rlmSubagentDisplayPath(join(tempDir, "sub-bad")),
+				JSON.stringify(makeEntry(join(tempDir, "sub-bad"), { peers: [7] as unknown as string[] })),
+			);
+			await expect(readRlmSubagentDisplayEntry(join(tempDir, "sub-bad"))).resolves.toBeUndefined();
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("accepts unknown extra fields from newer writers", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-rlm-display-forward-"));
 		try {

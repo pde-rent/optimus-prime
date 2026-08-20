@@ -27,6 +27,11 @@ export interface RlmSubagentDisplayEntry {
 	prompt?: string;
 	spawnCode?: string;
 	model?: { provider: string; modelId: string };
+	/**
+	 * Declared outbound sibling edges. `[]` (parent-only) must survive a round trip as `[]`, not as
+	 * undefined, or a rehydrated child silently regains reach its spawner denied it.
+	 */
+	peers?: string[];
 	status: "running" | "completed" | "deleted";
 	createdAt: number;
 	updatedAt: string;
@@ -47,6 +52,8 @@ function isRlmSubagentDisplayEntry(value: unknown): value is RlmSubagentDisplayE
 		typeof entry.sessionFile === "string" &&
 		(entry.status === "running" || entry.status === "completed" || entry.status === "deleted") &&
 		(entry.rlmMaxDepth === undefined || (Number.isSafeInteger(entry.rlmMaxDepth) && entry.rlmMaxDepth >= 0)) &&
+		(entry.peers === undefined ||
+			(Array.isArray(entry.peers) && entry.peers.every((peer) => typeof peer === "string"))) &&
 		typeof entry.createdAt === "number"
 	);
 }

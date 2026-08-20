@@ -300,6 +300,7 @@ interface PassiveRlmSubagentEntry {
 	prompt?: string;
 	spawnCode?: string;
 	model?: { provider: string; modelId: string };
+	peers?: string[];
 	status: "running" | "completed" | "deleted";
 	createdAt: number;
 }
@@ -322,13 +323,17 @@ function rlmSubagentMetadataFields(source: {
 	prompt?: string;
 	spawnCode?: string;
 	model?: { provider: string; modelId: string };
-}): Pick<PassiveRlmSubagentEntry, "rlmMaxDepth" | "rlmParentNodeId" | "prompt" | "spawnCode" | "model"> {
+	peers?: readonly string[];
+}): Pick<PassiveRlmSubagentEntry, "rlmMaxDepth" | "rlmParentNodeId" | "prompt" | "spawnCode" | "model" | "peers"> {
 	return {
 		...(source.rlmMaxDepth !== undefined ? { rlmMaxDepth: source.rlmMaxDepth } : {}),
 		...(source.rlmParentNodeId ? { rlmParentNodeId: source.rlmParentNodeId } : {}),
 		...(source.prompt ? { prompt: source.prompt } : {}),
 		...(source.spawnCode ? { spawnCode: source.spawnCode } : {}),
 		...(source.model ? { model: source.model } : {}),
+		// Presence test, not truthiness on length: `[]` is a declared parent-only cohort and must
+		// stay distinguishable from an undeclared child that keeps the family default.
+		...(source.peers ? { peers: [...source.peers] } : {}),
 	};
 }
 
@@ -921,6 +926,7 @@ export class AgentDaemon {
 			prompt?: string;
 			spawnCode?: string;
 			model?: { provider: string; modelId: string };
+			peers?: readonly string[];
 			status: "running" | "completed";
 			createdAt?: number;
 		},
@@ -1096,6 +1102,7 @@ export class AgentDaemon {
 			prompt?: string;
 			spawnCode?: string;
 			model?: { provider: string; modelId: string };
+			peers?: string[];
 			status: "running" | "completed" | "deleted";
 			createdAt: number;
 		}) => ({
@@ -1239,6 +1246,7 @@ export class AgentDaemon {
 				...(parentId ? { parentId } : {}),
 				sessionName: passive.info.name ?? passive.entry.sessionName,
 				model: passive.entry.model ? `${passive.entry.model.provider}/${passive.entry.model.modelId}` : undefined,
+				...(passive.entry.peers ? { peers: passive.entry.peers } : {}),
 				label: rlmChildLabel(passive.entry.prompt ?? ""),
 				status: passive.entry.status === "completed" ? "done" : "error",
 				sessionDir: passive.entry.sessionDir,
@@ -2343,6 +2351,9 @@ export class AgentDaemon {
 					prompt: metadata.prompt && metadata.prompt.length <= 4096 ? metadata.prompt : undefined,
 					spawnCode: metadata.spawnCode,
 					...(model ? { model: { provider: model.provider, modelId: model.id } } : {}),
+					// The completion write replaces the display file wholesale, so the declared edges
+					// have to be restated here or they are erased when the child finishes.
+					peers: session.peerNames,
 					status: "completed",
 					createdAt: metadata.createdAt,
 				});
@@ -2568,6 +2579,7 @@ export class AgentDaemon {
 								provider: options.model.provider,
 								modelId: options.model.id,
 							},
+							peers: options.peerNames,
 							status: "running",
 							createdAt: runtime.metadata.createdAt,
 						});
@@ -2911,6 +2923,9 @@ export class AgentDaemon {
 					sessionLease,
 					sessionOptions: {
 						...(rehydratedModel ? { model: rehydratedModel } : {}),
+						// Restored, not defaulted: a rehydrated child that dropped its declared edges
+						// would silently regain sibling reach its spawner denied it.
+						peerNames: entry.peers,
 						agentMessageController: this.createAgentMessageController(() => stateRef),
 						agentObserveController: this.createAgentObserveController(() => stateRef),
 						rlmHeartbeatController: {

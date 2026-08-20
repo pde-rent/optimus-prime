@@ -641,6 +641,47 @@ describe("buildRlmChildSnapshots", () => {
 		const solo = makeState({ activeSessionId: "solo" });
 		expect(buildRlmChildSnapshots("solo", [solo])).toEqual([]);
 	});
+
+	it("carries each child's declared outbound peer edges", () => {
+		const parent = makeState({ activeSessionId: "parent" });
+		const child = (activeSessionId: string, rlmChildId: string, peerNames?: readonly string[]) =>
+			makeState({
+				activeSessionId,
+				peerNames,
+				metadata: { kind: "subagent", createdAt: 1, parentActiveSessionId: "parent", rlmChildId },
+			});
+
+		const snapshots = buildRlmChildSnapshots("parent", [
+			parent,
+			child("undeclared", "sub-undeclared"),
+			child("parent-only", "sub-parent-only", []),
+			child("two-peers", "sub-two-peers", ["reviewer", "tester"]),
+		]);
+
+		expect(snapshots.map((snapshot) => [snapshot.id, snapshot.peers])).toEqual([
+			["sub-undeclared", undefined],
+			["sub-parent-only", []],
+			["sub-two-peers", ["reviewer", "tester"]],
+		]);
+		// An undeclared child must not even carry the key: a reattaching client merges
+		// snapshots by spread, where an explicit undefined would erase a known edge set.
+		expect("peers" in snapshots[0]!).toBe(false);
+		expect("peers" in snapshots[1]!).toBe(true);
+	});
+
+	it("copies the declared peers so a client cannot mutate session state", () => {
+		const parent = makeState({ activeSessionId: "parent" });
+		const declared = ["reviewer"];
+		const child = makeState({
+			activeSessionId: "child",
+			peerNames: declared,
+			metadata: { kind: "subagent", createdAt: 1, parentActiveSessionId: "parent", rlmChildId: "sub-aaa" },
+		});
+
+		buildRlmChildSnapshots("parent", [parent, child])[0]?.peers?.push("smuggled");
+
+		expect(declared).toEqual(["reviewer"]);
+	});
 });
 
 describe("resolveAttachModelFallbackMessage", () => {
@@ -698,6 +739,7 @@ interface StateOptions {
 	contextTokens?: number;
 	streamingMessage?: AgentMessage;
 	rlmDepth?: number;
+	peerNames?: readonly string[];
 	metadata?: {
 		kind: "top-level" | "subagent";
 		createdAt: number;
@@ -733,6 +775,7 @@ function makeState(options: StateOptions): ActiveSessionState {
 				sessionFile: options.sessionFile,
 				sessionId: options.sessionId ?? `session-${options.activeSessionId}`,
 				rlmDepth: options.rlmDepth ?? 0,
+				peerNames: options.peerNames,
 				sessionName: `session ${options.activeSessionId}`,
 				sessionManager: {
 					getCwd: () => "/tmp/project",

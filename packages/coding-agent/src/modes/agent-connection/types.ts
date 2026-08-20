@@ -556,6 +556,12 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 	model?: string;
 	/** Effective reasoning effort for the child run, when the host reports one. */
 	effort?: string;
+	/**
+	 * Sibling names this child declared it may message. Edges are one-way: listing B here does not
+	 * let B reach A. `[]` means parent-only and is NOT the same as undefined, which means the child
+	 * declared nothing and keeps the family default. The parent is reachable either way.
+	 */
+	peers?: string[];
 	label: string;
 	status: AgentConnectionRlmChildAgentStatus;
 	durationMs?: number;
