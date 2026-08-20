@@ -385,6 +385,15 @@ function jsFileOperation(line: string, paths: ReadonlyMap<string, string>): stri
 		if (action && path) return `${action} ${pathTail(path)}`;
 	}
 
+	// read(path) / write(path, content) repl globals
+	// Lookbehind, not a word boundary: `obj.read(x)` is somebody else's method, and
+	// the branch runs after the fs helpers so `writeFileSync(dst, read(src))` stays a write.
+	const replFileCall = trimmed.match(/(?<![\w$.])(read|write)\s*\(\s*([^,)]+)/);
+	if (replFileCall?.[1] && replFileCall[2]) {
+		const path = resolvePathArgument(replFileCall[2], paths);
+		if (path) return `${replFileCall[1]} ${pathTail(path)}`;
+	}
+
 	// await import(path)
 	const dynamicImport = trimmed.match(/\bimport\(\s*([^)]+)\)/);
 	if (dynamicImport?.[1]) {

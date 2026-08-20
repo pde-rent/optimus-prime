@@ -2,6 +2,7 @@ import { type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "../
 
 /** Runtime capabilities the REPL sandbox exposes without any install step. */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
+	"`read(path, { from?, to? })` and `write(path, content)` — synchronous file IO: `read` returns raw text, a 1-based inclusive line slice when bounded and the whole file otherwise; `write` creates parent directories, replaces atomically, and returns `{ path, bytes }`",
 	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
 	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring). Use a `%%bash` cell for shell logic and `Bun.spawn` for process control.",
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
@@ -125,7 +126,7 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"Important: do not install dependencies into the REPL just to make an external project import or run there. If a project import, test, script, CLI, or dependency check is needed, run it through that project's own environment and normal command interface (its documented commands, `bun run ...`, `uv run ...`, the project's own interpreter, from the repo root). Treat failures from that native environment as the relevant result.",
 	"",
-	"Use JavaScript for reading, searching, and editing files — it gives you reusable variables you can slice, filter, and act on without re-reading. Always assign read/search results to named variables so you can revisit them later.",
+	"Read and write files with the synchronous globals `read` and `write` — no `await` needed. `const head = read('pkg/file.ts', { from: 1, to: 80 })` returns that 1-based inclusive line slice as raw text, so slice a large file instead of pulling all of it into context; `write('out/report.md', text)` creates parent directories, replaces atomically, and returns `{ path, bytes }`. Use `read` to consume content as a value and `edit.src` when the next step is an edit. Assign read and search results to named variables so you can slice, filter, and act on them without re-reading.",
 	"",
 	"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 	"",

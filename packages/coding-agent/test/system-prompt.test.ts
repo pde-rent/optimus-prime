@@ -161,7 +161,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Important: do not install dependencies into the REPL just to make an external project import or run there. If a project import, test, script, CLI, or dependency check is needed, run it through that project's own environment and normal command interface (its documented commands, `bun run ...`, `uv run ...`, the project's own interpreter, from the repo root). Treat failures from that native environment as the relevant result.",
 				"",
-				"Use JavaScript for reading, searching, and editing files — it gives you reusable variables you can slice, filter, and act on without re-reading. Always assign read/search results to named variables so you can revisit them later.",
+				"Read and write files with the synchronous globals `read` and `write` — no `await` needed. `const head = read('pkg/file.ts', { from: 1, to: 80 })` returns that 1-based inclusive line slice as raw text, so slice a large file instead of pulling all of it into context; `write('out/report.md', text)` creates parent directories, replaces atomically, and returns `{ path, bytes }`. Use `read` to consume content as a value and `edit.src` when the next step is an edit. Assign read and search results to named variables so you can slice, filter, and act on them without re-reading.",
 				"",
 				"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 				"",
@@ -360,7 +360,7 @@ describe("buildRlmPrompt", () => {
 		expect(prompt).toContain("it must be the first line of the code cell");
 	});
 
-	test("documents preferring JavaScript for reading and searching files when repl is active", () => {
+	test("documents the read/write globals for file work when repl is active", () => {
 		const prompt = buildRlmPrompt({
 			cwd: "/repo",
 			messagesPath: "/repo/.pi/sessions/session.jsonl",
@@ -368,8 +368,11 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 
-		expect(prompt).toContain("Use JavaScript for reading, searching, and editing files");
-		expect(prompt).toContain("Always assign read/search results to named variables");
+		expect(prompt).toContain("Read and write files with the synchronous globals `read` and `write`");
+		// The division of labour is the part a model gets wrong: `read` yields a value, `edit.src`
+		// yields the anchor `edit.patch` needs.
+		expect(prompt).toContain("Use `read` to consume content as a value and `edit.src` when the next step is an edit");
+		expect(prompt).toContain("Assign read and search results to named variables");
 	});
 
 	test("includes the edit skill guidance only when the edit skill is installed", () => {

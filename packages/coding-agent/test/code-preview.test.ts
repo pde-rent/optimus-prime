@@ -120,6 +120,27 @@ if (await Bun.file(p).exists()) {
 		});
 	});
 
+	it("summarises the bare read/write repl globals", () => {
+		expect(previewJsCode("read('a/b.ts');")).toEqual({ language: "js", text: "read a/b.ts" });
+		expect(previewJsCode('write("x/y.json", data);')).toEqual({ language: "js", text: "write x/y.json" });
+		const code = `const p = "packages/coding-agent/src/foo.ts";
+const src = await read(p);`;
+		expect(previewJsCode(code)).toEqual({ language: "js", text: "read packages/coding-agent/src/foo.ts" });
+	});
+
+	it("does not label member calls as bare read/write", () => {
+		expect(previewJsCode("edit.src('f.ts');")).toEqual({ language: "js", text: "edit.src('f.ts')" });
+		expect(previewJsCode("obj.read('f');")).toEqual({ language: "js", text: "obj.read('f')" });
+		expect(previewJsCode("agent_observe.recent_messages('f.ts');")).toEqual({
+			language: "js",
+			text: "agent_observe.recent_messages('f.ts')",
+		});
+		// A path variable in scope must not turn an unrelated method call into a read.
+		const code = `const p = "packages/coding-agent/src/foo.ts";
+spread(p);`;
+		expect(previewJsCode(code)).toEqual({ language: "js", text: "spread(p)" });
+	});
+
 	it("resolves simple path variables", () => {
 		const code = `const target = "packages/coding-agent/src/foo.ts";
 const before = await Bun.file(target).text();

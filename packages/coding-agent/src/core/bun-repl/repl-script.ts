@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { inspect } from "node:util";
 import { deserialize, serialize } from "node:v8";
 import { createContext, runInContext } from "node:vm";
@@ -289,6 +291,58 @@ function pwd(): string {
 	return process.cwd();
 }
 
+/**
+ * File IO, synchronous on purpose.
+ *
+ * A cell is sequential, so nothing is gained by making these async, and sync means
+ * `read(p)` and `await read(p)` both yield the string — a forgotten `await` cannot
+ * leave a stray Promise where the model expected text. Relative paths resolve
+ * against the REPL's cwd, which is what `cd()` moves.
+ */
+function read(path: string, opts?: { from?: number; to?: number }): string {
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch (err: unknown) {
+		const code = (err as { code?: string }).code;
+		if (code === "ENOENT") throw new Error(`read: no such file: ${path}`);
+		if (code === "EISDIR") throw new Error(`read: ${path} is a directory`);
+		throw err;
+	}
+	if (opts?.from === undefined && opts?.to === undefined) return text;
+	// 1-based inclusive, the numbering the diff and edit tools print.
+	const lines = text.split("\n");
+	const from = Math.max(1, opts?.from ?? 1);
+	const to = Math.min(lines.length, opts?.to ?? lines.length);
+	return lines.slice(from - 1, to).join("\n");
+}
+
+function write(path: string, content: string | Uint8Array | ArrayBuffer): { path: string; bytes: number } {
+	const target = resolve(path);
+	mkdirSync(dirname(target), { recursive: true });
+	const data =
+		typeof content === "string"
+			? Buffer.from(content, "utf8")
+			: content instanceof ArrayBuffer
+				? new Uint8Array(content)
+				: content;
+	// Written beside the target, never in a temp dir: rename is only atomic within one
+	// filesystem, and a crash mid-write must not leave the target truncated.
+	const temp = `${target}.${crypto.randomUUID().slice(0, 8)}.tmp`;
+	try {
+		writeFileSync(temp, data);
+		renameSync(temp, target);
+	} catch (err: unknown) {
+		try {
+			unlinkSync(temp);
+		} catch {
+			// never created
+		}
+		throw err;
+	}
+	return { path: target, bytes: data.byteLength };
+}
+
 function sandboxConsole() {
 	// Strings print bare and everything else through `inspect`, matching what a normal
 	// console does. The previous version passed the whole argument list as one value, so
@@ -484,6 +538,8 @@ for (const [name, value] of Object.entries({
 	display,
 	cd,
 	pwd,
+	read,
+	write,
 	env: process.env,
 	__import: importModule,
 	__rlm_host_request: hostBridge.hostRequest.bind(hostBridge),
