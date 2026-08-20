@@ -78,6 +78,11 @@ So a multi-series chart says so, under the legend:
 The legend itself wraps across lines and never truncates an entry, so ten series give ten whole
 names in legend order. When you need to read ten series rather than see their envelope, draw them
 one per `show()`, or compare a single number each with `barh`.
+
+### Lifecycle and limits
+
+| call | behaviour |
+|---|---|
 | `xlim(a, b)`, `ylim(a, b)` | also accept a single `[a, b]` |
 | `figure(opts?)` | starts a fresh figure; `{ width, height, charset, color }` or `{ figsize: [w, h] }` in characters |
 | `show()` | renders the figure, then resets it |
