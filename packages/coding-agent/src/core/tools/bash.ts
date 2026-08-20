@@ -7,6 +7,7 @@ import { expandCollapseHint } from "../../modes/interactive/components/keybindin
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.js";
 import { theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
+import { formatDuration } from "../../utils/shared.js";
 import {
 	getShellConfig,
 	getShellEnv,
@@ -169,10 +170,6 @@ class BashResultRenderComponent extends Container {
 		cachedLines: undefined,
 		cachedSkipped: undefined,
 	};
-}
-
-function formatDuration(ms: number): string {
-	return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function formatBashCall(args: { command?: string; timeout?: number } | undefined): string {

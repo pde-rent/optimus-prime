@@ -1,4 +1,5 @@
 import { getKeybindings } from "../keybindings.js";
+import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
 import type { Component } from "../tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 
@@ -44,6 +45,13 @@ export interface SelectListTruncatePrimaryContext {
 	isSelected: boolean;
 }
 
+export interface SelectListRowContext {
+	item: SelectItem;
+	index: number;
+	isSelected: boolean;
+	width: number;
+}
+
 export interface SelectListLayoutOptions {
 	minPrimaryColumnWidth?: number;
 	maxPrimaryColumnWidth?: number;
@@ -51,6 +59,20 @@ export interface SelectListLayoutOptions {
 	showItemMetadata?: boolean;
 	showDirectionalScrollInfo?: boolean;
 	showSelectedDescription?: boolean;
+	/**
+	 * Replaces the default row body. Row decoration (tree glyphs, badges,
+	 * per-item metadata lines) is the only thing list surfaces legitimately
+	 * differ on; everything else must stay in this component.
+	 */
+	renderRow?: (context: SelectListRowContext) => string | string[];
+	/** Text appended to the scroll readout, e.g. active filter labels. */
+	scrollInfoSuffix?: () => string;
+	/** Keeps the readout visible even when every item fits. */
+	alwaysShowScrollInfo?: boolean;
+	/** Enter toggles the row through `onToggle` instead of confirming and closing. */
+	multiSelect?: boolean;
+	/** Empty-list message; defaults to the slash-command wording. */
+	noMatchText?: string;
 }
 
 export class SelectList implements Component {
@@ -64,6 +86,7 @@ export class SelectList implements Component {
 	public onSelect?: (item: SelectItem) => void;
 	public onCancel?: () => void;
 	public onSelectionChange?: (item: SelectItem) => void;
+	public onToggle?: (item: SelectItem) => void;
 
 	constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout: SelectListLayoutOptions = {}) {
 		this.items = items;
@@ -78,42 +101,61 @@ export class SelectList implements Component {
 		this.selectedIndex = 0;
 	}
 
+	/** Replaces the backing items, keeping the selection in range. */
+	setItems(items: SelectItem[]): void {
+		this.items = items;
+		this.filteredItems = items;
+		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, items.length - 1));
+	}
+
 	setSelectedIndex(index: number): void {
 		this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+	}
+
+	getSelectedIndex(): number {
+		return this.selectedIndex;
+	}
+
+	setMaxVisible(maxVisible: number): void {
+		this.maxVisible = Math.max(1, maxVisible);
 	}
 
 	invalidate(): void {}
 
 	render(width: number): string[] {
 		const lines: string[] = [];
+		const total = this.filteredItems.length;
 
-		if (this.filteredItems.length === 0) {
-			lines.push(this.theme.noMatch("  No matching commands"));
+		if (total === 0) {
+			lines.push(this.theme.noMatch(this.layout.noMatchText ?? "  No matching commands"));
+			if (this.layout.alwaysShowScrollInfo) {
+				lines.push(this.theme.scrollInfo(truncateToWidth(`  (0/0)${this.scrollInfoSuffix()}`, width - 2, "")));
+			}
 			return lines;
 		}
 
 		const primaryColumnWidth = this.getPrimaryColumnWidth();
+		const { start, end } = listWindow(this.selectedIndex, total, this.maxVisible);
 
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible),
-		);
-		const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
-
-		for (let i = startIndex; i < endIndex; i++) {
+		for (let i = start; i < end; i++) {
 			const item = this.filteredItems[i];
 			if (!item) continue;
 
 			const isSelected = i === this.selectedIndex;
+			if (this.layout.renderRow) {
+				const rendered = this.layout.renderRow({ item, index: i, isSelected, width });
+				lines.push(...(Array.isArray(rendered) ? rendered : [rendered]));
+				continue;
+			}
 			const descriptionSingleLine = item.description ? normalizeToSingleLine(item.description) : undefined;
 			lines.push(this.renderItem(item, isSelected, width, descriptionSingleLine, primaryColumnWidth));
 		}
 
-		if (startIndex > 0 || endIndex < this.filteredItems.length) {
+		if (this.layout.alwaysShowScrollInfo || start > 0 || end < total) {
 			const scrollText = this.layout.showDirectionalScrollInfo
-				? this.formatDirectionalScrollInfo(startIndex, this.filteredItems.length - endIndex)
-				: `  (${this.selectedIndex + 1}/${this.filteredItems.length})`;
-			lines.push(this.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")));
+				? this.formatDirectionalScrollInfo(start, total - end)
+				: scrollPositionText(this.selectedIndex, total);
+			lines.push(this.theme.scrollInfo(truncateToWidth(scrollText + this.scrollInfoSuffix(), width - 2, "")));
 		}
 
 		if (this.layout.showSelectedDescription) {
@@ -126,21 +168,33 @@ export class SelectList implements Component {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 		if (kb.matches(keyData, "tui.select.up")) {
-			this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
-			this.notifySelectionChange();
+			this.step(-1, true);
 		} else if (kb.matches(keyData, "tui.select.down")) {
-			this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
-			this.notifySelectionChange();
+			this.step(1, true);
+		} else if (kb.matches(keyData, "tui.select.pageUp")) {
+			this.step(-this.maxVisible, false);
+		} else if (kb.matches(keyData, "tui.select.pageDown")) {
+			this.step(this.maxVisible, false);
 		} else if (kb.matches(keyData, "tui.select.confirm")) {
 			const selectedItem = this.filteredItems[this.selectedIndex];
-			if (selectedItem && this.onSelect) {
-				this.onSelect(selectedItem);
+			if (!selectedItem) return;
+			if (this.layout.multiSelect) {
+				this.onToggle?.(selectedItem);
+			} else {
+				this.onSelect?.(selectedItem);
 			}
 		} else if (kb.matches(keyData, "tui.select.cancel")) {
-			if (this.onCancel) {
-				this.onCancel();
-			}
+			this.onCancel?.();
 		}
+	}
+
+	private step(delta: number, wrap: boolean): void {
+		this.selectedIndex = moveSelection(this.selectedIndex, this.filteredItems.length, delta, wrap);
+		this.notifySelectionChange();
+	}
+
+	private scrollInfoSuffix(): string {
+		return this.layout.scrollInfoSuffix?.() ?? "";
 	}
 
 	/** Pad a selected row to the full width so `selectedRow` can paint a solid bar. */

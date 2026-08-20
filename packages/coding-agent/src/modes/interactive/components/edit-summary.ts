@@ -81,7 +81,7 @@ export function mergeTurnFileChanges(
 }
 
 /** Dim gutter that anchors every per-file change summary line. */
-const FILE_CHANGE_SUMMARY_PREFIX = "    ╰─ ";
+export const FILE_CHANGE_SUMMARY_PREFIX = "    ╰─ ";
 /** Indent that aligns diff rows with the summary line's text column. */
 export const FILE_CHANGE_DIFF_INDENT = " ".repeat(visibleWidth(FILE_CHANGE_SUMMARY_PREFIX));
 

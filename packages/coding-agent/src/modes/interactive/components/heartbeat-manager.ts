@@ -1,4 +1,12 @@
-import { type Component, type Focusable, getKeybindings, Spacer, TruncatedText } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	type Focusable,
+	getKeybindings,
+	listWindow,
+	Spacer,
+	scrollPositionText,
+	TruncatedText,
+} from "@earendil-works/pi-tui";
 import type { AgentHeartbeatManagementAction } from "../../../core/cron-jobs.js";
 import type { AgentConnectionHeartbeat } from "../../agent-connection/types.js";
 import { theme } from "../theme/theme.js";
@@ -131,12 +139,11 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			list.addChild(new TruncatedText(theme.fg("muted", "No running or paused heartbeats"), 1, 0));
 			return;
 		}
-		const visibleItems = this.getListLayout().visibleItems;
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(visibleItems / 2), this.heartbeats.length - visibleItems),
+		const { start: startIndex, end: endIndex } = listWindow(
+			this.selectedIndex,
+			this.heartbeats.length,
+			this.getListLayout().visibleItems,
 		);
-		const endIndex = Math.min(startIndex + visibleItems, this.heartbeats.length);
 
 		for (let index = startIndex; index < endIndex; index++) {
 			const heartbeat = this.heartbeats[index];
@@ -159,7 +166,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 
 		if (startIndex > 0 || endIndex < this.heartbeats.length) {
 			list.addChild(
-				new TruncatedText(theme.fg("muted", `  (${this.selectedIndex + 1}/${this.heartbeats.length})`), 1, 0),
+				new TruncatedText(theme.fg("muted", scrollPositionText(this.selectedIndex, this.heartbeats.length)), 1, 0),
 			);
 		}
 	}

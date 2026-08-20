@@ -1,6 +1,10 @@
 import { isAgentSessionMessage } from "../../core/agent-messages.js";
 import type { AgentConnectionSessionEvent } from "../agent-connection/index.js";
 
+// Re-exported so the status line, context tree and subagent panel keep one
+// token rendering; interactive-mode.ts still imports it from here.
+export { formatTokenCount } from "../../utils/shared.js";
+
 export type AgentActivity = "waiting" | "thinking" | "writing" | "writing-code" | "executing";
 
 export interface AgentActivityStatus {
@@ -124,12 +128,4 @@ export class AgentActivityTracker {
 	private estimatedStreamingTokens(): number {
 		return Math.round(this.streamingChars / CHARS_PER_TOKEN_ESTIMATE);
 	}
-}
-
-export function formatTokenCount(count: number): string {
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-	return `${Math.round(count / 1000000)}M`;
 }

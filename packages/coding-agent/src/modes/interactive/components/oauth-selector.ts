@@ -4,7 +4,10 @@ import {
 	type Focusable,
 	fuzzyFilter,
 	getKeybindings,
+	listWindow,
+	moveSelection,
 	Spacer,
+	scrollPositionText,
 	TruncatedText,
 } from "@earendil-works/pi-tui";
 import type { AuthStatus, AuthStorage } from "../../../core/auth-storage.js";
@@ -276,12 +279,11 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		this.updateLayout();
 		this.listContainer.clear();
 
-		const maxVisible = this.listLayout.visibleItems;
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(maxVisible / 2), this.filteredProviders.length - maxVisible),
+		const { start: startIndex, end: endIndex } = listWindow(
+			this.selectedIndex,
+			this.filteredProviders.length,
+			this.listLayout.visibleItems,
 		);
-		const endIndex = Math.min(startIndex + maxVisible, this.filteredProviders.length);
 
 		for (let i = startIndex; i < endIndex; i++) {
 			const provider = this.filteredProviders[i];
@@ -300,7 +302,7 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		}
 
 		if (startIndex > 0 || endIndex < this.filteredProviders.length) {
-			const scrollInfo = theme.fg("muted", `  (${this.selectedIndex + 1}/${this.filteredProviders.length})`);
+			const scrollInfo = theme.fg("muted", scrollPositionText(this.selectedIndex, this.filteredProviders.length));
 			this.listContainer.addChild(new TruncatedText(scrollInfo, 1, 0));
 		}
 
@@ -313,6 +315,11 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 					: "No matching providers";
 			this.listContainer.addChild(new TruncatedText(theme.fg("muted", message), 1, 0));
 		}
+	}
+
+	private moveBy(delta: number): void {
+		this.selectedIndex = moveSelection(this.selectedIndex, this.filteredProviders.length, delta);
+		this.updateList();
 	}
 
 	private formatStatusIndicator(provider: AuthSelectorProvider): string {
@@ -360,13 +367,13 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 		if (kb.matches(keyData, "tui.select.up")) {
-			if (this.filteredProviders.length === 0) return;
-			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-			this.updateList();
+			this.moveBy(-1);
 		} else if (kb.matches(keyData, "tui.select.down")) {
-			if (this.filteredProviders.length === 0) return;
-			this.selectedIndex = Math.min(this.filteredProviders.length - 1, this.selectedIndex + 1);
-			this.updateList();
+			this.moveBy(1);
+		} else if (kb.matches(keyData, "tui.select.pageUp")) {
+			this.moveBy(-this.listLayout.visibleItems);
+		} else if (kb.matches(keyData, "tui.select.pageDown")) {
+			this.moveBy(this.listLayout.visibleItems);
 		}
 		// Only steal left/right for tabs when the search field is empty, so cursor
 		// editing still works while filtering.

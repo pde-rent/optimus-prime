@@ -208,7 +208,6 @@ type RenderSessionContextHarness = {
 	toolOutputExpanded: boolean;
 	chatContainer: Container;
 	editor: { addToHistory?: (text: string) => void };
-	footer: { invalidate: () => void };
 	updateEditorBorderColor: () => void;
 	resetPendingToolState: () => void;
 	preloadToolDefinitions: (toolNames: string[]) => Promise<void>;
@@ -256,7 +255,6 @@ function createRenderSessionContextHarness(overrides: Partial<RenderSessionConte
 		toolOutputExpanded: false,
 		chatContainer,
 		editor: { addToHistory },
-		footer: { invalidate: vi.fn() },
 		updateEditorBorderColor: vi.fn(),
 		resetPendingToolState: vi.fn(),
 		preloadToolDefinitions: vi.fn(async () => {}),
@@ -326,7 +324,6 @@ describe("InteractiveMode.renderSessionContext", () => {
 				lateReplSentAgentMessages,
 				toolOutputExpanded: false,
 				chatContainer,
-				footer: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
 				resetPendingToolState: vi.fn(),
 				preloadToolDefinitions: vi.fn(async () => {}),
@@ -380,7 +377,6 @@ describe("InteractiveMode.renderSessionContext", () => {
 				lateReplSentAgentMessages: new Map(),
 				toolOutputExpanded: false,
 				chatContainer,
-				footer: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
 				resetPendingToolState: vi.fn(),
 				preloadToolDefinitions: vi.fn(async () => {}),
@@ -1724,7 +1720,6 @@ describe("InteractiveMode tool event rendering", () => {
 		const fakeThis = Object.assign(Object.create(InteractiveMode.prototype), {
 			isInitialized: true,
 			init: vi.fn(async () => {}),
-			footer: { invalidate: vi.fn() },
 			updateConnectionStateFromEvent: vi.fn(),
 			activityTracker: new AgentActivityTracker(),
 			streamingComponent: { updateContent: vi.fn() },
@@ -1983,7 +1978,6 @@ describe("InteractiveMode model selection persistence", () => {
 		uiServices: {
 			settingsManager: { setDefaultModelAndProvider(provider: string, modelId: string): void };
 		};
-		footer: { invalidate(): void };
 		subagentSummaryLine: { invalidate(): void };
 		patchConnectionState(patch: Partial<AgentConnectionState>): void;
 		updateEditorBorderColor(): void;
@@ -2026,7 +2020,6 @@ describe("InteractiveMode model selection persistence", () => {
 				setDefaultModelAndProvider(provider: string, modelId: string): void;
 			};
 		};
-		footer: { invalidate(): void };
 		patchConnectionState(patch: Partial<AgentConnectionState>): void;
 		updateEditorBorderColor(): void;
 		showStatus(message: string): void;
@@ -2139,7 +2132,6 @@ describe("InteractiveMode model selection persistence", () => {
 				setDefaultModelAndProvider: vi.fn(),
 			},
 		};
-		fakeThis.footer = { invalidate: vi.fn() };
 		fakeThis.patchConnectionState = vi.fn();
 		fakeThis.updateEditorBorderColor = vi.fn();
 		fakeThis.showStatus = vi.fn();
@@ -2208,7 +2200,6 @@ describe("InteractiveMode model selection persistence", () => {
 				}),
 			},
 		};
-		fakeThis.footer = { invalidate: vi.fn() };
 		fakeThis.subagentSummaryLine = { invalidate: vi.fn() };
 		fakeThis.patchConnectionState = vi.fn();
 		fakeThis.updateEditorBorderColor = vi.fn();
@@ -2224,7 +2215,6 @@ describe("InteractiveMode model selection persistence", () => {
 			serviceTier: "default",
 			availableThinkingLevels: ["off"],
 		});
-		expect(fakeThis.footer.invalidate).toHaveBeenCalledTimes(1);
 		expect(fakeThis.updateEditorBorderColor).toHaveBeenCalledTimes(1);
 	});
 
@@ -2242,7 +2232,6 @@ describe("InteractiveMode model selection persistence", () => {
 				setDefaultModelAndProvider: vi.fn(),
 			},
 		};
-		fakeThis.footer = { invalidate: vi.fn() };
 		fakeThis.subagentSummaryLine = { invalidate: vi.fn() };
 		fakeThis.patchConnectionState = vi.fn();
 		fakeThis.updateEditorBorderColor = vi.fn();
@@ -2251,7 +2240,6 @@ describe("InteractiveMode model selection persistence", () => {
 
 		expect(fakeThis.uiServices.settingsManager.setDefaultModelAndProvider).not.toHaveBeenCalled();
 		expect(fakeThis.patchConnectionState).not.toHaveBeenCalled();
-		expect(fakeThis.footer.invalidate).not.toHaveBeenCalled();
 		expect(fakeThis.updateEditorBorderColor).not.toHaveBeenCalled();
 	});
 
@@ -2269,7 +2257,6 @@ describe("InteractiveMode model selection persistence", () => {
 				setDefaultModelAndProvider: vi.fn(),
 			},
 		};
-		fakeThis.footer = { invalidate: vi.fn() };
 		fakeThis.subagentSummaryLine = { invalidate: vi.fn() };
 		fakeThis.patchConnectionState = vi.fn();
 		fakeThis.updateEditorBorderColor = vi.fn();

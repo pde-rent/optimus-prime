@@ -14,14 +14,15 @@ import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../../../core/gr
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
+import { selectionHints } from "./keybinding-hints.js";
 
 const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
 	maxPrimaryColumnWidth: 32,
 };
 
-const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
+/** Shared with the `/effort` modal so both surfaces describe levels identically. */
+export const THINKING_LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning",
 	low: "Light reasoning",
@@ -182,7 +183,7 @@ class SelectSubmenu extends Container {
 		this.addChild(this.selectList);
 
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · esc to go back"), 0, 0));
+		this.addChild(new Text(`  ${selectionHints()}`, 0, 0));
 	}
 
 	handleInput(data: string): void {
@@ -303,7 +304,7 @@ export class SettingsSelectorComponent extends Container {
 						config.availableThinkingLevels.map((level) => ({
 							value: level,
 							label: level,
-							description: THINKING_DESCRIPTIONS[level],
+							description: THINKING_LEVEL_DESCRIPTIONS[level],
 						})),
 						currentValue,
 						(value) => {
@@ -451,7 +452,8 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
-		this.addChild(new DynamicBorder());
+		this.addChild(new Text(theme.bold(theme.fg("accent", "Settings")), 0, 0));
+		this.addChild(new Spacer(1));
 
 		this.settingsList = new SettingsList(
 			items,
@@ -531,10 +533,13 @@ export class SettingsSelectorComponent extends Container {
 		);
 
 		this.addChild(this.settingsList);
-		this.addChild(new DynamicBorder());
 	}
 
 	getSettingsList(): SettingsList {
 		return this.settingsList;
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
 	}
 }

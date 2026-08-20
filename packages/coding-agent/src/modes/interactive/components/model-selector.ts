@@ -5,7 +5,10 @@ import {
 	type Focusable,
 	fuzzyFilterScored,
 	getKeybindings,
+	listWindow,
+	moveSelection,
 	Spacer,
+	scrollPositionText,
 	Text,
 	type TUI,
 } from "@earendil-works/pi-tui";
@@ -353,13 +356,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.updateResponsiveLayout();
 		this.listContainer.clear();
 
-		const maxVisible = this.listLayout.visibleItems;
 		const selectedModelIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
-		const startIndex = Math.max(
-			0,
-			Math.min(selectedModelIndex - Math.floor(maxVisible / 2), this.filteredModels.length - maxVisible),
+		const { start: startIndex, end: endIndex } = listWindow(
+			selectedModelIndex,
+			this.filteredModels.length,
+			this.listLayout.visibleItems,
 		);
-		const endIndex = Math.min(startIndex + maxVisible, this.filteredModels.length);
 
 		// Show visible slice of filtered models
 		for (let i = startIndex; i < endIndex; i++) {
@@ -387,7 +389,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 		// Add scroll indicator if needed
 		if (startIndex > 0 || endIndex < this.filteredModels.length) {
-			const scrollInfo = theme.fg("muted", `  (${selectedModelIndex + 1}/${this.filteredModels.length})`);
+			const scrollInfo = theme.fg("muted", scrollPositionText(selectedModelIndex, this.filteredModels.length));
 			this.listContainer.addChild(new Text(scrollInfo, 0, 0));
 		}
 
@@ -421,19 +423,14 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			}
 			return;
 		}
-		// Up arrow - wrap to bottom when at top
 		if (kb.matches(keyData, "tui.select.up")) {
-			const selectableCount = this.getSelectableCount();
-			if (selectableCount === 0) return;
-			this.selectedIndex = this.selectedIndex === 0 ? selectableCount - 1 : this.selectedIndex - 1;
-			this.updateList();
-		}
-		// Down arrow - wrap to top when at bottom
-		else if (kb.matches(keyData, "tui.select.down")) {
-			const selectableCount = this.getSelectableCount();
-			if (selectableCount === 0) return;
-			this.selectedIndex = this.selectedIndex === selectableCount - 1 ? 0 : this.selectedIndex + 1;
-			this.updateList();
+			this.moveBy(-1, true);
+		} else if (kb.matches(keyData, "tui.select.down")) {
+			this.moveBy(1, true);
+		} else if (kb.matches(keyData, "tui.select.pageUp")) {
+			this.moveBy(-this.listLayout.visibleItems, false);
+		} else if (kb.matches(keyData, "tui.select.pageDown")) {
+			this.moveBy(this.listLayout.visibleItems, false);
 		}
 		// Enter
 		else if (kb.matches(keyData, "tui.select.confirm")) {
@@ -448,6 +445,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.searchInput.handleInput(keyData);
 			this.filterModels(this.searchInput.getValue());
 		}
+	}
+
+	private moveBy(delta: number, wrap: boolean): void {
+		this.selectedIndex = moveSelection(this.selectedIndex, this.getSelectableCount(), delta, wrap);
+		this.updateList();
 	}
 
 	private handleSelect(model: Model<any>): void {

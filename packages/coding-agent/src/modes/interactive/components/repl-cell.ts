@@ -8,6 +8,7 @@ import {
 import { formatAgentMessageParticipant } from "../../../core/agent-messages.js";
 import { parseReplBashCell, previewReplCode } from "../../../core/tools/code-preview.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
+import { formatDuration } from "../../../utils/shared.js";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../theme/working-icon.js";
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";
@@ -276,16 +277,6 @@ function readErrorDetails(value: unknown): ReplErrorDetails | undefined {
 	};
 }
 
-function formatDuration(durationMs: number | undefined): string | undefined {
-	if (durationMs === undefined) {
-		return undefined;
-	}
-	if (durationMs < 1000) {
-		return `${Math.round(durationMs)}ms`;
-	}
-	return `${(durationMs / 1000).toFixed(1)}s`;
-}
-
 function isImageBlock(block: ReplCellContentBlock): boolean {
 	return block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string";
 }
@@ -408,9 +399,8 @@ export class ReplCellComponent implements Component {
 			parts.push(theme.fg("muted", counts));
 		}
 
-		const duration = formatDuration(details.durationMs);
-		if (duration) {
-			parts.push(theme.fg("muted", duration));
+		if (details.durationMs !== undefined) {
+			parts.push(theme.fg("muted", formatDuration(details.durationMs)));
 		}
 
 		const errorName = !this.state.isPartial ? (details.error?.ename ?? details.errorEname) : undefined;

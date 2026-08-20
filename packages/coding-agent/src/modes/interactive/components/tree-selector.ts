@@ -1,17 +1,20 @@
 import {
 	type Component,
 	Container,
+	dotJoin,
 	type Focusable,
 	getKeybindings,
 	Input,
+	listWindow,
+	moveSelection,
 	Spacer,
+	scrollPositionText,
 	Text,
 	TruncatedText,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConnectionSessionTreeNode } from "../../agent-connection/index.js";
 import { theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint, keyText } from "./keybinding-hints.js";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
@@ -617,14 +620,11 @@ class TreeList implements Component {
 			return lines;
 		}
 
-		const startIndex = Math.max(
-			0,
-			Math.min(
-				this.selectedIndex - Math.floor(this.maxVisibleLines / 2),
-				this.filteredNodes.length - this.maxVisibleLines,
-			),
+		const { start: startIndex, end: endIndex } = listWindow(
+			this.selectedIndex,
+			this.filteredNodes.length,
+			this.maxVisibleLines,
 		);
-		const endIndex = Math.min(startIndex + this.maxVisibleLines, this.filteredNodes.length);
 
 		for (let i = startIndex; i < endIndex; i++) {
 			const flatNode = this.filteredNodes[i];
@@ -699,7 +699,10 @@ class TreeList implements Component {
 
 		lines.push(
 			truncateToWidth(
-				theme.fg("muted", `  (${this.selectedIndex + 1}/${this.filteredNodes.length})${this.getStatusLabels()}`),
+				theme.fg(
+					"muted",
+					scrollPositionText(this.selectedIndex, this.filteredNodes.length) + this.getStatusLabels(),
+				),
 				width,
 			),
 		);
@@ -895,9 +898,9 @@ class TreeList implements Component {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 		if (kb.matches(keyData, "tui.select.up")) {
-			this.selectedIndex = this.selectedIndex === 0 ? this.filteredNodes.length - 1 : this.selectedIndex - 1;
+			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, -1, true);
 		} else if (kb.matches(keyData, "tui.select.down")) {
-			this.selectedIndex = this.selectedIndex === this.filteredNodes.length - 1 ? 0 : this.selectedIndex + 1;
+			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, 1, true);
 		} else if (kb.matches(keyData, "app.tree.foldOrUp")) {
 			const currentId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
 			if (currentId && this.isFoldable(currentId) && !this.foldedNodes.has(currentId)) {
@@ -915,11 +918,9 @@ class TreeList implements Component {
 				this.selectedIndex = this.findBranchSegmentStart("down");
 			}
 		} else if (kb.matches(keyData, "tui.editor.cursorLeft") || kb.matches(keyData, "tui.select.pageUp")) {
-			// Page up
-			this.selectedIndex = Math.max(0, this.selectedIndex - this.maxVisibleLines);
+			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, -this.maxVisibleLines);
 		} else if (kb.matches(keyData, "tui.editor.cursorRight") || kb.matches(keyData, "tui.select.pageDown")) {
-			// Page down
-			this.selectedIndex = Math.min(this.filteredNodes.length - 1, this.selectedIndex + this.maxVisibleLines);
+			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, this.maxVisibleLines);
 		} else if (kb.matches(keyData, "tui.select.confirm")) {
 			const selected = this.filteredNodes[this.selectedIndex];
 			if (selected && this.onSelect) {
@@ -1170,9 +1171,7 @@ export class TreeSelectorComponent extends Container implements Focusable {
 
 		this.labelInputContainer = new Container();
 
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
-		this.addChild(new Text(theme.bold("  Session Tree"), 1, 0));
+		this.addChild(new Text(theme.bold(theme.fg("accent", "Session Tree")), 1, 0));
 		const filterKeys = [
 			keyText("app.tree.filter.default"),
 			keyText("app.tree.filter.noTools"),
@@ -1181,23 +1180,29 @@ export class TreeSelectorComponent extends Container implements Focusable {
 			keyText("app.tree.filter.all"),
 		].join("/");
 		const cycleKeys = `${keyText("app.tree.filter.cycleForward")}/${keyText("app.tree.filter.cycleBackward")}`;
+		const pageKeys = `${keyText("tui.select.pageUp")}/${keyText("tui.select.pageDown")}`;
+		const foldKeys = `${keyText("app.tree.foldOrUp")}/${keyText("app.tree.unfoldOrDown")}`;
 		this.addChild(
 			new TruncatedText(
 				theme.fg(
 					"muted",
-					`  ↑/↓: move. ←/→: page. ^←/^→ or Alt+←/Alt+→: fold/branch. ${keyText("app.tree.editLabel")}: label. ${filterKeys}: filters (${cycleKeys} cycle). ${keyText("app.tree.toggleLabelTimestamp")}: label time`,
+					dotJoin([
+						`${keyText("tui.select.up")}/${keyText("tui.select.down")} move`,
+						`${pageKeys} page`,
+						`${foldKeys} fold/branch`,
+						`${keyText("app.tree.editLabel")} label`,
+						`${filterKeys} filters (${cycleKeys} cycle)`,
+						`${keyText("app.tree.toggleLabelTimestamp")} label time`,
+					]),
 				),
-				0,
+				1,
 				0,
 			),
 		);
 		this.addChild(new SearchLine(this.treeList));
-		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 		this.addChild(this.treeContainer);
 		this.addChild(this.labelInputContainer);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
 
 		if (tree.length === 0) {
 			setTimeout(() => onCancel(), 100);

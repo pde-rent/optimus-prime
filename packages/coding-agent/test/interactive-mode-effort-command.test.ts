@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "bun:test";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ServiceTier } from "@earendil-works/pi-ai";
 import type { AutocompleteItem, Component } from "@earendil-works/pi-tui";
-import { ThinkingSelectorComponent } from "../src/modes/interactive/components/thinking-selector.js";
+import { SelectModalComponent } from "../src/modes/interactive/components/select-modal.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
@@ -12,7 +12,6 @@ type EffortCommandContext = {
 		availableThinkingLevels: ThinkingLevel[];
 	};
 	agentConnection: { setThinkingLevel: (level: ThinkingLevel) => Promise<void> };
-	footer: { invalidate: () => void };
 	showStatus: (message: string) => void;
 	showError: (message: string) => void;
 	patchConnectionState: (patch: Record<string, unknown>) => void;
@@ -20,7 +19,7 @@ type EffortCommandContext = {
 	getAvailableThinkingLevels: () => ThinkingLevel[];
 	applyThinkingLevel: (level: ThinkingLevel) => void;
 	showThinkingSelector: (levels?: ThinkingLevel[]) => void;
-	showSelector: (create: (done: () => void) => { component: Component; focus: Component }) => void;
+	showSelectorModal: (create: (done: () => void) => Component) => void;
 	ui: { requestRender: () => void };
 };
 
@@ -41,7 +40,6 @@ type FastCommandContext = {
 		setServiceTier: (serviceTier: ServiceTier) => Promise<void>;
 		getState: () => Promise<{ sessionId: string; serviceTier: ServiceTier }>;
 	};
-	footer: { invalidate: () => void };
 	subagentSummaryLine: { invalidate: () => void };
 	showStatus: (message: string) => void;
 	showError: (message: string) => void;
@@ -78,7 +76,6 @@ function makeFastContext(model: Model<Api> = testModel("openai-codex", "gpt-5.5"
 		connectionState: { sessionId: "session-1", serviceTier: "default", thinkingLevel: "high" },
 		fastModeToggleQueue: Promise.resolve(),
 		agentConnection: undefined as never,
-		footer: { invalidate: vi.fn() },
 		subagentSummaryLine: { invalidate: vi.fn() },
 		showStatus: vi.fn(),
 		showError: vi.fn(),
@@ -107,7 +104,6 @@ function makeContext(overrides: Partial<EffortCommandContext> = {}): EffortComma
 			availableThinkingLevels: ["off", "low", "medium", "high"],
 		},
 		agentConnection: { setThinkingLevel: vi.fn(async () => {}) },
-		footer: { invalidate: vi.fn() },
 		showStatus: vi.fn(),
 		showError: vi.fn(),
 		patchConnectionState: vi.fn(),
@@ -115,7 +111,7 @@ function makeContext(overrides: Partial<EffortCommandContext> = {}): EffortComma
 		getAvailableThinkingLevels: () => interactiveModePrototype.getAvailableThinkingLevels.call(context),
 		applyThinkingLevel: (level) => interactiveModePrototype.applyThinkingLevel.call(context, level),
 		showThinkingSelector: (levels) => interactiveModePrototype.showThinkingSelector.call(context, levels),
-		showSelector: vi.fn(),
+		showSelectorModal: vi.fn(),
 		ui: { requestRender: vi.fn() },
 		...overrides,
 	};
@@ -164,7 +160,6 @@ describe("InteractiveMode /effort", () => {
 
 			expect(setThinkingLevel).toHaveBeenCalledWith("high");
 			expect(context.patchConnectionState).toHaveBeenCalledWith({ thinkingLevel: "high" });
-			expect(context.footer.invalidate).toHaveBeenCalledWith();
 			expect(context.updateEditorBorderColor).toHaveBeenCalledWith();
 			expect(context.showError).not.toHaveBeenCalled();
 		});
@@ -182,18 +177,18 @@ describe("InteractiveMode /effort", () => {
 		});
 
 		it("opens the thinking-level selector when called without an argument", () => {
-			let selector: ThinkingSelectorComponent | undefined;
+			let selector: SelectModalComponent | undefined;
 			const done = vi.fn();
 			const context = makeContext({
-				showSelector: (create) => {
-					selector = create(done).component as ThinkingSelectorComponent;
+				showSelectorModal: (create) => {
+					selector = create(done) as SelectModalComponent;
 				},
 			});
 
 			interactiveModePrototype.handleEffortCommand.call(context, "");
 
 			expect(context.agentConnection.setThinkingLevel).not.toHaveBeenCalled();
-			expect(selector).toBeInstanceOf(ThinkingSelectorComponent);
+			expect(selector).toBeInstanceOf(SelectModalComponent);
 			expect(selector?.getSelectList().getSelectedItem()?.value).toBe("medium");
 
 			selector?.getSelectList().setSelectedIndex(3);
@@ -243,7 +238,6 @@ describe("InteractiveMode /effort", () => {
 				};
 				settingsManager: { setDefaultModelAndProvider: (provider: string, id: string) => void };
 				patchConnectionState: (patch: Record<string, unknown>) => void;
-				footer: { invalidate: () => void };
 				subagentSummaryLine: { invalidate: () => void };
 				updateEditorBorderColor: () => void;
 				setupAutocompleteProvider: () => void;
@@ -271,7 +265,6 @@ describe("InteractiveMode /effort", () => {
 				},
 				settingsManager: { setDefaultModelAndProvider: vi.fn() },
 				patchConnectionState,
-				footer: { invalidate: vi.fn() },
 				subagentSummaryLine: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
 				setupAutocompleteProvider,
@@ -297,7 +290,6 @@ describe("InteractiveMode /effort", () => {
 
 			expect(context.agentConnection.setServiceTier).toHaveBeenCalledWith("priority");
 			expect(context.patchConnectionState).toHaveBeenCalledWith({ serviceTier: "priority" });
-			expect(context.footer.invalidate).toHaveBeenCalledWith();
 			expect(context.subagentSummaryLine.invalidate).toHaveBeenCalledWith();
 		});
 

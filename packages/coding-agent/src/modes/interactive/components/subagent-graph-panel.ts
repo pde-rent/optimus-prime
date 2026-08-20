@@ -1,20 +1,25 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../../agent-connection/index.js";
-import { formatTokenCount } from "../agent-activity.js";
+import { AGENT_ACTIVITY_LABELS, formatTokenCount } from "../agent-activity.js";
 import { theme } from "../theme/theme.js";
 
 /** Rows rendered before the overflow indicator takes over. */
 export const SUBAGENT_GRAPH_MAX_ROWS = 8;
 
 const GAP = 2;
-/** Prefix + status icon + a readable stub of the label. */
-const MIN_LABEL_CELL = 16;
-const MAX_MODEL_WIDTH = 18;
+const MIN_NAME_CELL = 14;
+const MAX_NAME_CELL = 34;
+/** Activity is the primary cell, so it claims width from the name before it shrinks. */
+const MIN_ACTIVITY_CELL = 16;
+/** The panel is told the root's id, never its name; see setChildren. */
+const ROOT_LABEL = "main";
 
 export interface SubagentGraphRow {
 	child: AgentConnectionRlmChildAgentSnapshot;
 	/** Tree-drawing prefix, e.g. "│  └─ ". */
 	prefix: string;
+	/** Rows nested under this one, at any depth. */
+	descendants: number;
 	depth: number;
 }
 
@@ -24,15 +29,6 @@ export interface SubagentGraphTotals {
 	done: number;
 	errored: number;
 	tokens: number;
-}
-
-/**
- * `effort` is populated by the RLM spawn handle and is not part of the daemon
- * snapshot on every build, so it stays an optional read.
- */
-function childEffort(child: AgentConnectionRlmChildAgentSnapshot): string | undefined {
-	const effort = child.effort?.trim();
-	return effort ? effort : undefined;
 }
 
 function isActive(child: AgentConnectionRlmChildAgentSnapshot): boolean {
@@ -90,11 +86,21 @@ export function buildSubagentGraphRows(
 		const bucket = byParent.get(key) ?? [];
 		for (const [index, child] of bucket.entries()) {
 			const isLast = index === bucket.length - 1;
-			rows.push({ child, prefix: `${ancestors}${isLast ? "└─ " : "├─ "}`, depth });
+			rows.push({ child, prefix: `${ancestors}${isLast ? "└─ " : "├─ "}`, descendants: 0, depth });
 			walk(child.id, `${ancestors}${isLast ? "   " : "│  "}`, depth + 1);
 		}
 	};
 	walk(TOP, "", 0);
+	// Depth-first order puts a node's whole subtree in the rows right behind it.
+	for (const [index, row] of rows.entries()) {
+		let count = 0;
+		let next = rows[index + 1];
+		while (next !== undefined && next.depth > row.depth) {
+			count += 1;
+			next = rows[index + 1 + count];
+		}
+		row.descendants = count;
+	}
 	return rows;
 }
 
@@ -110,14 +116,19 @@ export function summarizeSubagentGraph(rows: readonly SubagentGraphRow[]): Subag
 	return totals;
 }
 
-function statusIcon(child: AgentConnectionRlmChildAgentSnapshot): string {
+/**
+ * Status rides on colour so the roster keeps one glyph shape per role, except
+ * for errors: a failure must still read as a failure on a monochrome or
+ * low-contrast terminal.
+ */
+function markerGlyph(child: AgentConnectionRlmChildAgentSnapshot): string {
 	switch (child.status) {
 		case "queued":
-			return theme.fg("dim", "◇");
+			return theme.fg("dim", "○");
 		case "running":
-			return theme.fg("accent", "◆");
+			return theme.fg("accent", "○");
 		case "done":
-			return child.activity ? theme.fg("accent", "◆") : theme.fg("success", "✓");
+			return child.activity ? theme.fg("accent", "○") : theme.fg("success", "○");
 		case "error":
 			return theme.fg("error", "✗");
 		case "cancelled":
@@ -129,78 +140,46 @@ function statusIcon(child: AgentConnectionRlmChildAgentSnapshot): string {
 	}
 }
 
-/** Drop the provider prefix: the family is what identifies the run at a glance. */
-function modelCell(model: string | undefined): string {
-	if (!model) return "-";
-	const parts = model.split("/");
-	return parts[parts.length - 1] || model;
+function firstLine(text: string | undefined): string {
+	return text?.split("\n", 1)[0]?.trim() ?? "";
 }
 
-function elapsedCell(durationMs: number | undefined): string {
-	if (durationMs === undefined) return "-";
+/**
+ * `hidden` is the part of this row's subtree the row cap elided; visible
+ * descendants already speak for themselves as their own tree rows.
+ */
+function nameCell(row: SubagentGraphRow, hidden: number): string {
+	const elided = hidden > 0 ? theme.fg("dim", ` (+${hidden})`) : "";
+	return `${theme.fg("dim", row.prefix)}${markerGlyph(row.child)} ${row.child.label}${elided}`;
+}
+
+function activityCell(child: AgentConnectionRlmChildAgentSnapshot): string {
+	const activity = child.activity;
+	if (activity) {
+		const label = AGENT_ACTIVITY_LABELS[activity.kind];
+		return activity.toolName ? `${label} ${activity.toolName}` : label;
+	}
+	if (child.status === "error") return firstLine(child.error) || "Failed";
+	if (child.status === "queued") return "Queued";
+	return firstLine(child.recap) || firstLine(child.answerPreview);
+}
+
+function elapsedCell(durationMs: number | undefined): string | undefined {
+	if (durationMs === undefined) return undefined;
 	const seconds = Math.max(0, Math.round(durationMs / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
+	if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 	const hours = Math.floor(minutes / 60);
-	return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
+	return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-interface GraphColumn {
-	header: string;
-	cells: string[];
-	width: number;
-	/** Higher drops first when the viewport cannot fit every column. */
-	dropOrder: number;
-	color: "dim" | "muted" | "text";
+function metricsCell(child: AgentConnectionRlmChildAgentSnapshot): string {
+	const tokens = child.tokenCount ? `↓ ${formatTokenCount(child.tokenCount)} tokens` : undefined;
+	return [elapsedCell(child.durationMs), tokens].filter((part) => part !== undefined).join(" · ");
 }
 
-function buildColumns(rows: readonly SubagentGraphRow[]): GraphColumn[] {
-	const columns: GraphColumn[] = [];
-	const add = (header: string, cells: string[], dropOrder: number, color: GraphColumn["color"]): void => {
-		columns.push({
-			header,
-			cells,
-			width: Math.max(header.length, ...cells.map((cell) => visibleWidth(cell))),
-			dropOrder,
-			color,
-		});
-	};
-	add(
-		"model",
-		rows.map((row) => truncateToWidth(modelCell(row.child.model), MAX_MODEL_WIDTH, "…")),
-		4,
-		"dim",
-	);
-	if (rows.some((row) => childEffort(row.child) !== undefined)) {
-		add(
-			"effort",
-			rows.map((row) => childEffort(row.child) ?? "-"),
-			2,
-			"muted",
-		);
-	}
-	add(
-		"tokens",
-		rows.map((row) => formatTokenCount(row.child.tokenCount ?? 0)),
-		0,
-		"text",
-	);
-	add(
-		"tools",
-		rows.map((row) => String(row.child.toolUseCount ?? 0)),
-		3,
-		"dim",
-	);
-	add(
-		"time",
-		rows.map((row) => elapsedCell(row.child.durationMs)),
-		1,
-		"dim",
-	);
-	return columns;
-}
-
+// ponytail: local width-aware padding, adopt the canonical pair in packages/tui/src/utils.ts once it lands.
 function padEndAnsi(text: string, width: number): string {
 	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
 }
@@ -209,59 +188,79 @@ function padStartAnsi(text: string, width: number): string {
 	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
 }
 
-function fitColumns(columns: GraphColumn[], width: number): GraphColumn[] {
-	const kept = [...columns];
-	const rightWidth = (): number => kept.reduce((sum, column) => sum + column.width + GAP, 0);
-	while (kept.length > 0 && width - rightWidth() < MIN_LABEL_CELL) {
-		let dropIndex = 0;
-		for (let index = 1; index < kept.length; index++) {
-			const candidate = kept[index];
-			const current = kept[dropIndex];
-			if (candidate && current && candidate.dropOrder > current.dropOrder) dropIndex = index;
-		}
-		kept.splice(dropIndex, 1);
-	}
-	return kept;
+function cellWidth(cells: readonly string[]): number {
+	return Math.max(0, ...cells.map((cell) => visibleWidth(cell)));
 }
 
-export function formatSubagentGraph(rows: readonly SubagentGraphRow[], width: number): string[] {
+/** Depth-first order puts a row's subtree right behind it, so the cap cuts a tail. */
+function elidedDescendants(row: SubagentGraphRow, index: number, visibleCount: number): number {
+	return Math.max(0, Math.min(row.descendants, index + row.descendants + 1 - visibleCount));
+}
+
+export function formatSubagentGraph(
+	rows: readonly SubagentGraphRow[],
+	width: number,
+	rootLabel: string = ROOT_LABEL,
+): string[] {
 	if (rows.length === 0 || width < 8) return [];
 	const visible = rows.slice(0, SUBAGENT_GRAPH_MAX_ROWS);
 	const hidden = rows.length - visible.length;
 	const totals = summarizeSubagentGraph(rows);
-	const columns = fitColumns(buildColumns(visible), width);
-	const labelWidth = Math.max(1, width - columns.reduce((sum, column) => sum + column.width + GAP, 0));
+
+	// The root row carries the fan-out aggregates, which is why the roster needs
+	// no separate summary header.
+	const errors = totals.errored > 0 ? ` · ${totals.errored} error` : "";
+	const names = [
+		`${theme.fg("accent", "●")} ${theme.bold(rootLabel)}`,
+		...visible.map((row, index) => nameCell(row, elidedDescendants(row, index, visible.length))),
+	];
+	const activities = [
+		`${totals.running}/${totals.total} running${errors}`,
+		...visible.map((row) => activityCell(row.child)),
+	];
+	const metrics = [
+		totals.tokens > 0 ? `↓ ${formatTokenCount(totals.tokens)} tokens` : "",
+		...visible.map((row) => metricsCell(row.child)),
+	];
+
+	let nameWidth = Math.min(MAX_NAME_CELL, cellWidth(names));
+	let metricsWidth = cellWidth(metrics);
+	let activityWidth = width - nameWidth - metricsWidth - GAP * 2;
+	if (activityWidth < MIN_ACTIVITY_CELL) {
+		nameWidth = Math.max(MIN_NAME_CELL, nameWidth + activityWidth - MIN_ACTIVITY_CELL);
+		activityWidth = width - nameWidth - metricsWidth - GAP * 2;
+	}
+	if (activityWidth < MIN_ACTIVITY_CELL) {
+		metricsWidth = 0;
+		activityWidth = width - nameWidth - GAP;
+	}
+	if (activityWidth < MIN_ACTIVITY_CELL) {
+		activityWidth = 0;
+		nameWidth = width;
+	}
 
 	const lines: string[] = [];
-	const summary = ` ${totals.total} · ${totals.running} running · ${totals.done} done · ${totals.errored} error · ${formatTokenCount(totals.tokens)} tokens`;
-	const head = truncateToWidth("Subagents", width, "…");
-	const tail = truncateToWidth(summary, Math.max(0, width - visibleWidth(head)), "…");
-	lines.push(padEndAnsi(theme.fg("muted", head) + theme.fg("dim", tail), width));
-
-	let header = padEndAnsi("agent", labelWidth);
-	for (const column of columns) {
-		header += " ".repeat(GAP) + padStartAnsi(column.header, column.width);
-	}
-	lines.push(theme.fg("dim", header));
-
-	for (const [index, row] of visible.entries()) {
-		const labelSpace = Math.max(1, labelWidth - row.prefix.length - 2);
-		const label = truncateToWidth(row.child.label, labelSpace, "…");
-		let line = padEndAnsi(`${theme.fg("dim", row.prefix)}${statusIcon(row.child)} ${label}`, labelWidth);
-		for (const column of columns) {
-			line += " ".repeat(GAP) + padStartAnsi(theme.fg(column.color, column.cells[index] ?? ""), column.width);
+	for (const [index, name] of names.entries()) {
+		const cells = [padEndAnsi(truncateToWidth(name, nameWidth, "…"), nameWidth)];
+		if (activityWidth > 0) {
+			const activity = truncateToWidth(activities[index] ?? "", activityWidth, "…");
+			cells.push(padEndAnsi(theme.fg(index === 0 ? "dim" : "muted", activity), activityWidth));
 		}
-		lines.push(line);
+		if (metricsWidth > 0) {
+			const cell = truncateToWidth(metrics[index] ?? "", metricsWidth, "…");
+			cells.push(padStartAnsi(theme.fg("dim", cell), metricsWidth));
+		}
+		lines.push(padEndAnsi(cells.join(" ".repeat(GAP)), width));
 	}
 
 	if (hidden > 0) {
-		lines.push(padEndAnsi(theme.fg("muted", truncateToWidth(`   … ${hidden} more`, width, "…")), width));
+		lines.push(padEndAnsi(theme.fg("muted", truncateToWidth(`  … ${hidden} more`, width, "…")), width));
 	}
 	return lines;
 }
 
 /**
- * Live tree of the RLM fan-out below the current session. Auto-shows while any
+ * Live roster of the RLM fan-out below the current session. Auto-shows while any
  * child is active and auto-hides once the fan-out settles, so an idle session
  * pays nothing; `toggle()` pins or squelches it explicitly.
  */

@@ -16,6 +16,7 @@ export {
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
+	type SelectListRowContext,
 	type SelectListTheme,
 	type SelectListTruncatePrimaryContext,
 } from "./components/select-list.js";
@@ -31,6 +32,7 @@ export {
 	type ScrollInfo,
 } from "./fullscreen.js";
 export { type FuzzyMatch, fuzzyFilter, fuzzyFilterScored, fuzzyMatch, type ScoredItem } from "./fuzzy.js";
+export { formatKeyText, type KeyTextOptions, keyText } from "./keybinding-format.js";
 export {
 	getKeybindings,
 	type Keybinding,
@@ -56,6 +58,7 @@ export {
 	setKittyProtocolActive,
 } from "./keys.js";
 export { latexToUnicode } from "./latex.js";
+export { type ListWindow, listWindow, moveSelection, scrollPositionText } from "./list-window.js";
 export {
 	isMouseSequence,
 	isWheelDown,
@@ -133,4 +136,16 @@ export {
 	TUI,
 	type TuiStopOptions,
 } from "./tui.js";
-export { hyperlinkAtColumn, truncateToWidth, urlAtColumn, visibleWidth, wrapTextWithAnsi } from "./utils.js";
+export {
+	collapseText,
+	DOT_SEPARATOR,
+	dotJoin,
+	ELLIPSIS,
+	hyperlinkAtColumn,
+	padEndAnsi,
+	padStartAnsi,
+	truncateToWidth,
+	urlAtColumn,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "./utils.js";

@@ -3,7 +3,16 @@
  * Displays a list of string options with keyboard navigation.
  */
 
-import { Container, getKeybindings, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
+import {
+	Container,
+	getKeybindings,
+	listWindow,
+	moveSelection,
+	Spacer,
+	scrollPositionText,
+	Text,
+	type TUI,
+} from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
 import { CountdownTimer } from "./countdown-timer.js";
 import { keyHint, rawKeyHint } from "./keybinding-hints.js";
@@ -116,12 +125,11 @@ export class ExtensionSelectorComponent extends Container {
 	private updateList(): void {
 		this.updateLayout();
 		this.listContainer.clear();
-		const maxVisible = this.listLayout.visibleItems;
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(maxVisible / 2), this.options.length - maxVisible),
+		const { start: startIndex, end: endIndex } = listWindow(
+			this.selectedIndex,
+			this.options.length,
+			this.listLayout.visibleItems,
 		);
-		const endIndex = Math.min(startIndex + maxVisible, this.options.length);
 		for (let i = startIndex; i < endIndex; i++) {
 			const isSelected = i === this.selectedIndex;
 			this.listContainer.addChild(
@@ -133,7 +141,7 @@ export class ExtensionSelectorComponent extends Container {
 		}
 		if (startIndex > 0 || endIndex < this.options.length) {
 			this.listContainer.addChild(
-				new Text(theme.fg("muted", `  (${this.selectedIndex + 1}/${this.options.length})`), 0, 0),
+				new Text(theme.fg("muted", scrollPositionText(this.selectedIndex, this.options.length)), 0, 0),
 			);
 		}
 	}
@@ -141,17 +149,24 @@ export class ExtensionSelectorComponent extends Container {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 		if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
-			this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-			this.updateList();
+			this.moveBy(-1);
 		} else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
-			this.selectedIndex = Math.min(this.options.length - 1, this.selectedIndex + 1);
-			this.updateList();
+			this.moveBy(1);
+		} else if (kb.matches(keyData, "tui.select.pageUp")) {
+			this.moveBy(-this.listLayout.visibleItems);
+		} else if (kb.matches(keyData, "tui.select.pageDown")) {
+			this.moveBy(this.listLayout.visibleItems);
 		} else if (kb.matches(keyData, "tui.select.confirm") || keyData === "\n") {
 			const selected = this.options[this.selectedIndex];
 			if (selected) this.onSelectCallback(selected);
 		} else if (kb.matches(keyData, "tui.select.cancel")) {
 			this.onCancelCallback();
 		}
+	}
+
+	private moveBy(delta: number): void {
+		this.selectedIndex = moveSelection(this.selectedIndex, this.options.length, delta);
+		this.updateList();
 	}
 
 	dispose(): void {

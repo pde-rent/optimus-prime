@@ -10,6 +10,8 @@ import type { AgentConnectionToolDefinition } from "../../agent-connection/index
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
 import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
+import { FILE_CHANGE_SUMMARY_PREFIX } from "./edit-summary.js";
+import { ExpandableComponent } from "./expandable-component.js";
 import { getReplCodeFromArgs, ReplCellComponent } from "./repl-cell.js";
 import { ToolPanel } from "./tool-panel.js";
 
@@ -67,7 +69,7 @@ function createReplayBuiltInToolDefinition(
 	}
 }
 
-export class ToolExecutionComponent extends Container implements Collapsible {
+export class ToolExecutionComponent extends ExpandableComponent implements Collapsible {
 	private contentPanel: ToolPanel;
 	private selfRenderContainer: Container;
 	private callRendererComponent?: Component;
@@ -78,9 +80,6 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 	private toolName: string;
 	private toolCallId: string;
 	private args: any;
-	private expanded = false;
-	/** Last global expansion applied, so unrelated re-applies keep a per-block toggle. */
-	private lastGlobalExpanded?: boolean;
 	private agentMessagesExpanded = false;
 	private editDiffsExpanded = false;
 	private showExpandHint = true;
@@ -277,21 +276,6 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 		return `tool:${this.toolCallId}`;
 	}
 
-	/** Global expansion; re-applying the same global value preserves a per-block toggle. */
-	setExpanded(expanded: boolean): void {
-		if (this.lastGlobalExpanded === expanded) {
-			return;
-		}
-		this.lastGlobalExpanded = expanded;
-		this.expanded = expanded;
-		this.updateDisplay();
-	}
-
-	toggleExpandedSelf(): void {
-		this.expanded = !this.expanded;
-		this.updateDisplay();
-	}
-
 	setAgentMessagesExpanded(expanded: boolean): void {
 		if (this.agentMessagesExpanded === expanded) {
 			return;
@@ -358,7 +342,7 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 		return this.hasRendererDefinition() && this.getRenderShell() === "self";
 	}
 
-	private updateDisplay(): void {
+	protected updateDisplay(): void {
 		let hasContent = false;
 		this.hideComponent = false;
 		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
@@ -424,7 +408,7 @@ export class ToolExecutionComponent extends Container implements Collapsible {
 					{ fallbackColor: (s: string) => theme.fg("toolOutput", s) },
 					{
 						fallbackOnly: true,
-						fallbackPrefix: "    ╰─ ",
+						fallbackPrefix: FILE_CHANGE_SUMMARY_PREFIX,
 					},
 				);
 				this.imageComponents.push(imageComponent);

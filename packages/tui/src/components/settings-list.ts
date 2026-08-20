@@ -1,7 +1,9 @@
 import { fuzzyFilter } from "../fuzzy.js";
+import { keyText } from "../keybinding-format.js";
 import { getKeybindings } from "../keybindings.js";
+import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
 import type { Component } from "../tui.js";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import { dotJoin, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 import { Input } from "./input.js";
 
 export interface SettingItem {
@@ -107,11 +109,7 @@ export class SettingsList implements Component {
 			return lines;
 		}
 
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), displayItems.length - this.maxVisible),
-		);
-		const endIndex = Math.min(startIndex + this.maxVisible, displayItems.length);
+		const { start: startIndex, end: endIndex } = listWindow(this.selectedIndex, displayItems.length, this.maxVisible);
 
 		const maxLabelWidth = Math.min(30, Math.max(...this.items.map((item) => visibleWidth(item.label))));
 
@@ -136,7 +134,7 @@ export class SettingsList implements Component {
 		}
 
 		if (startIndex > 0 || endIndex < displayItems.length) {
-			const scrollText = `  (${this.selectedIndex + 1}/${displayItems.length})`;
+			const scrollText = scrollPositionText(this.selectedIndex, displayItems.length);
 			lines.push(this.theme.hint(truncateToWidth(scrollText, width - 2, "")));
 		}
 
@@ -165,11 +163,13 @@ export class SettingsList implements Component {
 		const kb = getKeybindings();
 		const displayItems = this.searchEnabled ? this.filteredItems : this.items;
 		if (kb.matches(data, "tui.select.up")) {
-			if (displayItems.length === 0) return;
-			this.selectedIndex = this.selectedIndex === 0 ? displayItems.length - 1 : this.selectedIndex - 1;
+			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, -1, true);
 		} else if (kb.matches(data, "tui.select.down")) {
-			if (displayItems.length === 0) return;
-			this.selectedIndex = this.selectedIndex === displayItems.length - 1 ? 0 : this.selectedIndex + 1;
+			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, 1, true);
+		} else if (kb.matches(data, "tui.select.pageUp")) {
+			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, -this.maxVisible);
+		} else if (kb.matches(data, "tui.select.pageDown")) {
+			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, this.maxVisible);
 		} else if (kb.matches(data, "tui.select.confirm") || data === " ") {
 			this.activateItem();
 		} else if (kb.matches(data, "tui.select.cancel")) {
@@ -220,16 +220,12 @@ export class SettingsList implements Component {
 	}
 
 	private addHintLine(lines: string[], width: number): void {
+		const hints = dotJoin([
+			this.searchEnabled ? "Type to search" : undefined,
+			`${keyText("tui.select.confirm")}/Space to change`,
+			`${keyText("tui.select.cancel", { primaryOnly: true })} to cancel`,
+		]);
 		lines.push("");
-		lines.push(
-			truncateToWidth(
-				this.theme.hint(
-					this.searchEnabled
-						? "  Type to search · Enter/Space to change · Esc to cancel"
-						: "  Enter/Space to change · Esc to cancel",
-				),
-				width,
-			),
-		);
+		lines.push(truncateToWidth(this.theme.hint(`  ${hints}`), width));
 	}
 }

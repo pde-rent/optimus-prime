@@ -1,18 +1,19 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
 	Container,
+	dotJoin,
 	type Focusable,
 	fuzzyFilter,
 	getKeybindings,
 	Input,
 	Key,
 	matchesKey,
+	SelectList,
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
-import { theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
-import { keyText } from "./keybinding-hints.js";
+import { getSelectListTheme, theme } from "../theme/theme.js";
+import { keyHint, keyText, selectionHints } from "./keybinding-hints.js";
 
 type EnabledIds = string[] | null;
 
@@ -99,7 +100,8 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this._focused = value;
 		this.searchInput.focused = value;
 	}
-	private listContainer: Container;
+	private selectList: SelectList;
+	private detailText: Text;
 	private footerText: Text;
 	private callbacks: ModelsCallbacks;
 	private maxVisible = 8;
@@ -118,8 +120,6 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.enabledIds = config.enabledModelIds === null ? null : [...config.enabledModelIds];
 		this.filteredItems = this.buildItems();
 
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.fg("accent", theme.bold("Model Configuration")), 0, 0));
 		this.addChild(
 			new Text(theme.fg("muted", `Session-only. ${keyText("app.models.save")} to save to settings.`), 0, 0),
@@ -130,14 +130,24 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.addChild(this.searchInput);
 		this.addChild(new Spacer(1));
 
-		this.listContainer = new Container();
-		this.addChild(this.listContainer);
+		this.selectList = new SelectList([], this.maxVisible, getSelectListTheme(), {
+			multiSelect: true,
+			noMatchText: "  No matching models",
+			// The enabled tick and provider badge are the only per-row difference
+			// from every other list; the window, wrap and readout are shared.
+			renderRow: ({ index, isSelected }) => this.renderModelRow(index, isSelected),
+		});
+		this.selectList.onToggle = (item) => this.toggleModel(item.value);
+		this.addChild(this.selectList);
+
+		this.addChild(new Spacer(1));
+		this.detailText = new Text("", 0, 0);
+		this.addChild(this.detailText);
 
 		this.addChild(new Spacer(1));
 		this.footerText = new Text(this.getFooterText(), 0, 0);
 		this.addChild(this.footerText);
 
-		this.addChild(new DynamicBorder());
 		this.updateList();
 	}
 
@@ -154,20 +164,15 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 
 	private getFooterText(): string {
 		const enabledCount = this.enabledIds?.length ?? this.allIds.length;
-		const allEnabled = this.enabledIds === null;
-		const countText = allEnabled ? "all enabled" : `${enabledCount}/${this.allIds.length} enabled`;
-		const parts = [
-			`${keyText("tui.select.confirm")} toggle`,
-			`${keyText("app.models.enableAll")} all`,
-			`${keyText("app.models.clearAll")} clear`,
-			`${keyText("app.models.toggleProvider")} provider`,
-			`${keyText("app.models.reorderUp")}/${keyText("app.models.reorderDown")} reorder`,
-			`${keyText("app.models.save")} save`,
-			countText,
-		];
-		return this.isDirty
-			? theme.fg("dim", `  ${parts.join(" · ")} `) + theme.fg("warning", "(unsaved)")
-			: theme.fg("dim", `  ${parts.join(" · ")}`);
+		const countText = this.enabledIds === null ? "all enabled" : `${enabledCount}/${this.allIds.length} enabled`;
+		const hints = selectionHints([
+			keyHint("app.models.enableAll", "all"),
+			keyHint("app.models.clearAll", "clear"),
+			keyHint("app.models.toggleProvider", "provider"),
+			`${theme.fg("dim", `${keyText("app.models.reorderUp")}/${keyText("app.models.reorderDown")}`)}${theme.fg("muted", " reorder")}`,
+			keyHint("app.models.save", "save"),
+		]);
+		return `  ${dotJoin([hints, theme.fg("muted", countText), this.isDirty ? theme.fg("warning", "(unsaved)") : undefined], theme.fg("dim", " · "))}`;
 	}
 
 	private refresh(): void {
@@ -185,56 +190,43 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.callbacks.onChange(this.enabledIds === null ? null : [...this.enabledIds]);
 	}
 
+	private renderModelRow(index: number, isSelected: boolean): string {
+		const item = this.filteredItems[index];
+		if (!item) return "";
+		const prefix = isSelected ? theme.fg("accent", "❯ ") : "  ";
+		const modelText = isSelected ? theme.fg("accent", item.model.id) : item.model.id;
+		const providerBadge = theme.fg("muted", ` [${item.model.provider}]`);
+		// No tick when nothing is scoped: every model is enabled, so a column of
+		// ticks would read as a selection the user did not make.
+		const status = this.enabledIds === null ? "" : item.enabled ? theme.fg("success", " ✓") : theme.fg("dim", " ✗");
+		return `${prefix}${modelText}${providerBadge}${status}`;
+	}
+
 	private updateList(): void {
-		this.listContainer.clear();
+		this.selectList.setItems(this.filteredItems.map((item) => ({ value: item.fullId, label: item.model.id })));
+		this.selectList.setSelectedIndex(this.selectedIndex);
+		const selected = this.filteredItems[this.selectedIndex];
+		this.detailText.setText(selected ? theme.fg("muted", `  Model Name: ${selected.model.name}`) : "");
+	}
 
-		if (this.filteredItems.length === 0) {
-			this.listContainer.addChild(new Text(theme.fg("muted", "  No matching models"), 0, 0));
-			return;
-		}
-
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible),
-		);
-		const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
-		const allEnabled = this.enabledIds === null;
-
-		for (let i = startIndex; i < endIndex; i++) {
-			const item = this.filteredItems[i]!;
-			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", "› ") : "  ";
-			const modelText = isSelected ? theme.fg("accent", item.model.id) : item.model.id;
-			const providerBadge = theme.fg("muted", ` [${item.model.provider}]`);
-			const status = allEnabled ? "" : item.enabled ? theme.fg("success", " ✓") : theme.fg("dim", " ✗");
-			this.listContainer.addChild(new Text(`${prefix}${modelText}${providerBadge}${status}`, 0, 0));
-		}
-
-		if (startIndex > 0 || endIndex < this.filteredItems.length) {
-			this.listContainer.addChild(
-				new Text(theme.fg("muted", `  (${this.selectedIndex + 1}/${this.filteredItems.length})`), 0, 0),
-			);
-		}
-
-		if (this.filteredItems.length > 0) {
-			const selected = this.filteredItems[this.selectedIndex];
-			this.listContainer.addChild(new Spacer(1));
-			this.listContainer.addChild(new Text(theme.fg("muted", `  Model Name: ${selected.model.name}`), 0, 0));
-		}
+	private toggleModel(fullId: string): void {
+		this.enabledIds = toggle(this.enabledIds, fullId);
+		this.isDirty = true;
+		this.refresh();
+		this.notifyChange();
 	}
 
 	handleInput(data: string): void {
 		const kb = getKeybindings();
 
-		if (kb.matches(data, "tui.select.up")) {
-			if (this.filteredItems.length === 0) return;
-			this.selectedIndex = this.selectedIndex === 0 ? this.filteredItems.length - 1 : this.selectedIndex - 1;
-			this.updateList();
-			return;
-		}
-		if (kb.matches(data, "tui.select.down")) {
-			if (this.filteredItems.length === 0) return;
-			this.selectedIndex = this.selectedIndex === this.filteredItems.length - 1 ? 0 : this.selectedIndex + 1;
+		if (
+			kb.matches(data, "tui.select.up") ||
+			kb.matches(data, "tui.select.down") ||
+			kb.matches(data, "tui.select.pageUp") ||
+			kb.matches(data, "tui.select.pageDown")
+		) {
+			this.selectList.handleInput(data);
+			this.selectedIndex = this.selectList.getSelectedIndex();
 			this.updateList();
 			return;
 		}
@@ -260,13 +252,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		}
 
 		if (kb.matches(data, "tui.select.confirm")) {
-			const item = this.filteredItems[this.selectedIndex];
-			if (item) {
-				this.enabledIds = toggle(this.enabledIds, item.fullId);
-				this.isDirty = true;
-				this.refresh();
-				this.notifyChange();
-			}
+			this.selectList.handleInput(data);
 			return;
 		}
 

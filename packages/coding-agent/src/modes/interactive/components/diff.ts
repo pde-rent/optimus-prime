@@ -1,4 +1,5 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { replaceTabs } from "../../../core/tools/render-utils.js";
 import * as Diff from "../../../utils/diff.js";
 import { highlightCode, theme } from "../theme/theme.js";
 
@@ -10,13 +11,6 @@ function parseDiffLine(line: string): { prefix: string; lineNum: string; content
 	const match = line.match(/^([+-\s])(\s*\d*)\s(.*)$/);
 	if (!match) return null;
 	return { prefix: match[1], lineNum: match[2], content: match[3] };
-}
-
-/**
- * Replace tabs with spaces for consistent rendering.
- */
-function replaceTabs(text: string): string {
-	return text.replace(/\t/g, "   ");
 }
 
 /**

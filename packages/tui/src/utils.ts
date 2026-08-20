@@ -256,6 +256,48 @@ export function visibleWidth(str: string): number {
 	return width;
 }
 
+/**
+ * Pad `text` on the right so it occupies `width` terminal columns.
+ *
+ * Measured with `visibleWidth`, so ANSI escapes cost nothing and wide/CJK
+ * graphemes cost two columns — `String.prototype.padEnd` gets both wrong.
+ * Text already wider than `width` is returned untouched; truncate first if the
+ * column must be a hard cap.
+ */
+export function padEndAnsi(text: string, width: number): string {
+	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
+}
+
+/** Right-align counterpart of {@link padEndAnsi}; same width rules apply. */
+export function padStartAnsi(text: string, width: number): string {
+	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
+}
+
+/**
+ * Flatten every whitespace run — newlines included — to a single space.
+ *
+ * Single-row slots (status lines, summaries, hints) are laid out as one line, so
+ * an embedded newline would render taller than the layout reserved and overlap
+ * whatever sits below.
+ */
+export function collapseText(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+/** Separator between fragments of a composed status line. */
+export const DOT_SEPARATOR = " · ";
+
+/**
+ * Join status-line fragments, dropping empty and nullish ones so callers can
+ * pass conditional parts inline.
+ *
+ * Parts and separator arrive pre-styled: this package has no theme, colour is
+ * injected by the caller, and that boundary is deliberate.
+ */
+export function dotJoin(parts: ReadonlyArray<string | null | undefined>, separator: string = DOT_SEPARATOR): string {
+	return parts.filter((part): part is string => part != null && part.length > 0).join(separator);
+}
+
 /** Find the terminal-column span containing visible, non-whitespace content. */
 export function visibleContentSpan(line: string, maxWidth: number): { from: number; to: number } | null {
 	const limit = Math.floor(maxWidth);
@@ -1033,20 +1075,29 @@ export function applyBackgroundToLine(line: string, width: number, bgFn: (text: 
 }
 
 /**
+ * Ellipsis appended when text is truncated.
+ *
+ * ASCII rather than U+2026 because it is `truncateToWidth`'s long-standing
+ * default and callers assert on it; switching the glyph is an observable change
+ * to every default-ellipsis caller, not a cosmetic one.
+ */
+export const ELLIPSIS = "...";
+
+/**
  * Truncate text to fit within a maximum visible width, adding ellipsis if needed.
  * Optionally pad with spaces to reach exactly maxWidth.
  * Properly handles ANSI escape codes (they don't count toward width).
  *
  * @param text - Text to truncate (may contain ANSI codes)
  * @param maxWidth - Maximum visible width
- * @param ellipsis - Ellipsis string to append when truncating (default: "...")
+ * @param ellipsis - Ellipsis string to append when truncating (default: {@link ELLIPSIS})
  * @param pad - If true, pad result with spaces to exactly maxWidth (default: false)
  * @returns Truncated text, optionally padded to exactly maxWidth
  */
 export function truncateToWidth(
 	text: string,
 	maxWidth: number,
-	ellipsis: string = "...",
+	ellipsis: string = ELLIPSIS,
 	pad: boolean = false,
 ): string {
 	if (maxWidth <= 0) {

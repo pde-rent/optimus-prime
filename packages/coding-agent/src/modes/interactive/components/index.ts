@@ -23,9 +23,8 @@ export { DynamicBorder } from "./dynamic-border.js";
 export { ExtensionEditorComponent } from "./extension-editor.js";
 export { ExtensionInputComponent } from "./extension-input.js";
 export { ExtensionSelectorComponent } from "./extension-selector.js";
-export { FooterComponent } from "./footer.js";
 export { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./injected-prompt-message.js";
-export { keyHint, keyText, rawKeyHint } from "./keybinding-hints.js";
+export { keyHint, keyText, rawKeyHint, selectionHints } from "./keybinding-hints.js";
 export { LoginDialogComponent } from "./login-dialog.js";
 export { ModelSelectorComponent } from "./model-selector.js";
 export { OAuthSelectorComponent } from "./oauth-selector.js";
@@ -36,12 +35,10 @@ export {
 	type ReplCellState,
 } from "./repl-cell.js";
 export { type ModelsCallbacks, type ModelsConfig, ScopedModelsSelectorComponent } from "./scoped-models-selector.js";
+export { SelectModalComponent, type SelectModalOptions } from "./select-modal.js";
 export { type SettingsCallbacks, type SettingsConfig, SettingsSelectorComponent } from "./settings-selector.js";
-export { ShowImagesSelectorComponent } from "./show-images-selector.js";
 export { SkillInvocationMessageComponent } from "./skill-invocation-message.js";
 export { SubagentSummaryLine } from "./subagent-summary-line.js";
-export { ThemeSelectorComponent } from "./theme-selector.js";
-export { ThinkingSelectorComponent } from "./thinking-selector.js";
 export { ToolExecutionComponent, type ToolExecutionOptions } from "./tool-execution.js";
 export { TOOL_PANEL_PADDING_X, ToolPanel, toolPanelContentWidth, toolPanelLine } from "./tool-panel.js";
 export { TreeSelectorComponent } from "./tree-selector.js";

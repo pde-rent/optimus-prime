@@ -9,6 +9,7 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
+	listWindow,
 	matchesKey,
 	Spacer,
 	truncateToWidth,
@@ -19,7 +20,7 @@ import type { PathMetadata, ResolvedPaths, ResolvedResource } from "../../../cor
 import type { PackageSource, SettingsManager } from "../../../core/settings-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
-import { rawKeyHint } from "./keybinding-hints.js";
+import { keyHint, rawKeyHint } from "./keybinding-hints.js";
 
 type ResourceType = "extensions" | "skills" | "prompts" | "themes";
 
@@ -163,7 +164,7 @@ class ConfigSelectorHeader implements Component {
 	render(width: number): string[] {
 		const title = theme.bold("Resource Configuration");
 		const sep = theme.fg("muted", " · ");
-		const hint = rawKeyHint("space", "toggle") + sep + rawKeyHint("esc", "close");
+		const hint = rawKeyHint("space", "toggle") + sep + keyHint("tui.select.cancel", "close", { primaryOnly: true });
 		const hintWidth = visibleWidth(hint);
 		const titleWidth = visibleWidth(title);
 		const spacing = Math.max(1, width - titleWidth - hintWidth);
@@ -320,12 +321,11 @@ class ResourceList implements Component, Focusable {
 			return lines;
 		}
 
-		// Calculate visible range
-		const startIndex = Math.max(
-			0,
-			Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filteredItems.length - this.maxVisible),
+		const { start: startIndex, end: endIndex } = listWindow(
+			this.selectedIndex,
+			this.filteredItems.length,
+			this.maxVisible,
 		);
-		const endIndex = Math.min(startIndex + this.maxVisible, this.filteredItems.length);
 
 		for (let i = startIndex; i < endIndex; i++) {
 			const entry = this.filteredItems[i];

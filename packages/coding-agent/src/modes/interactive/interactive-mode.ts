@@ -17,7 +17,6 @@ import type {
 	AutocompleteItem,
 	AutocompleteProvider,
 	EditorComponent,
-	Keybinding,
 	KeyId,
 	MarkdownTheme,
 	OverlayHandle,
@@ -66,6 +65,7 @@ import {
 	DEFAULT_HEARTBEAT_DELIVERY_MODE,
 	parseHeartbeatCommand,
 } from "../../core/cron-jobs.js";
+import { sessionJsonlToMarkdown } from "../../core/export-markdown.js";
 import type {
 	AutocompleteProviderFactory,
 	ContextUsage,
@@ -114,7 +114,7 @@ import {
 	resolveBuiltinSlashCommandName,
 } from "../../core/slash-commands.js";
 import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
-import { type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
+import { formatSize, type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
 import { OPTIMUS_LOGO, OPTIMUS_LOGO_META_MAX_ROWS } from "../../themes/optimus-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
@@ -189,13 +189,13 @@ import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
 import { FEATURE_HINT_ANIMATION_INTERVAL_MS, FeatureHintComponent } from "./components/feature-hint.js";
-import { FooterComponent } from "./components/footer.js";
 import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
 import { formatKeyText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import type { AuthSelectorProvider } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
-import { SettingsSelectorComponent } from "./components/settings-selector.js";
+import { SelectModalComponent } from "./components/select-modal.js";
+import { SettingsSelectorComponent, THINKING_LEVEL_DESCRIPTIONS } from "./components/settings-selector.js";
 import { SideQuestionComponent } from "./components/side-question.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import {
@@ -206,7 +206,6 @@ import {
 import { SlashCommandResultMessageComponent } from "./components/slash-command-result-message.js";
 import { SubagentGraphPanel } from "./components/subagent-graph-panel.js";
 import { countDirectSubagentStatuses, SubagentSummaryLine } from "./components/subagent-summary-line.js";
-import { ThinkingSelectorComponent } from "./components/thinking-selector.js";
 import {
 	selectLatestToolExpandHint,
 	ToolExecutionComponent,
@@ -616,15 +615,8 @@ type GoalAnnouncementSnapshot = {
 
 type ModelFallbackWarningAction = "show" | "suppress";
 
-const THINKING_LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
-	off: "No reasoning",
-	minimal: "Very brief reasoning",
-	low: "Light reasoning",
-	medium: "Moderate reasoning",
-	high: "Deep reasoning",
-	xhigh: "Very deep reasoning",
-	max: "Maximum reasoning",
-};
+/** Matches the width auth-flows uses, so the same component looks the same everywhere. */
+const EXTENSION_SELECTOR_WIDTH = 76;
 
 const HEARTBEAT_ARGUMENT_COMPLETIONS: AutocompleteItem[] = [
 	{
@@ -963,7 +955,6 @@ export class InteractiveMode {
 	private footerSlot: Container;
 	private fullscreenEnabled = false;
 	private editorContainer: Container;
-	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
@@ -1115,6 +1106,7 @@ export class InteractiveMode {
 	private shutdownRequested = false;
 
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
+	private extensionSelectorHandle: OverlayHandle | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
@@ -1225,8 +1217,6 @@ export class InteractiveMode {
 		this.subagentSummaryLine.onCancel = () => this.focusEditor();
 		this.subagentSummaryLine.onChatAction = (data) => this.handleSubagentSummaryChatAction(data);
 		this.footerDataProvider = new FooterDataProvider(this.uiServices.getInitialCwd());
-		this.footer = new FooterComponent(this.footerDataProvider);
-		this.footer.setAutoCompactEnabled(this.settingsManager.getCompactionEnabled());
 		this.setGoalAnnouncementBaseline(emptyGoalState());
 
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -1522,7 +1512,6 @@ export class InteractiveMode {
 		this.mainContainer.addChild(this.editorContainer);
 		this.mainContainer.addChild(this.subagentSummaryLine);
 		this.mainContainer.addChild(this.widgetContainerBelow);
-		this.footerSlot.addChild(this.footer);
 		this.mainContainer.addChild(this.footerSlot);
 		for (const component of this.getPromptDockComponents()) {
 			this.promptDock.addChild(component);
@@ -2522,9 +2511,6 @@ export class InteractiveMode {
 	}
 
 	private applyRuntimeSettings(): void {
-		this.footer.setAutoCompactEnabled(
-			this.connectionState?.autoCompactionEnabled ?? this.settingsManager.getCompactionEnabled(),
-		);
 		this.footerDataProvider.setCwd(this.getCurrentCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
@@ -2629,7 +2615,6 @@ export class InteractiveMode {
 		// turns (the in-flight message isn't persisted yet), so the in-flight delta must keep
 		// accumulating. The baseline is managed at turn end (refreshConnectionContextUsage) and
 		// reset on a new user message.
-		this.footer.setAutoCompactEnabled(state.autoCompactionEnabled);
 		this.sessionRecap = state.recap;
 		this.renderRecap();
 		this.updateWorkingPulse();
@@ -2744,7 +2729,6 @@ export class InteractiveMode {
 		if (!marked) {
 			this.modelRegistry.markProviderAuthStale(event.provider);
 		}
-		this.footer.invalidate();
 		this.updateEditorBorderColor();
 	}
 
@@ -3275,8 +3259,7 @@ export class InteractiveMode {
 		if (!this.currentFeatureHint) {
 			const hint = this.featureHintDeck.next({
 				getKeybinding: (action) => {
-					const key = keyText(action);
-					return key ? this.capitalizeKey(key) : undefined;
+					return keyText(action) || undefined;
 				},
 				isResidentSession: this.options.returnToAgentsView === true,
 			});
@@ -3543,7 +3526,6 @@ export class InteractiveMode {
 		this.setExtensionHeader(undefined);
 		this.clearExtensionWidgets();
 		this.footerDataProvider.clearExtensionStatuses();
-		this.footer.invalidate();
 		this.autocompleteProviderWrappers = [];
 		this.setCustomEditorComponent(undefined);
 		this.setupAutocompleteProvider();
@@ -3620,16 +3602,11 @@ export class InteractiveMode {
 
 		if (this.customFooter) {
 			this.footerSlot.removeChild(this.customFooter);
-		} else {
-			this.footerSlot.removeChild(this.footer);
 		}
 
-		if (factory) {
-			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
+		this.customFooter = factory ? factory(this.ui, theme, this.footerDataProvider) : undefined;
+		if (this.customFooter) {
 			this.footerSlot.addChild(this.customFooter);
-		} else {
-			this.customFooter = undefined;
-			this.footerSlot.addChild(this.footer);
 		}
 
 		this.ui.requestRender();
@@ -3781,19 +3758,15 @@ export class InteractiveMode {
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionSelector);
-			this.ui.setFocus(this.extensionSelector);
-			this.ui.requestRender();
+			this.extensionSelectorHandle = this.showFullPaneOverlay(this.extensionSelector, EXTENSION_SELECTOR_WIDTH);
 		});
 	}
 
 	private hideExtensionSelector(): void {
 		this.extensionSelector?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
+		this.extensionSelectorHandle?.hide();
+		this.extensionSelectorHandle = undefined;
 		this.extensionSelector = undefined;
-		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
 	}
 
@@ -5299,7 +5272,6 @@ export class InteractiveMode {
 			await this.init();
 		}
 
-		this.footer.invalidate();
 		this.updateConnectionStateFromEvent(event);
 		// A new user message resets the activity tracker to 0, so the in-flight baseline must
 		// reset with it. (agent_start on auto-retry does not reset the tracker.)
@@ -5350,18 +5322,15 @@ export class InteractiveMode {
 
 			case "session_info_changed":
 				this.updateTerminalTitle();
-				this.footer.invalidate();
 				this.ui.requestRender();
 				break;
 
 			case "thinking_level_changed":
-				this.footer.invalidate();
 				this.subagentSummaryLine.invalidate();
 				this.updateEditorBorderColor();
 				break;
 
 			case "service_tier_changed":
-				this.footer.invalidate();
 				this.subagentSummaryLine.invalidate();
 				break;
 
@@ -5512,7 +5481,6 @@ export class InteractiveMode {
 					}
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
-					this.footer.invalidate();
 				}
 				this.ui.requestRender();
 				break;
@@ -5624,7 +5592,6 @@ export class InteractiveMode {
 						this.showError(`Compaction succeeded, but the transcript could not be refreshed: ${message}`);
 					}
 					await this.refreshConnectionContextUsage();
-					this.footer.invalidate();
 				} else if (event.errorMessage && event.reason === "manual") {
 					if (event.errorSeverity === "warning") this.showWarning(event.errorMessage);
 					else this.showError(event.errorMessage);
@@ -6449,7 +6416,6 @@ export class InteractiveMode {
 		}
 
 		if (options.updateFooter) {
-			this.footer.invalidate();
 			this.updateEditorBorderColor();
 		}
 
@@ -7169,11 +7135,11 @@ export class InteractiveMode {
 		const selected = this.queueSelection.selected;
 		if (!selected) return undefined;
 		const lane = selected.lane === "steering" ? "steering" : "follow-up";
-		const older = this.getAppKeyDisplay("app.message.navigateOlder");
-		const newer = this.getAppKeyDisplay("app.message.navigateNewer");
-		const earlier = this.getAppKeyDisplay("app.message.moveEarlier");
-		const later = this.getAppKeyDisplay("app.message.moveLater");
-		const queue = this.getAppKeyDisplay("app.message.followUp");
+		const older = keyText("app.message.navigateOlder");
+		const newer = keyText("app.message.navigateNewer");
+		const earlier = keyText("app.message.moveEarlier");
+		const later = keyText("app.message.moveLater");
+		const queue = keyText("app.message.followUp");
 		return `${lane} ${selected.index + 1} · ${older}/${newer} browse · ${earlier}/${later} reorder · enter steers · ${queue} queues · empty deletes`;
 	}
 
@@ -7232,7 +7198,7 @@ export class InteractiveMode {
 		}
 		this.fullscreenEnabled = enabled;
 		this.applyFullscreen(enabled);
-		const followKey = this.getEditorKeyDisplay("tui.viewport.follow");
+		const followKey = keyText("tui.viewport.follow");
 		this.showStatus(
 			enabled
 				? `Fullscreen rendering on — wheel/pageUp scroll, ${followKey} follows output`
@@ -7454,7 +7420,7 @@ export class InteractiveMode {
 				const text = styleQueuedMessagePreview(message, "Follow-up", (name) => this.isRecognizedSlashCommand(name));
 				this.queuedMessagesContainer.addChild(new TruncatedText(text, 1, 0));
 			}
-			const dequeueHint = this.getAppKeyDisplay("app.message.navigateOlder");
+			const dequeueHint = keyText("app.message.navigateOlder");
 			const hintText = theme.fg("dim", `╰─ ${dequeueHint} to browse and edit queued messages`);
 			this.queuedMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
 		}
@@ -7476,20 +7442,26 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Shows a selector component in place of the editor.
-	 * @param create Factory that receives a `done` callback and returns the component and focus target
+	 * Shows a selection surface as a centered modal. Every selector goes through
+	 * here so the prompt stays put and the chrome matches across surfaces.
+	 * @param create Factory that receives a `done` callback closing the modal
 	 */
-	private showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
+	private showSelectorModal(
+		create: (done: () => void) => Component,
+		options: number | FullPaneOverlayOptions = 80,
+	): void {
+		let handle: OverlayHandle | undefined;
+		let closed = false;
 		const done = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			if (closed) return;
+			closed = true;
+			// `hide` restores focus to whatever was focused before the overlay opened.
+			handle?.hide();
+			this.ui.requestRender();
 		};
-		const { component, focus } = create(done);
-		this.editorContainer.clear();
-		this.editorContainer.addChild(component);
-		this.ui.setFocus(focus);
-		this.ui.requestRender();
+		const component = create(done);
+		if (closed) return;
+		handle = this.showFullPaneOverlay(component, options);
 	}
 
 	private showFullPaneOverlay(component: Component, options: number | FullPaneOverlayOptions = 80): OverlayHandle {
@@ -7505,7 +7477,7 @@ export class InteractiveMode {
 			this.showError(error instanceof Error ? error.message : String(error));
 			return;
 		}
-		this.showSelector((done) => {
+		this.showSelectorModal((done) => {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: state.autoCompactionEnabled,
@@ -7541,7 +7513,6 @@ export class InteractiveMode {
 						void this.agentConnection.setAutoCompactionEnabled(enabled).catch((error) => {
 							this.showError(error instanceof Error ? error.message : String(error));
 						});
-						this.footer.setAutoCompactEnabled(enabled);
 					},
 					onIdleEvictionMinutesChange: (value) => {
 						this.settingsManager.setIdleEvictionMinutes(value);
@@ -7590,7 +7561,6 @@ export class InteractiveMode {
 							.setThinkingLevel(level)
 							.then(() => {
 								this.patchConnectionState({ thinkingLevel: level });
-								this.footer.invalidate();
 								this.updateEditorBorderColor();
 							})
 							.catch((error) => {
@@ -7681,7 +7651,7 @@ export class InteractiveMode {
 					},
 				},
 			);
-			return { component: selector, focus: selector.getSettingsList() };
+			return selector;
 		});
 	}
 
@@ -7743,7 +7713,6 @@ export class InteractiveMode {
 			serviceTier: state.serviceTier,
 			availableThinkingLevels: state.availableThinkingLevels,
 		});
-		this.footer.invalidate();
 		this.subagentSummaryLine.invalidate();
 		this.updateEditorBorderColor();
 		// Rebuild so the /effort argument hint reflects the new model's levels.
@@ -8072,7 +8041,6 @@ export class InteractiveMode {
 					return;
 				}
 				this.patchConnectionState({ serviceTier: state.serviceTier });
-				this.footer.invalidate();
 				this.subagentSummaryLine.invalidate();
 				this.showStatus(`Fast mode: ${state.serviceTier === "priority" ? "on" : "off"}`);
 			})
@@ -8105,21 +8073,23 @@ export class InteractiveMode {
 			this.showStatus("Current model does not support thinking");
 			return;
 		}
-		this.showSelector((done) => {
-			const selector = new ThinkingSelectorComponent(
-				currentLevel,
-				levels,
-				(level) => {
-					done();
-					this.applyThinkingLevel(level);
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-			);
-			return { component: selector, focus: selector.getSelectList() };
-		});
+		this.showSelectorModal(
+			(done) =>
+				new SelectModalComponent({
+					title: "Thinking Level",
+					items: levels.map((level) => ({
+						value: level,
+						label: level,
+						description: THINKING_LEVEL_DESCRIPTIONS[level],
+					})),
+					selectedValue: currentLevel,
+					onSelect: (value) => {
+						done();
+						this.applyThinkingLevel(value as ThinkingLevel);
+					},
+					onCancel: done,
+				}),
+		);
 	}
 
 	private applyThinkingLevel(level: ThinkingLevel): void {
@@ -8127,7 +8097,6 @@ export class InteractiveMode {
 			.setThinkingLevel(level)
 			.then(() => {
 				this.patchConnectionState({ thinkingLevel: level });
-				this.footer.invalidate();
 				this.updateEditorBorderColor();
 				this.showStatus(`Thinking level: ${level}`);
 			})
@@ -8319,7 +8288,7 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		};
 
-		this.showSelector((done) => {
+		this.showSelectorModal((done) => {
 			const selector = new ScopedModelsSelectorComponent(
 				{
 					allModels,
@@ -8344,7 +8313,7 @@ export class InteractiveMode {
 					},
 				},
 			);
-			return { component: selector, focus: selector };
+			return selector;
 		});
 	}
 
@@ -8364,7 +8333,7 @@ export class InteractiveMode {
 
 		const initialSelectedId = userMessages[userMessages.length - 1]?.entryId;
 
-		this.showSelector((done) => {
+		this.showSelectorModal((done) => {
 			const selector = new UserMessageSelectorComponent(
 				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
 				async (entryId) => {
@@ -8391,7 +8360,7 @@ export class InteractiveMode {
 				},
 				initialSelectedId,
 			);
-			return { component: selector, focus: selector.getMessageList() };
+			return selector;
 		});
 	}
 
@@ -8435,7 +8404,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.showSelector((done) => {
+		this.showSelectorModal((done) => {
 			const selector = new TreeSelectorComponent(
 				tree,
 				realLeafId,
@@ -8543,7 +8512,7 @@ export class InteractiveMode {
 				initialSelectedId,
 				initialFilterMode,
 			);
-			return { component: selector, focus: selector };
+			return selector;
 		});
 	}
 
@@ -8622,7 +8591,6 @@ export class InteractiveMode {
 			onAuthChanged: async () => {
 				await this.refreshConnectionModelsAfterAuthChange();
 				await this.updateAvailableProviderCount();
-				this.footer.invalidate();
 				this.updateEditorBorderColor();
 			},
 			onLoginCompleted: () => {
@@ -8961,7 +8929,9 @@ export class InteractiveMode {
 		const outputPath = this.getPathCommandArgument(text, "/export");
 
 		try {
-			if (outputPath?.endsWith(".jsonl")) {
+			if (outputPath === "--clipboard" || outputPath === "-c") {
+				await this.copySessionToClipboard();
+			} else if (outputPath?.endsWith(".jsonl")) {
 				const filePath = await this.agentConnection.exportToJsonl(outputPath);
 				this.showStatus(`Session exported to: ${filePath}`);
 			} else {
@@ -8970,6 +8940,26 @@ export class InteractiveMode {
 			}
 		} catch (error: unknown) {
 			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+		}
+	}
+
+	/**
+	 * A self-contained HTML page is not pasteable, so the clipboard gets a Markdown
+	 * transcript instead. The branch lives in the agent process, which may be a
+	 * daemon, so it comes back over the existing JSONL export rather than a new
+	 * transport method.
+	 */
+	private async copySessionToClipboard(): Promise<void> {
+		const tmpFile = path.join(os.tmpdir(), `${APP_NAME}-export-${process.pid}.jsonl`);
+		try {
+			await this.agentConnection.exportToJsonl(tmpFile);
+			const markdown = sessionJsonlToMarkdown(fs.readFileSync(tmpFile, "utf-8"));
+			await copyToClipboard(markdown);
+			this.showStatus(
+				`Copied session transcript to clipboard as Markdown (${formatSize(Buffer.byteLength(markdown))})`,
+			);
+		} finally {
+			fs.rmSync(tmpFile, { force: true });
 		}
 	}
 
@@ -9506,39 +9496,19 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private capitalizeKey(key: string): string {
-		return key
-			.split("/")
-			.map((k) =>
-				k
-					.split("+")
-					.map((part) => (part === "esc" ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-					.join("+"),
-			)
-			.join("/");
-	}
-
-	private getAppKeyDisplay(action: AppKeybinding): string {
-		return this.capitalizeKey(keyText(action));
-	}
-
-	private getEditorKeyDisplay(action: Keybinding): string {
-		return this.capitalizeKey(keyText(action));
-	}
-
 	private getShortcutGuide(): string {
-		const tab = this.getEditorKeyDisplay("tui.input.tab");
-		const newLine = this.getEditorKeyDisplay("tui.input.newLine");
-		const clearInput = this.getAppKeyDisplay("app.input.clear");
-		const shortcutsKey = this.getAppKeyDisplay("app.shortcuts");
-		const selectModel = this.getAppKeyDisplay("app.model.select");
-		const expandTools = this.getAppKeyDisplay("app.tools.expand");
-		const expandMessages = this.getAppKeyDisplay("app.messages.expand");
-		const expandEdits = this.getAppKeyDisplay("app.edits.expand");
-		const toggleThinking = this.getAppKeyDisplay("app.thinking.toggle");
-		const externalEditor = this.getAppKeyDisplay("app.editor.external");
-		const promptStash = this.getAppKeyDisplay("app.prompt.stash");
-		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
+		const tab = keyText("tui.input.tab");
+		const newLine = keyText("tui.input.newLine");
+		const clearInput = keyText("app.input.clear");
+		const shortcutsKey = keyText("app.shortcuts");
+		const selectModel = keyText("app.model.select");
+		const expandTools = keyText("app.tools.expand");
+		const expandMessages = keyText("app.messages.expand");
+		const expandEdits = keyText("app.edits.expand");
+		const toggleThinking = keyText("app.thinking.toggle");
+		const externalEditor = keyText("app.editor.external");
+		const promptStash = keyText("app.prompt.stash");
+		const pasteImage = keyText("app.clipboard.pasteImage");
 
 		return `
 **Prompt**
@@ -9557,51 +9527,51 @@ ${shortcutsKey ? `\`${shortcutsKey}\` quick shortcuts · ` : ""}\`/hotkeys\` ful
 	}
 
 	private getHotkeysGuide(): string {
-		const cursorUp = this.getEditorKeyDisplay("tui.editor.cursorUp");
-		const cursorDown = this.getEditorKeyDisplay("tui.editor.cursorDown");
-		const cursorLeft = this.getEditorKeyDisplay("tui.editor.cursorLeft");
-		const cursorRight = this.getEditorKeyDisplay("tui.editor.cursorRight");
-		const cursorWordLeft = this.getEditorKeyDisplay("tui.editor.cursorWordLeft");
-		const cursorWordRight = this.getEditorKeyDisplay("tui.editor.cursorWordRight");
-		const cursorLineStart = this.getEditorKeyDisplay("tui.editor.cursorLineStart");
-		const cursorLineEnd = this.getEditorKeyDisplay("tui.editor.cursorLineEnd");
-		const jumpForward = this.getEditorKeyDisplay("tui.editor.jumpForward");
-		const jumpBackward = this.getEditorKeyDisplay("tui.editor.jumpBackward");
-		const pageUp = this.getEditorKeyDisplay("tui.editor.pageUp");
-		const pageDown = this.getEditorKeyDisplay("tui.editor.pageDown");
-		const submit = this.getEditorKeyDisplay("tui.input.submit");
-		const newLine = this.getEditorKeyDisplay("tui.input.newLine");
-		const deleteWordBackward = this.getEditorKeyDisplay("tui.editor.deleteWordBackward");
-		const deleteWordForward = this.getEditorKeyDisplay("tui.editor.deleteWordForward");
-		const deleteToLineStart = this.getEditorKeyDisplay("tui.editor.deleteToLineStart");
-		const deleteToLineEnd = this.getEditorKeyDisplay("tui.editor.deleteToLineEnd");
-		const yank = this.getEditorKeyDisplay("tui.editor.yank");
-		const yankPop = this.getEditorKeyDisplay("tui.editor.yankPop");
-		const undo = this.getEditorKeyDisplay("tui.editor.undo");
-		const tab = this.getEditorKeyDisplay("tui.input.tab");
-		const clear = this.getAppKeyDisplay("app.clear");
-		const clearInput = this.getAppKeyDisplay("app.input.clear");
-		const interrupt = this.getAppKeyDisplay("app.interrupt");
-		const shortcutsKey = this.getAppKeyDisplay("app.shortcuts");
-		const exit = this.getAppKeyDisplay("app.exit");
-		const selectModel = this.getAppKeyDisplay("app.model.select");
-		const expandTools = this.getAppKeyDisplay("app.tools.expand");
-		const expandMessages = this.getAppKeyDisplay("app.messages.expand");
-		const expandEdits = this.getAppKeyDisplay("app.edits.expand");
-		const toggleThinking = this.getAppKeyDisplay("app.thinking.toggle");
-		const focusSubagents = this.getAppKeyDisplay("app.subagents.focus");
-		const toggleSubagentGraph = this.getAppKeyDisplay("app.subagents.graph");
-		const manageHeartbeats = this.getAppKeyDisplay("app.heartbeats.open");
-		const externalEditor = this.getAppKeyDisplay("app.editor.external");
-		const promptStash = this.getAppKeyDisplay("app.prompt.stash");
-		const followUp = this.getAppKeyDisplay("app.message.followUp");
-		const browseQueue = this.getAppKeyDisplay("app.message.navigateOlder");
-		const reorderQueue = `${this.getAppKeyDisplay("app.message.moveEarlier")} / ${this.getAppKeyDisplay("app.message.moveLater")}`;
-		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
-		const viewportPageUp = this.getEditorKeyDisplay("tui.viewport.pageUp");
-		const viewportPageDown = this.getEditorKeyDisplay("tui.viewport.pageDown");
-		const viewportTop = this.getEditorKeyDisplay("tui.viewport.top");
-		const viewportFollow = this.getEditorKeyDisplay("tui.viewport.follow");
+		const cursorUp = keyText("tui.editor.cursorUp");
+		const cursorDown = keyText("tui.editor.cursorDown");
+		const cursorLeft = keyText("tui.editor.cursorLeft");
+		const cursorRight = keyText("tui.editor.cursorRight");
+		const cursorWordLeft = keyText("tui.editor.cursorWordLeft");
+		const cursorWordRight = keyText("tui.editor.cursorWordRight");
+		const cursorLineStart = keyText("tui.editor.cursorLineStart");
+		const cursorLineEnd = keyText("tui.editor.cursorLineEnd");
+		const jumpForward = keyText("tui.editor.jumpForward");
+		const jumpBackward = keyText("tui.editor.jumpBackward");
+		const pageUp = keyText("tui.editor.pageUp");
+		const pageDown = keyText("tui.editor.pageDown");
+		const submit = keyText("tui.input.submit");
+		const newLine = keyText("tui.input.newLine");
+		const deleteWordBackward = keyText("tui.editor.deleteWordBackward");
+		const deleteWordForward = keyText("tui.editor.deleteWordForward");
+		const deleteToLineStart = keyText("tui.editor.deleteToLineStart");
+		const deleteToLineEnd = keyText("tui.editor.deleteToLineEnd");
+		const yank = keyText("tui.editor.yank");
+		const yankPop = keyText("tui.editor.yankPop");
+		const undo = keyText("tui.editor.undo");
+		const tab = keyText("tui.input.tab");
+		const clear = keyText("app.clear");
+		const clearInput = keyText("app.input.clear");
+		const interrupt = keyText("app.interrupt");
+		const shortcutsKey = keyText("app.shortcuts");
+		const exit = keyText("app.exit");
+		const selectModel = keyText("app.model.select");
+		const expandTools = keyText("app.tools.expand");
+		const expandMessages = keyText("app.messages.expand");
+		const expandEdits = keyText("app.edits.expand");
+		const toggleThinking = keyText("app.thinking.toggle");
+		const focusSubagents = keyText("app.subagents.focus");
+		const toggleSubagentGraph = keyText("app.subagents.graph");
+		const manageHeartbeats = keyText("app.heartbeats.open");
+		const externalEditor = keyText("app.editor.external");
+		const promptStash = keyText("app.prompt.stash");
+		const followUp = keyText("app.message.followUp");
+		const browseQueue = keyText("app.message.navigateOlder");
+		const reorderQueue = `${keyText("app.message.moveEarlier")} / ${keyText("app.message.moveLater")}`;
+		const pasteImage = keyText("app.clipboard.pasteImage");
+		const viewportPageUp = keyText("tui.viewport.pageUp");
+		const viewportPageDown = keyText("tui.viewport.pageDown");
+		const viewportTop = keyText("tui.viewport.top");
+		const viewportFollow = keyText("tui.viewport.follow");
 
 		let hotkeys = `
 **Navigation**
@@ -9816,7 +9786,6 @@ ${interrupt ? `| \`${interrupt}\` | Interrupt current operation |\n` : ""}${shor
 		this.stopGoalTrayTimer();
 		this.closeHeartbeatManager();
 		this.clearExtensionTerminalInputListeners();
-		this.footer.dispose();
 		this.footerDataProvider.dispose();
 		if (this.unsubscribe) {
 			this.unsubscribe();

@@ -9,6 +9,7 @@ import { stripAnsi } from "../../../utils/ansi.js";
 import { theme } from "../theme/theme.js";
 import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
 import { DynamicBorder } from "./dynamic-border.js";
+import { ExpandableComponent } from "./expandable-component.js";
 import { expandCollapseHint, keyText } from "./keybinding-hints.js";
 import { truncateToVisualLines } from "./visual-truncate.js";
 
@@ -16,7 +17,7 @@ const PREVIEW_LINES = 20;
 
 let nextBashBlockId = 0;
 
-export class BashExecutionComponent extends Container implements Collapsible {
+export class BashExecutionComponent extends ExpandableComponent implements Collapsible {
 	readonly toggleTargetId = `bash:${nextBashBlockId++}`;
 	private command: string;
 	private outputLines: string[] = [];
@@ -26,8 +27,6 @@ export class BashExecutionComponent extends Container implements Collapsible {
 	private loader: Loader;
 	private truncationResult?: TruncationResult;
 	private fullOutputPath?: string;
-	private expanded = false;
-	private lastGlobalExpanded?: boolean;
 	private contentContainer: Container;
 
 	constructor(command: string, ui: TUI, excludeFromContext = false, options: { suppressLeadingSpace?: boolean } = {}) {
@@ -58,23 +57,6 @@ export class BashExecutionComponent extends Container implements Collapsible {
 		this.contentContainer.addChild(this.loader);
 
 		this.addChild(new DynamicBorder(borderColor));
-	}
-
-	/**
-	 * Set whether the output is expanded (shows full output) or collapsed (preview only).
-	 */
-	setExpanded(expanded: boolean): void {
-		if (this.lastGlobalExpanded === expanded) {
-			return;
-		}
-		this.lastGlobalExpanded = expanded;
-		this.expanded = expanded;
-		this.updateDisplay();
-	}
-
-	toggleExpandedSelf(): void {
-		this.expanded = !this.expanded;
-		this.updateDisplay();
 	}
 
 	override invalidate(): void {
@@ -125,7 +107,7 @@ export class BashExecutionComponent extends Container implements Collapsible {
 		this.updateDisplay();
 	}
 
-	private updateDisplay(): void {
+	protected updateDisplay(): void {
 		// Apply truncation for LLM context limits (same limits as bash tool)
 		const fullOutput = this.outputLines.join("\n");
 		const contextTruncation = truncateTail(fullOutput, {
