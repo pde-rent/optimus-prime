@@ -150,7 +150,6 @@ describe("buildRlmPrompt", () => {
 				`REPL runtime — Bun, not Node (\`%%bash\` cells included): package and script commands are \`bun\`/\`bunx\`, never \`npm\`/\`npx\`/\`node\`. Available in every cell with no install step:\n${DEFAULT_RLM_RUNTIME_LABELS.map((label) => `- ${label}`).join("\n")}`,
 				"",
 
-				"Inspect a preloaded binding with `Object.keys(<skill>)` when its SKILL.md leaves an argument contract unclear.",
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 				"",
 				"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
@@ -237,9 +236,10 @@ describe("buildRlmPrompt", () => {
 			installedSkills: ["websearch"],
 		});
 
-		expect(prompt).toContain("Inspect a preloaded binding with `Object.keys(<skill>)`");
-		// The names live in the <available_skills> roster, emitted once by buildSystemPrompt.
-		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
+		// The names, the summaries and both routes to a full contract live in the
+		// <available_skills> roster, emitted once by buildSystemPrompt.
+		expect(prompt).not.toContain("Installed skills");
+		expect(prompt).not.toContain("Object.keys");
 		expect(prompt).toContain("A callable `rlm` is already in your global namespace");
 		expect(prompt).toContain("persistent JavaScript/TypeScript REPL (Bun)");
 		expect(prompt).toContain("Each `%%bash` cell runs in a throw-away subshell");
@@ -281,7 +281,9 @@ describe("buildRlmPrompt", () => {
 			allowRecursion: false,
 		});
 		expect(withBash).not.toContain("Installed skills: `websearch`.");
-		expect(withBash).toContain("Inspect a preloaded binding with `Object.keys(<skill>)`");
+		// File access is also what makes a roster summary expandable, so the roster owns
+		// both the names and the route out of them; nothing about skills is said twice.
+		expect(withBash).not.toContain("Object.keys");
 
 		// With no file access there is no roster, so this is the only place they appear.
 		const withoutTools = buildRlmPrompt({

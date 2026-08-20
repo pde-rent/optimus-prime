@@ -17,6 +17,17 @@ const MAX_NAME_LENGTH = 64;
 /** Max description length per spec */
 const MAX_DESCRIPTION_LENGTH = 1024;
 
+/**
+ * Tier-1 roster budget, per skill.
+ *
+ * The roster is prompt prefix: every request pays for every skill, and most turns use
+ * none of them. A routing line only has to get the model from "I need to do X" to the
+ * right SKILL.md; the contract itself is one `read()` away and is paid for only by the
+ * turn that needs it. The cap binds an author-written `summary` too, so a third-party
+ * skill cannot price itself into every request.
+ */
+const MAX_SUMMARY_LENGTH = 80;
+
 const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
@@ -73,6 +84,14 @@ function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
 export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
+	/**
+	 * Optional one-line routing text for the prompt roster. Absent, the first sentence of
+	 * `description` is used, so no existing skill has to be rewritten to benefit.
+	 *
+	 * YAML trap: a plain unquoted scalar cannot contain ": " anywhere, so a summary like
+	 * `summary: Charts: bar, line` silently drops the entire skill. Quote it or reword.
+	 */
+	summary?: string;
 	"disable-model-invocation"?: boolean;
 	[key: string]: unknown;
 }
@@ -91,6 +110,8 @@ export interface SkillJsMetadata {
 interface BaseSkill {
 	name: string;
 	description: string;
+	/** Author-written roster line; derived from `description` when absent. */
+	summary?: string;
 	filePath: string;
 	baseDir: string;
 	sourceInfo: SourceInfo;
@@ -402,9 +423,11 @@ function loadSkillFromFile(
 		}
 
 		const js = basename(filePath) === "SKILL.md" ? detectJsSkill(skillDir, name, diagnostics) : null;
+		const rawSummary = typeof frontmatter.summary === "string" ? frontmatter.summary.trim() : "";
 		const baseSkill: BaseSkill = {
 			name,
 			description: frontmatter.description,
+			...(rawSummary ? { summary: rawSummary } : {}),
 			filePath,
 			baseDir: skillDir,
 			sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
@@ -429,6 +452,54 @@ function loadSkillFromFile(
 	}
 }
 
+function collapse(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * First sentence of a description.
+ *
+ * A `.` only closes a sentence when whitespace follows it. These descriptions are dense
+ * with `websearch.run(...)`, `Bun.Image` and `0..1`, all of which would otherwise cut the
+ * line to nothing; an abbreviation followed by a space is far rarer than any of them.
+ */
+function firstSentence(text: string): string {
+	const end = text.search(/[.!?]\s/);
+	return end === -1 ? text : text.slice(0, end + 1);
+}
+
+/**
+ * Tier-1 routing line: `summary` frontmatter if the author wrote one, else the first
+ * sentence of `description` -- which is where these descriptions already put "what is
+ * this for" before handing the rest of the text to the API contract.
+ *
+ * Truncation is visible on purpose. `…` is the model's cue that the line is an index
+ * entry rather than the contract, and that the SKILL.md holds the rest.
+ */
+function summarizeSkillForPrompt(skill: Pick<Skill, "summary" | "description">): string {
+	const explicit = skill.summary ? collapse(skill.summary) : "";
+	const source = explicit || firstSentence(collapse(skill.description));
+	if (source.length <= MAX_SUMMARY_LENGTH) return source;
+	const cut = source.slice(0, MAX_SUMMARY_LENGTH);
+	const lastSpace = cut.lastIndexOf(" ");
+	return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[\s,;:—-]+$/, "")}…`;
+}
+
+/**
+ * `summary` renders a routing line per skill and defers the contract to the SKILL.md;
+ * `full` renders the whole description, as every request used to.
+ */
+export type SkillRosterMode = "summary" | "full";
+
+/**
+ * Deferring is the default because this harness cannot be used without the lookup it
+ * depends on: `repl` is the only tool a session is guaranteed to have, and `read(path)`
+ * is how every other file in the prompt is reached already. A model too weak to follow
+ * a stated path to a file cannot run an agent loop here at all, so there is no config
+ * in which `full` is the safer default -- only ones where it is the cheaper trade.
+ */
+export const DEFAULT_SKILL_ROSTER_MODE: SkillRosterMode = "summary";
+
 /**
  * Format skills for inclusion in a system prompt.
  *
@@ -438,10 +509,17 @@ function loadSkillFromFile(
  * so the tags, the repeated absolute paths and the entity escaping were charging ~4.5KB for
  * the same four facts a line carries. The SKILL.md files themselves still follow the spec.
  *
+ * The same argument applied a second time gives the two tiers. A full description is the
+ * contract for a skill the turn is about to call, and dead weight on every turn that is
+ * not; `summary` bills the routing line always and the contract only when it is needed.
+ * Nothing becomes undiscoverable: every name, binding and path still renders, and the
+ * intro states the route to the rest.
+ *
  * Skills with disableModelInvocation=true are excluded from the prompt
  * (they can only be invoked explicitly via /skill:name commands).
  */
-export function formatSkillsForPrompt(skills: Skill[]): string {
+export function formatSkillsForPrompt(skills: Skill[], options?: { mode?: SkillRosterMode }): string {
+	const mode = options?.mode ?? DEFAULT_SKILL_ROSTER_MODE;
 	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
 
 	if (visibleSkills.length === 0) {
@@ -459,19 +537,26 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 		const binding = skill.kind === "js" ? ` [${skill.js.importName}]` : "";
 		const location = root ? "" : ` (${skill.filePath})`;
 		// A folded or multi-line YAML description would otherwise break one-line-per-skill.
-		const description = skill.description.replace(/\s+/g, " ").trim();
-		const entry = `- ${skill.name}${binding}${location}: ${description}`;
+		const text = mode === "full" ? collapse(skill.description) : summarizeSkillForPrompt(skill);
+		const entry = `- ${skill.name}${binding}${location}: ${text}`;
 		const group = groups.get(root);
 		if (group) group.push(entry);
 		else groups.set(root, [entry]);
 	}
 
-	const lines = [
-		"\n\nSkills are specialized instructions for specific tasks. Read a skill's SKILL.md with the repl tool when the task matches its description, and resolve relative paths inside it against that skill's directory.",
-		"Entries are `name [binding]: description`; a binding is preloaded into the persistent JavaScript REPL and callable directly.",
-		"",
-		"<available_skills>",
-	];
+	// The route out of Tier 1 is stated here rather than assumed: an entry the model
+	// cannot expand is worse than no entry, because it reads as the whole contract.
+	const intro =
+		mode === "full"
+			? [
+					"\n\nSkills are specialized instructions for specific tasks. Read a skill's SKILL.md with the repl tool when the task matches its description, and resolve relative paths inside it against that skill's directory.",
+					"Entries are `name [binding]: description`; a binding is preloaded into the persistent JavaScript REPL and callable directly.",
+				]
+			: [
+					"\n\nSkills are specialized instructions for specific tasks. Each entry is a routing summary, not the contract: read that skill's SKILL.md with the repl tool before using it, and resolve relative paths inside it against that skill's directory.",
+					"Entries are `name [binding]: summary`, and `…` marks an abridged line. A binding is preloaded into the persistent JavaScript REPL and callable directly, but its call signature lives in the SKILL.md — read that, or `Object.keys(<binding>)`, before the first call.",
+				];
+	const lines = [...intro, "", "<available_skills>"];
 	// Entries carrying their own path go first, so no `Files:` template line can claim them.
 	lines.push(...(groups.get("") ?? []));
 	for (const [root, entries] of groups) {

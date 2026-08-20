@@ -39,8 +39,9 @@ export interface RlmPromptOptions {
  */
 const OUTPUT_FORM_PROMPT = [
 	"Choose the shape that carries the result, not prose by default. Prose for judgements and next steps. A table for a handful of labelled values the reader will compare exactly. Code or a diff for anything they will copy or apply. A chart when the shape of the data is the answer.",
-	// Which shape to reach for, not what the calls do: the skill's own roster entry
-	// carries the API, and this line is paid by every root agent whether or not it charts.
+	// Which shape to reach for. The roster entry carries only a routing summary, so this
+	// is the one place the surface is named; it is paid by every root agent whether or
+	// not it charts, which is why it stays a list of call names and not a contract.
 	"When the `chart` skill is loaded its output is plain text, so it goes anywhere prose goes. `chart(values)` for a trend, `chart.bar` for magnitudes, `chart.spark` inline in a sentence or table cell, `chart.gauge(ratio)` for progress, `chart.histogram` for a distribution, `chart.candle` for OHLC.",
 	"Reach for a chart on latency and timing distributions, token or cost trends over a run, benchmark comparisons, error-rate movement, file-size or coverage changes, and anything you would otherwise describe as rising, falling, or spiky. Three numbers do not need a chart; twenty usually do.",
 	"Do not chart and then restate the same numbers in prose. Lead with the shape, then say what it means and what follows from it.",
@@ -225,17 +226,13 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		skillLines.push(`Local skills live under ${skillsDir}. Read their SKILL.md files when helpful.`);
 	}
 	if (installedSkills.length > 0) {
-		// The <available_skills> roster carries each skill's name, binding, description
-		// and path already, and it is rendered whenever the model can read a file. Naming
-		// the same bindings again here bought nothing and was paid on every request, so
-		// only the part the roster does not state -- how to interrogate a binding -- is
-		// kept. Without file access there is no roster, so the names are listed instead.
+		// The <available_skills> roster carries each skill's name, binding, summary and
+		// path, and states both routes out of a summary (the SKILL.md, `Object.keys`).
+		// Restating either here was paid on every request for nothing. It renders only
+		// where the model can read a file -- which is also the only place a summary can
+		// be expanded, so without file access the full names are listed instead.
 		const rendersSkillRoster = hasRepl || activeTools.includes("bash");
-		if (rendersSkillRoster) {
-			skillLines.push(
-				"Inspect a preloaded binding with `Object.keys(<skill>)` when its SKILL.md leaves an argument contract unclear.",
-			);
-		} else {
+		if (!rendersSkillRoster) {
 			const installed = installedSkills.map((skill) => `\`${skill}\``).join(", ");
 			skillLines.push(`Installed skills: ${installed}. Read their SKILL.md files for usage.`);
 		}
@@ -248,8 +245,9 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		}
 		if (hasRepl && installedSkills.includes("edit")) {
 			skillLines.push(
-				// The two call shapes and when to prefer `patch` are in the skill's roster entry;
-				// only the snapshot mechanics, which do not fit a one-line description, are here.
+				// Editing is the one skill nearly every code turn reaches for, so it is the one
+				// worth stating in full up front rather than routing through its SKILL.md: the
+				// roster summary would cost a round trip on almost every session.
 				'For targeted existing-file edits prefer the preloaded `edit` skill. `await edit.src("pkg/file.ts")` prints `[path#TAG]` then `N:text`; pass TAG to `await edit.patch("pkg/file.ts", TAG, [{ at: [2, 3], text }, { after: 4, text }])`. Numbers index that snapshot and never shift between hunks in one call, and a file that moved underneath the tag is rejected rather than corrupted. Build `oldText`/`newText` from inspected slices when the text contains backticks or template placeholders.',
 			);
 		}
@@ -300,8 +298,9 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		if (installedSkills.includes("refine")) {
 			parts.push(
 				"",
-				// The trigger, the call and its timing are in the skill's roster entry; what
-				// only this block states is which component a given observation belongs in.
+				// Which component a given observation belongs in -- the judgement, not the API.
+				// `refine.run(...)` and its timing are in the skill's SKILL.md, reached the same
+				// way as any other skill's contract.
 				"Continual harness refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole harness.",
 			);
 		}

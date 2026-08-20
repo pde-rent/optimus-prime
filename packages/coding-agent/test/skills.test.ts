@@ -19,6 +19,7 @@ const collisionFixturesDir = resolve(__dirname, "fixtures/skills-collision");
 function createTestSkill(options: {
 	name: string;
 	description: string;
+	summary?: string;
 	filePath: string;
 	baseDir: string;
 	disableModelInvocation?: boolean;
@@ -28,6 +29,7 @@ function createTestSkill(options: {
 	const base = {
 		name: options.name,
 		description: options.description,
+		...(options.summary ? { summary: options.summary } : {}),
 		filePath: options.filePath,
 		baseDir: options.baseDir,
 		sourceInfo: createSyntheticSourceInfo(options.filePath, { source: options.source ?? "test" }),
@@ -208,6 +210,38 @@ describe("skills", () => {
 			expect(skills.length).toBeGreaterThanOrEqual(6);
 		});
 
+		it("should read an optional summary from frontmatter", () => {
+			const root = mkdtempSync(join(tmpdir(), "skill-summary-"));
+			try {
+				mkdirSync(join(root, "with-summary"), { recursive: true });
+				writeFileSync(
+					join(root, "with-summary", "SKILL.md"),
+					// The summary must not contain ": " -- an unquoted YAML scalar ends there and
+					// the whole skill disappears. Kept single-clause on purpose.
+					"---\nname: with-summary\ndescription: Long contract text. More of it.\nsummary: Short routing line.\n---\n\nBody.\n",
+				);
+				mkdirSync(join(root, "no-summary"), { recursive: true });
+				writeFileSync(
+					join(root, "no-summary", "SKILL.md"),
+					"---\nname: no-summary\ndescription: Long contract text. More of it.\n---\n\nBody.\n",
+				);
+
+				const { skills, diagnostics } = loadSkillsFromDir({ dir: root, source: "test" });
+				const byName = new Map(skills.map((skill) => [skill.name, skill]));
+
+				expect(byName.get("with-summary")?.summary).toBe("Short routing line.");
+				expect(byName.get("no-summary")?.summary).toBeUndefined();
+				expect(diagnostics).toHaveLength(0);
+
+				const roster = formatSkillsForPrompt(skills);
+				expect(roster).toContain("- with-summary: Short routing line.");
+				// Degrades to the first sentence for a third-party skill that declares none.
+				expect(roster).toContain("- no-summary: Long contract text.");
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
 		it("should return empty for non-existent directory", () => {
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: "/non/existent/path",
@@ -342,8 +376,119 @@ describe("skills", () => {
 			const introText = result.substring(0, rosterStart);
 
 			expect(introText).toContain("Skills are specialized instructions for specific tasks");
-			expect(introText).toContain("Read a skill's SKILL.md with the repl tool");
-			expect(introText).toContain("`name [binding]: description`");
+			expect(introText).toContain("read that skill's SKILL.md with the repl tool");
+			expect(introText).toContain("`name [binding]: summary`");
+		});
+
+		// Tier 2 has no dedicated call: the route out of a summary is the same `read` the
+		// prompt already documents. A summary the model cannot expand reads as the whole
+		// contract, so the route is not optional and neither is this assertion.
+		it("should state the route from a summary to the full contract", () => {
+			const skills: Skill[] = [
+				createTestSkill({
+					name: "test-skill",
+					description: "A test skill. It has a much longer contract than the summary shows.",
+					filePath: "/path/to/test-skill/SKILL.md",
+					baseDir: "/path/to/test-skill",
+					js: {
+						importName: "test_skill",
+						packagePath: "/path/to/test-skill",
+						entryPath: "/path/to/test-skill/skill.js",
+					},
+				}),
+			];
+
+			const result = formatSkillsForPrompt(skills);
+
+			// Name, binding and path all survive the tiering: nothing is undiscoverable.
+			expect(result).toContain("- test-skill [test_skill]: A test skill.");
+			expect(result).toContain("Files: /path/to/{name}/SKILL.md");
+			expect(result).toContain("read that skill's SKILL.md");
+			expect(result).toContain("`Object.keys(<binding>)`");
+			// The deferred half must not leak back in.
+			expect(result).not.toContain("much longer contract");
+		});
+
+		it("should reproduce the full description in full mode", () => {
+			const description = "A test skill. It has a much longer contract than the summary shows.";
+			const skills: Skill[] = [
+				createTestSkill({
+					name: "test-skill",
+					description,
+					summary: "Ignored in full mode.",
+					filePath: "/path/to/test-skill/SKILL.md",
+					baseDir: "/path/to/test-skill",
+				}),
+			];
+
+			const result = formatSkillsForPrompt(skills, { mode: "full" });
+
+			expect(result).toContain(`- test-skill: ${description}`);
+			expect(result).toContain("Read a skill's SKILL.md with the repl tool when the task matches its description");
+			expect(result).toContain("`name [binding]: description`");
+			expect(result).not.toContain("Ignored in full mode.");
+		});
+
+		describe("tier-1 summaries", () => {
+			const format = (options: { description: string; summary?: string }): string => {
+				const line = formatSkillsForPrompt([
+					createTestSkill({
+						name: "s",
+						description: options.description,
+						summary: options.summary,
+						filePath: "/r/s/SKILL.md",
+						baseDir: "/r/s",
+					}),
+				])
+					.split("\n")
+					.find((candidate) => candidate.startsWith("- s: "));
+				return line!.slice("- s: ".length);
+			};
+
+			it("should fall back to the first sentence when no summary is declared", () => {
+				expect(
+					format({ description: "Run the checker. `await check()` -> `{ ok, results }`. Use it often." }),
+				).toBe("Run the checker.");
+			});
+
+			it("should prefer a declared summary over the description", () => {
+				expect(
+					format({ description: "Run the checker. Plus a lot more.", summary: "Run the project's own checker." }),
+				).toBe("Run the project's own checker.");
+			});
+
+			// `websearch.run(...)`, `Bun.Image` and `0..1` all appear in real descriptions and
+			// would each cut the line to nothing if a bare `.` ended a sentence.
+			it("should not treat a dotted call or range as a sentence end", () => {
+				expect(format({ description: "Search with `await websearch.run(q)` over 0..1 of the corpus." })).toBe(
+					"Search with `await websearch.run(q)` over 0..1 of the corpus.",
+				);
+			});
+
+			it("should truncate an over-long summary at a word boundary and mark it", () => {
+				const result = format({
+					description:
+						"Load on-disk images (PNG, JPEG, GIF, WebP) into context as attachments you can actually SEE, including screenshots and scans.",
+				});
+
+				expect(result.endsWith("…")).toBe(true);
+				expect(result.length).toBeLessThanOrEqual(81);
+				// Truncation lands between words, never mid-word.
+				expect(result).toBe("Load on-disk images (PNG, JPEG, GIF, WebP) into context as attachments you can…");
+			});
+
+			// A declared summary is the escape hatch for a bad first sentence, not a way to
+			// buy unlimited prompt prefix: the cap binds whoever wrote it.
+			it("should cap a declared summary too", () => {
+				const result = format({ description: "Short.", summary: "x".repeat(200) });
+
+				expect(result.length).toBeLessThanOrEqual(81);
+				expect(result.endsWith("…")).toBe(true);
+			});
+
+			it("should keep a summary that has no sentence terminator", () => {
+				expect(format({ description: "JSON-RPC 2.0 over HTTP" })).toBe("JSON-RPC 2.0 over HTTP");
+			});
 		});
 
 		// The block is permanent prompt prefix: XML tags, per-skill absolute paths and
@@ -377,24 +522,46 @@ describe("skills", () => {
 			expect(result.match(/\/path\/to\//g)).toHaveLength(1);
 		});
 
+		const make = (count: number, description: string): Skill[] =>
+			Array.from({ length: count }, (_, index) =>
+				createTestSkill({
+					name: `skill-${index}`,
+					description,
+					filePath: `/skills/skill-${index}/SKILL.md`,
+					baseDir: `/skills/skill-${index}`,
+				}),
+			);
+
 		// The old per-skill XML form charged ~4.5KB beyond the descriptions across the
 		// bundled set, most of it tags and a repeated absolute path. A line costs a name,
 		// a binding and two separators; pin the marginal cost so neither can creep back.
 		it("should charge only a line prefix per additional skill", () => {
 			const description = "A description long enough to dominate the line it sits on.";
-			const make = (count: number): Skill[] =>
-				Array.from({ length: count }, (_, index) =>
-					createTestSkill({
-						name: `skill-${index}`,
-						description,
-						filePath: `/skills/skill-${index}/SKILL.md`,
-						baseDir: `/skills/skill-${index}`,
-					}),
-				);
-
-			const marginal = (formatSkillsForPrompt(make(17)).length - formatSkillsForPrompt(make(1)).length) / 16;
+			const marginal =
+				(formatSkillsForPrompt(make(17, description)).length - formatSkillsForPrompt(make(1, description)).length) /
+				16;
 
 			expect(marginal).toBeLessThanOrEqual(description.length + 20);
+		});
+
+		// The second half of the same argument. Above, a line costs a description; here, a
+		// description is deferred to the SKILL.md and a line costs a bounded routing summary
+		// no matter how long the contract behind it is. Pin the ceiling so a skill with a
+		// 600-character description cannot charge every request for it again.
+		it("should cap the marginal cost at the tier-1 budget regardless of description length", () => {
+			const long = `A short purpose line. ${"Contract detail that belongs in the SKILL.md. ".repeat(12)}`;
+
+			const summaryMarginal =
+				(formatSkillsForPrompt(make(17, long)).length - formatSkillsForPrompt(make(1, long)).length) / 16;
+			const fullMarginal =
+				(formatSkillsForPrompt(make(17, long), { mode: "full" }).length -
+					formatSkillsForPrompt(make(1, long), { mode: "full" }).length) /
+				16;
+
+			expect(summaryMarginal).toBeLessThanOrEqual(80 + 20);
+			expect(fullMarginal).toBeGreaterThan(long.length);
+			// The whole point of the tiering, stated as a number.
+			expect(summaryMarginal * 5).toBeLessThan(fullMarginal);
 		});
 
 		it("should keep a multi-line description on one line", () => {
