@@ -4,7 +4,12 @@
  *
  * Two keyless sources answer all four questions, so this skill is the fetch, the join, and -
  * mostly - the trimming. DefiLlama carries TVL for 461 chains and 8088 protocols; GeckoTerminal
- * carries the DEX-liquidity ranking DefiLlama has no equivalent for. Neither needs a key.
+ * carries the DEX volume DefiLlama has no equivalent for. Neither needs a key.
+ *
+ * ONE METRIC, ONE SOURCE. TVL is always DefiLlama's and DEX volume is always GeckoTerminal's,
+ * with no overlap and no fallback across the seam: no `tvl` here was ever sourced from
+ * GeckoTerminal and no `volume24h` from DefiLlama. That is what makes the field name sufficient
+ * provenance, so no row has to carry a source tag.
  *
  * TRIMMING IS THE FEATURE. `/protocols` is 8.6 MB and one `/protocol/{slug}` detail is 13 MB;
  * a chain history is 3250 daily points. Those numbers are the reason this file exists rather
@@ -20,10 +25,11 @@
  * rather than by string equality. Categories drift the same way: live data says "Dexs" where
  * every caller writes "Dexes", so category matching is singularised.
  *
- * THE RANK IS DEX RESERVES, NOT IMPORTANCE. GeckoTerminal ranks Solana first on $389B of pool
- * reserve against Ethereum's $5.2B, which says more about how many junk pools a chain carries
- * than about where value sits - DefiLlama has Ethereum at $46B TVL and Solana at $5.2B. Both
- * numbers ride on every row for exactly that reason, and `{ by: "tvl" }` re-sorts.
+ * GECKOTERMINAL'S `rank_by_liquidity` IS DELIBERATELY NOT READ. It counts raw pool reserve, so it
+ * ranks Solana first on $389B against Ethereum's $5.2B while DefiLlama has Ethereum at $46B TVL
+ * and Solana at $5.2B, and it seats Near ($0.1B TVL) above Tron ($5.0B). The wrong field, not the
+ * wrong source: the same payload's `swap_volume_usd_24h` is the authoritative DEX volume, so that
+ * is what rides on the row and what `{ by: "volume" }` sorts on.
  *
  * Errors follow the `rpc` and `portfolio` convention: an upstream that is down, rate-limited or
  * slow comes back as an `{error, status?}` value so the surrounding cell keeps running, while a
@@ -34,11 +40,11 @@ const LLAMA = "https://api.llama.fi";
 
 /**
  * The public `api.geckoterminal.com/v2/networks` route lists networks but carries no metrics at
- * all - no liquidity, no volume, no chain id - so it cannot rank anything. This internal route
- * is the only free source of `rank_by_liquidity`, and being internal it may change or vanish;
- * when it does, `chains` degrades to TVL order rather than failing.
+ * all - no volume, no liquidity, no chain id - so nothing can be joined off it. This internal
+ * route is the only free source of DEX volume, and being internal it may change or vanish; when
+ * it does, `chains` answers from DefiLlama alone with no `volume24h` rather than failing.
  */
-const GECKO_RANKING_URL = "https://app.geckoterminal.com/api/p1/networks?page=1&include=network_metric";
+const GECKO_VOLUME_URL = "https://app.geckoterminal.com/api/p1/networks?page=1&include=network_metric";
 
 /** Long enough that a burst of related questions costs one download, short enough to act on. */
 const DOC_TTL_MS = 10 * 60_000;
@@ -212,12 +218,16 @@ export function foldChains(doc) {
 }
 
 /**
- * Liquidity ranks keyed by every identifier GeckoTerminal offers, because 12 of its top 50 are
- * non-EVM and carry no chain id to join on.
+ * 24h DEX volume in USD, keyed by every identifier GeckoTerminal offers, because 12 of its 50
+ * networks are non-EVM and carry no chain id to join on.
+ *
+ * The metric hangs off the included `network_metric`, never off the network itself, and every
+ * money field in it is a decimal STRING - `swap_volume_usd_24h` is `"6267922512.52942"`, so the
+ * `Number` is load-bearing rather than defensive.
  *
  * @returns {{byId: Map<number, number>, byName: Map<string, number>}}
  */
-export function rankIndex(doc) {
+export function volumeIndex(doc) {
 	const metrics = new Map();
 	for (const item of doc?.included ?? []) {
 		if (item?.type === "network_metric" && item.attributes) metrics.set(item.id, item.attributes);
@@ -227,19 +237,21 @@ export function rankIndex(doc) {
 	for (const network of doc?.data ?? []) {
 		const attributes = network?.attributes;
 		if (!attributes) continue;
-		const rank = metrics.get(network.relationships?.network_metric?.data?.id)?.rank_by_liquidity;
-		if (typeof rank !== "number") continue;
+		const raw = metrics.get(network.relationships?.network_metric?.data?.id)?.swap_volume_usd_24h;
+		// `Number(null)` is 0, an entirely plausible volume, so null goes before the conversion.
+		const volume = raw == null ? Number.NaN : Number(raw);
+		if (!Number.isFinite(volume)) continue;
 		const id = attributes.chain_id == null ? Number.NaN : Number(attributes.chain_id);
-		if (Number.isFinite(id) && !byId.has(id)) byId.set(id, rank);
+		if (Number.isFinite(id) && !byId.has(id)) byId.set(id, volume);
 		for (const alias of [attributes.name, attributes.identifier, attributes.cg_network_id]) {
 			const key = norm(alias);
-			if (key && !byName.has(key)) byName.set(key, rank);
+			if (key && !byName.has(key)) byName.set(key, volume);
 		}
 	}
 	return { byId, byName };
 }
 
-function rankOf(row, index) {
+function volumeOf(row, index) {
 	if (row.chainId !== undefined) {
 		const byId = index.byId.get(row.chainId);
 		if (byId !== undefined) return byId;
@@ -251,13 +263,14 @@ function rankOf(row, index) {
 	return index.byName.get(norm(row.gecko));
 }
 
-function chainRow(row, rank) {
+function chainRow(row, volume) {
 	/** @type {Record<string, unknown>} */
 	const out = { name: row.name };
 	if (row.chainId !== undefined) out.chainId = row.chainId;
 	out.symbol = row.symbol;
 	out.tvl = Math.round(row.tvl);
-	if (rank !== undefined) out.rank = rank;
+	// Whole USD, the unit `tvl` uses, so the two divide into a turnover ratio as they stand.
+	if (volume !== undefined) out.volume24h = Math.round(volume);
 	return out;
 }
 
@@ -353,21 +366,27 @@ export function renderHistory(series, valueKey, history, points) {
 export default function createSkill() {
 	return {
 		/**
-		 * The chains worth caring about, ranked by DEX liquidity and carrying TVL.
+		 * The chains worth caring about, by TVL, carrying DEX volume alongside.
 		 *
-		 * The universe is DefiLlama's chain list, so chains with real value but no DEX activity
-		 * (Bitcoin, Hyperliquid L1) are present and simply carry no `rank`. Each row is
-		 * `{name, chainId?, symbol, tvl, rank?}`: `name` is the DefiLlama spelling, which is what
-		 * `defi.chain` and `defi.protocols({ chain })` take, and `chainId` is present only for EVM
-		 * chains, where it feeds `rpc.pick(chainId)` from the sibling skill directly.
+		 * Each row is `{name, chainId?, symbol, tvl, volume24h?}`. `tvl` is DefiLlama's and
+		 * `volume24h` is GeckoTerminal's 24h DEX volume - the field name is the source, always.
+		 * `name` is the DefiLlama spelling, which is what `defi.chain` and
+		 * `defi.protocols({ chain })` take; `chainId` is present only for EVM chains, where it
+		 * feeds `rpc.pick(chainId)` from the sibling skill directly.
 		 *
-		 * `rank` counts raw pool reserve, which over-weights chains carrying many junk pools -
-		 * cross-check it against `tvl`, or pass `{ by: "tvl" }` to sort by that instead. If the
-		 * ranking source is unreachable the call still succeeds, in TVL order, with no `rank`.
+		 * The universe is DefiLlama's 459 chains and GeckoTerminal's first page covers 44 of them,
+		 * so `volume24h` is ABSENT on roughly a third of a default 50-row answer - both for chains
+		 * with no DEX activity at all (Bitcoin, Hyperliquid L1) and for small ones off the page.
+		 * That is why the default is `{ by: "tvl" }`, which is complete, and why `{ by: "volume" }`
+		 * is opt-in - it sinks every chain without a volume below every chain with one. If
+		 * GeckoTerminal is unreachable the call still succeeds, in TVL order, with no `volume24h`.
+		 *
+		 * The two disagree, and the disagreement is the signal - Tron sits 5th on TVL and 10th on
+		 * volume, X Layer 24th and 7th. Divide them for turnover.
 		 *
 		 * @param {object} [opts]
 		 * @param {number} [opts.limit=50] - How many rows to return.
-		 * @param {"liquidity"|"tvl"} [opts.by="liquidity"] - Sort key.
+		 * @param {"tvl"|"volume"} [opts.by="tvl"] - Sort key.
 		 * @param {boolean} [opts.raw=false] - Untrimmed DefiLlama entries instead of rows.
 		 * @param {boolean} [opts.refresh=false] - Bypass the 10 minute memo.
 		 * @param {number} [opts.timeout=30] - Timeout in seconds.
@@ -376,25 +395,26 @@ export default function createSkill() {
 		 */
 		async chains(opts = {}) {
 			const limit = checkCount(opts.limit, 50, "defi.chains", "limit");
-			const by = opts.by ?? "liquidity";
-			if (by !== "liquidity" && by !== "tvl") {
-				throw new TypeError(`defi.chains: by must be "liquidity" or "tvl", got ${JSON.stringify(opts.by)}`);
+			const by = opts.by ?? "tvl";
+			if (by !== "tvl" && by !== "volume") {
+				throw new TypeError(`defi.chains: by must be "tvl" or "volume", got ${JSON.stringify(opts.by)}`);
 			}
-			const [doc, ranking] = await Promise.all([
+			const [doc, gecko] = await Promise.all([
 				loadDoc(`${LLAMA}/v2/chains`, opts, "defi.chains"),
-				loadDoc(GECKO_RANKING_URL, opts, "defi.chains"),
+				loadDoc(GECKO_VOLUME_URL, opts, "defi.chains"),
 			]);
 			if (isFailure(doc)) return doc;
 
-			// The ranking is a secondary signal on an unofficial endpoint; losing it should cost
-			// the `rank` field, not the answer.
-			const index = isFailure(ranking) ? { byId: new Map(), byName: new Map() } : rankIndex(ranking);
-			const ranked = foldChains(doc).map((row) => ({ row, rank: rankOf(row, index) }));
-			ranked.sort((a, b) =>
-				by === "tvl" ? b.row.tvl - a.row.tvl : (a.rank ?? Infinity) - (b.rank ?? Infinity) || b.row.tvl - a.row.tvl,
+			// Volume rides on an unofficial endpoint; losing it should cost the `volume24h` field,
+			// not the answer.
+			const index = isFailure(gecko) ? { byId: new Map(), byName: new Map() } : volumeIndex(gecko);
+			const rows = foldChains(doc).map((row) => ({ row, volume: volumeOf(row, index) }));
+			// -1 rather than 0, so a chain with no volume sorts below one measured at zero.
+			rows.sort((a, b) =>
+				by === "volume" ? (b.volume ?? -1) - (a.volume ?? -1) || b.row.tvl - a.row.tvl : b.row.tvl - a.row.tvl,
 			);
-			const top = ranked.slice(0, limit);
-			return opts.raw ? top.map((e) => e.row.src) : top.map((e) => chainRow(e.row, e.rank));
+			const top = rows.slice(0, limit);
+			return opts.raw ? top.map((e) => e.row.src) : top.map((e) => chainRow(e.row, e.volume));
 		},
 
 		/**

@@ -8,12 +8,12 @@ const {
 	clearDefiCache,
 	downsample,
 	foldChains,
-	rankIndex,
 	renderHistory,
+	volumeIndex,
 } = defiSkill;
 
 type ErrorValue = { error: string; status?: number };
-type ChainRow = { name: string; chainId?: number; symbol: string | null; tvl: number; rank?: number };
+type ChainRow = { name: string; chainId?: number; symbol: string | null; tvl: number; volume24h?: number };
 type ProtocolRow = {
 	name: string;
 	slug: string;
@@ -45,7 +45,15 @@ const LLAMA_CHAINS = [
 	{ gecko_id: "islamic-coin", tvl: 12345, tokenSymbol: "ISLM", cmcId: null, name: "HAQQ", chainId: "11235" },
 ];
 
-const GECKO_RANKING = {
+/**
+ * Trimmed from the live payload, which puts every money field in a network_metric on the
+ * `included` side as a decimal STRING and leaves the network object itself metric-free.
+ *
+ * The `rank_by_liquidity` values are kept and are deliberately misleading - HAQQ, which trades
+ * nothing, outranks Base - because the skill must ignore that field, and a fixture that agreed
+ * with volume order could not prove it does.
+ */
+const GECKO_NETWORKS = {
 	data: [
 		{
 			id: "136",
@@ -71,12 +79,29 @@ const GECKO_RANKING = {
 			attributes: { name: "Base", identifier: "base", chain_id: 8453, cg_network_id: "base" },
 			relationships: { network_metric: { data: { id: "4", type: "network_metric" } } },
 		},
+		{
+			id: "77",
+			type: "network",
+			attributes: { name: "HAQQ", identifier: "haqq", chain_id: 11235, cg_network_id: "haqq-network" },
+			relationships: { network_metric: { data: { id: "5", type: "network_metric" } } },
+		},
 	],
 	included: [
-		{ id: "8", type: "network_metric", attributes: { rank_by_liquidity: 1, reserve_in_usd: "388992917336.672" } },
-		{ id: "2", type: "network_metric", attributes: { rank_by_liquidity: 2 } },
-		{ id: "3", type: "network_metric", attributes: { rank_by_liquidity: 3 } },
-		{ id: "4", type: "network_metric", attributes: { rank_by_liquidity: 8 } },
+		{
+			id: "8",
+			type: "network_metric",
+			attributes: {
+				swap_volume_usd_24h: "6267922512.52942",
+				swap_count_24h: 35422391,
+				reserve_in_usd: "392596324369.452",
+				rank_by_liquidity: 1,
+			},
+		},
+		{ id: "2", type: "network_metric", attributes: { swap_volume_usd_24h: "2954183001.5", rank_by_liquidity: 2 } },
+		{ id: "3", type: "network_metric", attributes: { swap_volume_usd_24h: "2293884120.9", rank_by_liquidity: 3 } },
+		{ id: "4", type: "network_metric", attributes: { swap_volume_usd_24h: "968512340.44", rank_by_liquidity: 8 } },
+		// A measured zero, which must still outrank a chain with no measurement at all.
+		{ id: "5", type: "network_metric", attributes: { swap_volume_usd_24h: "0", rank_by_liquidity: 4 } },
 	],
 };
 
@@ -184,7 +209,7 @@ function stubAll(overrides: Record<string, unknown> = {}) {
 	return stubFetch((url) => {
 		if (url in overrides) return overrides[url];
 		if (url === CHAINS_URL) return response(LLAMA_CHAINS);
-		if (url === GECKO_URL) return response(GECKO_RANKING);
+		if (url === GECKO_URL) return response(GECKO_NETWORKS);
 		if (url === PROTOCOLS_URL) return response(LLAMA_PROTOCOLS);
 		if (url.startsWith("https://api.llama.fi/v2/historicalChainTvl/")) return response(CHAIN_HISTORY);
 		if (url.startsWith("https://api.llama.fi/protocol/")) return response(PROTOCOL_DETAIL);
@@ -193,13 +218,14 @@ function stubAll(overrides: Record<string, unknown> = {}) {
 }
 
 describe("defi.chains", () => {
-	it("ranks by liquidity, folds duplicate chain ids, and keeps chainId only for EVM", async () => {
+	it("defaults to TVL order, folds duplicate chain ids, and keeps chainId only for EVM", async () => {
 		const calls = stubAll();
 		const rows = (await defi.chains()) as ChainRow[];
 
 		expect(calls.sort()).toEqual([CHAINS_URL, GECKO_URL].sort());
-		expect(rows.map((r) => r.name)).toEqual(["Solana", "BSC", "Ethereum", "Base", "Bitcoin", "HAQQ"]);
-		expect(rows.map((r) => r.rank)).toEqual([1, 2, 3, 8, undefined, undefined]);
+		// TVL is the default axis because it is the complete one - GeckoTerminal covers a third.
+		expect(rows.map((r) => r.name)).toEqual(["Ethereum", "Solana", "BSC", "Base", "Bitcoin", "HAQQ"]);
+		expect(rows).toEqual((await defi.chains({ by: "tvl" })) as ChainRow[]);
 		// "BSC" and "Binance" are one chain; the $0 twin must not take a row of its own.
 		expect(rows.filter((r) => r.chainId === 56)).toHaveLength(1);
 		expect(rows.find((r) => r.name === "BSC")?.tvl).toBe(5201879703);
@@ -228,19 +254,59 @@ describe("defi.chains", () => {
 		expect((await defi.chains({ limit: 3 })).length).toBe(3);
 	});
 
-	it("sorts by tvl on request and drops only the rank when the ranking source fails", async () => {
-		stubAll({ [GECKO_URL]: response("gone", { status: 503, text: true }) });
-		const rows = (await defi.chains({ by: "tvl" })) as ChainRow[];
+	it("carries GeckoTerminal volume as whole USD, parsed from the decimal string it ships", async () => {
+		stubAll();
+		const rows = (await defi.chains()) as ChainRow[];
+		const by = (name: string) => rows.find((r) => r.name === name);
 
-		expect(rows[0].name).toBe("Ethereum");
-		expect(rows.every((r) => r.rank === undefined)).toBe(true);
+		// "6267922512.52942" joined by name, because Solana carries no chain_id on either side.
+		expect(by("Solana")?.volume24h).toBe(6267922513);
+		// Joined by chain id, and through the "BNB Chain" spelling neither source shares.
+		expect(by("BSC")?.volume24h).toBe(2954183002);
+		expect(by("Ethereum")?.volume24h).toBe(2293884121);
+		// Same unit as `tvl`, so the pair divides into a turnover ratio untouched.
+		expect(by("Ethereum")!.volume24h! / by("Ethereum")!.tvl).toBeCloseTo(0.0499, 3);
+		// GeckoTerminal's own rank is never surfaced, however tempting the field looks.
+		expect(rows.every((r) => !("rank" in r))).toBe(true);
+	});
+
+	it("orders by volume differently than by tvl, and sinks an unmeasured chain below a zero", async () => {
+		stubAll();
+		const byTvl = (await defi.chains({ by: "tvl" })) as ChainRow[];
+		const byVolume = (await defi.chains({ by: "volume" })) as ChainRow[];
+
+		expect(byTvl.map((r) => r.name)).toEqual(["Ethereum", "Solana", "BSC", "Base", "Bitcoin", "HAQQ"]);
+		expect(byVolume.map((r) => r.name)).toEqual(["Solana", "BSC", "Ethereum", "Base", "HAQQ", "Bitcoin"]);
+		expect(byVolume.map((r) => r.name)).not.toEqual(byTvl.map((r) => r.name));
+		// Ethereum leads on TVL by 9x and still comes third on volume - the disagreement is signal.
+		expect(byTvl[0].name).toBe("Ethereum");
+		expect(byVolume.findIndex((r) => r.name === "Ethereum")).toBe(2);
+		// HAQQ is measured at zero and Bitcoin is not measured at all, so HAQQ ranks higher even
+		// though Bitcoin holds 300,000x its TVL.
+		expect(byVolume[4]).toMatchObject({ name: "HAQQ", volume24h: 0 });
+		expect(byVolume[5]).not.toHaveProperty("volume24h");
+	});
+
+	it("degrades to DefiLlama alone when GeckoTerminal fails, with volume absent rather than zero", async () => {
+		stubAll({ [GECKO_URL]: response("gone", { status: 503, text: true }) });
+		const rows = (await defi.chains()) as ChainRow[];
+
+		// An unofficial endpoint going away must cost the field, not the answer.
+		expect(Array.isArray(rows)).toBe(true);
+		expect(rows).not.toHaveProperty("error");
+		expect(rows.map((r) => r.name)).toEqual(["Ethereum", "Solana", "BSC", "Base", "Bitcoin", "HAQQ"]);
+		expect(rows.every((r) => !("volume24h" in r))).toBe(true);
+		expect(rows.every((r) => r.tvl > 0)).toBe(true);
+		// Asking for volume order without volume is still an answer, not a lie about zero.
+		const byVolume = (await defi.chains({ by: "volume" })) as ChainRow[];
+		expect(byVolume.map((r) => r.name)).toEqual(rows.map((r) => r.name));
 	});
 
 	it("returns untrimmed entries under raw", async () => {
 		stubAll();
 		const rows = (await defi.chains({ limit: 1, raw: true })) as (typeof LLAMA_CHAINS)[number][];
 
-		expect(rows[0].cmcId).toBe("5426");
+		expect(rows[0].cmcId).toBe("1027");
 	});
 
 	it("returns an error value on an HTTP failure", async () => {
@@ -255,7 +321,9 @@ describe("defi.chains", () => {
 		stubAll();
 		expect(defi.chains({ limit: 0 })).rejects.toThrow(TypeError);
 		expect(defi.chains({ limit: 2.5 })).rejects.toThrow(TypeError);
-		expect(defi.chains({ by: "volume" })).rejects.toThrow(TypeError);
+		expect(defi.chains({ by: "tvl?" })).rejects.toThrow(TypeError);
+		// Retired rather than kept as a trap: it sorted on pool reserve, not importance.
+		expect(defi.chains({ by: "liquidity" })).rejects.toThrow(/must be "tvl" or "volume"/);
 	});
 });
 
@@ -436,7 +504,7 @@ describe("caching", () => {
 	it("does not cache a failed response", async () => {
 		let status = 500;
 		const calls = stubFetch((url) =>
-			url === CHAINS_URL ? response(LLAMA_CHAINS, { status }) : response(GECKO_RANKING),
+			url === CHAINS_URL ? response(LLAMA_CHAINS, { status }) : response(GECKO_NETWORKS),
 		);
 		expect((await defi.chains()) as ErrorValue).toHaveProperty("status", 500);
 		status = 200;
@@ -472,9 +540,12 @@ describe("helpers", () => {
 	it("exposes the shapes the join depends on", () => {
 		expect(foldChains(LLAMA_CHAINS)).toHaveLength(6);
 		expect(foldChains(null)).toEqual([]);
-		expect(rankIndex(GECKO_RANKING).byId.get(56)).toBe(2);
-		expect(rankIndex(GECKO_RANKING).byName.get("binancesmartchain")).toBe(2);
-		expect(rankIndex({}).byId.size).toBe(0);
+		expect(volumeIndex(GECKO_NETWORKS).byId.get(56)).toBe(2954183001.5);
+		expect(volumeIndex(GECKO_NETWORKS).byName.get("binancesmartchain")).toBe(2954183001.5);
+		expect(volumeIndex({}).byId.size).toBe(0);
+		// `Number(null)` is 0, a plausible volume, so a metric without the field must not index as one.
+		const missing = { data: GECKO_NETWORKS.data, included: [{ id: "2", type: "network_metric", attributes: {} }] };
+		expect(volumeIndex(missing).byId.has(56)).toBe(false);
 		expect([...(chainAliases(LLAMA_CHAINS, "BSC") ?? [])]).toEqual(["bsc", "binance"]);
 		expect(chainAliases(LLAMA_CHAINS, "nope")).toBeNull();
 	});
