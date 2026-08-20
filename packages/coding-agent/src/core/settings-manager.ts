@@ -795,7 +795,13 @@ export class SettingsManager {
 
 	/** Opt out only to inspect a collapse; the loop otherwise streams and is billed to max_tokens. */
 	getDegeneracyGuard(): boolean {
-		return this.settings.degeneracyGuard ?? true;
+		// Default off until the repetition rule stops firing on ordinary enumeration. A review
+		// reproduced aborts on twelve bullets sharing a clause (700 chars) against genuine
+		// degeneracy at 560 — a 1.25x margin. The validation corpus was static source files,
+		// which structurally cannot contain generated lists, so the measured zero false
+		// positives never covered the shape that breaks it. A guard that kills real answers is
+		// worse than the failure it prevents; re-enable when the margin is real.
+		return this.settings.degeneracyGuard ?? false;
 	}
 
 	setDegeneracyGuard(enabled: boolean): void {
