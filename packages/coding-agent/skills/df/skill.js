@@ -26,6 +26,8 @@ const isNull = (v) => v === null || v === undefined;
 
 const NUMERIC = new Set(["i64", "f64"]);
 const MAX_CELL = 24;
+/** pandas' `display.precision` default, for the same reason it has one. */
+const DISPLAY_DECIMALS = 6;
 const INT32_MIN = -2147483648;
 const INT32_MAX = 2147483647;
 const DESCRIBE_STATS = ["count", "null_count", "mean", "std", "min", "25%", "50%", "75%", "max"];
@@ -500,6 +502,13 @@ export class DataFrame {
 		if (!Array.isArray(keys) || keys.length === 0) {
 			throw new TypeError(`df.sort: expected a column name, an array of names, or a key function, got ${typeof by}`);
 		}
+		// A bare boolean here reads as `descending` to polars and as `ascending` to pandas, and the
+		// two mean opposite things. Guessing would silently return the reverse of what was asked.
+		if (typeof opts !== "object" || opts === null) {
+			throw new TypeError(
+				`df.sort: expected options as an object, e.g. { descending: true }, got ${typeof opts}. The pandas positional spelling is sort_values(by, ascending).`,
+			);
+		}
 		// Sort keys are read once into raw stores rather than per comparison; a column key needs no
 		// copy at all, since its store is already the array the comparator wants.
 		const sortKeys = keys.map((k) => {
@@ -861,17 +870,46 @@ export class DataFrame {
 
 // pandas spellings for the polars names, so either muscle memory lands.
 DataFrame.prototype.assign = DataFrame.prototype.with_columns;
-DataFrame.prototype.sort_values = DataFrame.prototype.sort;
 DataFrame.prototype.groupby = DataFrame.prototype.group_by;
 DataFrame.prototype.to_records = DataFrame.prototype.to_dicts;
+/**
+ * `sort` is polars — `sort(by, { descending })`. This is pandas — `sort_values(by, ascending)`, with
+ * the direction as a second positional whose sense is inverted. An adapter rather than an alias,
+ * because one function cannot read a bare `false` as both directions at once.
+ */
+DataFrame.prototype.sort_values = function sort_values(by, opts) {
+	const pandas = typeof opts === "boolean" || Array.isArray(opts);
+	return this.sort(by, pandas ? { ascending: opts } : opts);
+};
 DataFrame.prototype.dropna = DataFrame.prototype.drop_nulls;
 DataFrame.prototype.drop_duplicates = DataFrame.prototype.unique;
 
 const range = (from, to) => Array.from({ length: to - from }, (_, i) => from + i);
 
+/**
+ * Display only - `to_dicts`, `to_columns` and `get_column` all return the stored value untouched.
+ *
+ * A float that came out of arithmetic carries its full binary tail, and a column of
+ * `16.89861185106625` is a column the reader cannot scan. pandas and polars both round their repr
+ * for the same reason. Rounding is skipped where it would erase the number instead of shortening
+ * it, so a value smaller than the sixth decimal prints as itself rather than as `0`.
+ */
+function fmtNumber(v) {
+	if (!Number.isFinite(v) || Number.isInteger(v)) return String(v);
+	const rounded = Number(v.toFixed(DISPLAY_DECIMALS));
+	return rounded === 0 ? String(v) : String(rounded);
+}
+
 function fmt(v) {
 	if (isNull(v)) return "null";
-	const s = v instanceof Date ? v.toISOString() : typeof v === "object" ? JSON.stringify(v) : String(v);
+	const s =
+		typeof v === "number"
+			? fmtNumber(v)
+			: v instanceof Date
+				? v.toISOString()
+				: typeof v === "object"
+					? JSON.stringify(v)
+					: String(v);
 	return s.length > MAX_CELL ? `${s.slice(0, MAX_CELL - 1)}…` : s;
 }
 

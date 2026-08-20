@@ -1,6 +1,6 @@
 ---
 name: chart
-description: Terminal charts over @crafter/charts (braille rendering), in two surfaces. Native — `chart(data, opts?)` plus `chart.bar/scatter/candle/spark/gauge/donut/histogram`, each returning a string. matplotlib.pyplot — `const plt = chart.plt` then plot, scatter, bar, barh, hist, step, title, xlabel, ylabel, legend, xlim, ylim, grid, figure, show, clf, close. `plt.show()` renders the figure and resets it, so each chart holds exactly the calls made since the last show. No subplots, savefig, colormaps, 3D or animation. Use it whenever numbers read better as a shape than as a table.
+description: Terminal charts over @crafter/charts (braille rendering), in two surfaces. Native — `chart(data, opts?)` plus `chart.bar/scatter/candle/spark/gauge/donut/histogram`, each returning a string. matplotlib.pyplot — `const plt = chart.plt` then plot, scatter, bar, barh, hist, step, title, xlabel, ylabel, legend, xlim, ylim, grid, figure, show, clf, close. `plot(x, y, fmt?, opts?)` takes `{label, color}` and named colours, as matplotlib does. `plt.show()` renders the figure and resets it, so each chart holds exactly the calls made since the last show. No subplots, savefig, colormaps, 3D or animation. Use it whenever numbers read better as a shape than as a table.
 ---
 
 # Chart
@@ -22,24 +22,62 @@ braille (2x4 dots per character cell) so lines read as curves rather than stairc
 idiom transfers verbatim:
 
     const plt = chart.plt;               // like: import matplotlib.pyplot as plt
-    plt.plot(xs, ys, "r-");
-    plt.plot(xs, baseline);
+    plt.plot(xs, ys, "r-", { label: "p99" });
+    plt.plot(xs, baseline, { label: "p50", color: "green" });
     plt.title("latency");
     plt.xlabel("request");
     plt.ylabel("ms");
-    plt.legend(["p99", "p50"]);
     plt.show();                          // renders the chart
 
 | Call | Notes |
 |---|---|
-| `plot(y)`, `plot(x, y)`, `plot(x, y, fmt)` | `fmt` is a matplotlib format string — colour `bgrcmykw`, line `-` or `:`, marker `o . + x *`. A marker with no line draws a scatter. |
-| `scatter(x, y)` | points, unconnected |
-| `bar(x, height)` | `x` must be numeric; for category labels use `barh` |
+| `plot(y)`, `plot(x, y)`, `plot(x, y, fmt)`, `plot(x, y, fmt?, opts?)` | `fmt` is a matplotlib format string — colour `bgrcmykw` or a name like `"red"`, line `-` or `:`, marker `o . + x *`. A marker with no line draws a scatter. |
+| `scatter(x, y, opts?)` | points, unconnected |
+| `bar(x, height, opts?)` | `x` must be numeric; for category labels use `barh` |
 | `barh(labels, values)` | horizontal bars with the label printed beside each one |
 | `hist(values, bins?)` | `bins` defaults to 10 |
-| `step(x, y)` | staircase |
+| `step(x, y, opts?)` | staircase |
 | `title(s)`, `xlabel(s)`, `ylabel(s)` | text lines above and below the plot; `ylabel` sits above the axis, since a terminal cannot rotate it |
-| `legend(labels?)` | no legend is drawn unless you call this, as in matplotlib |
+| `legend(labels?)` | draws the legend, overriding plot-time labels positionally |
+
+### Naming and colouring a series
+
+`plot`, `scatter`, `step` and `bar` take an options object last, holding any of `label`, `color`,
+`linestyle` (alias `ls`) and `marker`. It may follow a `fmt` or replace it, and it may sit where
+`y` would be when `x` is implied:
+
+    plt.plot(x, y, { label: "Ethereum" });
+    plt.plot(x, y, "r--", { label: "Solana" });
+    plt.plot(y, { color: "green", marker: "o" });
+
+An option outside that list throws rather than being dropped, so `linewidth` tells you it is not
+a thing here instead of quietly changing nothing.
+
+Colours are the eight the renderer can draw — `blue green red cyan magenta yellow white gray` —
+by name, or as the letters `bgrcmykw`. `grey` and `black` land on `gray`. Anything else (`orange`,
+`#ff0000`, `tab:blue`) throws and lists what is available; nothing silently falls back to a
+default, because a series drawn in a colour nobody chose is a chart that misleads. A series with
+no colour takes the next one in the cycle, as matplotlib's property cycle does.
+
+Naming a series with `label` draws the legend on its own — matplotlib also wants `legend()`, but
+a terminal has no legend to toggle, so a named series that drew none would be a pure loss.
+`legend([...])` still works and still wins where the two disagree, entry by entry.
+
+### How many series can be told apart
+
+**One, in a normal REPL cell. Eight if ANSI colour survives to the reader.** Colour is the
+renderer's only per-series distinction — every line is drawn from the same braille glyphs and
+there are no dash patterns — and its palette holds eight. The REPL runs with `NO_COLOR`, and tool
+output is stripped of escapes before you see it, so in practice the curves in a multi-series chart
+are not tellable apart at all.
+
+So a multi-series chart says so, under the legend:
+
+    note: all 10 series drew, in legend order, but this output carries no colour, ...
+
+The legend itself wraps across lines and never truncates an entry, so ten series give ten whole
+names in legend order. When you need to read ten series rather than see their envelope, draw them
+one per `show()`, or compare a single number each with `barh`.
 | `xlim(a, b)`, `ylim(a, b)` | also accept a single `[a, b]` |
 | `figure(opts?)` | starts a fresh figure; `{ width, height, charset, color }` or `{ figsize: [w, h] }` in characters |
 | `show()` | renders the figure, then resets it |

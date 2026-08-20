@@ -355,6 +355,195 @@ describe("plt argument errors", () => {
 	});
 });
 
+// The transcript that prompted these: a model wrote plot(x, y, { label: name }) — the single most
+// common way to name a series in matplotlib — and got a TypeError pointing it at legend([...]).
+describe("plt.plot options", () => {
+	it("names a series from { label }, the way label= does in matplotlib", () => {
+		const { plt, render } = makePlt();
+		plt.plot([0, 1, 2], [3, 1, 4], { label: "Ethereum" });
+		expect(render()).toContain("─ Ethereum");
+	});
+
+	it("keeps the fmt string form, and takes both together", () => {
+		const { plt, render } = makePlt();
+		plt.plot([0, 1, 2], [3, 1, 4], "r-");
+		expect(render()).toContain("┤");
+
+		const both = makePlt();
+		both.plt.plot([0, 1, 2], [3, 1, 4], "r-", { label: "Solana" });
+		expect(both.render()).toContain("─ Solana");
+	});
+
+	it("takes the options object with x implied, and with no fmt", () => {
+		const { plt, render } = makePlt();
+		plt.plot([3, 1, 4], { label: "BSC" });
+		expect(render()).toContain("─ BSC");
+	});
+
+	it("lets legend([...]) override a plot-time label positionally and leave the rest", () => {
+		const { plt, render } = makePlt();
+		plt.plot([1, 2, 3], { label: "first" });
+		plt.plot([3, 2, 1], { label: "second" });
+		plt.legend(["OVERRIDDEN"]);
+		const out = render();
+		expect(out).toContain("OVERRIDDEN");
+		expect(out).not.toContain("first");
+		expect(out).toContain("second");
+	});
+
+	it("still draws no legend for a series nobody named", () => {
+		const { plt, render } = makePlt();
+		plt.plot([1, 2, 3]);
+		expect(render()).not.toContain("─ ");
+	});
+
+	it("names a series on scatter, step and bar too", () => {
+		for (const call of ["scatter", "step", "bar"] as const) {
+			const { plt, render } = makePlt();
+			plt[call]([0, 1, 2], [3, 1, 4], { label: `${call}_MARK` });
+			expect(render()).toContain(`${call}_MARK`);
+		}
+	});
+
+	it("refuses an option it cannot honour instead of dropping it", () => {
+		const { plt } = makePlt();
+		expect(() => plt.plot([1, 2], { linewidth: 3 })).toThrow(/unknown option "linewidth"/);
+		expect(() => plt.plot([1, 2], { linewidth: 3 })).toThrow(/label, color/);
+	});
+});
+
+// "red-" was rejected for having an "e" in it. matplotlib takes named colours, and the renderer
+// has eight of them, so refusing the name was the facade being narrower than what it wraps.
+describe("plt colours", () => {
+	it("takes a colour name in the fmt string", () => {
+		const named = makePlt();
+		named.plt.plot([1, 4, 2, 8], "red-");
+		const lettered = makePlt();
+		lettered.plt.plot([1, 4, 2, 8], "r-");
+		expect(named.render()).toBe(lettered.render());
+	});
+
+	it("takes color as an option, by name or by letter", () => {
+		const { plt } = makePlt();
+		expect(() => plt.plot([1, 2, 3], { color: "green", label: "g" })).not.toThrow();
+		expect(() => plt.plot([1, 2, 3], { color: "k", label: "k" })).not.toThrow();
+		expect(() => plt.plot([1, 2, 3], { color: "GREY", label: "grey" })).not.toThrow();
+		expect(String(plt.show())).toContain("─ grey");
+	});
+
+	it("puts the colour on the line, so ANSI output differs by colour", () => {
+		const red = makePlt();
+		red.plt.figure({ color: true });
+		red.plt.plot([1, 4, 2, 8], { color: "red" });
+		const blue = makePlt();
+		blue.plt.figure({ color: true });
+		blue.plt.plot([1, 4, 2, 8], { color: "blue" });
+		const drawn = red.render();
+		expect(drawn).not.toBe(blue.render());
+		expect(drawn).toContain("\x1b[31m");
+	});
+
+	it("refuses a colour the renderer has no ink for, and names the ones it has", () => {
+		const { plt } = makePlt();
+		expect(() => plt.plot([1, 2], { color: "orange" })).toThrow(TypeError);
+		expect(() => plt.plot([1, 2], { color: "orange" })).toThrow(
+			/blue, green, red, cyan, magenta, yellow, white, gray/,
+		);
+		expect(() => plt.plot([1, 2], "#ff0000")).toThrow(TypeError);
+		expect(() => plt.plot([1, 2], "zz")).toThrow(/unknown character/);
+	});
+});
+
+// The transcript's chart: ten chains, a legend cut mid-word at "─ Solan", four series with no
+// entry at all, and a model left writing "a couple chains share line styles" as a guess.
+describe("legend with more series than the renderer can distinguish", () => {
+	const CHAINS = [
+		"Ethereum",
+		"Solana",
+		"BSC",
+		"Bitcoin",
+		"Tron",
+		"Base",
+		"Arbitrum",
+		"Hyperliquid",
+		"Sui",
+		"Avalanche",
+	];
+
+	/** Ten series of eight points, as percent change from the first day — the transcript's shape. */
+	function tenSeries(plt: any, opts?: Record<string, unknown>) {
+		if (opts) plt.figure(opts);
+		for (const [i, name] of CHAINS.entries()) {
+			const base = 100 + i * 30;
+			const week = Array.from({ length: 8 }, (_, d) => base * (1 + Math.sin(d / 2 + i) / 12));
+			plt.plot(
+				week.map((_, d) => d),
+				week.map((v) => ((v - week[0]!) / week[0]!) * 100),
+				{ label: name },
+			);
+		}
+	}
+
+	it("gives every one of ten series a whole legend entry", () => {
+		const { plt, render } = makePlt();
+		tenSeries(plt);
+		const out = render();
+		for (const name of CHAINS) expect(out).toContain(`─ ${name}`);
+		// The library's own legend stopped after six entries and cut the sixth; nothing may be
+		// left as a prefix of the name it stands for.
+		expect(out).not.toContain("─ Solan\n");
+		expect(out).not.toContain("─ Avalanch\n");
+	});
+
+	it("wraps the legend instead of running past the figure width", () => {
+		const { plt, render } = makePlt();
+		tenSeries(plt, { width: 64, height: 14 });
+		const legend = render()
+			.split("\n")
+			.filter((l) => l.includes("─ "));
+		expect(legend.length).toBeGreaterThan(1);
+		for (const l of legend) expect(l.length).toBeLessThanOrEqual(64);
+	});
+
+	it("says how many series drew, so nothing has to be guessed at", () => {
+		const { plt, render } = makePlt();
+		tenSeries(plt);
+		expect(render()).toContain("all 10 series drew");
+	});
+
+	it("names the series that reuse a colour once the palette runs out", () => {
+		const { plt, render } = makePlt();
+		tenSeries(plt, { color: true });
+		const out = render();
+		expect(out).toContain("all 10 series drew");
+		expect(out).toContain("8 colours");
+		expect(out).toContain("Sui, Avalanche");
+	});
+
+	it("says plainly that colourless output cannot tell two curves apart", () => {
+		const { plt, render } = makePlt();
+		plt.plot([1, 2, 3], { label: "p50" });
+		plt.plot([2, 3, 4], { label: "p99" });
+		expect(render()).toContain("no colour");
+	});
+
+	it("keeps quiet about a single series", () => {
+		const { plt, render } = makePlt();
+		plt.plot([1, 2, 3], { label: "only" });
+		expect(render()).not.toContain("note:");
+	});
+
+	it("wraps the native named-series legend the same way", () => {
+		const chart = makeChart();
+		const out = chart.line(
+			CHAINS.map((name, i) => ({ name, data: [i, i + 1, i + 2] })),
+			{ width: 64, height: 10, color: false },
+		);
+		for (const name of CHAINS) expect(out).toContain(`─ ${name}`);
+		expect(out).toContain("all 10 series drew");
+	});
+});
+
 // @crafter/charts has no title field, so `chart(data, { title })` dropped it silently for as
 // long as the option has been documented. A no-op option is worse than an absent one.
 describe("native title option", () => {

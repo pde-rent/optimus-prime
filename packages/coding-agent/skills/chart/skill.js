@@ -37,12 +37,7 @@ function shouldColor(option) {
 	return Boolean(process.stdout?.isTTY);
 }
 
-const render = (spec, opts) => {
-	const body = shouldColor(opts?.color) ? renderToAnsi(spec) : renderToString(spec);
-	// @crafter/charts has no title field, so passing one through the spec dropped it silently.
-	// Compose it here, the same way the pyplot path does, rather than leaving the option a no-op.
-	return opts?.title ? `${centre(String(opts.title), opts.width ?? 64)}\n${body}` : body;
-};
+const render = (spec, color) => (color ? renderToAnsi(spec) : renderToString(spec));
 
 /**
  * Normalise the accepted inputs into rows the library can key on.
@@ -87,9 +82,13 @@ function toRows(data) {
 	return { rows, keys: [{ key: "value" }] };
 }
 
-/** Build a spec, applying one mark type per series. */
-function build(data, opts, mark) {
-	const options = opts ?? {};
+/**
+ * Build a spec, applying one mark type per series.
+ *
+ * Labels are deliberately withheld from the marks: the library's own legend is one grid row that
+ * clips at the plot width, so it drops whole series. `legendBlock` draws them instead.
+ */
+function build(data, options, mark) {
 	const { rows, keys } = toRows(data);
 	let spec = crafterChart({
 		width: options.width ?? 64,
@@ -97,16 +96,27 @@ function build(data, opts, mark) {
 		...(options.charset ? { charset: options.charset } : {}),
 	}).data(rows, { xKey: "x" });
 	if (options.yFormat) spec = spec.yAxis({ format: options.yFormat });
-	for (const series of keys) {
-		const color = series.color ?? options.barColor;
-		spec = spec[mark]({
-			key: series.key,
-			...(color ? { color } : {}),
-			// Only label a named series; a lone "value" legend is noise.
-			...(series.key === "value" ? {} : { label: series.key }),
-		});
+	const entries = [];
+	for (const [i, series] of keys.entries()) {
+		const color = series.color ?? options.barColor ?? PALETTE[i % PALETTE.length];
+		spec = spec[mark]({ key: series.key, color });
+		// Only name a named series; a lone "value" legend is noise.
+		if (series.key !== "value") entries.push({ label: series.key, mark, color });
 	}
-	return spec;
+	return { spec, entries };
+}
+
+/** Everything the two surfaces stack around a plot, in one order. */
+function compose(parts) {
+	const lines = [];
+	if (parts.title) lines.push(centre(String(parts.title), parts.width));
+	if (parts.ylabel) lines.push(parts.ylabel);
+	lines.push(parts.body);
+	lines.push(...legendBlock(parts.entries, parts.width, parts.color));
+	if (parts.xlabel) lines.push(centre(parts.xlabel, parts.width));
+	const note = seriesNote(parts.entries, parts.color);
+	if (note) lines.push(note);
+	return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -131,31 +141,120 @@ class Rendered extends String {
 
 /** matplotlib format strings, e.g. `"r--"`, `"bo"`, `"k."`. */
 const FMT_COLORS = { b: "blue", g: "green", r: "red", c: "cyan", m: "magenta", y: "yellow", k: "gray", w: "white" };
+/**
+ * The eight the renderer can actually draw, under the names matplotlib uses for them, plus the
+ * two spellings that land on one of the eight. A colour outside this set is refused rather than
+ * defaulted, because a series drawn in a colour nobody asked for is a chart that lies.
+ */
+const NAMED_COLORS = {
+	blue: "blue",
+	green: "green",
+	red: "red",
+	cyan: "cyan",
+	magenta: "magenta",
+	yellow: "yellow",
+	white: "white",
+	gray: "gray",
+	grey: "gray",
+	black: "gray",
+};
+const COLOR_NAMES = Object.keys(NAMED_COLORS).slice(0, 8);
+/** Cycled over unclaimed series, in the same order the library's own `plot()` uses. */
+const PALETTE = ["cyan", "green", "yellow", "magenta", "red", "blue", "white", "gray"];
+/** @crafter/charts keeps its escape table internal, so the legend's swatches carry the codes. */
+const ANSI_FG = { red: 31, green: 32, yellow: 33, blue: 34, magenta: 35, cyan: 36, white: 37, gray: 90 };
 const FMT_MARKERS = "o.,+x*sdv^<>ph";
 
-function parseFmt(fmt) {
-	if (fmt === undefined || fmt === null) return {};
-	if (typeof fmt !== "string") {
+/** Table lookups are own-key only, so a key like "constructor" cannot resolve to a prototype member. */
+const lookup = (table, key) => (typeof key === "string" && Object.hasOwn(table, key) ? table[key] : undefined);
+
+const paint = (text, color, on) => (on && lookup(ANSI_FG, color) ? `\x1b[${ANSI_FG[color]}m${text}\x1b[0m` : text);
+
+function toColor(where, value) {
+	const key = typeof value === "string" ? value.trim().toLowerCase() : value;
+	const color = lookup(NAMED_COLORS, key) ?? lookup(FMT_COLORS, key);
+	if (!color) {
 		throw new TypeError(
-			`plot(x, y, fmt) wants fmt as a string such as "r--" or "bo", got ${typeof fmt}. Series names come from legend([...]).`,
+			`${where} got colour ${JSON.stringify(value)}, which the renderer cannot draw. It has ${COLOR_NAMES.join(", ")}, or the letters bgrcmykw.`,
 		);
 	}
+	return color;
+}
+
+function parseFmt(where, fmt) {
+	if (fmt === undefined || fmt === null || fmt === "") return {};
+	if (typeof fmt !== "string") {
+		throw new TypeError(
+			`${where} wants fmt as a string such as "r--" or "bo", got ${typeof fmt}. A name, colour or style goes in the options object instead, e.g. { label: "eth", color: "red" }.`,
+		);
+	}
+	let rest = fmt;
 	let color;
+	// matplotlib's own fmt is single-character, but "red-" is what a model writes, so a leading
+	// colour name is taken first and only the remainder read as style characters.
+	for (const name of Object.keys(NAMED_COLORS)) {
+		if (rest.toLowerCase().startsWith(name)) {
+			color = NAMED_COLORS[name];
+			rest = rest.slice(name.length);
+			break;
+		}
+	}
 	let hasMarker = false;
 	let hasLine = false;
-	for (const ch of fmt) {
-		if (ch in FMT_COLORS) color = FMT_COLORS[ch];
+	for (const ch of rest) {
+		const named = lookup(FMT_COLORS, ch);
+		if (named) color = named;
 		else if (ch === "-" || ch === ":") hasLine = true;
 		else if (FMT_MARKERS.includes(ch)) hasMarker = true;
 		else {
 			throw new TypeError(
-				`plot fmt "${fmt}" has an unknown character "${ch}". Use a colour (bgrcmykw), a line style (- or :), or a marker (o . + x *).`,
+				`plot fmt "${fmt}" has an unknown character "${ch}". Use a colour (bgrcmykw, or a name — ${COLOR_NAMES.join(", ")}), a line style (- or :), or a marker (o . + x *).`,
 			);
 		}
 	}
 	// A marker with no line is matplotlib's scatter; anything else stays a line.
 	return { ...(color ? { color } : {}), mark: hasMarker && !hasLine ? "scatter" : "line" };
 }
+
+const STYLE_OPTIONS = ["label", "color", "linestyle", "ls", "marker"];
+
+/** A fmt string and the options object describe the same three things, so both parse in one place. */
+function parseStyle(where, fmt, opts) {
+	if (opts === undefined || opts === null) return parseFmt(where, fmt);
+	if (typeof opts !== "object" || Array.isArray(opts)) {
+		throw new TypeError(
+			`${where} wants the options as an object, e.g. { label: "eth" }, got ${Array.isArray(opts) ? "an array" : typeof opts}`,
+		);
+	}
+	for (const key of Object.keys(opts)) {
+		if (!STYLE_OPTIONS.includes(key)) {
+			throw new TypeError(`${where} got an unknown option "${key}". It takes ${STYLE_OPTIONS.join(", ")}.`);
+		}
+	}
+	const style = parseFmt(where, `${fmt ?? ""}${opts.linestyle ?? opts.ls ?? ""}${opts.marker ?? ""}`);
+	if (opts.color !== undefined) style.color = toColor(where, opts.color);
+	if (opts.label !== undefined) style.label = String(opts.label);
+	return style;
+}
+
+/**
+ * matplotlib's `plot(x, y, fmt, **kwargs)`, in JS. `y` and `fmt` are each optional and the options
+ * object is recognised by shape, so it may follow either — an array can only be data and a string
+ * can only be a fmt, which leaves nothing ambiguous.
+ */
+function seriesArgs(where, args) {
+	const rest = args.slice(1);
+	const opts = rest.length > 0 && isOptions(rest[rest.length - 1]) ? rest.pop() : undefined;
+	const fmt = rest.length > 0 && typeof rest[rest.length - 1] === "string" ? rest.pop() : undefined;
+	if (rest.length > 1) {
+		throw new TypeError(
+			`${where} got ${args.length} arguments; it takes x, then an optional y, fmt and options object`,
+		);
+	}
+	return { x: args[0], y: rest[0], ...parseStyle(where, fmt, opts) };
+}
+
+const isOptions = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 function asNumbers(where, name, value) {
 	if (!Array.isArray(value)) {
@@ -208,6 +307,55 @@ function centre(text, width) {
 	return " ".repeat(pad) + text;
 }
 
+const MARK_SYMBOL = { line: "─", scatter: "•", bar: "█" };
+/** The renderer's y-axis gutter, so the legend lines up under the plot area as it used to. */
+const LEGEND_INDENT = 8;
+
+/**
+ * The library writes its legend into a single grid row and clips it at the plot width, so with ten
+ * series the sixth entry ends mid-word and the last four never appear at all. Wrapping keeps every
+ * entry whole; an entry wider than the figure gets its own line rather than being cut.
+ */
+function legendBlock(entries, width, color) {
+	if (!entries || entries.length === 0) return [];
+	const room = Math.max(16, width - LEGEND_INDENT);
+	const lines = [];
+	let plain = "";
+	let painted = "";
+	for (const e of entries) {
+		const symbol = lookup(MARK_SYMBOL, e.mark) ?? "─";
+		const item = `${symbol} ${e.label}`;
+		if (plain !== "" && plain.length + 2 + item.length > room) {
+			lines.push(" ".repeat(LEGEND_INDENT) + painted);
+			plain = "";
+			painted = "";
+		}
+		const sep = plain === "" ? "" : "  ";
+		plain += sep + item;
+		painted += sep + paint(symbol, e.color, color) + ` ${e.label}`;
+	}
+	lines.push(" ".repeat(LEGEND_INDENT) + painted);
+	return lines;
+}
+
+/**
+ * Colour is the renderer's only per-series distinction — every line is the same braille glyph and
+ * there are no dash patterns — so past eight series, or with colour off, the curves genuinely
+ * cannot be told apart. Silence here is what leaves a model guessing whether its tenth series drew.
+ */
+function seriesNote(entries, color) {
+	if (!entries || entries.length < 2) return "";
+	const drew = `all ${entries.length} series drew, in legend order`;
+	if (!color) {
+		return `note: ${drew}, but this output carries no colour, and colour is the only thing that tells two curves apart here. Draw them one per show(), or compare final values with barh.`;
+	}
+	const repeats = entries.slice(PALETTE.length).map((e) => e.label);
+	if (repeats.length > 0) {
+		return `note: ${drew}; the palette holds ${PALETTE.length} colours, so ${repeats.join(", ")} reuse one already taken.`;
+	}
+	return "";
+}
+
 function limitPair(where, a, b) {
 	const [lo, hi] = Array.isArray(a) ? a : [a, b];
 	const nums = asNumbers(where, "limits", [lo, hi]);
@@ -216,7 +364,7 @@ function limitPair(where, a, b) {
 	return nums;
 }
 
-function renderSeries(fig) {
+function renderSeries(fig, color) {
 	const byX = new Map();
 	for (const s of fig.series) {
 		for (const [x, y] of s.points) {
@@ -230,17 +378,14 @@ function renderSeries(fig) {
 	const size = { width: fig.width, height: fig.height, ...(fig.charset ? { charset: fig.charset } : {}) };
 	let spec = crafterChart(size).data(rows, { xKey: "x" }).xAxis();
 	if (fig.ylim) spec = spec.yDomain(fig.ylim);
-	for (const s of fig.series) {
-		spec = spec[s.mark]({
-			key: s.key,
-			...(s.color ? { color: s.color } : {}),
-			// The renderer draws a legend for any labelled mark, so labels are withheld until
-			// legend() asks for one — matplotlib shows no legend unless you call it.
-			...(fig.legend && s.label ? { label: s.label } : {}),
-		});
+	for (const [i, s] of fig.series.entries()) {
+		spec = spec[s.mark]({ key: s.key, color: seriesColor(s, i) });
 	}
-	return render(spec, { color: fig.color });
+	return render(spec, color);
 }
+
+/** matplotlib's property cycle — an unclaimed series takes the next colour rather than the default one. */
+const seriesColor = (s, i) => s.color ?? PALETTE[i % PALETTE.length];
 
 /** Horizontal bars, the one chart shape that can carry category labels in a terminal. */
 function renderBars(fig) {
@@ -259,14 +404,24 @@ function renderFigure(fig) {
 	if (fig.bars === null && fig.series.length === 0) {
 		throw new Error("plt.show() has nothing to draw. Call plot(), scatter(), bar(), barh(), step() or hist() first.");
 	}
-	const lines = [];
-	if (fig.title) lines.push(centre(fig.title, fig.width));
-	// matplotlib rotates the y label down the left edge; a terminal cannot, so it sits above the
-	// axis where it still reads as belonging to the vertical scale.
-	if (fig.ylabel) lines.push(fig.ylabel);
-	lines.push(fig.bars ? renderBars(fig) : renderSeries(fig));
-	if (fig.xlabel) lines.push(centre(fig.xlabel, fig.width));
-	return lines.join("\n");
+	const color = shouldColor(fig.color);
+	// A legend is drawn only once asked for, as in matplotlib — either by legend() or by naming a
+	// series at plot time, which in a terminal would otherwise be a label that goes nowhere.
+	const entries =
+		fig.legend && !fig.bars
+			? fig.series.map((s, i) => ({ label: s.label || `series ${i + 1}`, mark: s.mark, color: seriesColor(s, i) }))
+			: [];
+	return compose({
+		title: fig.title,
+		// matplotlib rotates the y label down the left edge; a terminal cannot, so it sits above the
+		// axis where it still reads as belonging to the vertical scale.
+		ylabel: fig.ylabel,
+		body: fig.bars ? renderBars(fig) : renderSeries(fig, color),
+		xlabel: fig.xlabel,
+		entries,
+		width: fig.width,
+		color,
+	});
 }
 
 function unsupported(name, hint) {
@@ -287,20 +442,25 @@ function unsupported(name, hint) {
 function createPyplot() {
 	let fig = newFigure();
 
-	const push = (mark, points, color) => {
+	const push = (mark, points, style) => {
 		if (fig.bars) throw new TypeError("barh cannot share a figure with plot/bar/scatter. Call show() between them.");
-		fig.series.push({ key: `s${fig.series.length}`, mark, points, ...(color ? { color } : {}), label: "" });
+		const { color, label } = style ?? {};
+		fig.series.push({ key: `s${fig.series.length}`, mark, points, ...(color ? { color } : {}), label: label ?? "" });
+		// matplotlib needs legend() on top of a label=, but in a terminal there is no legend widget
+		// to toggle, so naming a series and getting no legend is a loss with nothing to show for it.
+		if (label) fig.legend = true;
 	};
 
-	const plot = (x, y, fmt) => {
-		// `plot(y, "r-")` — matplotlib reads a trailing string as the format, not as data.
-		const [ys, format] = typeof y === "string" ? [undefined, y] : [y, fmt];
-		const { mark = "line", color } = parseFmt(format);
-		push(mark, toPoints("plot(x, y?, fmt?)", x, ys), color);
+	const plot = (...args) => {
+		const where = "plot(x, y?, fmt?, opts?)";
+		const a = seriesArgs(where, args);
+		push(a.mark ?? "line", toPoints(where, a.x, a.y), a);
 	};
 
-	const step = (x, y) => {
-		const points = toPoints("step(x, y?)", x, y);
+	const step = (...args) => {
+		const where = "step(x, y?, opts?)";
+		const a = seriesArgs(where, args);
+		const points = toPoints(where, a.x, a.y);
 		const staircase = [];
 		for (const [i, point] of points.entries()) {
 			// The renderer keys rows by x, so the riser is nudged just left of the next sample
@@ -308,7 +468,7 @@ function createPyplot() {
 			if (i > 0) staircase.push([point[0] - (point[0] - points[i - 1][0]) * 1e-6, points[i - 1][1]]);
 			staircase.push(point);
 		}
-		push("line", staircase);
+		push("line", staircase, a);
 	};
 
 	const hist = (values, bins) => {
@@ -358,12 +518,18 @@ function createPyplot() {
 		step,
 		hist,
 		barh,
-		scatter: (x, y) => push("scatter", toPoints("scatter(x, y?)", x, y)),
-		bar: (x, height) => {
-			if (Array.isArray(x) && x.some((v) => typeof v === "string")) {
+		scatter: (...args) => {
+			const where = "scatter(x, y?, opts?)";
+			const a = seriesArgs(where, args);
+			push("scatter", toPoints(where, a.x, a.y), a);
+		},
+		bar: (...args) => {
+			const where = "bar(x, height, opts?)";
+			const a = seriesArgs(where, args);
+			if (Array.isArray(a.x) && a.x.some((v) => typeof v === "string")) {
 				throw new TypeError("bar(x, height) wants numeric x. For category labels use barh(labels, values).");
 			}
-			push("bar", toPoints("bar(x, height)", x, height));
+			push("bar", toPoints(where, a.x, a.y), a);
 		},
 		title: label("title"),
 		xlabel: label("xlabel"),
@@ -372,6 +538,8 @@ function createPyplot() {
 			fig.legend = true;
 			if (labels === undefined) return;
 			if (!Array.isArray(labels)) throw new TypeError('legend(labels?) wants an array, e.g. legend(["p50", "p99"])');
+			// Positional override, as in matplotlib: a series past the end of the array keeps the
+			// label it was plotted with, so the two ways of naming a series compose.
 			for (const [i, text] of labels.entries()) if (fig.series[i]) fig.series[i].label = String(text);
 		},
 		xlim: limit("xlim"),
@@ -395,19 +563,28 @@ function createPyplot() {
 }
 
 export default function createSkill() {
+	function draw(data, opts, mark) {
+		const options = opts ?? {};
+		const color = shouldColor(options.color);
+		const { spec, entries } = build(data, options, mark);
+		// @crafter/charts has no title field, so passing one through the spec dropped it silently.
+		// Compose it here, the same way the pyplot path does, rather than leaving the option a no-op.
+		return compose({ title: options.title, body: render(spec, color), entries, width: options.width ?? 64, color });
+	}
+
 	/** Line chart. Accepts numbers, `[x, y]` pairs, `{x, y}` objects, or `[{name, data}, ...]`. */
 	function line(data, opts) {
-		return render(build(data, opts, "line"), opts);
+		return draw(data, opts, "line");
 	}
 
 	/** Bar chart; same inputs as `line`. */
 	function bar(data, opts) {
-		return render(build(data, opts, "bar"), opts);
+		return draw(data, opts, "bar");
 	}
 
 	/** Scatter plot; same inputs as `line`. */
 	function scatter(data, opts) {
-		return render(build(data, opts, "scatter"), opts);
+		return draw(data, opts, "scatter");
 	}
 
 	/** Candlestick chart from `[{open, high, low, close}, ...]` or `[o, h, l, c]` tuples. */
@@ -421,7 +598,14 @@ export default function createSkill() {
 		const spec = crafterChart({ width: options.width ?? 64, height: options.height ?? 14 })
 			.data(rows, { xKey: "x" })
 			.candlestick({ open: "open", high: "high", low: "low", close: "close" });
-		return render(spec, options);
+		const color = shouldColor(options.color);
+		return compose({
+			title: options.title,
+			body: render(spec, color),
+			entries: [],
+			width: options.width ?? 64,
+			color,
+		});
 	}
 
 	/** One-line sparkline; safe to embed in other output. */

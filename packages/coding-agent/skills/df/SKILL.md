@@ -105,10 +105,17 @@ entry overwrites a column another entry reads; if that matters, split it into tw
     frame.sort("tvl", { descending: true })
     frame.sort(["chain", "tvl"], { descending: [false, true] })
     frame.sort((r) => r.name.toLowerCase())
-    frame.sort_values("tvl", { ascending: false })          // pandas spelling
+    frame.sort_values("tvl", false)                         // pandas: sort_values(by, ascending)
+    frame.sort_values("tvl", { ascending: false })          // same thing, spelled out
 
 The sort is stable, so ties keep their input order. Nulls go last in both directions; pass
 `{ nulls_last: false }` to put them first.
+
+`sort` is the polars signature and `sort_values` is the pandas one, which is why the second
+argument means opposite things under the two names — `sort(by, { descending })` against
+`sort_values(by, ascending)`, where a bare `false` means *descending*. `sort_values` also takes
+polars' options object, and an array for a per-column direction. `sort` refuses a bare boolean
+outright rather than guess which of the two you meant and hand back the reverse order in silence.
 
 ### `group_by(...).agg(spec)`
 
@@ -174,15 +181,20 @@ inside the closure or drop the rows first:
 cell prints as one. Over ten rows it shows the first five, an ellipsis, and the last five; long
 cells are truncated.
 
-    shape: (5, 4)
-    ┌──────────┬─────────────┬────────────┬──────────────────────┐
-    │ name     ┆ tvl         ┆ volume24h  ┆ turnover             │
-    │ ---      ┆ ---         ┆ ---        ┆ ---                  │
-    │ str      ┆ i64         ┆ i64        ┆ f64                  │
-    ╞══════════╪═════════════╪════════════╪══════════════════════╡
-    │ Ethereum ┆ 46187428786 ┆ 2305418154 ┆ 0.04991440776410575  │
-    │ BSC      ┆ 5258544136  ┆ 2978028120 ┆ 0.5663217884989147   │
-    └──────────┴─────────────┴────────────┴──────────────────────┘
+    shape: (2, 4)
+    ┌──────────┬─────────────┬────────────┬──────────┐
+    │ name     ┆ tvl         ┆ volume24h  ┆ turnover │
+    │ ---      ┆ ---         ┆ ---        ┆ ---      │
+    │ str      ┆ i64         ┆ i64        ┆ f64      │
+    ╞══════════╪═════════════╪════════════╪══════════╡
+    │ Ethereum ┆ 46187428786 ┆ 2305418154 ┆ 0.049914 │
+    │ BSC      ┆ 5258544136  ┆ 2978028120 ┆ 0.566322 │
+    └──────────┴─────────────┴────────────┴──────────┘
+
+Floats are rounded to six decimals **for display only** — `0.04991440776410575` above is stored
+and returned whole. `to_dicts`, `to_columns` and `get_column` never round, so read numbers from
+those and treat the table as something to look at. A value smaller than the sixth decimal prints
+in full rather than as `0`, so `1e-9` stays `1e-9` instead of reading as "nothing happened".
 
 ## The recipe: API -> frame -> table + chart
 

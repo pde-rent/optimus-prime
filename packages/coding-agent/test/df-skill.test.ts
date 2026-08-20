@@ -222,9 +222,38 @@ describe("sort", () => {
 		expect(df(rows).sort("v", { nulls_last: false }).get_column("v")).toEqual([null, 1, 2]);
 	});
 
-	it("takes the pandas ascending option through the sort_values alias", () => {
-		expect(DataFrame.prototype.sort_values).toBe(DataFrame.prototype.sort);
+	// sort_values stopped being an alias when it took on the pandas positional signature, so what
+	// is pinned here is that both spellings still reach the same sort, not that they are one object.
+	it("takes the pandas ascending option through sort_values", () => {
 		expect(df(CHAINS).sort_values("tvl", { ascending: false }).get_column("name")[0]).toBe("Ethereum");
+		expect(df(CHAINS).sort_values("tvl").get_column("name")[0]).toBe("Base");
+	});
+
+	// The transcript's call. It used to be read as `{}`, so it sorted ascending and returned the
+	// bottom of the table under the name of the top — wrong data, no error.
+	it("reads the pandas second positional as ascending, not as options", () => {
+		expect(df(CHAINS).sort_values("tvl", false).get_column("name")).toEqual(["Ethereum", "BSC", "Solana", "Base"]);
+		expect(df(CHAINS).sort_values("tvl", true).get_column("name")).toEqual(["Base", "Solana", "BSC", "Ethereum"]);
+	});
+
+	it("takes a per-column direction array positionally too", () => {
+		const rows = [
+			{ g: "a", v: 1 },
+			{ g: "b", v: 2 },
+			{ g: "a", v: 3 },
+		];
+		expect(df(rows).sort_values(["g", "v"], [true, false]).to_dicts()).toEqual([
+			{ g: "a", v: 3 },
+			{ g: "a", v: 1 },
+			{ g: "b", v: 2 },
+		]);
+	});
+
+	// polars spells the direction `descending`, pandas spells it `ascending`; a bare boolean under
+	// the polars name would mean the opposite of what a pandas hand wrote.
+	it("refuses a bare boolean on the polars sort rather than guessing its sense", () => {
+		expect(() => df(CHAINS).sort("tvl", false as any)).toThrow(TypeError);
+		expect(() => df(CHAINS).sort("tvl", false as any)).toThrow(/sort_values\(by, ascending\)/);
 	});
 
 	it("orders dates and strings, not just numbers", () => {
@@ -543,6 +572,21 @@ describe("output", () => {
 
 	it("prints null as null, not as a blank or a zero", () => {
 		expect(String(df([{ v: null }]))).toContain("null");
+	});
+
+	// A column of 16.89861185106625 is a column nobody can scan, and the width it forces pushes the
+	// rest of the table sideways. Rounding is display-only, so the stored value stays exact.
+	it("rounds a float for display without touching what it stores", () => {
+		const frame = df([{ chg: 16.89861185106625, tvl: 46, tiny: 1e-9 }]);
+		const out = String(frame);
+		expect(out).toContain("16.898612");
+		expect(out).not.toContain("16.89861185106625");
+		// An integer keeps its exact spelling, and a value under the sixth decimal is printed whole
+		// rather than rounded away to a zero that would read as "no change".
+		expect(out).toContain("46");
+		expect(out).toContain("1e-9");
+		expect(frame.to_dicts()).toEqual([{ chg: 16.89861185106625, tvl: 46, tiny: 1e-9 }]);
+		expect(frame.get_column("chg")[0]).toBe(16.89861185106625);
 	});
 
 	it("renders through the REPL's inspector", () => {
