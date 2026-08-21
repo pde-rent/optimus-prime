@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { setKeybindings, type TUI, visibleWidth } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	ConfigurationMenuComponent,
 	type ConfigurationMenuTab,
 } from "../src/modes/interactive/components/configuration-menu.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 import { createHarness, type Harness } from "./suite/harness.js";
 
 function createFakeTui(): TUI {

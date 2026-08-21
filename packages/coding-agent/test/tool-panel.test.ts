@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import stripAnsi from "strip-ansi";
 import { toolPanelLine } from "../src/modes/interactive/components/tool-panel.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const ANSI_RESET = "\x1b[0m";
 

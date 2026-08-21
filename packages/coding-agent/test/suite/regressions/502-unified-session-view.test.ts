@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "bun:test";
-import stripAnsi from "strip-ansi";
 import { AgentsViewMode } from "../../../src/modes/agents-view/agents-view-mode.js";
 import type { SessionSummary } from "../../../src/modes/daemon/daemon-session-list.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../../../src/utils/ansi.js";
 import { createDeferred as deferred } from "../scheduling.js";
 
 function summary(id: string): SessionSummary {

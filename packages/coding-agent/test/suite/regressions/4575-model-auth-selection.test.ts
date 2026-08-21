@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { type AutocompleteProvider, setKeybindings, type TUI } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../../../src/core/keybindings.js";
 import type { AgentConnectionModel, AgentConnectionModelCatalog } from "../../../src/modes/agent-connection/types.js";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.js";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { getModelArgumentCompletions } from "../../../src/modes/model-autocomplete.js";
+import stripAnsi from "../../../src/utils/ansi.js";
 import { createHarness, type Harness } from "../harness.js";
 
 interface ConnectionAuthRefreshHarness {

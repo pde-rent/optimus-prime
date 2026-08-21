@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { type Component, setKeybindings, TUI, visibleWidth } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.js";
 import { ReplCellComponent, type ReplCellState } from "../src/modes/interactive/components/repl-cell.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 class HostComponent implements Component {
 	constructor(private child: Component) {}

@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../src/modes/agent-connection/types.js";
 import { SubagentGraphPanel } from "../src/modes/interactive/components/subagent-graph-panel.js";
@@ -10,6 +9,7 @@ import {
 } from "../src/modes/interactive/components/subagent-summary-line.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 function child(
 	id: string,

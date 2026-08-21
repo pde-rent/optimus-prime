@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, test, vi } from "bun:test";
 import type { TUI } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import {
 	COMPACTION_OUTCOME_CUSTOM_TYPE,
 	type CustomMessage,
@@ -20,6 +19,7 @@ import { buildConversationComponents } from "../src/modes/interactive/components
 import { SlashCommandMessageComponent } from "../src/modes/interactive/components/slash-command-message.js";
 import { SlashCommandResultMessageComponent } from "../src/modes/interactive/components/slash-command-result-message.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const componentOptions = {
 	ui: { requestRender: vi.fn() } as unknown as TUI,

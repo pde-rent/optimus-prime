@@ -2,10 +2,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { TUI } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { buildConversationComponents } from "../../../src/modes/interactive/components/conversation-components.js";
 import { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../../../src/utils/ansi.js";
 import { createHarness, type Harness } from "../harness.js";
 
 const replTool: AgentTool = {

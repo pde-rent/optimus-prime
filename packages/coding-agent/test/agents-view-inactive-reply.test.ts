@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	AgentsViewMode,
@@ -9,6 +8,7 @@ import {
 	parseAgentsViewCommand,
 } from "../src/modes/agents-view/agents-view-mode.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 function summary(overrides: Partial<SessionSummary>): SessionSummary {
 	return {

@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { resetCapabilitiesCache, setCapabilities, setKeybindings, type TUI } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
+import stripAnsi from "../src/utils/ansi.js";
 
 const mocks = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),

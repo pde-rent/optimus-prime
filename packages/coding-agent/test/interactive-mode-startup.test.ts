@@ -1,6 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Container, setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	BrandSplashHeader,
@@ -11,6 +10,7 @@ import {
 import type { PromptStashState } from "../src/modes/interactive/prompt-stash-state.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
 import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 describe("InteractiveMode startup hints", () => {
 	beforeAll(() => {

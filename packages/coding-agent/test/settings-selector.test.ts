@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, test, vi } from "bun:test";
 import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import {
 	type SettingsCallbacks,
 	type SettingsConfig,
 	SettingsSelectorComponent,
 } from "../src/modes/interactive/components/settings-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const config: SettingsConfig = {
 	autoCompact: true,

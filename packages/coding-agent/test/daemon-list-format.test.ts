@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import stripAnsi from "strip-ansi";
 import { formatSessionListTable } from "../src/cli/daemon-list-format.js";
 import type { SessionActivity, SessionLifecycle, SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 describe("formatSessionListTable", () => {
 	it("sorts sessions by status and renders compact suffix ids", () => {

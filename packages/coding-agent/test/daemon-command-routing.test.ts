@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { DAEMON_COMMAND_COMPATIBILITY } from "../src/modes/daemon/daemon-protocol.js";
 import { DAEMON_COMMAND_TYPES } from "../src/modes/daemon/daemon-shared.js";
 

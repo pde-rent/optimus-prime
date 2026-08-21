@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent, thinkingRecap } from "../src/modes/interactive/components/assistant-message.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";

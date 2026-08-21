@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../src/modes/agent-connection/types.js";
 import {
 	buildSubagentGraphRows,
@@ -10,6 +9,7 @@ import {
 	summarizeSubagentGraph,
 } from "../src/modes/interactive/components/subagent-graph-panel.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 function child(
 	id: string,

@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, getModel, type Usage } from "@earendil-works/pi-ai";
-import stripAnsi from "strip-ansi";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { type ContextTreeNode, loadContextTreeChildrenFromDisk } from "../src/core/context-tree.js";
@@ -14,6 +13,7 @@ import { SettingsManager } from "../src/core/settings-manager.js";
 import { addAssistantUsage, cloneUsage, emptyUsage } from "../src/core/usage.js";
 import { formatContextTree } from "../src/modes/interactive/components/context-tree-format.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 import { createTestResourceLoader } from "./utilities.js";
 
 const model = getModel("anthropic", "claude-sonnet-4-5")!;

@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../src/core/provider-display-names.js";
@@ -10,6 +9,7 @@ import {
 	OAuthSelectorComponent,
 } from "../src/modes/interactive/components/oauth-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
 

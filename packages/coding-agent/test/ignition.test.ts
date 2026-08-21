@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { existsSync } from "fs";
-import { describe, expect, it } from "vitest";
 import {
 	IGNITION_DURATION_MS,
 	IGNITION_EYES,

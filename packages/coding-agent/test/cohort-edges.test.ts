@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createAgentMessageHostHandlers } from "../src/core/agent-messages.js";
 import { createHarness } from "./suite/harness.js";
 

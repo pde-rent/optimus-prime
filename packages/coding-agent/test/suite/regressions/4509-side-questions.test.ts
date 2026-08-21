@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Container } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { type SideQuestionEvent, startSideQuestion } from "../../../src/core/side-question.js";
 import { AgentDaemon } from "../../../src/modes/daemon/daemon-mode.js";
 import { BashExecutionComponent } from "../../../src/modes/interactive/components/bash-execution.js";
 import { SideQuestionComponent } from "../../../src/modes/interactive/components/side-question.js";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { getEditorTheme, initTheme, theme } from "../../../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../../../src/utils/ansi.js";
 import { createHarness, getMessageText } from "../harness.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {

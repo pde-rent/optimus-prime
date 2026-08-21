@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import stripAnsi from "strip-ansi";
 import { ExtensionSelectorComponent } from "../src/modes/interactive/components/extension-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const BACKGROUND_START = /\x1b\[(?:4[0-8]|48;5;\d+|48;2;\d+;\d+;\d+)m/;
 

@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
-import stripAnsi from "strip-ansi";
 import {
 	formatFileChangeSummaryLine,
 	formatTotalChangeSummary,
@@ -11,6 +10,7 @@ import {
 	mergeTurnFileChanges,
 } from "../src/modes/interactive/components/edit-summary.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import stripAnsi from "../src/utils/ansi.js";
 
 const usage: Usage = {
 	input: 0,
