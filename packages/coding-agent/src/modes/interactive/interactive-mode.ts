@@ -168,10 +168,10 @@ import { BranchSummaryMessageComponent } from "./components/branch-summary-messa
 import { type FullPaneOverlayOptions, showFullPaneOverlay } from "./components/centered-overlay.js";
 import {
 	isCollapsible,
+	parseBlockTarget,
 	parseOpenAgentTarget,
 	parseToggleTarget,
 	setClickTargetsEnabled,
-	THINKING_TOGGLE_TARGET,
 } from "./components/click-target.js";
 import {
 	CompactionOutcomeMessageComponent,
@@ -6024,7 +6024,7 @@ export class InteractiveMode {
 	private async openScopedAgentsView(): Promise<void> {
 		if (!this.options.returnToAgentsView) {
 			this.focusEditor();
-			this.showStatus("The agents view needs the daemon; start without --no-daemon to browse sessions");
+			this.showStatus("The agents view needs the daemon; start with --no-session to browse to browse sessions");
 			return;
 		}
 		await this.returnToAgentsView("scoped_agents_view");
@@ -6855,7 +6855,7 @@ export class InteractiveMode {
 
 	private async requestAgentsView(): Promise<void> {
 		if (!this.options.returnToAgentsView) {
-			this.showStatus("The agents view needs the daemon; start without --no-daemon to browse sessions");
+			this.showStatus("The agents view needs the daemon; start with --no-session to browse to browse sessions");
 			return;
 		}
 		await this.returnToAgentsView();
@@ -7325,9 +7325,9 @@ export class InteractiveMode {
 	}
 
 	/**
-	 * Click on a collapse chevron in the transcript (fullscreen only, where mouse
-	 * reporting is on). Returns true once consumed so the URL never reaches the
-	 * platform opener.
+	 * Click on a transcript block or collapse chevron (fullscreen only, where
+	 * mouse reporting is on). Returns true once consumed so the URL never
+	 * reaches the platform opener.
 	 */
 	private activateToggleTarget(url: string): boolean {
 		const openTarget = parseOpenAgentTarget(url);
@@ -7335,27 +7335,43 @@ export class InteractiveMode {
 			this.openSubagentFromGraph(openTarget);
 			return true;
 		}
+		const blockTarget = parseBlockTarget(url);
+		if (blockTarget !== null) {
+			// Thinking visibility is one global setting; any thinking row toggles it.
+			if (blockTarget.kind === "thinking") {
+				this.toggleThinkingBlockVisibility();
+				return true;
+			}
+			for (const child of this.chatContainer.children) {
+				if (isCollapsible(child) && child.toggleTargetId === blockTarget.id) {
+					child.toggleExpandedSelf();
+					this.requestRenderAfterBlockToggle();
+					return true;
+				}
+			}
+			return true;
+		}
 		const target = parseToggleTarget(url);
 		if (target === null) {
 			return false;
 		}
-		if (target === THINKING_TOGGLE_TARGET) {
-			this.toggleThinkingBlockVisibility();
-			return true;
-		}
 		for (const child of this.chatContainer.children) {
 			if (isCollapsible(child) && child.toggleTargetId === target) {
 				child.toggleExpandedSelf();
-				// Blocks above the viewport change height; stay anchored.
-				if (this.ui.isFullscreen()) {
-					this.ui.requestRender();
-				} else {
-					this.ui.requestRenderPreservingViewport();
-				}
+				this.requestRenderAfterBlockToggle();
 				return true;
 			}
 		}
 		return true;
+	}
+
+	/** Blocks above the viewport change height when a row expands; stay anchored. */
+	private requestRenderAfterBlockToggle(): void {
+		if (this.ui.isFullscreen()) {
+			this.ui.requestRender();
+		} else {
+			this.ui.requestRenderPreservingViewport();
+		}
 	}
 
 	/**
@@ -7364,7 +7380,7 @@ export class InteractiveMode {
 	 */
 	private openSubagentFromGraph(childId: string): void {
 		if (!this.options.returnToAgentsView) {
-			this.showStatus("Opening a subagent needs the daemon; start without --no-daemon");
+			this.showStatus("Opening a subagent needs the daemon; start with --no-session to browse");
 			return;
 		}
 		const child = this.subagentSnapshots.get(childId);

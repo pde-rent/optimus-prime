@@ -1,10 +1,8 @@
 import { getEnvApiKey } from "../env-api-keys.js";
 import type { Context, Model, SimpleStreamOptions, StreamFunction, StreamOptions } from "../types.js";
-import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
-import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
-import { createAssistantMessage } from "./assistant-message.js";
 import {
 	applyResponsesReasoningParams,
 	convertResponsesMessages,
@@ -15,6 +13,7 @@ import {
 } from "./openai-responses-shared.js";
 import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
+import { runProviderStream } from "./stream-runner.js";
 
 const DEFAULT_AZURE_API_VERSION = "v1";
 const AZURE_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode", "azure-openai-responses"]);
@@ -54,13 +53,13 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 	context: Context,
 	options?: AzureOpenAIResponsesOptions,
 ): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
+	let requestId: string | undefined;
+	const deploymentName = resolveDeploymentName(model, options);
 
-	(async () => {
-		const deploymentName = resolveDeploymentName(model, options);
-		const output = createAssistantMessage(model);
-
-		try {
+	return runProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const { url, headers } = createClient(model, apiKey, options);
 			let params = buildParams(model, context, options, deploymentName);
@@ -78,30 +77,16 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 			});
 			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
-			const requestId = response.headers.get("x-request-id") ?? undefined;
+			const _requestId = response.headers.get("x-request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
 
 			await processResponsesStream(openaiStream, output, stream, model);
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw streamFailureFromStopReason(output.stopReasonRaw, { requestId });
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			failAssistantStream(model, output, stream, error, {
-				aborted: options?.signal?.aborted === true,
-				scratchKeys: ["index", "partialJson"],
-			});
-		}
-	})();
-
-	return stream;
+		},
+		{
+			getRequestId: () => requestId,
+			scratchKeys: ["index", "partialJson"],
+		},
+	);
 };
 
 export const streamSimpleAzureOpenAIResponses: StreamFunction<"azure-openai-responses", SimpleStreamOptions> = (

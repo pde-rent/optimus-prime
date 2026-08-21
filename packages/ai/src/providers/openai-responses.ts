@@ -9,11 +9,9 @@ import type {
 	StreamFunction,
 	StreamOptions,
 } from "../types.js";
-import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { requestWithRetry } from "../utils/http.js";
-import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
-import { createAssistantMessage } from "./assistant-message.js";
 import {
 	applyCopilotRequestHeaders,
 	applyResponsesReasoningParams,
@@ -27,6 +25,7 @@ import {
 } from "./openai-responses-shared.js";
 import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning, resolveCacheRetention } from "./simple-options.js";
+import { runProviderStream } from "./stream-runner.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
@@ -55,12 +54,12 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 	context: Context,
 	options?: OpenAIResponsesOptions,
 ): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
+	let requestId: string | undefined;
 
-	(async () => {
-		const output = createAssistantMessage(model);
-
-		try {
+	return runProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
@@ -80,7 +79,7 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 			});
 			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
-			const requestId = response.headers.get("x-request-id") ?? undefined;
+			requestId = response.headers.get("x-request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
 
 			await processResponsesStream(openaiStream, output, stream, model, {
@@ -88,26 +87,12 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 				applyServiceTierPricing: (usage, serviceTier) =>
 					applyServiceTierCostMultiplier(usage, serviceTier, getServiceTierCostMultiplier(model, serviceTier)),
 			});
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw streamFailureFromStopReason(output.stopReasonRaw, { requestId });
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			failAssistantStream(model, output, stream, error, {
-				aborted: options?.signal?.aborted === true,
-				scratchKeys: ["index", "partialJson"],
-			});
-		}
-	})();
-
-	return stream;
+		},
+		{
+			getRequestId: () => requestId,
+			scratchKeys: ["index", "partialJson"],
+		},
+	);
 };
 
 export const streamSimpleOpenAIResponses: StreamFunction<"openai-responses", SimpleStreamOptions> = (

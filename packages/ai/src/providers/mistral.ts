@@ -14,13 +14,11 @@ import type {
 	Tool,
 	ToolCall,
 } from "../types.js";
-import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
 import { iterateSseJson, joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
-import { createAssistantMessage } from "./assistant-message.js";
 import type {
 	ChatCompletionStreamRequest,
 	ChatCompletionStreamRequestMessage,
@@ -29,6 +27,7 @@ import type {
 	FunctionTool,
 } from "./mistral-wire-types.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
+import { runProviderStream } from "./stream-runner.js";
 import { transformMessages } from "./transform-messages.js";
 
 /** SDK default `serverURL`; the `/v1` version prefix lives in the request path. */
@@ -51,13 +50,11 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 	model: Model<"mistral-conversations">,
 	context: Context,
 	options?: MistralOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output = createAssistantMessage(model);
-
-		try {
+): AssistantMessageEventStream =>
+	runProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider);
 			if (!apiKey) {
 				throw new Error(`No API key for provider: ${model.provider}`);
@@ -82,28 +79,12 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 			});
 			stream.push({ type: "start", partial: output });
 			await consumeChatStream(model, output, stream, iterateCompletionEvents(response, options?.signal));
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw streamFailureFromStopReason(output.stopReasonRaw);
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			failAssistantStream(model, output, stream, error, {
-				aborted: options?.signal?.aborted === true,
-				message: formatMistralError(error),
-				scratchKeys: ["partialArgs"],
-			});
-		}
-	})();
-
-	return stream;
-};
+		},
+		{
+			formatError: formatMistralError,
+			scratchKeys: ["partialArgs"],
+		},
+	);
 
 /** Maps provider-agnostic `SimpleStreamOptions` to Mistral request options. */
 export const streamSimpleMistral: StreamFunction<"mistral-conversations", SimpleStreamOptions> = (

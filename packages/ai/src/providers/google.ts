@@ -11,7 +11,7 @@ import type {
 	ThinkingLevel,
 	ToolCall,
 } from "../types.js";
-import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import type {
 	GoogleContent as Content,
 	GoogleGenerateContentConfig as GenerateContentConfig,
@@ -21,8 +21,6 @@ import type {
 } from "../utils/google-api-types.js";
 import { iterateSseJson, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
-import { createAssistantMessage } from "./assistant-message.js";
 import type { GoogleThinkingLevel } from "./google-shared.js";
 import {
 	convertMessages,
@@ -34,6 +32,7 @@ import {
 	retainThoughtSignature,
 } from "./google-shared.js";
 import { buildSimpleBaseOptions } from "./simple-options.js";
+import { runProviderStream } from "./stream-runner.js";
 
 export interface GoogleOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "any";
@@ -50,13 +49,11 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 	model: Model<"google-generative-ai">,
 	context: Context,
 	options?: GoogleOptions,
-): AssistantMessageEventStream => {
-	const stream = new AssistantMessageEventStream();
-
-	(async () => {
-		const output = createAssistantMessage(model);
-
-		try {
+): AssistantMessageEventStream =>
+	runProviderStream(
+		model,
+		options,
+		async (output, stream) => {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			let params = buildParams(model, context, options);
 			const nextParams = await options?.onPayload?.(params, model);
@@ -233,27 +230,11 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 					});
 				}
 			}
-
-			if (options?.signal?.aborted) {
-				throw new Error("Request was aborted");
-			}
-
-			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw streamFailureFromStopReason(output.stopReasonRaw);
-			}
-
-			stream.push({ type: "done", reason: output.stopReason, message: output });
-			stream.end();
-		} catch (error) {
-			failAssistantStream(model, output, stream, error, {
-				aborted: options?.signal?.aborted === true,
-				scratchKeys: ["index"],
-			});
-		}
-	})();
-
-	return stream;
-};
+		},
+		{
+			scratchKeys: ["index"],
+		},
+	);
 
 export const streamSimpleGoogle: StreamFunction<"google-generative-ai", SimpleStreamOptions> = (
 	model: Model<"google-generative-ai">,
