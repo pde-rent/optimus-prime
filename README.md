@@ -32,8 +32,8 @@
 
 ## Install
 
-Prerequisites: [Bun](https://bun.sh) 1.4+ and `git`. No Node, npm, or Python in the toolchain
-or the runtime — `bun`, `bunx`, `bun run`, `bun install`, never `npm`/`npx`/`node`.
+Prerequisites: [Bun](https://bun.sh) 1.4+ and `git`. No Node or npm in the toolchain or the
+runtime — `bun`, `bunx`, `bun run`, `bun install`, never `npm`/`npx`/`node`.
 
 ```sh
 git clone https://github.com/pde-rent/optimus-prime.git
@@ -93,7 +93,7 @@ so it is what ships rather than dev tooling.
 | Packages installed | 125 | 84 | **25** |
 | `node_modules` | 197 MB | 140 MB | **4.8 MB** |
 | Bundle | 13 MB | 11 MB | **4.5 MB** |
-| Cold start, mean of 5 | 230 ms | 350 ms | **~80 ms** |
+| Cold start, mean of 5 | 230 ms | 350 ms | **~60 ms** |
 | Default runtime | Node | Node | **Bun** |
 
 Startup includes the runtime difference; the dependency and size figures do not. Four runtime
@@ -103,21 +103,22 @@ inside Bun itself.
 ## What changed
 
 prime-agent introduced the RLM: an agent that programs in a persistent REPL and can call
-itself. That REPL was a Python IPython kernel over ZeroMQ. This fork replaced it with a native
-Bun REPL, which takes an interpreter, a native module and a socket hop out of every tool call.
+itself. That REPL was a Python IPython kernel over ZeroMQ — an interpreter, a native module and a
+socket hop bolted next to a runtime the TUI was already using. The fork exists in large part to
+delete that: the REPL here is native Bun JS/TS, the same runtime that renders the editor, so
+everything stays in one process, one language and one toolchain.
 
 | | prime-agent | Optimus |
 |---|---|---|
 | REPL | Python IPython kernel over ZeroMQ | native Bun JS/TS |
-| Python in repo | 968 lines | none |
-| Snapshots | JSON — `Map`/`Set`/`Date` returned as `{}` | structured clone; functions restored from source |
-| Live handles | captured, restored hollow | never captured, reported by name |
+| Telemetry | on by default, posted to a vendor endpoint | none — the code is deleted, not disabled |
 | Provider access | 5 vendor SDKs | one fetch client, wire types vendored |
 | Editor protocol | ACP mode | removed |
-| Telemetry | on by default, posted to a vendor endpoint | none — the code is deleted, not disabled |
-| Session upload | `/traces` uploaded whole transcripts | removed |
 | Highlighting | highlight.js, ~350 ms import | rule data with a local tokenizer |
-| Charts | none | braille terminal charts |
+| Charts | none | braille terminal charts, a matplotlib-shaped API |
+| Data work | ad hoc scripting in the kernel | `df` data frames with a pandas-shaped API and NumPy-shaped vector math |
+| Continual memory | none | harness entries — skills, prompts, memories, subagent specs — curated by the agent, searched on demand |
+| Subagent lifecycle | spawn and hope | idle kernels reaped with snapshot restore, adaptive passivation, disk-only retirement, a reasoning-loop guard |
 | Delegation shape | assembled by the agent | resolved for it, under a budget dial |
 | Cohort messaging | every sibling reachable | edges declared per child, one-way |
 | Child token cost | folded into the parent's total | itemised per child, in the roster |
@@ -164,6 +165,13 @@ Reach is bounded to parent, siblings and children. Siblings talk directly, so a 
 reconcile without routing everything through the coordinator, and a repeated delegation role
 becomes a saved subagent spec instead of prompt text retyped each session. The agents view
 draws the live graph.
+
+Children are managed, not just spawned. A REPL kernel is snapshotted and reaped after ten idle
+minutes and transparently restored on the next cell, so finished subtrees stop costing memory.
+In the daemon, passivation scales with the resident child population and finished children retire
+disk-only after thirty idle minutes — their transcripts stay resumable. A reasoning-loop guard
+watches every run, including every child: planning that never acts is steered toward a concrete
+call once, then aborted with one clean continuation, then stopped.
 
 The agent also manages its own headroom. Compaction triggers by default at 500k tokens under a
 666k context budget, itself hard-capped by whatever window the model actually has; both are
@@ -251,6 +259,14 @@ exist that the runtime quietly ignores.
 | `--service-tier <tier>` | | `auto`, `default`, `flex`, `scale`, `priority` |
 | `--compact` / `--no-` | `/compact` | automatic context compaction |
 | `--retry` / `--no-` | | retry on transient API failures |
+| `--reasoning-loop-guard` / `--no-` | | steer or stop runs that plan without acting |
+| `--degeneracy-guard` / `--no-` | | abort output collapsed into repetition |
+| `--dynamic-context` | | let the agent retune its own context budget |
+
+Settings without flags follow the same table: `toolTimeouts.replMs` /`toolTimeouts.bashSeconds`
+(per-tool call timeouts), `replIdleTimeoutMinutes` (idle REPL kernels are snapshotted and
+reaped), `idleEvictionMinutes` (daemon worker eviction and child passivation), and
+`dynamicContext` (the agent retuning its own headroom).
 
 Commands answer to the names other CLIs use for them: `/exit`, `/config`, `/cost`, `/connect`,
 `/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`.
@@ -276,6 +292,7 @@ has; no player, no sound, same startup time.
 | `chart` | Terminal charts — line, bar, candlestick, gauge, sparkline |
 | `web3` | Chain RPC, wallet balances, DeFi TVL and volume — EVM, Solana, Tron |
 | `stats` | Array statistics `Math` lacks — quantiles, stddev, correlation, describe |
+| `df` | Data frames — a pandas-shaped API over columnar data plus NumPy-shaped vector math, in-process |
 
 Memory retrieval is a local BM25F index: no embedding service, no network call.
 
@@ -333,13 +350,15 @@ also startup cost — everything parsed before the first prompt renders. So a de
 place or gets written out. Twenty-five installed packages instead of a hundred and twenty-five
 is an audit a person can actually perform.
 
-| Kept | Why |
+| Dependency | Why |
 |---|---|
 | `@crafter/charts` | Terminal charts. Zero deps of its own; its `typescript` peer is no longer installed now that peer auto-install is off |
 | `@speed-highlight/core` | Highlighting rule data, zero deps |
-| `jiti` | Extension loading; `Bun.plugin` does not intercept bare specifiers at runtime |
 | `proper-lockfile` | Cross-process file locking |
 | `extract-zip` | Bun's archive API is write-only |
+
+Extensions load through a native Bun import path with virtual-module shims — the same TS
+transpilation jiti provided, without the dependency.
 
 Written out instead, each differential-tested against what it replaced: gitignore matching
 (1440/1440 identical), git URL parsing (20/20), globs (512/512), JSON Schema and validation
@@ -369,26 +388,37 @@ Bun-versus-kernel audit · [docs/upstream-sync.md](docs/upstream-sync.md) for tr
 
 ## Credits
 
-Two upstreams, both copyright notices kept in [LICENSE](LICENSE) as MIT requires:
+Everything below shaped this harness. The first two are upstream with code carried over (their
+copyright notices are kept in [LICENSE](LICENSE) as MIT requires); the rest are influences — no
+code taken, credited where a decision landed in the source.
 
-- **[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)** — the
-  direct parent: the RLM architecture, refinement and skills, the daemon and agents view.
-- **[earendil-works/pi](https://github.com/earendil-works/pi)** (Mario Zechner) — what
-  prime-agent was built from: the agent loop, TUI, provider layer and extension system.
-
-An independent hard fork. Neither project endorses it, and bugs here are ours.
-
-### Influences
-
-No code taken. These shaped decisions, and are credited in the source where they landed:
-
-| Project | What it shaped | Where |
+| Project | Relationship | What it shaped |
 |---|---|---|
-| **[ponytail](https://github.com/DietrichGebert/ponytail)** | Reuse before adding code; what is never traded away (validation at trust boundaries, error handling, security); one runnable check for non-trivial logic | `CODE_CRAFT_PROMPT` |
-| **[pstack](https://github.com/cursor/plugins/tree/main/pstack)** | Verify against the real thing — a green build and the agent's own summary are not evidence. Blast-radius check before widening a shared change | `VERIFICATION_PROMPT` |
-| **[oh-my-pi](https://github.com/can1357/oh-my-pi)** | Hash-anchored editing, verification through the project's own checker, and suppressing repeated agent messages | `edit.src`/`edit.patch`, `check`, `agent-messages.ts` |
-| **[Mem0](https://github.com/mem0ai/mem0)** | Extract-and-consolidate, retrieve-before-write, scoped recall. Its per-query cost is why retrieval here stays lexical | `rlm.harness.search_memory` |
-| **[Letta / MemGPT](https://github.com/letta-ai/letta)** | Agent-managed memory tiers curated through tools | `rlm.harness` CRUD |
+| **[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)** | hard-fork parent | the RLM architecture, refinement and skills, the daemon and agents view |
+| **[earendil-works/pi](https://github.com/earendil-works/pi)** (Mario Zechner) | upstream of the parent | the agent loop, TUI, provider layer and extension system |
+| **[xai-org/grok-build](https://github.com/xai-org/grok-build)** | influence | TUI architecture (action/effect loop, scrollback folding), per-session storage layout, compaction design (prefire passes, tool-result pruning), the subagent task tool and coordinator |
+| **[Claude Code](https://claude.com/claude-code)** | influence | tool-calling shape, SKILL.md skill definition format, overall loop conventions, session management UX |
+| **[oh-my-pi](https://github.com/can1357/oh-my-pi)** | influence | hash-anchored editing, verification through the project's own checker, suppressing repeated agent messages (`edit.src`/`edit.patch`, `check`, `agent-messages.ts`) |
+| **[Mem0](https://github.com/mem0ai/mem0)** | influence | extract-and-consolidate, retrieve-before-write, scoped recall; its per-query cost is why retrieval here stays lexical (`rlm.harness.search_memory`) |
+| **[Letta / MemGPT](https://github.com/letta-ai/letta)** | influence | agent-managed memory tiers curated through tools (`rlm.harness` CRUD) |
+| **[ponytail](https://github.com/DietrichGebert/ponytail)** | influence | reuse before adding code; what is never traded away; one runnable check for non-trivial logic (`CODE_CRAFT_PROMPT`) |
+| **[pstack](https://github.com/cursor/plugins/tree/main/pstack)** | influence | verify against the real thing; blast-radius check before widening a shared change (`VERIFICATION_PROMPT`) |
 
 Both prompt sections are always-on defaults, not plugins — nothing to install, nothing to drift
 out of sync. A repository overrides them from its own `AGENTS.md` or `CLAUDE.md`.
+
+### Research reading
+
+Directional influences, listed honestly: not every conclusion is factored in yet. They set the
+vocabulary for what the harness is trying at, and each will be reviewed and folded in or rejected
+on evidence.
+
+- ReAct (Yao et al., 2022) — interleaving reasoning and acting
+- Reflexion (Shinn et al., 2023) — verbal self-review between attempts
+- Voyager (Wang et al., 2023) — a growing library of reusable skills
+- Executable Code Actions / CodeAct (Wang et al., 2024) — code as the action space; the RLM's foundation
+- SWE-agent and the agent–computer interface (Yang et al., 2024) — tool interfaces decide outcomes
+- mini-swe-agent — minimal scaffolding at competitive scores
+- Don't Build Multi-Agents (Cognition, 2025) — the context-engineering case against fan-out; why the graph resolver defaults off
+- The OpenHands stuck detector — semantic repetition detection for runaway runs
+- Erlang/OTP supervision trees — restart intensity limits and escalation ladders for child tasks
