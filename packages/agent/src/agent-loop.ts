@@ -13,6 +13,12 @@ import {
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
 import { DegeneracyDetector, type DegeneracyReport, degeneracyErrorMessage } from "./degeneracy.js";
+import {
+	extractTurnProgress,
+	type ReasoningLoopDecision,
+	ReasoningLoopGuard,
+	reasoningLoopStopErrorMessage,
+} from "./reasoning-loop.js";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -130,21 +136,41 @@ function cloneUsage(usage: AssistantMessage["usage"]): AssistantMessage["usage"]
 	return { ...usage, cost: { ...usage.cost } };
 }
 
-function createAbortedAssistantMessage(
+/**
+ * Terminal message for a turn the loop itself stopped (user abort or
+ * degeneracy guard). "aborted" and not "error": this is a stopped turn, not a
+ * provider failure, and the aborted path already drops the message from
+ * replayed context and skips auto-retry.
+ */
+function createStoppedAssistantMessage(
 	config: AgentLoopConfig,
 	partialMessage: AssistantMessage | null,
+	content: AssistantMessage["content"],
+	errorMessage: string,
 ): AssistantMessage {
 	return {
 		role: "assistant",
-		content: partialMessage ? cloneAssistantContent(partialMessage.content) : [{ type: "text", text: "" }],
+		content,
 		api: partialMessage?.api ?? config.model.api,
 		provider: partialMessage?.provider ?? config.model.provider,
 		model: partialMessage?.model ?? config.model.id,
 		usage: cloneUsage(partialMessage?.usage ?? EMPTY_USAGE),
 		stopReason: "aborted",
-		errorMessage: ABORT_ERROR_MESSAGE,
+		errorMessage,
 		timestamp: Date.now(),
 	};
+}
+
+function createAbortedAssistantMessage(
+	config: AgentLoopConfig,
+	partialMessage: AssistantMessage | null,
+): AssistantMessage {
+	return createStoppedAssistantMessage(
+		config,
+		partialMessage,
+		partialMessage ? cloneAssistantContent(partialMessage.content) : [{ type: "text", text: "" }],
+		ABORT_ERROR_MESSAGE,
+	);
 }
 
 function createDegenerateAssistantMessage(
@@ -152,25 +178,33 @@ function createDegenerateAssistantMessage(
 	partialMessage: AssistantMessage | null,
 	report: DegeneracyReport,
 ): AssistantMessage {
-	return {
-		role: "assistant",
-		// The looped text is the payload of the bug: persisting it would make it permanent context
-		// for every later turn and can re-trigger the collapse, so the turn keeps no content.
-		content: [],
-		api: partialMessage?.api ?? config.model.api,
-		provider: partialMessage?.provider ?? config.model.provider,
-		model: partialMessage?.model ?? config.model.id,
-		usage: cloneUsage(partialMessage?.usage ?? EMPTY_USAGE),
-		// "aborted" and not "error": this is a stopped turn, not a provider failure, and the
-		// aborted path already drops the message from replayed context and skips auto-retry.
-		stopReason: "aborted",
-		errorMessage: degeneracyErrorMessage(report),
-		timestamp: Date.now(),
-	};
+	// The looped text is the payload of the bug: persisting it would make it permanent context
+	// for every later turn and can re-trigger the collapse, so the turn keeps no content.
+	return createStoppedAssistantMessage(config, partialMessage, [], degeneracyErrorMessage(report));
 }
 
 function getTerminalMessage(event: Extract<AssistantMessageEvent, { type: "done" | "error" }>): AssistantMessage {
 	return event.type === "done" ? event.message : event.error;
+}
+
+/**
+ * Place a finalized assistant message in the context (replacing the streamed
+ * partial or appending it) and emit its start/end events.
+ */
+async function commitAssistantMessage(
+	context: AgentContext,
+	emit: AgentEventSink,
+	finalMessage: AssistantMessage,
+	addedPartial: boolean,
+): Promise<AssistantMessage> {
+	if (addedPartial) {
+		context.messages[context.messages.length - 1] = finalMessage;
+	} else {
+		context.messages.push(finalMessage);
+		await emit({ type: "message_start", message: { ...finalMessage } });
+	}
+	await emit({ type: "message_end", message: finalMessage });
+	return finalMessage;
 }
 
 function endAgentStreamOnError(
@@ -235,12 +269,7 @@ export function agentLoop(
  * via `convertToLlm`. If it doesn't, the LLM provider will reject the request.
  * This cannot be validated here since `convertToLlm` is only called once per turn.
  */
-export function agentLoopContinue(
-	context: AgentContext,
-	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
-): EventStream<AgentEvent, AgentMessage[]> {
+function assertContinuable(context: AgentContext): void {
 	if (context.messages.length === 0) {
 		throw new Error("Cannot continue: no messages in context");
 	}
@@ -248,6 +277,15 @@ export function agentLoopContinue(
 	if (context.messages[context.messages.length - 1].role === "assistant") {
 		throw new Error("Cannot continue from message role: assistant");
 	}
+}
+
+export function agentLoopContinue(
+	context: AgentContext,
+	config: AgentLoopConfig,
+	signal?: AbortSignal,
+	streamFn?: StreamFn,
+): EventStream<AgentEvent, AgentMessage[]> {
+	assertContinuable(context);
 
 	const stream = createAgentStream();
 
@@ -299,13 +337,7 @@ export async function runAgentLoopContinue(
 	signal?: AbortSignal,
 	streamFn?: StreamFn,
 ): Promise<AgentMessage[]> {
-	if (context.messages.length === 0) {
-		throw new Error("Cannot continue: no messages in context");
-	}
-
-	if (context.messages[context.messages.length - 1].role === "assistant") {
-		throw new Error("Cannot continue from message role: assistant");
-	}
+	assertContinuable(context);
 
 	const newMessages: AgentMessage[] = [];
 	const currentContext: AgentContext = { ...context };
@@ -338,6 +370,25 @@ async function runLoop(
 
 	const shouldStopBeforeTurn = (): boolean => !firstTurn && (config.shouldStopBeforeTurn?.() ?? false);
 
+	const endLoop = async (): Promise<void> => {
+		await emit({ type: "agent_end", messages: newMessages });
+	};
+
+	/**
+	 * Await a post-turn poll; on abort, emit `agent_end` and return `undefined`
+	 * so the caller can unwind with a single `if`.
+	 */
+	const settleOrEnd = async <T>(operation: Promise<T>): Promise<T | undefined> => {
+		const result = await settlePostTurn(operation, signal);
+		if (result.status === "aborted") {
+			await endLoop();
+			return undefined;
+		}
+		return result.value;
+	};
+	// Cross-turn reasoning-loop guard: catches fluent planning that never acts. One ladder per run.
+	const loopGuard = config.reasoningLoopGuard === false ? undefined : new ReasoningLoopGuard();
+
 	while (true) {
 		throwIfAborted(signal);
 		let hasMoreToolCalls = true;
@@ -360,12 +411,22 @@ async function runLoop(
 				pendingMessages = [];
 			}
 
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+			loopGuard?.beginTurn();
+			const streamed = await streamAssistantResponse(currentContext, config, signal, emit, streamFn, loopGuard);
+			const message = streamed.message;
 			newMessages.push(message);
+
+			if (streamed.reasoningLoop && streamed.reasoningLoop.kind !== "stop") {
+				// The looping generation was aborted mid-stream. The recovery ladder continues:
+				// the steering or continuation message opens the next turn instead of ending the run.
+				await emit({ type: "turn_end", message, toolResults: [] });
+				pendingMessages = [streamed.reasoningLoop.message];
+				continue;
+			}
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
 				await emit({ type: "turn_end", message, toolResults: [] });
-				await emit({ type: "agent_end", messages: newMessages });
+				await endLoop();
 				return;
 			}
 
@@ -386,8 +447,20 @@ async function runLoop(
 
 			await emit({ type: "turn_end", message, toolResults });
 			if (signal?.aborted) {
-				await emit({ type: "agent_end", messages: newMessages });
+				await endLoop();
 				return;
+			}
+			if (loopGuard) {
+				const noProgress = loopGuard.finishTurn(extractTurnProgress(message, toolResults));
+				if (noProgress) {
+					const decision = loopGuard.trigger();
+					if (decision.kind === "stop") {
+						await endLoop();
+						return;
+					}
+					pendingMessages = [decision.message];
+					continue;
+				}
 			}
 			lastTurn = {
 				message,
@@ -396,7 +469,7 @@ async function runLoop(
 				newMessages,
 			};
 
-			const shouldStopResult = await settlePostTurn(
+			const shouldStop = await settleOrEnd(
 				maybePromiseWithAbort(
 					config.shouldStopAfterTurn?.({
 						message,
@@ -406,60 +479,41 @@ async function runLoop(
 					}) ?? false,
 					signal,
 				),
-				signal,
 			);
-			if (shouldStopResult.status === "aborted") {
-				await emit({ type: "agent_end", messages: newMessages });
-				return;
-			}
-			if (shouldStopResult.value || shouldStopBeforeTurn()) {
-				await emit({ type: "agent_end", messages: newMessages });
+			if (shouldStop === undefined || shouldStop || shouldStopBeforeTurn()) {
+				await endLoop();
 				return;
 			}
 
-			const steeringMessagesResult = await settlePostTurn(
-				pollMessagesUnlessAborted(config.getSteeringMessages, signal),
-				signal,
-			);
-			if (steeringMessagesResult.status === "aborted") {
-				await emit({ type: "agent_end", messages: newMessages });
+			const steeringMessages = await settleOrEnd(pollMessagesUnlessAborted(config.getSteeringMessages, signal));
+			if (steeringMessages === undefined) {
 				return;
 			}
-			pendingMessages = steeringMessagesResult.value;
+			pendingMessages = steeringMessages;
 			// Steering drained by this poll owns the turn boundary; stop only when it was empty.
 			if (pendingMessages.length === 0 && shouldStopBeforeTurn()) {
-				await emit({ type: "agent_end", messages: newMessages });
+				await endLoop();
 				return;
 			}
 		}
 
 		if (shouldStopBeforeTurn()) break;
-		const followUpMessagesResult = await settlePostTurn(
-			pollMessagesUnlessAborted(config.getFollowUpMessages, signal),
-			signal,
-		);
-		if (followUpMessagesResult.status === "aborted") {
-			await emit({ type: "agent_end", messages: newMessages });
+		const followUpMessages = await settleOrEnd(pollMessagesUnlessAborted(config.getFollowUpMessages, signal));
+		if (followUpMessages === undefined) {
 			return;
 		}
-		const followUpMessages = followUpMessagesResult.value;
 		if (followUpMessages.length > 0) {
 			pendingMessages = followUpMessages;
 			continue;
 		}
 
 		if (shouldStopBeforeTurn()) break;
-		const continuationMessagesResult = lastTurn
-			? await settlePostTurn(
-					maybePromiseWithAbort(config.getContinuationMessages?.(lastTurn, signal) ?? [], signal),
-					signal,
-				)
-			: ({ status: "completed", value: [] } satisfies PostTurnResult<AgentMessage[]>);
-		if (continuationMessagesResult.status === "aborted") {
-			await emit({ type: "agent_end", messages: newMessages });
+		const continuationMessages = lastTurn
+			? await settleOrEnd(maybePromiseWithAbort(config.getContinuationMessages?.(lastTurn, signal) ?? [], signal))
+			: [];
+		if (continuationMessages === undefined) {
 			return;
 		}
-		const continuationMessages = continuationMessagesResult.value || [];
 		if (continuationMessages.length > 0) {
 			pendingMessages = continuationMessages;
 			continue;
@@ -468,8 +522,14 @@ async function runLoop(
 		break;
 	}
 
-	await emit({ type: "agent_end", messages: newMessages });
+	await endLoop();
 }
+
+type StreamedAssistantTurn = {
+	message: AssistantMessage;
+	/** Set when the reasoning-loop guard stopped the generation mid-turn. */
+	reasoningLoop?: ReasoningLoopDecision;
+};
 
 async function streamAssistantResponse(
 	context: AgentContext,
@@ -477,24 +537,20 @@ async function streamAssistantResponse(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 	streamFn?: StreamFn,
-): Promise<AssistantMessage> {
+	loopGuard?: ReasoningLoopGuard,
+): Promise<StreamedAssistantTurn> {
 	let partialMessage: AssistantMessage | null = null;
 	let addedPartial = false;
-	const finishStoppedMessage = async (finalMessage: AssistantMessage) => {
-		if (addedPartial) {
-			context.messages[context.messages.length - 1] = finalMessage;
-		} else {
-			context.messages.push(finalMessage);
-			await emit({ type: "message_start", message: { ...finalMessage } });
-		}
-		await emit({ type: "message_end", message: finalMessage });
-		return finalMessage;
-	};
+	const finishStoppedMessage = (finalMessage: AssistantMessage) =>
+		commitAssistantMessage(context, emit, finalMessage, addedPartial);
 
 	const detector = config.degeneracyGuard === false ? undefined : new DegeneracyDetector();
 	// The provider needs a signal this function can trip on its own: a degenerate response has to
 	// be cancelled at the socket or the tokens keep being generated and billed to max_tokens.
-	const guardAbort = detector ? new AbortController() : undefined;
+	const guardAbort = detector || loopGuard ? new AbortController() : undefined;
+	/** Set when the reasoning-loop guard itself cuts the stream, so the abort catch below
+	 * returns the ladder decision instead of treating the cut as a plain user abort. */
+	let guardAbortReason: ReasoningLoopDecision | undefined;
 	const forwardAbort = guardAbort ? () => guardAbort.abort() : undefined;
 	if (forwardAbort && signal) {
 		if (signal.aborted) {
@@ -540,6 +596,7 @@ async function streamAssistantResponse(
 			void Promise.resolve(iterator.return?.()).catch(() => undefined);
 		};
 		let degeneracy: DegeneracyReport | undefined;
+		let reasoningLoop: ReasoningLoopDecision | undefined;
 		while (true) {
 			const next = await raceWithAbort<IteratorResult<AssistantMessageEvent>>(
 				iterator.next(),
@@ -576,13 +633,25 @@ async function streamAssistantResponse(
 							message: { ...partialMessage },
 						});
 					}
+
 					// Assistant prose only. Tool-call arguments are code, diffs, JSON and base64,
 					// all legitimately repetitive, and a false positive there destroys real work.
 					if (detector && (event.type === "text_delta" || event.type === "thinking_delta")) {
 						degeneracy = detector.push(event.contentIndex, event.delta);
 					}
-					break;
+					if (loopGuard) {
+						if (event.type === "toolcall_start") {
+							loopGuard.noteToolCallSeen();
+						} else if (
+							event.type === "thinking_delta" &&
+							!reasoningLoop &&
+							loopGuard.observeThinking(event.delta)
+						) {
+							reasoningLoop = loopGuard.trigger();
+						}
+					}
 
+					break;
 				case "done":
 				case "error": {
 					let finalMessage = getTerminalMessage(event);
@@ -593,37 +662,41 @@ async function streamAssistantResponse(
 							throw error;
 						}
 					}
-					if (addedPartial) {
-						context.messages[context.messages.length - 1] = finalMessage;
-					} else {
-						context.messages.push(finalMessage);
-					}
-					if (!addedPartial) {
-						await emit({ type: "message_start", message: { ...finalMessage } });
-					}
-					await emit({ type: "message_end", message: finalMessage });
-					return finalMessage;
+					return { message: await commitAssistantMessage(context, emit, finalMessage, addedPartial) };
 				}
 			}
 			if (degeneracy) {
 				guardAbort?.abort();
 				closeIterator();
-				return finishStoppedMessage(createDegenerateAssistantMessage(config, partialMessage, degeneracy));
+				return {
+					message: await finishStoppedMessage(
+						createDegenerateAssistantMessage(config, partialMessage, degeneracy),
+					),
+				};
+			}
+			if (reasoningLoop) {
+				// Same socket-level cut as degeneracy: the looping planning keeps being generated
+				// and billed until the provider stream is cancelled.
+				guardAbortReason = reasoningLoop;
+				guardAbort?.abort();
+				closeIterator();
+				return {
+					message: await finishStoppedMessage(
+						createStoppedAssistantMessage(config, partialMessage, [], reasoningLoopStopErrorMessage()),
+					),
+					reasoningLoop,
+				};
 			}
 		}
 
 		const finalMessage = await maybePromiseWithAbort(response.result(), signal);
-		if (addedPartial) {
-			context.messages[context.messages.length - 1] = finalMessage;
-		} else {
-			context.messages.push(finalMessage);
-			await emit({ type: "message_start", message: { ...finalMessage } });
-		}
-		await emit({ type: "message_end", message: finalMessage });
-		return finalMessage;
+		return { message: await commitAssistantMessage(context, emit, finalMessage, addedPartial) };
 	} catch (error) {
 		if (signal?.aborted && isAbortError(error)) {
-			return finishStoppedMessage(createAbortedAssistantMessage(config, partialMessage));
+			return {
+				message: await finishStoppedMessage(createAbortedAssistantMessage(config, partialMessage)),
+				reasoningLoop: guardAbortReason,
+			};
 		}
 		throw error;
 	} finally {

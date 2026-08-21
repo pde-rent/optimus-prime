@@ -317,7 +317,7 @@ describe("agent loop degeneracy guard", () => {
 
 	it("streams to completion when the guard is turned off", async () => {
 		const { streamFn, seen } = degenerateStreamFn("thinking", "I'm not going to be honest with you and ", 60);
-		const messages = await runTurn({ degeneracyGuard: false }, streamFn);
+		const messages = await runTurn({ degeneracyGuard: false, reasoningLoopGuard: false }, streamFn);
 
 		const assistant = messages.find((m) => m.role === "assistant") as AssistantMessage;
 		expect(assistant.stopReason).toBe("stop");

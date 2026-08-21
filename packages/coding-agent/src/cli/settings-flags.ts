@@ -35,6 +35,7 @@ export interface SettingsFlagValues {
 	rlmMaxDepth?: number;
 	dynamicDepth?: boolean;
 	degeneracyGuard?: boolean;
+	reasoningLoopGuard?: boolean;
 	dynamicEffort?: DynamicEffortMode;
 	serviceTier?: ServiceTier;
 	compaction?: boolean;
@@ -117,6 +118,12 @@ export const SETTINGS_FLAGS = [
 		flag: "--degeneracy-guard",
 		field: "degeneracyGuard",
 		help: "Abort a turn whose output collapses into a repetition loop",
+	}),
+	spec({
+		kind: "bool",
+		flag: "--reasoning-loop-guard",
+		field: "reasoningLoopGuard",
+		help: "Steer or stop a run whose assistant keeps planning without acting",
 	}),
 	spec({
 		kind: "enum",

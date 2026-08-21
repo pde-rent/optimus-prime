@@ -115,6 +115,7 @@ export interface AgentOptions {
 	maxRetryDelayMs?: number;
 	toolExecution?: ToolExecutionMode;
 	degeneracyGuard?: boolean;
+	reasoningLoopGuard?: boolean;
 }
 
 class PendingMessageQueue {
@@ -206,6 +207,7 @@ export class Agent {
 	public maxRetryDelayMs?: number;
 	public toolExecution: ToolExecutionMode;
 	public degeneracyGuard: boolean;
+	public reasoningLoopGuard: boolean;
 
 	constructor(options: AgentOptions = {}) {
 		this._state = createMutableAgentState(options.initialState);
@@ -228,6 +230,7 @@ export class Agent {
 		this.maxRetryDelayMs = options.maxRetryDelayMs;
 		this.toolExecution = options.toolExecution ?? "parallel";
 		this.degeneracyGuard = options.degeneracyGuard ?? true;
+		this.reasoningLoopGuard = options.reasoningLoopGuard ?? true;
 	}
 
 	/**
@@ -462,8 +465,8 @@ export class Agent {
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			toolExecution: this.toolExecution,
 			degeneracyGuard: this.degeneracyGuard,
+
 			beforeToolCall: this.beforeToolCall,
-			afterToolCall: this.afterToolCall,
 			shouldStopAfterTurn: async (context) => this.shouldStopAfterTurn?.(context) ?? false,
 			shouldStopBeforeTurn: () => this.shouldStopBeforeTurn?.() ?? false,
 			convertToLlm: this.convertToLlm,

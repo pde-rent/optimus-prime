@@ -266,6 +266,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	degeneracyGuard?: boolean;
 
 	/**
+
+	 * Detect planning that never acts across turns and recover: steer, then abort the
+	 * generation with a forced continuation, then stop the run. Defaults to `true`.
+	 */
+	reasoningLoopGuard?: boolean;
+
+	/**
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.

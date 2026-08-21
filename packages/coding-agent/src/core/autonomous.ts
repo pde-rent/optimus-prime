@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readlink } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { TurnProgress } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage, UserMessage } from "@earendil-works/pi-ai";
 import { waitForChildProcess } from "../utils/child-process.js";
 import { killProcessTree, trackDetachedChildPid, untrackDetachedChildPid } from "../utils/shell.js";
@@ -32,6 +33,7 @@ export interface AgentAutonomousGateFailure {
 
 export interface AgentAutonomousStatus {
 	enabled: boolean;
+	noProgressTurns: number;
 	continuationsUsed: number;
 	turnsUsed: number;
 	tokensUsed: number;
@@ -63,9 +65,14 @@ export const DEFAULT_AUTONOMOUS_GATES: Required<AgentAutonomousGateConfig> = {
 const MAX_GATE_OUTPUT_CHARS = 6000;
 const MAX_CHILD_PROCESS_OUTPUT_CHARS = 1024 * 1024;
 
+/** Consecutive no-progress turns after which blind autonomous continuation is refused. */
+export const AUTONOMOUS_NO_PROGRESS_TURN_LIMIT = 2;
+
 export interface AutonomousRuntimeState {
 	enabled: boolean;
+	noProgressTurns: number;
 	continuationsUsed: number;
+
 	turnsUsed: number;
 	tokensUsed: number;
 	startedAt?: number;
@@ -87,7 +94,7 @@ type AutonomousLimitState = Pick<
 
 export interface AutonomousDecision {
 	shouldContinue: boolean;
-	reason: "missing_terminal_evidence" | "gate_failed" | "not_needed" | "limit_reached";
+	reason: "missing_terminal_evidence" | "gate_failed" | "not_needed" | "limit_reached" | "no_progress";
 }
 
 interface GitWorktreeSnapshot {
@@ -110,6 +117,7 @@ export function createAutonomousRuntimeState(
 	const enabled = config?.enabled === true;
 	return {
 		enabled,
+		noProgressTurns: 0,
 		continuationsUsed: 0,
 		turnsUsed: 0,
 		tokensUsed: 0,
@@ -128,7 +136,6 @@ export function createAutonomousRuntimeState(
 		},
 		gateAttempts: {},
 		lastGateFailure: undefined,
-		lastGateFailureSnapshot: undefined,
 	};
 }
 
@@ -139,6 +146,7 @@ export function setAutonomousEnabled(
 ): void {
 	state.enabled = enabled;
 	if (enabled) {
+		state.noProgressTurns = 0;
 		state.continuationsUsed = 0;
 		state.turnsUsed = 0;
 		state.tokensUsed = 0;
@@ -147,8 +155,8 @@ export function setAutonomousEnabled(
 		state.lastGateFailure = undefined;
 		state.lastGateFailureSnapshot = undefined;
 	} else {
+		state.noProgressTurns = 0;
 		state.startedAt = undefined;
-		state.gateAttempts = {};
 		state.lastGateFailure = undefined;
 		state.lastGateFailureSnapshot = undefined;
 	}
@@ -157,6 +165,7 @@ export function setAutonomousEnabled(
 export function autonomousStatus(state: AutonomousRuntimeState): AgentAutonomousStatus {
 	return {
 		enabled: state.enabled,
+		noProgressTurns: state.noProgressTurns,
 		continuationsUsed: state.continuationsUsed,
 		turnsUsed: state.turnsUsed,
 		tokensUsed: state.tokensUsed,
@@ -181,6 +190,21 @@ export function addAutonomousContinuation(state: AutonomousRuntimeState): void {
 		return;
 	}
 	state.continuationsUsed++;
+}
+
+/**
+ * Tracks observable progress per finished turn. Any tool call or new observation bytes reset
+ * the streak; a turn with neither advances it toward AUTONOMOUS_NO_PROGRESS_TURN_LIMIT.
+ */
+export function noteAutonomousTurnProgress(state: AutonomousRuntimeState, progress: TurnProgress): void {
+	if (!state.enabled) {
+		return;
+	}
+	if (progress.toolCalls > 0 || progress.newObservationBytes > 0) {
+		state.noProgressTurns = 0;
+		return;
+	}
+	state.noProgressTurns++;
 }
 
 function autonomousTokenDelta(usage: Usage | undefined): number {
@@ -244,6 +268,11 @@ export async function shouldAutonomouslyContinue(
 			return { shouldContinue: false, reason: "limit_reached" };
 		}
 		return { shouldContinue: true, reason: "gate_failed" };
+	}
+	if (state.noProgressTurns >= AUTONOMOUS_NO_PROGRESS_TURN_LIMIT) {
+		// Blindly continuing a stalled run only burns budget; the reasoning-loop guard in the
+		// agent loop owns recovery, so refuse the continuation and let the run stop.
+		return { shouldContinue: false, reason: "no_progress" };
 	}
 	if (autonomousLimitReason(state, now)) {
 		return { shouldContinue: false, reason: "limit_reached" };
