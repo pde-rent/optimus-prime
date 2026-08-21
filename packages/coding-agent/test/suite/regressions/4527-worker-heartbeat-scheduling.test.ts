@@ -1,22 +1,15 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { AgentCronJobStore, AgentCronScheduler } from "../../../src/core/cron-jobs.js";
-import { createHarness, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("ENG-4527 worker heartbeat scheduling", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("starts 50 independently owned heartbeats while one worker is blocked", async () => {
 		const workerCount = 50;
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("blocked worker completed")]);
 		let releaseBlockedWorker: () => void = () => {};
 		const blockedWorker = new Promise<void>((resolve) => {

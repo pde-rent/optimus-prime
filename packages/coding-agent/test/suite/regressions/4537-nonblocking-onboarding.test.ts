@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { shouldRunOnboarding } from "../../../src/modes/interactive/onboarding.js";
-import { createHarness, type Harness } from "../harness.js";
+import type { Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
 
 describe("ENG-4537 non-blocking onboarding", () => {
 	const harnesses: Harness[] = [];
@@ -11,11 +12,10 @@ describe("ENG-4537 non-blocking onboarding", () => {
 	});
 
 	test("never reopens shown onboarding for a client-local auth mismatch", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { onboardingShown: true },
 			withConfiguredAuth: false,
 		});
-		harnesses.push(harness);
 
 		expect(
 			shouldRunOnboarding({
@@ -27,11 +27,10 @@ describe("ENG-4537 non-blocking onboarding", () => {
 	});
 
 	test("never reopens shown onboarding when the daemon session has no model", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { onboardingShown: true },
 			withConfiguredAuth: false,
 		});
-		harnesses.push(harness);
 
 		expect(
 			shouldRunOnboarding({

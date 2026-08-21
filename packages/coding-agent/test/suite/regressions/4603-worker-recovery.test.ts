@@ -40,6 +40,7 @@ import {
 } from "../../../src/modes/session-worker/private-framing.js";
 import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, type Harness } from "../harness.js";
+import { delay } from "../helpers.js";
 
 interface OwnerRecord {
 	token: string;
@@ -740,11 +741,6 @@ function createFrameReader(socket: Socket): {
 function decodeResponse(frame: PrivateFrame<DaemonWorkerFrameHeader>): DaemonResponse {
 	return JSON.parse(frame.payload.toString("utf8")) as DaemonResponse;
 }
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
 describe("ENG-4603 worker recovery convergence", () => {
 	it("allows only the current generation to replace a crashed resident worker", async () => {
 		if (process.platform === "win32") return;

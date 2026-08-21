@@ -24,6 +24,7 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "../../src/index.js";
+import { fauxProviderExtension } from "./helpers.js";
 
 type RecordedSessionEvent =
 	| SessionBeforeSwitchEvent
@@ -78,26 +79,7 @@ describe("AgentSessionRuntime characterization", () => {
 			model: options?.bootstrapModel === false ? undefined : faux.getModel(),
 			thinkingLevel: options?.bootstrapThinkingLevel === false ? undefined : undefined,
 			resourceLoaderOptions: {
-				extensionFactories: [
-					(pi: ExtensionAPI) => {
-						pi.registerProvider(faux.getModel().provider, {
-							baseUrl: faux.getModel().baseUrl,
-							apiKey: "faux-key",
-							api: faux.api,
-							models: faux.models.map((registeredModel) => ({
-								id: registeredModel.id,
-								name: registeredModel.name,
-								api: registeredModel.api,
-								reasoning: registeredModel.reasoning,
-								input: registeredModel.input,
-								cost: registeredModel.cost,
-								contextWindow: registeredModel.contextWindow,
-								maxTokens: registeredModel.maxTokens,
-							})),
-						});
-						extensionFactory(pi);
-					},
-				],
+				extensionFactories: [fauxProviderExtension(faux, extensionFactory)],
 				noSkills: true,
 				noPromptTemplates: true,
 				noThemes: true,
@@ -737,25 +719,7 @@ describe("AgentSessionRuntime characterization", () => {
 			agentDir: tempDir,
 			authStorage: otherAuthStorage,
 			resourceLoaderOptions: {
-				extensionFactories: [
-					(pi: ExtensionAPI) => {
-						pi.registerProvider(faux.getModel().provider, {
-							baseUrl: faux.getModel().baseUrl,
-							apiKey: "faux-key",
-							api: faux.api,
-							models: faux.models.map((registeredModel) => ({
-								id: registeredModel.id,
-								name: registeredModel.name,
-								api: registeredModel.api,
-								reasoning: registeredModel.reasoning,
-								input: registeredModel.input,
-								cost: registeredModel.cost,
-								contextWindow: registeredModel.contextWindow,
-								maxTokens: registeredModel.maxTokens,
-							})),
-						});
-					},
-				],
+				extensionFactories: [fauxProviderExtension(faux)],
 				noSkills: true,
 				noPromptTemplates: true,
 				noThemes: true,
@@ -811,25 +775,7 @@ describe("AgentSessionRuntime characterization", () => {
 			agentDir: tempDir,
 			authStorage: otherAuthStorage,
 			resourceLoaderOptions: {
-				extensionFactories: [
-					(pi: ExtensionAPI) => {
-						pi.registerProvider(faux.getModel().provider, {
-							baseUrl: faux.getModel().baseUrl,
-							apiKey: "faux-key",
-							api: faux.api,
-							models: faux.models.map((registeredModel) => ({
-								id: registeredModel.id,
-								name: registeredModel.name,
-								api: registeredModel.api,
-								reasoning: registeredModel.reasoning,
-								input: registeredModel.input,
-								cost: registeredModel.cost,
-								contextWindow: registeredModel.contextWindow,
-								maxTokens: registeredModel.maxTokens,
-							})),
-						});
-					},
-				],
+				extensionFactories: [fauxProviderExtension(faux)],
 				noSkills: true,
 				noPromptTemplates: true,
 				noThemes: true,

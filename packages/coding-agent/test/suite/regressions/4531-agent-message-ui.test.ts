@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Message, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Message, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { Container, type TUI } from "@earendil-works/pi-tui";
 import {
 	AGENT_MESSAGE_SOURCE,
@@ -23,6 +23,8 @@ import { ReplCellComponent } from "../../../src/modes/interactive/components/rep
 import { formatQueuedMessagePreview, InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { createHarness, getMessageText, getUserTexts, type Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
+import { gatedWaitTool } from "../scheduling.js";
 
 function createPayload(message: string): AgentSessionMessagePayload {
 	return {
@@ -239,22 +241,8 @@ describe("ENG-4531 agent message UI", () => {
 	});
 
 	it("preserves the custom message when direct delivery races with active work", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return { content: [{ type: "text", text: "released" }], details: {} };
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("Original turn complete."),

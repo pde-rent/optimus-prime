@@ -118,3 +118,19 @@ export async function createWaitingHarness(
 		waitForToolStart,
 	};
 }
+
+/** Gated "wait" tool: the run stalls in tool execution until `release()` is called. */
+export function gatedWaitTool(): { tool: AgentTool; release: () => void } {
+	const gate = createDeferred();
+	const tool: AgentTool = {
+		name: "wait",
+		label: "Wait",
+		description: "Wait for release",
+		parameters: Type.Object({}),
+		execute: async () => {
+			await gate.promise;
+			return { content: [{ type: "text", text: "released" }], details: {} };
+		},
+	};
+	return { tool, release: gate.resolve };
+}

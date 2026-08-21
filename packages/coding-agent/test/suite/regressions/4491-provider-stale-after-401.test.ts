@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { createHarness, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 function provider401Message(): AssistantMessage {
 	return {
@@ -43,19 +45,10 @@ function provider500Message(): AssistantMessage {
 }
 
 describe("issue #4491 provider stale after repeated 401", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("retries structured provider auth failures once, then marks current auth stale", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([provider401Message(), provider401Message(), provider401Message()]);
 
 		await harness.session.prompt("hello");
@@ -82,11 +75,10 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("emits stale auth source tokens for daemon clients after bare 401 auth failures", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			provider: "prime-inference",
 			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([bareProvider401Message()]);
 
 		await harness.session.prompt("hello");
@@ -108,11 +100,10 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("classifies bare status-code auth failures before login guidance is appended", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			provider: "prime-inference",
 			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		const message = bareProvider401Message();
 		const event = { type: "agent_end", messages: [message] } as AgentEvent;
 		const session = harness.session as unknown as {
@@ -126,10 +117,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("creates retry promises for exhausted structured auth failures so cleanup is awaited", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		const event = { type: "agent_end", messages: [provider401Message()] } as AgentEvent;
 		const session = harness.session as unknown as {
 			_retryAttempt: number;
@@ -144,10 +134,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("marks captured auth failures stale when retry backoff is cancelled", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 100 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([provider401Message(), provider401Message()]);
 
 		const sawRetryStart = new Promise<void>((resolve) => {
@@ -172,10 +161,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("marks each failed auth source stale when credentials change during retry backoff", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 1, baseDelayMs: 5 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([provider401Message(), provider401Message()]);
 
 		let changedCredentials = false;
@@ -200,10 +188,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("marks captured auth failures stale when the final retryable error is not auth", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([provider401Message(), provider500Message(), provider500Message()]);
 
 		await harness.session.prompt("hello");
@@ -223,10 +210,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("marks concrete auth failures stale when retry is disabled", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: false } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([provider401Message()]);
 
 		await harness.session.prompt("hello");
@@ -238,10 +224,9 @@ describe("issue #4491 provider stale after repeated 401", () => {
 	});
 
 	it("resolves retry state for auth failures surfaced only on agent_end", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 0, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		const message = provider401Message();
 		const event = { type: "agent_end", messages: [message] } as AgentEvent;
 		const session = harness.session as unknown as {

@@ -1,16 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createHarness, getUserTexts, type Harness } from "../harness.js";
+import { trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("ENG-4653 queued messages after agent end", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	async function waitForDelivery(harness: Harness, expectedCalls: number): Promise<void> {
 		await vi.waitFor(() => expect(harness.faux.state.callCount).toBe(expectedCalls));
 		await harness.session.agent.waitForIdle();

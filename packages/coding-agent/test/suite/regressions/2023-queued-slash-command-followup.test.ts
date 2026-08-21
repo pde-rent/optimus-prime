@@ -1,18 +1,13 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createHarness, getAssistantTexts, getUserTexts, type Harness } from "../harness.js";
+import { getAssistantTexts, getUserTexts } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("issue #2023 queued slash-command follow-up", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("treats extension-origin queued slash-command follow-ups as raw user text instead of dispatching the command", async () => {
 		let extensionApi: ExtensionAPI | undefined;
 		const commandRuns: string[] = [];
@@ -33,7 +28,7 @@ describe("issue #2023 queued slash-command follow-up", () => {
 				};
 			},
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [waitTool],
 			extensionFactories: [
 				(pi) => {
@@ -47,7 +42,6 @@ describe("issue #2023 queued slash-command follow-up", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),

@@ -2,44 +2,18 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createHarness, type Harness } from "./harness.js";
+import { createAssistant, createTrackedHarness, trackHarnesses, waitFor } from "./helpers.js";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+const harnesses = trackHarnesses();
 
 type SessionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<boolean>;
 	_shouldStopAfterTurn: (context: ShouldStopAfterTurnContext) => Promise<boolean>;
 	_createKernelHostHandlers: () => Record<string, unknown>;
 };
-
-function createAssistant(
-	harness: Harness,
-	options: { stopReason?: AssistantMessage["stopReason"]; errorMessage?: string } = {},
-) {
-	const model = harness.getModel();
-	return {
-		...fauxAssistantMessage("", {
-			stopReason: options.stopReason,
-			errorMessage: options.errorMessage,
-			timestamp: Date.now(),
-		}),
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-	};
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
 
 function setStreaming(harness: Harness, streaming: boolean) {
 	(harness.session.agent.state as { isStreaming: boolean }).isStreaming = streaming;
@@ -60,21 +34,11 @@ function extensionCompaction() {
 }
 
 describe("AgentSession compact skill host requests", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("schedules via compact.run and compacts at the turn boundary with reason requested", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -111,11 +75,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("runs a requested compaction even when auto-compaction is disabled", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: false, keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -134,11 +97,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("drops a pending requested compaction when the turn is aborted", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -154,11 +116,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("drops a pending requested compaction on the pre-prompt path after an abort", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -174,11 +135,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("rejects compact.run while no turn is active", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -189,11 +149,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("prioritizes overflow recovery over a pending requested compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
@@ -246,7 +205,7 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("keeps a pending requested compaction when manual compaction fails", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi: any) => {
@@ -254,7 +213,6 @@ describe("AgentSession compact skill host requests", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -267,11 +225,10 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("clears a pending requested compaction when manual compaction succeeds", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
 		});
-		harnesses.push(harness);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -294,8 +251,7 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("is gated by the compaction.agentCallable setting", async () => {
-		const harness = await createHarness({ settings: { compaction: { agentCallable: false } } });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { settings: { compaction: { agentCallable: false } } });
 
 		expect(() => harness.session.handleCompactHostRequest("compact.run")).toThrow(
 			"the compact skill is disabled in this session",

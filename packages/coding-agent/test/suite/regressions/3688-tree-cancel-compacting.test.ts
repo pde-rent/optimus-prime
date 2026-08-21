@@ -1,25 +1,18 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { assistantMsg, userMsg } from "../../utilities.js";
-import { createHarness, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("issue #3688 tree cancellation compaction state", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("clears branch summary state when session_before_tree cancels navigation", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_tree", () => ({ cancel: true }));
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		const targetId = harness.sessionManager.appendMessage(userMsg("first"));
 		harness.sessionManager.appendMessage(assistantMsg("reply"));

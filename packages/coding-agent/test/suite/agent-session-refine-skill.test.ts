@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createHarness, type Harness } from "./harness.js";
+import { createTrackedHarness, trackHarnesses } from "./helpers.js";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+const harnesses = trackHarnesses();
 
 type SessionInternals = {
 	_consumePendingRequestedRefine: () => boolean;
@@ -17,18 +23,8 @@ function setStreaming(harness: Harness, streaming: boolean) {
 }
 
 describe("AgentSession refine skill host requests", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("schedules via refine.run and reports pending via refine.status", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -43,8 +39,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("stores global flag from refine.run", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -57,8 +52,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("defaults to local scope when global is not provided", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -72,8 +66,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("updates pending request when called again", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -88,8 +81,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("replaces an in-flight serialized plan instead of applying both requests", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true, serializedRefine: true });
 		const internals = harness.session as unknown as SessionInternals;
 		const abort = new AbortController();
 		internals._serializedPlanInFlight = new Promise(() => {});
@@ -105,8 +97,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("discards a settled serialized plan when a replacement request arrives", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true, serializedRefine: true });
 		const internals = harness.session as unknown as SessionInternals;
 		internals._serializedPlanInFlight = Promise.resolve({ status: "plan" });
 		internals._serializedExplicitRefineOptions = { instructions: "first", global: true };
@@ -123,8 +114,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("rejects refine.run while no turn is active", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -135,8 +125,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("validates instructions type in refine.run", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		setStreaming(harness, true);
@@ -147,8 +136,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("validates global flag type in refine.run", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		setStreaming(harness, true);
@@ -159,8 +147,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("reports in_flight as false when no refine is active", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		const status = harness.session.handleRefineHostRequest("refine.status");
@@ -169,8 +156,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("consumes pending refine request at turn boundary", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -186,8 +172,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("does nothing when no pending refine at turn boundary", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		const internals = harness.session as unknown as SessionInternals;
@@ -197,8 +182,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("catches errors from refine at turn boundary without throwing", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -223,8 +207,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("continues notifying refine listeners after one throws", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = harness.session as unknown as SessionInternals;
 		const observed: string[] = [];
 		harness.session.subscribe(() => {
@@ -241,8 +224,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("registers refine.run and refine.status handlers when auto-refine is allowed", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		const internals = harness.session as unknown as SessionInternals;
@@ -251,8 +233,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("does not register refine handlers when auto-refine is not allowed (rlmDepth > 0)", async () => {
-		const harness = await createHarness({ persistSession: true, rlmDepth: 1 });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true, rlmDepth: 1 });
 		await harness.session.prompt("one");
 
 		const internals = harness.session as unknown as SessionInternals;
@@ -273,8 +254,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("clears pending refine on dispose", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 
@@ -288,8 +268,7 @@ describe("AgentSession refine skill host requests", () => {
 	});
 
 	it("rejects unknown refine request type", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		await harness.session.prompt("one");
 
 		expect(() => harness.session.handleRefineHostRequest("refine.unknown")).toThrow(

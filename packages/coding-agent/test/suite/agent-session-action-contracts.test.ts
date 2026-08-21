@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createHarness, getUserTexts, type Harness } from "./harness.js";
+import { createTrackedHarness } from "./helpers.js";
 import { withStreaming } from "./scheduling.js";
 
 describe("AgentSession action contracts", () => {
@@ -31,7 +32,7 @@ describe("AgentSession action contracts", () => {
 	});
 
 	it("runs input handlers before deciding whether busy submissions enter a queue", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("input", async (event) =>
@@ -42,7 +43,6 @@ describe("AgentSession action contracts", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		withStreaming(harness, true);
 
 		await harness.session.prompt("queued", { streamingBehavior: "followUp" });
@@ -76,7 +76,7 @@ describe("AgentSession action contracts", () => {
 	it("restores normalized payloads without interception, parsing, or an idle wake", async () => {
 		let inputHandlerRuns = 0;
 		let extensionCommandRuns = 0;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("input", async () => {
@@ -92,7 +92,6 @@ describe("AgentSession action contracts", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("steer done"), fauxAssistantMessage("follow-up done")]);
 
 		await harness.session.restoreFollowUpMessage("/compact");

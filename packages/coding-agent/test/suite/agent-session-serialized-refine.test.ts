@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
-import { createHarness, type Harness } from "./harness.js";
+import type { Harness, HarnessOptions } from "./harness.js";
+import { createTrackedHarness, emptyRefinementResult, trackHarnesses } from "./helpers.js";
+
+const harnesses = trackHarnesses();
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 type SerializedInternals = {
 	_shouldStopAfterTurn(context: {
@@ -70,18 +77,6 @@ type SerializedInternals = {
 	_drainPendingRefinementForDisposal(): Promise<void>;
 	_autoRefineOperations: Set<Promise<void>>;
 };
-
-function emptyRefinementResult() {
-	return {
-		id: "refine_test",
-		summary: "test refinement",
-		rationale: "test rationale",
-		expectedOutcome: "test outcome",
-		appliedEdits: [],
-		harnessStatePath: "/tmp/harness_state.json",
-	};
-}
-
 function makeCtx(text: string) {
 	return {
 		message: {
@@ -106,29 +101,25 @@ function mockSerializedRefine(harness: Harness) {
 	return { plan, applyRefine: internals._applyRefine };
 }
 
+async function createPersistedHarness(options: HarnessOptions = {}): Promise<Harness> {
+	const harness = await createTrackedHarness(harnesses, { ...options, persistSession: true });
+	return harness;
+}
+
+async function createRefineHarness(options: HarnessOptions = {}): Promise<Harness> {
+	return createPersistedHarness({ ...options, serializedRefine: true });
+}
+
+function approvingReviewer(rationale = "test", instructions = "test") {
+	return vi.fn(async () => ({ shouldRefine: true, rationale, instructions }));
+}
 describe("Serialized auto-refine checkpoint", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("refines exactly once when >25 tool turns run in one loop", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "durable lesson",
-			instructions: "capture the lesson",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("durable lesson", "capture the lesson");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
@@ -143,17 +134,10 @@ describe("Serialized auto-refine checkpoint", () => {
 	});
 
 	it("max concurrent primary/refinement model requests is one in serialized mode", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._assistantTurnsSinceAutoRefine = 1;
 
@@ -187,17 +171,10 @@ describe("Serialized auto-refine checkpoint", () => {
 	});
 
 	it("prompt/state update visible on resumed turn after serialized refine", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "add memory",
-				instructions: "add a memory entry",
-			})),
+			autoRefineReviewer: approvingReviewer("add memory", "add a memory entry"),
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -211,17 +188,10 @@ describe("Serialized auto-refine checkpoint", () => {
 	});
 
 	it("final agent_end pending refine completes before dispose", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -235,17 +205,11 @@ describe("Serialized auto-refine checkpoint", () => {
 	});
 
 	it("interactive background refine behavior preserved when serializedRefine is false", async () => {
-		const harness = await createHarness({
-			persistSession: true,
+		const harness = await createPersistedHarness({
 			serializedRefine: false,
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
 		expect(internals._serializedRefine).toBe(false);
@@ -262,17 +226,10 @@ describe("Serialized auto-refine checkpoint", () => {
 	});
 
 	it("never deadlocks: serialized checkpoint does not call waitForIdle or _maybeAutoRefine", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		// Simulate "active" agent state (as during a tool loop)
@@ -296,22 +253,10 @@ describe("Serialized auto-refine checkpoint", () => {
 });
 
 describe("Serialized agent-callable refine", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("services a pending refine.run before stopping for steering", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const { applyRefine } = mockSerializedRefine(harness);
 		internals._pendingRequestedRefine = { instructions: "capture a lesson" };
@@ -331,12 +276,9 @@ describe("Serialized agent-callable refine", () => {
 	});
 
 	it("agent-callable refine.run starts background planning immediately in serialized mode", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -359,18 +301,11 @@ describe("Serialized agent-callable refine", () => {
 	});
 
 	it("agent-callable request takes priority over interval-triggered auto-refine", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "interval",
-			instructions: "interval lesson",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("interval", "interval lesson");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -393,12 +328,9 @@ describe("Serialized agent-callable refine", () => {
 	});
 
 	it("agent-callable refine.run background plan started immediately, NOT fire-and-forget at agent_end", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
 
@@ -413,12 +345,9 @@ describe("Serialized agent-callable refine", () => {
 	});
 
 	it("pending agent-callable refine drained before disposal", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -435,28 +364,12 @@ describe("Serialized agent-callable refine", () => {
 });
 
 describe("Serialized autonomous continuation", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("autonomous tool loop continues past serialized refinement boundary with no deadlock", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "checkpoint",
-			instructions: "capture lesson",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("checkpoint", "capture lesson");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 3, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -486,27 +399,11 @@ describe("Serialized autonomous continuation", () => {
 });
 
 describe("Serialized background planning during tools", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("planning overlaps a deferred tool but next model turn waits for plan+apply", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let resolvePlan: () => void = () => {};
@@ -555,18 +452,11 @@ describe("Serialized background planning during tools", () => {
 	});
 
 	it("lets refine.run supersede an interval plan that ignores abort", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "interval review",
-			instructions: "interval plan",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("interval review", "interval plan");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let resolveIntervalPlan: () => void = () => {};
@@ -613,18 +503,11 @@ describe("Serialized background planning during tools", () => {
 		// the review is part of the background plan, not a second model request
 		// overlapping the primary stream. The primary stream is already done
 		// (message_end fired) when planning starts.
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		vi.spyOn(internals, "_planRefine").mockResolvedValue({ id: "p", proposal: { edits: [] } });
@@ -652,24 +535,11 @@ describe("Serialized background planning during tools", () => {
 });
 
 describe("PR #503 model persistence regression", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("persisted subagent model is restored on session rehydration", async () => {
 		// PR #503 commit 47c4b28f8 persists and restores the subagent model
 		// on rehydration. This test verifies the model is not lost when a
 		// session is created with a specific model.
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
-		});
-		harnesses.push(harness);
+		const harness = await createRefineHarness({});
 
 		// The session should have a model set.
 		expect(harness.session.model).toBeDefined();
@@ -680,17 +550,10 @@ describe("PR #503 model persistence regression", () => {
 		// PR #503 commit 742a85b99 preserves the extension system prompt
 		// after the refine wait. This test verifies the model survives a
 		// serialized refine checkpoint.
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const { applyRefine } = mockSerializedRefine(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
@@ -706,28 +569,12 @@ describe("PR #503 model persistence regression", () => {
 });
 
 describe("Serialized refine review-fix regressions", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("explicit refine.run does NOT call the auto-review gate", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "should not be called",
-			instructions: "should not be called",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("should not be called", "should not be called");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		vi.spyOn(internals, "_planRefine").mockResolvedValue({ id: "p", proposal: { edits: [] } });
@@ -755,18 +602,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("failure result stamps cooldown and does NOT retry synchronously", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Make background planning fail
@@ -796,8 +636,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("non-serialized explicit refine suppresses interval auto-refine for that turn", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			refine(options: { instructions?: string }): Promise<unknown>;
 		};
@@ -815,18 +654,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("serialized failure does not schedule interactive auto-refine at agent_end", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Make background planning fail
@@ -871,18 +703,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("explicit refine.run bg plan fails then boundary replan/apply succeeds", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let planCalls = 0;
@@ -912,18 +737,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("interval bg plan failure does not retry synchronously", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Interval background planning fails (not explicit refine.run).
@@ -946,8 +764,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("classifies an aborted stale background plan as invalidated", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			_runBackgroundPlan(
 				options: { instructions?: string },
@@ -968,18 +785,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("stale branch failure does not requeue explicit refine.run", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		vi.spyOn(internals, "_planRefine").mockRejectedValue(new Error("plan failed"));
@@ -1002,18 +812,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("newer pending supersedes failed older explicit refine.run", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		vi.spyOn(internals, "_planRefine").mockImplementation(async (opts) => {
@@ -1039,18 +842,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("disposal does not double-refine after explicit drain", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let planCalls = 0;
@@ -1080,11 +876,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("public refine waits for serialized bg plan: max concurrency 1, bg then public apply", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
+		const reviewer = approvingReviewer("test", "test");
 		// Tool that blocks until released. Signals from execute so we know the
 		// real agent turn is active (isStreaming is true) before we proceed.
 		let resolveGate: () => void = () => {};
@@ -1108,14 +900,11 @@ describe("Serialized refine review-fix regressions", () => {
 		};
 		// Use turnInterval=999 to avoid interval auto-refine; we trigger bg planning
 		// explicitly via handleRefineHostRequest("refine.run").
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 999, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 			tools: [gateTool],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let planCalls = 0;
@@ -1194,8 +983,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("public refine waits for active compaction without aborting it", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseCompaction: () => void = () => {};
 		const compactionOperation = new Promise<void>((resolve) => {
@@ -1221,8 +1009,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("public refine waits for active branch summary without aborting it", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseBranchSummary: () => void = () => {};
 		const branchSummaryOperation = new Promise<void>((resolve) => {
@@ -1248,8 +1035,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("public refine snapshots final events and operations after the agent becomes idle", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseIdle: () => void = () => {};
 		const idleOperation = new Promise<void>((resolve) => {
@@ -1288,18 +1074,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("interval background plan derives instructions from review, not prepopulated", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "specific rationale from review",
-			instructions: "specific instructions from review",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("specific rationale from review", "specific instructions from review");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		let capturedPlanOptions: { instructions?: string } | undefined;
@@ -1326,8 +1105,7 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("emits refine_failed when a ready background plan fails to apply", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._serializedPlanInFlight = Promise.resolve({
 			status: "plan",
@@ -1352,17 +1130,10 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("disposal applies ready background plan before teardown", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		const exactPlan = { id: "disposal-plan", proposal: { edits: [] } };
@@ -1391,18 +1162,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("services a compaction-triggered refine at the next serialized boundary", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "post-compaction lesson",
-			instructions: "capture it",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("post-compaction lesson", "capture it");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const { applyRefine } = mockSerializedRefine(harness);
 
@@ -1416,18 +1180,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("defers serialized compaction refinement even when no continuation was scheduled", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "terminal compaction lesson",
-			instructions: "capture it",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("terminal compaction lesson", "capture it");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const interactiveSpy = vi.spyOn(internals, "_maybeAutoRefine");
 		const { applyRefine } = mockSerializedRefine(harness);
@@ -1443,12 +1200,9 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("defers manual compaction refinement to the serialized checkpoint", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		vi.spyOn(internals, "_getRequiredRequestAuth").mockResolvedValue({ apiKey: "test" });
 		vi.spyOn(internals, "_performCompaction").mockResolvedValue({
@@ -1466,13 +1220,10 @@ describe("Serialized refine review-fix regressions", () => {
 
 	it("preserves a serialized compaction trigger while cooldown is active", async () => {
 		const reviewer = vi.fn(async () => ({ shouldRefine: false, rationale: "not called" }));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 60_000 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._lastAutoRefineReviewAt = Date.now();
 		internals._scheduleAutoRefineAfterCompaction(true);
@@ -1485,13 +1236,10 @@ describe("Serialized refine review-fix regressions", () => {
 
 	it("clears a serialized compaction trigger when disposal occurs during cooldown", async () => {
 		const reviewer = vi.fn(async () => ({ shouldRefine: false, rationale: "not called" }));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 60_000 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._lastAutoRefineReviewAt = Date.now();
 		internals._compactAutoRefinePending = true;
@@ -1503,12 +1251,9 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("continues to the interval drain after a compact trigger hits cooldown", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 1, cooldownMs: 60_000 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const settings = { enabled: true, compact: true, turnInterval: 1, cooldownMs: 60_000 };
 		vi.spyOn(harness.session.settingsManager, "getAutoRefineSettings")
@@ -1526,18 +1271,11 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("falls back to an interval review when compact-triggered refinement is disabled", async () => {
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "interval lesson",
-			instructions: "capture it",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("interval lesson", "capture it");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: false, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const { applyRefine } = mockSerializedRefine(harness);
 		internals._assistantTurnsSinceAutoRefine = 1;
@@ -1555,13 +1293,10 @@ describe("Serialized refine review-fix regressions", () => {
 
 	it("clears a compact trigger after a review decides no refinement is needed", async () => {
 		const reviewer = vi.fn(async () => ({ shouldRefine: false, rationale: "nothing durable" }));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const { applyRefine } = mockSerializedRefine(harness);
 		internals._scheduleAutoRefineAfterCompaction(true);
@@ -1575,12 +1310,9 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("does not let a compact review failure block disposal", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, compact: true, turnInterval: 999, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._compactAutoRefinePending = true;
 		vi.spyOn(internals, "_runSerializedAutoRefineReview").mockRejectedValue(
@@ -1592,12 +1324,9 @@ describe("Serialized refine review-fix regressions", () => {
 	});
 
 	it("retries a failed explicit background plan during disposal", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 999, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		const options = { instructions: "explicit recovery" };
 		internals._serializedPlanInFlight = Promise.resolve({
@@ -1617,32 +1346,16 @@ describe("Serialized refine review-fix regressions", () => {
 });
 
 describe("Serialized refine event-ordering integration", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("real message_end/turn_end ordering: threshold planning starts and applies before next model turn", async () => {
 		// This test uses real agent.prompt() with faux responses to verify
 		// that _shouldStopAfterTurn's await this._agentEventQueue ensures
 		// the message_end counter increment and background plan kickoff
 		// happen BEFORE the serialized checkpoint runs.
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "integration test",
-			instructions: "capture lesson",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("integration test", "capture lesson");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 2, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		const planSpy = vi
@@ -1684,31 +1397,15 @@ describe("Serialized refine event-ordering integration", () => {
 });
 
 describe("P0 concurrency regressions", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("steering waits for interval refine and threshold compaction boundaries", async () => {
 		// Verify that when threshold compaction would fire, the serialized
 		// checkpoint runs FIRST, draining the background plan, so the
 		// compaction model call cannot overlap an in-flight refine.
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "test",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "test");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._admitSessionInput(internals._createPreparedTurnAction("steer", "steer", undefined, {}));
 
@@ -1757,17 +1454,10 @@ describe("P0 concurrency regressions", () => {
 		expect(internals._assistantTurnsSinceAutoRefine).toBe(0);
 	});
 	it("branch navigation with in-flight serialized plan: aborts signal, no apply", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		const applySpy = vi.spyOn(internals, "_applyRefine").mockResolvedValue(emptyRefinementResult());
@@ -1827,18 +1517,11 @@ describe("P0 concurrency regressions", () => {
 		// mock but lets the real _applyRefine run, which calls
 		// applyRefinementProposal, saveHarnessState, _rebuildSystemPrompt,
 		// and emits refine_complete.
-		const reviewer = vi.fn(async () => ({
-			shouldRefine: true,
-			rationale: "test",
-			instructions: "add a memory",
-		}));
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const reviewer = approvingReviewer("test", "add a memory");
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Mock only _planRefine (the LLM planning call), NOT _applyRefine.
@@ -1906,12 +1589,9 @@ describe("P0 concurrency regressions", () => {
 		expect(extensionEmit).toHaveBeenCalledWith(expect.objectContaining({ type: "refine_complete", appliedEdits: 1 }));
 	});
 	it("explicit refine.run planning failure: stamps cooldown, no apply, no retry", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Make planning fail for the explicit refine.run request.
@@ -1945,12 +1625,9 @@ describe("P0 concurrency regressions", () => {
 		// rlm.harness.create_memory) during serialized background planning
 		// is detected via baselineState comparison and the stale edit is
 		// rejected, preserving the concurrent write.
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Seed a memory entry on disk so the plan has something to update.
@@ -2045,8 +1722,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("aborted non-serialized turn clears _pendingRequestedRefine at agent_end", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			refine: (options: { instructions?: string }) => Promise<unknown>;
 		};
@@ -2072,8 +1748,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("explicit abort during a tool call clears a non-serialized refine.run before agent_end", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			refine: (options: { instructions?: string }) => Promise<unknown>;
 		};
@@ -2103,8 +1778,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("explicit abort invalidates an in-flight serialized refine.run plan", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		const applyRefine = vi.spyOn(internals, "_applyRefine").mockResolvedValue(emptyRefinementResult());
 		let planSignal: AbortSignal | undefined;
@@ -2136,8 +1810,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("explicit abort cancels an in-flight public refinement plan", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let planSignal: AbortSignal | undefined;
 		vi.spyOn(internals, "_planRefine").mockImplementation(
@@ -2159,8 +1832,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("explicit abort cancels direct serialized refinement planning", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		const applyRefine = vi.spyOn(internals, "_applyRefine").mockResolvedValue(emptyRefinementResult());
 		let planSignal: AbortSignal | undefined;
@@ -2189,8 +1861,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("direct serialized planning blocks a concurrent public refinement plan", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseDirectPlan: () => void = () => {};
 		const directPlanGate = new Promise<void>((resolve) => {
@@ -2228,8 +1899,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("explicit abort cancels a serialized auto-refine review", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let reviewSignal: AbortSignal | undefined;
 		vi.spyOn(internals, "_reviewAutoRefine").mockImplementation((_context, signal) => {
@@ -2255,8 +1925,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("does not stamp cooldown when the branch changes during serialized refinement", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._assistantTurnsSinceAutoRefine = 4;
 		internals._lastAutoRefineReviewAt = 0;
@@ -2277,8 +1946,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("services a pending request after an invalidated background plan", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._serializedPlanInFlight = Promise.resolve({ status: "invalidated" });
 		internals._pendingRequestedRefine = { instructions: "latest" };
@@ -2291,8 +1959,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("records cooldown after dropping a stale ready background plan", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		const apply = vi.spyOn(internals, "_applyRefine").mockResolvedValue(emptyRefinementResult());
 		const reviewAtBeforeCheckpoint = internals._lastAutoRefineReviewAt;
@@ -2313,17 +1980,10 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("aborted serialized turn clears _pendingRequestedRefine so it does not leak to next checkpoint", async () => {
-		const harness = await createHarness({
-			persistSession: true,
-			serializedRefine: true,
+		const harness = await createRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 999, cooldownMs: 0 } },
-			autoRefineReviewer: vi.fn(async () => ({
-				shouldRefine: true,
-				rationale: "test",
-				instructions: "test",
-			})),
+			autoRefineReviewer: approvingReviewer("test", "test"),
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals & {
 			refine: (options: { instructions?: string }) => Promise<unknown>;
 		};
@@ -2364,8 +2024,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("public refine resumes pending messages after the application phase", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 
 		// Provide a provider response first so a resumed turn can complete.
@@ -2389,8 +2048,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("surfaces an explicit serialized planning failure without terminating the turn", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._pendingRequestedRefine = { instructions: "fail planning" };
 		vi.spyOn(internals, "_planRefine").mockRejectedValue(new Error("planner unavailable"));
@@ -2408,8 +2066,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("isolates an explicit serialized apply failure from the turn boundary", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._pendingRequestedRefine = { instructions: "fail at apply" };
 		vi.spyOn(internals, "_planRefine").mockResolvedValue({ id: "plan", proposal: { edits: [] } });
@@ -2428,8 +2085,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("consumes a serialized background plan only once across concurrent drains", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let resolvePlan: (value: unknown) => void = () => {};
 		internals._serializedPlanInFlight = new Promise((resolve) => {
@@ -2466,8 +2122,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("disposal waits for the checkpoint owner to finish applying a claimed plan", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let resolvePlan: (value: unknown) => void = () => {};
 		internals._serializedPlanInFlight = new Promise((resolve) => {
@@ -2508,11 +2163,9 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("drains a due interactive auto-refine without waiting for agent idle", async () => {
-		const harness = await createHarness({
-			persistSession: true,
+		const harness = await createPersistedHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
 		internals._assistantTurnsSinceAutoRefine = 1;
 		const waitForIdle = vi.spyOn(harness.session.agent, "waitForIdle").mockResolvedValue();
@@ -2525,8 +2178,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("waits for an interactive auto-refine operation before disposal drain continues", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseOperation: () => void = () => {};
 		const operation = new Promise<void>((resolve) => {
@@ -2546,8 +2198,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("memoizes disposeAsync before refinement drain completes", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals;
 		let releaseDrain: () => void = () => {};
 		const drain = new Promise<void>((resolve) => {
@@ -2563,8 +2214,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("public refine clears a settled serialized plan left by an aborted turn", async () => {
-		const harness = await createHarness({ persistSession: true, serializedRefine: true });
-		harnesses.push(harness);
+		const harness = await createRefineHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			_serializedExplicitRefineOptions?: { instructions?: string; global?: boolean };
 		};
@@ -2583,8 +2233,7 @@ describe("P0 concurrency regressions", () => {
 	});
 
 	it("public refine waits for idle without aborting the session or child runs", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createPersistedHarness();
 		const internals = harness.session as unknown as SerializedInternals & {
 			_goalAbortInProgress: boolean;
 			_cancelActiveRlmChildRuns: () => void;

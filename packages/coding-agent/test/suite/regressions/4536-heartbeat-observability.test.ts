@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { AgentCronJobStore } from "../../../src/core/cron-jobs.js";
-import { createHarness, type Harness } from "../harness.js";
+import type { Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
 
 describe("ENG-4536 heartbeat observability", () => {
 	const harnesses: Harness[] = [];
@@ -11,8 +12,7 @@ describe("ENG-4536 heartbeat observability", () => {
 	});
 
 	it("keeps user and agent heartbeat ownership separate while allowing user management", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const store = AgentCronJobStore.forSessionArtifacts();
 		for (const sessionId of ["session-a", "session-b"]) {
 			store.registerSessionArtifact(sessionId, join(harness.tempDir, "artifacts", sessionId));
@@ -54,8 +54,7 @@ describe("ENG-4536 heartbeat observability", () => {
 	});
 
 	it("emits invalidation for lifecycle changes and keeps multiple agent heartbeats", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const store = AgentCronJobStore.forSessionArtifacts();
 		store.registerSessionArtifact("session-a", join(harness.tempDir, "artifacts", "session-a"));
 		let changes = 0;

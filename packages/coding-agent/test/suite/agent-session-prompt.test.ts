@@ -9,6 +9,7 @@ import type { PromptTemplate } from "../../src/core/prompt-templates.js";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.js";
 import { createTestResourceLoader } from "../utilities.js";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
+import { createTrackedHarness } from "./helpers.js";
 import { createDeferred, createWaitingHarness, expectRejection, gatedHook } from "./scheduling.js";
 
 function gateNextAgentStart(harness: Harness): { reached: Promise<void>; release(): void } {
@@ -66,8 +67,7 @@ describe("AgentSession prompt characterization", () => {
 	});
 
 	it("keeps a prompt session-owned when cancellation arrives after admission", async () => {
-		const harness = await createHarness({ models: [{ id: "slow-faux" }] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { models: [{ id: "slow-faux" }] });
 		let releaseResponse = () => {};
 		const responseGate = new Promise<void>((resolve) => {
 			releaseResponse = resolve;
@@ -143,7 +143,7 @@ describe("AgentSession prompt characterization", () => {
 		const firstInputReached = createDeferred();
 		const firstInputGate = createDeferred();
 		const inputOrder: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("input", async (event) => {
@@ -156,7 +156,6 @@ describe("AgentSession prompt characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("first done"), fauxAssistantMessage("second done")]);
 
 		const first = harness.session.prompt("first");
@@ -173,7 +172,7 @@ describe("AgentSession prompt characterization", () => {
 
 	it("admits reentrant hook prompts without deadlocking the active action", async () => {
 		let submitted = false;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async () => {
@@ -186,7 +185,6 @@ describe("AgentSession prompt characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("outer done"), fauxAssistantMessage("hook done")]);
 
 		await harness.session.prompt("outer");
@@ -211,8 +209,7 @@ describe("AgentSession prompt characterization", () => {
 				};
 			},
 		};
-		const harness = await createHarness({ tools: [echoTool] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { tools: [echoTool] });
 
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("echo", { text: "hello" }), { stopReason: "toolUse" }),
@@ -250,8 +247,7 @@ describe("AgentSession prompt characterization", () => {
 				};
 			},
 		});
-		const harness = await createHarness({ tools: [makeTool("slow", 25), makeTool("fast", 0)] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { tools: [makeTool("slow", 25), makeTool("fast", 0)] });
 
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("slow", { value: "a" }), fauxToolCall("fast", { value: "b" })], {
@@ -328,8 +324,7 @@ describe("AgentSession prompt characterization", () => {
 				diagnostics: [],
 			}),
 		};
-		const harness = await createHarness({ resourceLoader });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { resourceLoader });
 		let expandedPrompt = "";
 
 		harness.setResponses([
@@ -363,8 +358,7 @@ describe("AgentSession prompt characterization", () => {
 			...createTestResourceLoader(),
 			getPrompts: () => ({ prompts: [template], diagnostics: [] }),
 		};
-		const harness = await createHarness({ resourceLoader });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { resourceLoader });
 		let expandedPrompt = "";
 
 		harness.setResponses([
@@ -382,7 +376,7 @@ describe("AgentSession prompt characterization", () => {
 
 	it("dispatches extension commands without consuming a provider response", async () => {
 		const commandRuns: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.registerCommand("testcmd", {
@@ -394,7 +388,6 @@ describe("AgentSession prompt characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("should stay queued")]);
 
 		await harness.session.prompt("/testcmd hello world");
@@ -460,7 +453,7 @@ describe("AgentSession prompt characterization", () => {
 	it("preserves the active extension system prompt when max depth changes mid-run", async () => {
 		const responseStarted = createDeferred();
 		const responseGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			rlmDepth: 1,
 			extensionFactories: [
 				(pi) => {
@@ -472,7 +465,6 @@ active extension doctrine`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			async () => {
 				responseStarted.resolve();
@@ -495,7 +487,7 @@ active extension doctrine`,
 	});
 
 	it("resets stale extension system prompt for accepted agent messages", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			systemPrompt: "base prompt",
 			extensionFactories: [
 				(pi) => {
@@ -507,7 +499,6 @@ stale extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		const baseSystemPrompt = harness.session.systemPrompt;
 		const providerSystemPrompts: string[] = [];
 		harness.setResponses([
@@ -539,7 +530,7 @@ stale extension instructions`,
 		const hookRelease = new Promise<void>((resolve) => {
 			releaseHook = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			systemPrompt: "pre-refine base",
 			extensionFactories: [
@@ -561,7 +552,6 @@ stale extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_baseSystemPrompt: string;
 			_refineInFlight?: Promise<void>;
@@ -613,7 +603,7 @@ stale extension instructions`,
 		const hookStarted = new Promise<void>((resolve) => {
 			signalHookStarted = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			systemPrompt: "pre-refine base",
 			extensionFactories: [
@@ -626,7 +616,6 @@ stale extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_baseSystemPrompt: string;
 			_refineAbortController?: AbortController;
@@ -673,7 +662,7 @@ stale extension instructions`,
 		const hookRelease = new Promise<void>((resolve) => {
 			releaseHook = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			systemPrompt: "pre-refine base",
 			extensionFactories: [
@@ -695,7 +684,6 @@ stale injected extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_baseSystemPrompt: string;
 			_refineInFlight?: Promise<void>;
@@ -758,8 +746,7 @@ stale injected extension instructions`,
 
 	it("pumps a follow-up queued while an injected prompt owns the active turn", async () => {
 		const hook = gatedHook({ prompt: "injected prompt" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		const internals = harness.session as unknown as {
 			_promptInjectedMessage(
 				text: string,
@@ -810,7 +797,7 @@ stale injected extension instructions`,
 				},
 			): Promise<void>;
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			systemPrompt: "base prompt",
 			extensionFactories: [
 				(pi) => {
@@ -828,7 +815,6 @@ stale injected extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		sessionInternals = harness.session as unknown as typeof sessionInternals;
 		let providerSystemPrompt = "not observed";
 		harness.setResponses([
@@ -852,7 +838,7 @@ stale injected extension instructions`,
 
 	it("preserves an extension system prompt across a refine handoff wait", async () => {
 		let sessionInternals: { _refineInFlight?: Promise<void> };
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			systemPrompt: "base prompt",
 			extensionFactories: [
 				(pi) => {
@@ -874,7 +860,6 @@ extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		sessionInternals = harness.session as unknown as { _refineInFlight?: Promise<void> };
 		let providerSystemPrompt = "";
 		harness.setResponses([
@@ -903,7 +888,7 @@ extension instructions`,
 			_applyRefine(plan: unknown, options: unknown, abort: AbortController): Promise<unknown>;
 		};
 		let releaseRefine: (() => void) | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			systemPrompt: "pre-refine base",
 			extensionFactories: [
@@ -922,7 +907,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		sessionInternals = harness.session as unknown as typeof sessionInternals;
 		vi.spyOn(sessionInternals, "_planRefine").mockResolvedValue({ id: "race-plan", proposal: { edits: [] } });
 		vi.spyOn(sessionInternals, "_applyRefine").mockImplementation(async () => {
@@ -1127,7 +1111,7 @@ stale post-hook extension instructions`,
 		const eventQueueGate = new Promise<void>((resolve) => {
 			releaseEventQueue = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("agent_start", async () => {
@@ -1136,7 +1120,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		const agentMessageId = "agentmsg_clear_lifecycle";
 		const agentPrompt = `Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: ${agentMessageId}\n\nagent text`;
 		await harness.session.sendCustomMessage(
@@ -1214,7 +1197,7 @@ stale post-hook extension instructions`,
 	it("waitForIdle waits for cancelled dispatch cleanup in the session event queue", async () => {
 		const eventQueueReached = createDeferred();
 		const eventQueueGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("agent_start", async () => {
@@ -1224,7 +1207,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("never delivered")]);
 		const dispatchGate = gateNextAgentStart(harness);
 		const prompt =
@@ -1470,7 +1452,7 @@ stale post-hook extension instructions`,
 			getPrompts: () => ({ prompts: [template], diagnostics: [] }),
 		};
 		const commandRuns: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			resourceLoader,
 			extensionFactories: [
 				(pi) => {
@@ -1483,7 +1465,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await expect(harness.session.queueAgentMessagePrompt("/review keep literal", "followUp")).resolves.toBe(true);
 		await expect(harness.session.queueAgentMessagePrompt("/testcmd keep literal", "followUp")).resolves.toBe(true);
@@ -1776,7 +1757,7 @@ stale post-hook extension instructions`,
 	it("cancels an invisible idle prompt aborted during preparation", async () => {
 		const preparationReached = createDeferred();
 		const preparationGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async () => {
@@ -1786,7 +1767,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("done")]);
 		const prompt = harness.session.prompt("aborted prompt");
 		await preparationReached.promise;
@@ -1831,7 +1811,7 @@ stale post-hook extension instructions`,
 	it("aborts while a queued prompt is still preparing without consuming its snapshot", async () => {
 		const preparationReached = createDeferred();
 		const preparationGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async () => {
@@ -1841,7 +1821,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("done")]);
 		await harness.session.restoreFollowUpMessage("queued prompt");
 		expect(harness.session.resumeQueuedWork()).toBe(true);
@@ -1860,7 +1839,7 @@ stale post-hook extension instructions`,
 	it("aborts while an extension event is pending without flushing or cancelling its queue", async () => {
 		const extensionReached = createDeferred();
 		const extensionGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("message_start", async (event) => {
@@ -1871,7 +1850,6 @@ stale post-hook extension instructions`,
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("done")]);
 		const prompt = harness.session.prompt("pending extension event");
 		await extensionReached.promise;
@@ -1959,8 +1937,7 @@ stale post-hook extension instructions`,
 	});
 
 	it("throws when prompting without configured auth", async () => {
-		const harness = await createHarness({ withConfiguredAuth: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { withConfiguredAuth: false });
 		const surfacedErrors: string[] = [];
 		harness.session.bindExtensions({ onError: (error) => surfacedErrors.push(error.error) });
 
@@ -1971,8 +1948,7 @@ stale post-hook extension instructions`,
 	});
 
 	it("rejects promptUntilAccepted when validation fails", async () => {
-		const harness = await createHarness({ withConfiguredAuth: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { withConfiguredAuth: false });
 
 		await expect(harness.session.promptUntilAccepted("hi")).rejects.toThrow(
 			`No API key found for ${harness.getModel().provider}.`,

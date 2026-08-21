@@ -7,16 +7,10 @@
 
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage, ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
-import {
-	type AssistantMessage,
-	fauxAssistantMessage,
-	fauxToolCall,
-	type ToolResultMessage,
-	Type,
-	type Usage,
-} from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type ToolResultMessage, Type } from "@earendil-works/pi-ai";
 import type { AgentSession } from "../../src/core/agent-session.js";
-import { createHarness, type Harness } from "./harness.js";
+import type { Harness } from "./harness.js";
+import { createAssistant, createTrackedHarness, waitFor } from "./helpers.js";
 
 type SessionInternals = {
 	_shouldStopAfterTurn: (context: ShouldStopAfterTurnContext) => boolean | Promise<boolean>;
@@ -30,47 +24,6 @@ type SessionInternals = {
 	}) => Promise<unknown>;
 	_continueAfterThresholdCompaction: boolean;
 };
-
-function createUsage(totalTokens: number): Usage {
-	return {
-		input: totalTokens,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
-function createAssistant(
-	harness: Harness,
-	options: { stopReason?: AssistantMessage["stopReason"]; totalTokens?: number; timestamp?: number },
-): AssistantMessage {
-	const model = harness.getModel();
-	return {
-		...fauxAssistantMessage("", { stopReason: options.stopReason, timestamp: options.timestamp }),
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: createUsage(options.totalTokens ?? 0),
-	};
-}
-
 /** Faux repl tool that services goal.* host requests like the real kernel bridge. */
 function createFauxReplTool(sessionRef: { current?: AgentSession }) {
 	return {
@@ -131,11 +84,10 @@ describe("compaction continuation", () => {
 	}
 
 	it("resumes the interrupted tool loop when a threshold compaction is skipped", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SessionInternals;
 		const context = midToolLoopContext(harness);
 
@@ -158,11 +110,10 @@ describe("compaction continuation", () => {
 	});
 
 	it("control: a skipped requested compaction mid tool loop does resume", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as SessionInternals;
 		midToolLoopContext(harness);
 		internals._continueAfterThresholdCompaction = true;
@@ -186,14 +137,13 @@ describe("compaction continuation", () => {
 				details: {},
 			}),
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [bigTool],
 			// Huge keepRecentTokens: prepareCompaction finds nothing to summarize and throws CompactionSkippedError.
 			settings: { compaction: { enabled: true, reserveTokens: 500, keepRecentTokens: 1_000_000 } },
 			models: [{ id: "faux-1", contextWindow: 6_000 }],
 			persistSession: true,
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("big", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("final answer after the tool call"),
@@ -212,7 +162,7 @@ describe("compaction continuation", () => {
 	// BUG B (end-to-end): unlike the tests above, the threshold compaction here SUCCEEDS.
 	it("e2e: an active goal keeps continuing after a successful threshold compaction", async () => {
 		const sessionRef: { current?: AgentSession } = {};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [createFauxReplTool(sessionRef)],
 			// Let a running goal continuation cross the threshold while remaining well below overflow.
 			settings: { compaction: { enabled: true, reserveTokens: 8_000, keepRecentTokens: 1 } },
@@ -231,7 +181,6 @@ describe("compaction continuation", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		sessionRef.current = harness.session;
 		const largeStep = "x".repeat(3_500);
 		harness.setResponses([
@@ -256,13 +205,12 @@ describe("compaction continuation", () => {
 	// With both drivers active the goal continuation takes exclusive priority, matching _getContinuationMessages.
 	it("queues only the goal continuation when a goal and autonomous mode are both active", async () => {
 		const sessionRef: { current?: AgentSession } = {};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [createFauxReplTool(sessionRef)],
 			autonomous: { enabled: true, maxContinuations: 5 },
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		sessionRef.current = harness.session;
 		harness.session.handleGoalHostRequest("goal.create", { objective: "finish the task" });
 		const internals = harness.session as unknown as SessionInternals;
@@ -280,12 +228,11 @@ describe("compaction continuation", () => {
 	// A user-cancelled compaction must withdraw the goal continuation queued for it.
 	it("withdraws the queued goal continuation when the threshold compaction is cancelled", async () => {
 		const sessionRef: { current?: AgentSession } = {};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [createFauxReplTool(sessionRef)],
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		sessionRef.current = harness.session;
 		harness.session.handleGoalHostRequest("goal.create", { objective: "finish the task" });
 		const internals = harness.session as unknown as SessionInternals;
@@ -315,12 +262,11 @@ describe("compaction continuation", () => {
 	// A stale marker (continuation already consumed, goal completed) must not be rolled back.
 	it("keeps completed-goal bookkeeping when a later threshold compaction is cancelled", async () => {
 		const sessionRef: { current?: AgentSession } = {};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [createFauxReplTool(sessionRef)],
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		sessionRef.current = harness.session;
 		harness.session.handleGoalHostRequest("goal.create", { objective: "finish the task" });
 		const internals = harness.session as unknown as SessionInternals;

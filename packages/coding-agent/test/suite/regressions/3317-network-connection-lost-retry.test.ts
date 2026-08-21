@@ -1,21 +1,15 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { createHarness, getAssistantTexts, type Harness } from "../harness.js";
+import { getAssistantTexts } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("issue #3317 network connection lost retry", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it('retries transient "Network connection lost." failures', async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } },
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "Network connection lost." }),
 			fauxAssistantMessage("recovered after reconnect"),

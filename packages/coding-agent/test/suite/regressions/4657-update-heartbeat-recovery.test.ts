@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../../../src/core/agent-session-runtime.js";
 import { AgentCronJobStore, type AgentCronScheduler } from "../../../src/core/cron-jobs.js";
 import type { ActiveSessionState } from "../../../src/modes/daemon/active-session-state.js";
 import { AgentDaemon } from "../../../src/modes/daemon/daemon-mode.js";
-import { createHarness, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 type AgentDaemonCronInternals = {
 	sessions: Map<string, ActiveSessionState>;
@@ -15,17 +17,8 @@ type AgentDaemonCronInternals = {
 };
 
 describe("ENG-4657 update heartbeat recovery", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("runs an overdue heartbeat after an unchanged worker session is restored", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("heartbeat recovered")]);
 		const sessionFile = harness.session.sessionFile;
 		const artifactDir = harness.sessionManager.getSessionArtifactDir();

@@ -1,20 +1,14 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { createHarness, type Harness } from "../harness.js";
+import { createHarness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 describe("issue #4435 auth error login guidance", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("adds /login guidance to provider authentication errors", async () => {
-		const harness = await createHarness({ settings: { retry: { enabled: false } } });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { settings: { retry: { enabled: false } } });
 		harness.setResponses([
 			fauxAssistantMessage("", {
 				stopReason: "error",

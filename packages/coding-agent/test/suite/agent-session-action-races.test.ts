@@ -3,6 +3,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { CustomMessage } from "../../src/core/messages.js";
 import type { ActionStore, SessionAction } from "../../src/core/session-action-store.js";
 import { createHarness, getMessageText, getUserTexts, type Harness } from "./harness.js";
+import { createTrackedHarness } from "./helpers.js";
 import { createDeferred, expectRejection } from "./scheduling.js";
 
 type ActionKind = "turn" | "command";
@@ -180,7 +181,7 @@ describe("AgentSession action commit-fence races", () => {
 	it("rejects a prompt waiting behind tree navigation when the session is disposed", async () => {
 		const treeHookReached = createDeferred();
 		const treeHookGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_tree", async () => {
@@ -190,7 +191,6 @@ describe("AgentSession action commit-fence races", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		await harness.session.prompt("one");
 		const target = harness.sessionManager.getEntries().find((entry) => entry.type === "message");
@@ -366,7 +366,7 @@ describe("AgentSession action commit-fence races", () => {
 
 	it("admits a reentrant prompt from a navigation hook without waiting on its own pause", async () => {
 		let promptFromHook: (() => Promise<void>) | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_tree", async () => {
@@ -376,7 +376,6 @@ describe("AgentSession action commit-fence races", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		promptFromHook = () => harness.session.promptUntilAccepted("prompt from navigation hook");
 		harness.setResponses([
 			fauxAssistantMessage("one done"),

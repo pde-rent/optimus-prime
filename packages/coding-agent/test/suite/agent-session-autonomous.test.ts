@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +11,10 @@ import {
 	shouldAutonomouslyContinue,
 } from "../../src/core/autonomous.js";
 import type { AgentCronJob } from "../../src/core/cron-jobs.js";
-import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
+import { createHarness, getAssistantTexts, getMessageText, getUserTexts } from "./harness.js";
+import { createTrackedHarness, trackHarnesses } from "./helpers.js";
+
+const harnesses = trackHarnesses();
 
 function isProcessRunning(pid: number): boolean {
 	try {
@@ -42,19 +45,10 @@ async function waitForPidFile(path: string, timeoutMs = 2000): Promise<number> {
 }
 
 describe("AgentSession autonomous mode", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("injects a host-side continuation when the assistant asks the user for help", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxContinuations: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("Which package manager should I use?"),
 			fauxAssistantMessage("I inspected the repo and used npm."),
@@ -75,10 +69,9 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("continues through a claimed external blocker instead of trusting prose", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxContinuations: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("Blocked: this requires an API key credential from the user."),
 			fauxAssistantMessage(
@@ -97,10 +90,9 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("stops after the configured autonomous continuation limit", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxContinuations: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("Can you confirm the test command?"),
 			fauxAssistantMessage("Can you confirm whether to run lint too?"),
@@ -117,10 +109,9 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("does not count failed assistant messages against autonomous usage limits", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxTurns: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("failed", { stopReason: "error", errorMessage: "provider failed" })]);
 
 		await harness.session.prompt("try once");
@@ -133,10 +124,9 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("counts aborted assistant messages against autonomous usage limits", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxTurns: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("aborted", { stopReason: "aborted" })]);
 
 		await harness.session.prompt("try once");
@@ -163,10 +153,9 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("continues when the assistant tries to finish without terminal evidence", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: { enabled: true, maxContinuations: 1 },
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Done."), fauxAssistantMessage("I will collect concrete evidence.")]);
 
 		await harness.session.prompt("make the change");
@@ -226,14 +215,13 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("lets passing autonomous gates complete the run under verifier control", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 1,
 				gates: { commands: [`${process.execPath} -e "process.exit(0)"`] },
 			},
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Done.")]);
 
 		await harness.session.prompt("make the change");
@@ -243,7 +231,7 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("feeds failing autonomous gate output back into the session", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 1,
@@ -253,7 +241,6 @@ describe("AgentSession autonomous mode", () => {
 				},
 			},
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Done."), fauxAssistantMessage("I will fix the gate failure.")]);
 
 		await harness.session.prompt("make the change");
@@ -265,7 +252,7 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("suppresses autonomous continuation injection for host-driven gate prompts", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -275,7 +262,6 @@ describe("AgentSession autonomous mode", () => {
 				},
 			},
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Still failing.")]);
 
 		harness.session.recordHostAutonomousContinuation();
@@ -290,7 +276,7 @@ describe("AgentSession autonomous mode", () => {
 	});
 
 	it("suppresses autonomous continuation injection for queued host-driven prompts", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -300,7 +286,6 @@ describe("AgentSession autonomous mode", () => {
 				},
 			},
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("Still failing.")]);
 		const sessionInternals = harness.session as unknown as {
 			_compactionAbortController?: AbortController;
@@ -466,14 +451,13 @@ describe("AgentSession autonomous mode", () => {
 
 	it("terminates an autonomous gate without mutating retry state when the session is aborted", async () => {
 		const gate = `${process.execPath} -e "const fs=require('fs'); fs.writeFileSync('gate.pid', String(process.pid)); setTimeout(() => {}, 60000)"`;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 1,
 				gates: { commands: [gate], maxRetries: 1 },
 			},
 		});
-		harnesses.push(harness);
 		execFileSync("git", ["init"], { cwd: harness.tempDir, stdio: "ignore" });
 		const pidFile = join(harness.tempDir, "gate.pid");
 		let gatePid: number | undefined;

@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { AgentTool, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Model, Type } from "@earendil-works/pi-ai";
 import type { AgentCronJob } from "../../src/core/cron-jobs.js";
 import type { ExtensionAPI } from "../../src/index.js";
 import { createHarness, getAssistantTexts, getMessageText, type Harness } from "./harness.js";
+import { createTrackedHarness, trackHarnesses } from "./helpers.js";
+
+const harnesses = trackHarnesses();
 
 function createDeferred<T = void>(): {
 	promise: Promise<T>;
@@ -39,17 +42,9 @@ function createHeartbeat(): AgentCronJob {
 }
 
 describe("AgentSession model and extension characterization", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("setModel saves the model and emits model_select", async () => {
 		const modelEvents: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -62,7 +57,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const nextModel = harness.getModel("faux-2")!;
 
 		await harness.session.setModel(nextModel);
@@ -81,7 +75,7 @@ describe("AgentSession model and extension characterization", () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
 		let handlerCompleted = false;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -96,7 +90,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const nextModel = harness.getModel("faux-2")!;
 
 		await harness.session.setModel(nextModel, { waitForExtensions: false });
@@ -115,7 +108,7 @@ describe("AgentSession model and extension characterization", () => {
 		const firstHandlerStarted = createDeferred();
 		const finishFirstHandler = createDeferred();
 		const events: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -134,7 +127,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
 		await firstHandlerStarted.promise;
@@ -155,7 +147,7 @@ describe("AgentSession model and extension characterization", () => {
 		const firstHandlerStarted = createDeferred();
 		const finishFirstHandler = createDeferred();
 		const events: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -174,7 +166,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
 		await firstHandlerStarted.promise;
@@ -200,7 +191,7 @@ describe("AgentSession model and extension characterization", () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
 		let handlerCompleted = false;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -215,7 +206,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		const result = await harness.session.cycleModel("forward", { waitForExtensions: false });
 		await handlerStarted.promise;
@@ -233,7 +223,7 @@ describe("AgentSession model and extension characterization", () => {
 	it("waits for pending model_select handlers before starting the next prompt", async () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -247,7 +237,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("after model select")]);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
@@ -267,7 +256,7 @@ describe("AgentSession model and extension characterization", () => {
 	it("includes nextTurn messages queued by pending model_select handlers in the next prompt", async () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -289,7 +278,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("after model context")]);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
@@ -318,7 +306,7 @@ describe("AgentSession model and extension characterization", () => {
 	it("includes nextTurn messages queued by pending model_select handlers in accepted prompts", async () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -340,7 +328,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("accepted")]);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
@@ -380,8 +367,7 @@ describe("AgentSession model and extension characterization", () => {
 				return { content: [{ type: "text", text: "released" }], details: {} };
 			},
 		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("turn complete"),
@@ -402,7 +388,7 @@ describe("AgentSession model and extension characterization", () => {
 	it("includes nextTurn messages queued by pending model_select handlers in injected prompts", async () => {
 		const handlerStarted = createDeferred();
 		const finishHandler = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -424,7 +410,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("heartbeat")]);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
@@ -449,7 +434,7 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("allows model_select handlers to enqueue user messages without waiting on themselves", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
@@ -462,7 +447,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("queued from hook")]);
 
 		await harness.session.setModel(harness.getModel("faux-2")!, { waitForExtensions: false });
@@ -507,13 +491,12 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("cycles through scoped models and preserves the scoped thinking preference", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: false },
 			],
 		});
-		harnesses.push(harness);
 		const modelOne = harness.getModel("faux-1")!;
 		const modelTwo = harness.getModel("faux-2")!;
 		harness.session.setScopedModels([{ model: modelOne, thinkingLevel: "high" }, { model: modelTwo }] as Array<{
@@ -532,8 +515,7 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("clamps thinking levels to model capabilities and cycles available levels", async () => {
-		const harness = await createHarness({ models: [{ id: "faux-1", reasoning: false }] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { models: [{ id: "faux-1", reasoning: false }] });
 
 		harness.session.setThinkingLevel("high");
 		expect(harness.session.thinkingLevel).toBe("off");
@@ -541,14 +523,13 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("throws when setModel is called without configured auth", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
 			],
 			withConfiguredAuth: false,
 		});
-		harnesses.push(harness);
 
 		await expect(harness.session.setModel(harness.getModel("faux-2")!)).rejects.toThrow(
 			`No API key for ${harness.getModel().provider}/faux-2`,
@@ -565,7 +546,7 @@ describe("AgentSession model and extension characterization", () => {
 				throw new Error("tool should have been blocked");
 			},
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [echoTool],
 			extensionFactories: [
 				(pi) => {
@@ -573,7 +554,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("echo", { text: "hello" })], { stopReason: "toolUse" }),
 			(context) => {
@@ -608,7 +588,7 @@ describe("AgentSession model and extension characterization", () => {
 				return { content: [{ type: "text", text }], details: { text } };
 			},
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			tools: [echoTool],
 			extensionFactories: [
 				(pi) => {
@@ -619,7 +599,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("echo", { text: "hello" })], { stopReason: "toolUse" }),
 			(context) => {
@@ -644,7 +623,7 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("allows extension context handlers to modify messages before the LLM call", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("context", async (event) => ({
@@ -657,7 +636,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		let providerUserText = "";
 		harness.setResponses([
 			(context) => {
@@ -685,7 +663,7 @@ describe("AgentSession model and extension characterization", () => {
 
 	it("allows extension input handlers to transform or handle input", async () => {
 		let extensionApi: ExtensionAPI | undefined;
-		const transformedHarness = await createHarness({
+		const transformedHarness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					extensionApi = pi;
@@ -698,7 +676,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(transformedHarness);
 		let providerUserText = "";
 		transformedHarness.setResponses([
 			(context) => {
@@ -723,7 +700,7 @@ describe("AgentSession model and extension characterization", () => {
 	});
 
 	it("allows before_agent_start handlers to inject custom messages and modify the system prompt", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async (event) => ({
@@ -738,7 +715,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		let providerSystemPrompt = "";
 		let sawInjectedUserMessage = false;
 		harness.setResponses([
@@ -765,7 +741,7 @@ describe("AgentSession model and extension characterization", () => {
 
 	it("bindExtensions emits session_start and reload emits session_shutdown then session_start", async () => {
 		const lifecycleEvents: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_start", async (event) => {
@@ -777,7 +753,6 @@ describe("AgentSession model and extension characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await harness.session.bindExtensions({ shutdownHandler: () => {} });
 		await harness.session.reload();

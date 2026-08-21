@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession } from "../../../src/core/agent-session.js";
@@ -7,6 +7,9 @@ import type { AgentCronJob, AgentCronJobStore, AgentCronScheduler } from "../../
 import type { ActiveSessionState } from "../../../src/modes/daemon/active-session-state.js";
 import { AgentDaemon } from "../../../src/modes/daemon/daemon-mode.js";
 import { createHarness, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
+
+const harnesses = trackHarnesses();
 
 type AgentDaemonCronInternals = {
 	agentMessagePreparingTargets: Map<string, number>;
@@ -66,17 +69,8 @@ async function waitForCondition(predicate: () => boolean): Promise<void> {
 }
 
 describe("ENG-4519 heartbeat rebirth", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("cancels legacy jobs instead of reopening an archived session", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.sessionManager.appendSessionState({ status: "active" });
 		harness.sessionManager.appendSessionState({ status: "archived" });
 		const createRuntime = vi.fn<CreateAgentSessionRuntimeFactory>(async () => {
@@ -112,8 +106,7 @@ describe("ENG-4519 heartbeat rebirth", () => {
 	});
 
 	it("cancels a job without recreating its deleted session file", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const createRuntime = vi.fn<CreateAgentSessionRuntimeFactory>(async () => {
 			throw new Error("missing sessions must not be recreated");
 		});
@@ -138,8 +131,7 @@ describe("ENG-4519 heartbeat rebirth", () => {
 	});
 
 	it("stops opening a runtime when its heartbeat is cancelled in flight", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.sessionManager.appendSessionState({ status: "active" });
 		let releaseRuntime: () => void = () => {};
 		const runtimeGate = new Promise<void>((resolve) => {
@@ -169,8 +161,7 @@ describe("ENG-4519 heartbeat rebirth", () => {
 	});
 
 	it("records a heartbeat cancelled while waiting to prompt as skipped", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.sessionManager.appendSessionState({ status: "active" });
 		const promptHeartbeat = vi.spyOn(harness.session, "promptHeartbeat").mockResolvedValue();
 		const createRuntime = vi.fn<CreateAgentSessionRuntimeFactory>(async ({ cwd, agentDir }) =>
@@ -210,8 +201,7 @@ describe("ENG-4519 heartbeat rebirth", () => {
 	});
 
 	it("uses an updated RLM heartbeat instruction after waiting to prompt", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.sessionManager.appendSessionState({ status: "active" });
 		const promptHeartbeat = vi.spyOn(harness.session, "promptHeartbeat").mockResolvedValue();
 		const createRuntime = vi.fn<CreateAgentSessionRuntimeFactory>(async ({ cwd, agentDir }) =>
@@ -287,8 +277,7 @@ describe("ENG-4519 heartbeat rebirth", () => {
 	});
 
 	it("still restores and prompts a session explicitly persisted as active", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.sessionManager.appendSessionState({ status: "active" });
 		const promptHeartbeat = vi.spyOn(harness.session, "promptHeartbeat").mockResolvedValue();
 		const createRuntime = vi.fn<CreateAgentSessionRuntimeFactory>(async ({ cwd, agentDir }) =>

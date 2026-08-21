@@ -14,7 +14,8 @@ import { waitForHeadlessCompletion } from "../../../src/modes/headless-completio
 import { RpcClient } from "../../../src/modes/rpc/rpc-client.js";
 import { createRpcExtensionUiBridge } from "../../../src/modes/rpc/rpc-extension-ui-context.js";
 import { BUN_PATH } from "../../bun-path.js";
-import { createHarness, getAssistantTexts, getUserTexts, type Harness } from "../harness.js";
+import { getAssistantTexts, getUserTexts, type Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
 
 const fixturePath = resolve(__dirname, "../../fixtures/rpc-connection-mode-fixture.ts");
 const fauxExtensionPath = resolve(__dirname, "../../fixtures/eng-4600-faux-extension.ts");
@@ -205,14 +206,13 @@ describe("ENG-4685 daemon-backed client modes", () => {
 
 	it("runs host-owned autonomous gate retries through the shared completion loop", async () => {
 		const gate = `${process.execPath} -e "process.exit(0)"`;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
 				gates: { commands: [gate], maxRetries: 2 },
 			},
 		});
-		harnesses.push(harness);
 		const state = (
 			harness.session as unknown as {
 				_autonomousState: AutonomousRuntimeState;

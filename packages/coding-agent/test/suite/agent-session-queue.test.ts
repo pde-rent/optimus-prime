@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
+import { describe, expect, it, spyOn, vi } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -10,7 +10,7 @@ import {
 	createAgentSessionMessage,
 	createAgentSessionMessagePrompt,
 } from "../../src/core/agent-messages.js";
-import { type AgentCronJob, shouldDeferHeartbeatCronJob } from "../../src/core/cron-jobs.js";
+import { shouldDeferHeartbeatCronJob } from "../../src/core/cron-jobs.js";
 import { createSessionSlashCommandMessage } from "../../src/core/messages.js";
 import {
 	applyRefinementProposal,
@@ -25,7 +25,17 @@ import {
 } from "../../src/core/refinement/index.js";
 import { parseSessionSlashCommand } from "../../src/core/slash-commands.js";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
+import {
+	agentPromptText,
+	createTrackedHarness,
+	emptyRefinementResult,
+	heartbeatJob,
+	trackHarnesses,
+	waitFor,
+} from "./helpers.js";
 import { createDeferred, createWaitingHarness, expectRejection, gatedHook, withStreaming } from "./scheduling.js";
+
+const harnesses = trackHarnesses();
 
 type AutoRefineReason = "turn_interval" | "compact";
 
@@ -51,33 +61,6 @@ type SteeringStopInternals = {
 	_steeringStopPending: boolean;
 	_clearQueuedGoalContexts(): void;
 };
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
-function emptyRefinementResult(): RefinementResult {
-	return {
-		id: "refine_test",
-		summary: "test refinement",
-		rationale: "test rationale",
-		expectedOutcome: "test outcome",
-		appliedEdits: [],
-		harnessStatePath: "/tmp/harness_state.json",
-	};
-}
-
 function refinePlanJson(summary: string, edits: unknown[] = []): string {
 	return JSON.stringify({
 		summary,
@@ -90,40 +73,9 @@ function refinePlanJson(summary: string, edits: unknown[] = []): string {
 function createAutoRefineHarness(options: Parameters<typeof createHarness>[0] = {}): Promise<Harness> {
 	return createHarness({ ...options, persistSession: true });
 }
-
-function agentPromptText(id: string, body: string): string {
-	return `Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: ${id}\n\n${body}`;
-}
-
-function heartbeatJob(): AgentCronJob {
-	return {
-		id: "heartbeat-test",
-		status: "active",
-		source: "heartbeat",
-		activeSessionId: "active-test",
-		sessionId: "session-test",
-		sessionFile: "/tmp/session.jsonl",
-		cwd: "/tmp",
-		prompt: "check progress",
-		schedule: { kind: "interval", expression: "every 5m", intervalMs: 300_000 },
-		createdAt: "2026-01-01T00:00:00.000Z",
-		updatedAt: "2026-01-01T00:00:00.000Z",
-		nextRunAt: "2026-01-01T00:05:00.000Z",
-		runCount: 0,
-	};
-}
-
 const skipReviewer = vi.fn(async () => ({ shouldRefine: true, rationale: "durable lesson" }));
 
 describe("AgentSession queue characterization", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("does not count failed assistant messages toward the auto-refine interval", async () => {
 		const harness = await createAutoRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
@@ -658,7 +610,7 @@ describe("AgentSession queue characterization", () => {
 	it("cancels a restart checkpoint while tree navigation owns the commit fence", async () => {
 		const treeEventReached = createDeferred();
 		const treeEventGate = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_tree", async () => {
@@ -668,7 +620,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		await harness.session.prompt("one");
 		const target = harness.sessionManager.getEntries().find((entry) => entry.type === "message");
@@ -690,14 +641,13 @@ describe("AgentSession queue characterization", () => {
 
 	it("keeps queued work paused until tree navigation events settle", async () => {
 		const treeEvent = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_tree", async () => treeEvent.promise);
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("queued")]);
 		await harness.session.prompt("first");
 		const target = harness.sessionManager.getEntries().find((entry) => entry.type === "message");
@@ -737,7 +687,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("invalidates queued prompt preparation on branch navigation", async () => {
 		let pause: { release(): void } | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async (event) => {
@@ -746,7 +696,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one")]);
 		await harness.session.prompt("first");
 		const target = harness.sessionManager.getEntries().find((entry) => entry.type === "message");
@@ -1284,7 +1233,7 @@ describe("AgentSession queue characterization", () => {
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.registerCommand("testcmd", { description: "Test", handler: async () => gate });
@@ -1297,7 +1246,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const extensionErrors: string[] = [];
 		harness.session.bindExtensions({ onError: (error) => extensionErrors.push(error.error) });
 
@@ -1317,8 +1265,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("settles a visibly queued session command while an earlier action is preparing", async () => {
 		const hook = gatedHook({ prompt: "preparing turn" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		harness.setResponses([fauxAssistantMessage("done")]);
 		const pause = harness.session.acquireQueuedWorkPause();
 		await harness.session.followUp("preparing turn", undefined, { resumeIfIdle: true });
@@ -1335,8 +1282,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("removes goal context while its steering handoff is still preparing", async () => {
 		const hook = gatedHook({ prompt: "stale goal context" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		harness.setResponses([fauxAssistantMessage("must not run")]);
 		const pause = harness.session.acquireQueuedWorkPause();
 		withStreaming(harness, true);
@@ -1360,8 +1306,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("releases restart checkpoint waiters when preparation hands off", async () => {
 		const hook = gatedHook({ prompt: "checkpoint handoff" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		let releaseResponse = () => {};
 		harness.setResponses([
 			async () => {
@@ -1391,8 +1336,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("keeps steering stop pending while a steering handoff is still preparing", async () => {
 		const hook = gatedHook({ prompt: "active steering" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		const internals = harness.session as unknown as SteeringStopInternals;
 		harness.setResponses([fauxAssistantMessage("delivered")]);
 		const pause = harness.session.acquireQueuedWorkPause();
@@ -1415,8 +1359,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("removes preparing inputs from literal queue projections", async () => {
 		const hook = gatedHook({ prompt: "owned prompt" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		harness.setResponses([fauxAssistantMessage("delivered")]);
 		const queueUpdates: { steering: readonly string[]; followUp: readonly string[] }[] = [];
 		harness.session.subscribe((event) => {
@@ -1567,8 +1510,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("stops counting cleared preparing inputs as pending", async () => {
 		const hook = gatedHook({ prompt: "cleared prompt" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		harness.setResponses([fauxAssistantMessage("never delivered")]);
 		const pause = harness.session.acquireQueuedWorkPause();
 		await harness.session.followUp("cleared prompt", undefined, { resumeIfIdle: true });
@@ -1587,8 +1529,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("coalesces a same-key follow-up while a steering owner is preparing", async () => {
 		const hook = gatedHook({ prompt: "steering heartbeat" });
-		const harness = await createHarness({ extensionFactories: [hook.factory] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [hook.factory] });
 		harness.setResponses([fauxAssistantMessage("done")]);
 		const pause = harness.session.acquireQueuedWorkPause();
 		await harness.session.steer("steering heartbeat", undefined, { queueKey: "heartbeat", resumeIfIdle: true });
@@ -1665,7 +1606,7 @@ describe("AgentSession queue characterization", () => {
 		const firstPrompt = agentPromptText("agentmsg_batch_first", "first");
 		const secondPrompt = agentPromptText("agentmsg_batch_second", "second");
 		let cancelSecond: (() => void) | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("message_start", (event) => {
@@ -1676,7 +1617,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		harness.setResponses([fauxAssistantMessage("shared response")]);
 		let cleared: { steering: string[]; followUp: string[] } | undefined;
@@ -1704,7 +1644,7 @@ describe("AgentSession queue characterization", () => {
 	it("keeps cleared prompts out of the handoff snapshot during the refine wait", async () => {
 		let sessionInternals: { _refineInFlight?: Promise<void> };
 		let clearDuringRefineWait: (() => void) | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async () => {
@@ -1725,7 +1665,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		sessionInternals = harness.session as unknown as { _refineInFlight?: Promise<void> };
 		harness.setResponses([fauxAssistantMessage("kept response")]);
 
@@ -1773,7 +1712,7 @@ describe("AgentSession queue characterization", () => {
 	it("delivers next-turn context when the first preparing turn is cancelled", async () => {
 		const firstPrompt = agentPromptText("agentmsg_cancel_first", "cancelled");
 		let cancelFirst: (() => void) | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", () => {
@@ -1782,7 +1721,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		let cleared: { steering: string[]; followUp: string[] } | undefined;
 		cancelFirst = () => {
@@ -1896,7 +1834,7 @@ describe("AgentSession queue characterization", () => {
 		});
 		let pause: { release(): void } | undefined;
 		let gatePreparation = true;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async () => {
@@ -1907,7 +1845,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		withStreaming(harness, true);
 		const firstDelivery = harness.session.waitForAgentMessagePromptDelivery("agentmsg_clear_first");
@@ -1949,8 +1886,7 @@ describe("AgentSession queue characterization", () => {
 
 		// Terminal queued-prompt preparation errors reject both delivery and completion.
 		const errors: string[] = [];
-		const authHarness = await createHarness({ withConfiguredAuth: false });
-		harnesses.push(authHarness);
+		const authHarness = await createTrackedHarness(harnesses, { withConfiguredAuth: false });
 		await authHarness.session.bindExtensions({ onError: (error) => errors.push(error.error) });
 		withStreaming(authHarness, true);
 		const delivery = authHarness.session.waitForAgentMessagePromptDelivery("agentmsg_terminal");
@@ -2039,14 +1975,13 @@ describe("AgentSession queue characterization", () => {
 
 	it("resolves pre-registered queued and direct agent-message delivery waiters once prompts start", async () => {
 		const blocked = createDeferred();
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("turn_start", async () => blocked.promise);
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("done")]);
 		withStreaming(harness, true);
 		const queuedDelivery = harness.session.waitForAgentMessagePromptDelivery("agentmsg_sync");
@@ -2107,7 +2042,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("throws when queueing an extension command", async () => {
 		const queue = (harness: Harness) => harness.session.steer("/testcmd queued");
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.registerCommand("testcmd", {
@@ -2117,7 +2052,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await expect(queue(harness)).rejects.toThrow(
 			'Extension command "/testcmd" cannot be queued. Use prompt() or execute the command when not streaming.',
@@ -2180,7 +2114,7 @@ describe("AgentSession queue characterization", () => {
 
 	it("splits all-mode batches when execution policies differ", async () => {
 		const beforeAgentStartPrompts: string[] = [];
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async (event) => {
@@ -2189,7 +2123,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		harness.setResponses([fauxAssistantMessage("custom done"), fauxAssistantMessage("follow-up done")]);
 		const prompt = spyOn(harness.session.agent, "prompt");
@@ -2304,7 +2237,7 @@ describe("AgentSession queue characterization", () => {
 		async (phase) => {
 			const prepared = createDeferred<void>();
 			const releasePreparation = createDeferred<void>();
-			const harness = await createHarness({
+			const harness = await createTrackedHarness(harnesses, {
 				extensionFactories:
 					phase === "preparing"
 						? [
@@ -2317,7 +2250,6 @@ describe("AgentSession queue characterization", () => {
 							]
 						: [],
 			});
-			harnesses.push(harness);
 			harness.setResponses([fauxAssistantMessage("accepted done")]);
 			const pause = phase === "queued" ? harness.session.acquireQueuedWorkPause() : undefined;
 			const id = `agentmsg_${phase}_coalesced_owner`;
@@ -2353,7 +2285,7 @@ describe("AgentSession queue characterization", () => {
 	it("retains active preparation while blocking duplicate and direct admission", async () => {
 		let hookRuns = 0;
 		let pause: { release(): void } | undefined;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async (event) => {
@@ -2365,7 +2297,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("queued done"), fauxAssistantMessage("direct done")]);
 		withStreaming(harness, true);
 		await harness.session.followUp("queued", undefined, { queueKey: "same", resumeIfIdle: true });
@@ -2391,8 +2322,7 @@ describe("AgentSession queue characterization", () => {
 			parameters: Type.Object({}),
 			execute: async () => ({ content: [{ type: "text", text: "done" }], details: {} }),
 		};
-		const harness = await createHarness({ tools: [tool] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { tools: [tool] });
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("instant", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("second handled"),
@@ -2429,7 +2359,7 @@ describe("AgentSession queue characterization", () => {
 		const navigationGate = createDeferred();
 		let navigationStarts = 0;
 		let commandNavigated = false;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_tree", async () => {
@@ -2445,7 +2375,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		await harness.session.bindExtensions({
 			commandContextActions: {
 				waitForIdle: () => harness.session.waitForIdle(),
@@ -2546,7 +2475,7 @@ describe("AgentSession queue characterization", () => {
 		let targetId: string | undefined;
 		let navigateFromContext: ((target: string) => Promise<{ cancelled: boolean }>) | undefined;
 		let navigated = false;
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -2565,7 +2494,6 @@ describe("AgentSession queue characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		await harness.session.bindExtensions({
 			commandContextActions: {
 				waitForIdle: () => harness.session.waitForIdle(),
@@ -2795,14 +2723,6 @@ describe("AgentSession queue characterization", () => {
 });
 
 describe("AgentSession scheduler scenarios", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("S1: delivers mid-run steering, follow-up, command, and custom inputs in order", async () => {
 		let extensionApi: ExtensionAPI | undefined;
 		const waiting = await createWaitingHarness({
@@ -3044,7 +2964,7 @@ describe("AgentSession scheduler scenarios", () => {
 		const firstPreparation = createDeferred();
 		const prepared: string[] = [];
 		const directGate = gatedHook({ prompt: "direct" });
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("before_agent_start", async (event) => {
@@ -3057,7 +2977,6 @@ describe("AgentSession scheduler scenarios", () => {
 				directGate.factory,
 			],
 		});
-		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		const responseGate = createDeferred();
 		let providerSystemPrompt = "";

@@ -11,6 +11,7 @@ import {
 } from "../../../src/core/agent-session-runtime.js";
 import { AuthStorage } from "../../../src/core/auth-storage.js";
 import { SessionManager } from "../../../src/core/session-manager.js";
+import { fauxProviderExtension } from "../helpers.js";
 
 describe("issue #2753 reload stale resource settings", () => {
 	const cleanups: Array<() => void> = [];
@@ -40,25 +41,7 @@ describe("issue #2753 reload stale resource settings", () => {
 				agentDir,
 				authStorage,
 				resourceLoaderOptions: {
-					extensionFactories: [
-						(pi) => {
-							pi.registerProvider(faux.getModel().provider, {
-								baseUrl: faux.getModel().baseUrl,
-								apiKey: "faux-key",
-								api: faux.api,
-								models: faux.models.map((registeredModel) => ({
-									id: registeredModel.id,
-									name: registeredModel.name,
-									api: registeredModel.api,
-									reasoning: registeredModel.reasoning,
-									input: registeredModel.input,
-									cost: registeredModel.cost,
-									contextWindow: registeredModel.contextWindow,
-									maxTokens: registeredModel.maxTokens,
-								})),
-							});
-						},
-					],
+					extensionFactories: [fauxProviderExtension(faux)],
 					noSkills: true,
 					noThemes: true,
 				},

@@ -5,7 +5,8 @@ import { ModelSelectorComponent } from "../../../src/modes/interactive/component
 import { ScopedModelsSelectorComponent } from "../../../src/modes/interactive/components/scoped-models-selector.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../../../src/utils/ansi.js";
-import { createHarness, type Harness } from "../harness.js";
+import type { Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
 
 function createFakeTui(): TUI {
 	return {
@@ -36,14 +37,13 @@ describe("issue #3217 scoped model ordering", () => {
 	});
 
 	it("propagates reordered scoped models back to the session state", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
 				{ id: "faux-3", name: "Three", reasoning: true },
 			],
 		});
-		harnesses.push(harness);
 
 		const orderedIds = harness.models.map((model) => `${model.provider}/${model.id}`);
 		const changes: Array<string[] | null> = [];
@@ -67,14 +67,13 @@ describe("issue #3217 scoped model ordering", () => {
 	});
 
 	it("preserves scoped model order in the /model scoped tab", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
 				{ id: "faux-2", name: "Two", reasoning: true },
 				{ id: "faux-3", name: "Three", reasoning: true },
 			],
 		});
-		harnesses.push(harness);
 
 		const modelOne = harness.getModel("faux-1")!;
 		const modelTwo = harness.getModel("faux-2")!;

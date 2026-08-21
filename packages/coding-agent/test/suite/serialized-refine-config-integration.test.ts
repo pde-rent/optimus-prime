@@ -9,7 +9,12 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { type AgentSessionRuntimeConfig, mergeAgentSessionRuntimeConfig } from "../../src/core/agent-session-config.js";
 import type { AgentRlmHeartbeatController } from "../../src/core/cron-jobs.js";
-import { createHarness, type Harness } from "./harness.js";
+import { createTrackedHarness, trackHarnesses } from "./helpers.js";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+const harnesses = trackHarnesses();
 
 type SerializedInternals = {
 	_serializedRefine: boolean;
@@ -25,15 +30,6 @@ type SerializedInternals = {
 };
 
 describe("Serialized refine config integration (unit)", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("serializedRefine round-trips through mergeAgentSessionRuntimeConfig", () => {
 		const base: AgentSessionRuntimeConfig = {
 			cwd: "/tmp",
@@ -57,21 +53,19 @@ describe("Serialized refine config integration (unit)", () => {
 	});
 
 	it("serializedRefine=true produces a session with _serializedRefine=true", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
 		expect(internals._serializedRefine).toBe(true);
 	});
 
 	it("serializedRefine=false (default) produces a session with _serializedRefine=false", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
 		expect(internals._serializedRefine).toBe(false);
@@ -85,13 +79,12 @@ describe("Serialized refine config integration (unit)", () => {
 			rationale: "integration",
 			instructions: "capture",
 		}));
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 			settings: { autoRefine: { enabled: true, turnInterval: 2, cooldownMs: 0 } },
 			autoRefineReviewer: reviewer,
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals & {
 			_planRefine: (opts: { instructions?: string }, signal: AbortSignal) => Promise<unknown>;
@@ -131,21 +124,11 @@ describe("Serialized refine config integration (unit)", () => {
 });
 
 describe("Serialized refine controller availability (unit)", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("setRlmHeartbeatController attaches a heartbeat controller to a session", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals;
 		expect(internals._rlmHeartbeatController).toBeUndefined();
@@ -170,7 +153,7 @@ describe("Serialized refine controller availability (unit)", () => {
 	});
 
 	it("refine.status reports in_flight when background plan is active", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
@@ -180,7 +163,6 @@ describe("Serialized refine controller availability (unit)", () => {
 				instructions: "test",
 			})),
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals & {
 			_planRefine: (opts: { instructions?: string }, signal: AbortSignal) => Promise<unknown>;
@@ -226,21 +208,11 @@ describe("Serialized refine controller availability (unit)", () => {
 });
 
 describe("PR #503 model preservation (unit)", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("model is preserved and accessible after session creation", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 		});
-		harnesses.push(harness);
 
 		// The session should have a model set from the faux provider.
 		expect(harness.session.model).toBeDefined();
@@ -249,7 +221,7 @@ describe("PR #503 model preservation (unit)", () => {
 	});
 
 	it("model survives a serialized refine checkpoint", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 			settings: { autoRefine: { enabled: true, turnInterval: 1, cooldownMs: 0 } },
@@ -259,7 +231,6 @@ describe("PR #503 model preservation (unit)", () => {
 				instructions: "test",
 			})),
 		});
-		harnesses.push(harness);
 
 		const internals = harness.session as unknown as SerializedInternals & {
 			_planRefine: (opts: { instructions?: string }, signal: AbortSignal) => Promise<unknown>;
@@ -288,11 +259,10 @@ describe("PR #503 model preservation (unit)", () => {
 	});
 
 	it("model is preserved after clean disposal", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			serializedRefine: true,
 		});
-		harnesses.push(harness);
 
 		const modelBefore = harness.session.model;
 		expect(modelBefore).toBeDefined();

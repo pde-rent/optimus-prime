@@ -14,6 +14,7 @@ import type { DaemonResponse } from "../../../src/modes/daemon/daemon-protocol.j
 import type { SessionSummary } from "../../../src/modes/daemon/daemon-session-list.js";
 import { BUN_PATH } from "../../bun-path.js";
 import { createHarness, type Harness } from "../harness.js";
+import { delay, waitFor } from "../helpers.js";
 
 interface SupervisorHandle {
 	child: ChildProcess;
@@ -34,26 +35,6 @@ const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DI
 const supervisors = new Set<SupervisorHandle>();
 const harnesses: Harness[] = [];
 const sockets = new Set<string>();
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
 function spawnSupervisor(paths: {
 	agentDir: string;
 	completionPath: string;

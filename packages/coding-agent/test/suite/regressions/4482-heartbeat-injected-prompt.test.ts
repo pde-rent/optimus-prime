@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Message, Type } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Message } from "@earendil-works/pi-ai";
 import { Container, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { type AgentCronJob, shouldDeferHeartbeatCronJob } from "../../../src/core/cron-jobs.js";
 import { createGoalContextMessage, type GoalState } from "../../../src/core/goals.js";
@@ -12,6 +12,8 @@ import {
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { createHarness, getMessageText, getUserTexts, type Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
+import { gatedWaitTool } from "../scheduling.js";
 
 type AddMessageToChatHost = {
 	addMessageToChat(
@@ -136,7 +138,7 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 	});
 
 	it("runs heartbeat prompts through before_agent_start handlers", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			systemPrompt: "base prompt",
 			extensionFactories: [
 				(pi) => {
@@ -152,7 +154,6 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		let providerSystemPrompt = "";
 		let sawExtensionContext = false;
 		harness.setResponses([
@@ -188,25 +189,8 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 	});
 
 	it("keeps pending nextTurn context separate from queued heartbeat prompts", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return {
-					content: [{ type: "text", text: "released" }],
-					details: {},
-				};
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		let queuedHeartbeatText = "";
 		let queuedPendingContextText = "";
 		const queueEvents: Array<{ steering: readonly string[]; followUp: readonly string[] }> = [];
@@ -271,7 +255,7 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 		const inputGate = new Promise<void>((resolve) => {
 			releaseInput = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("input", async (event) => {
@@ -282,7 +266,6 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const providerOrder: string[] = [];
 		harness.setResponses([
 			(context) => {
@@ -390,25 +373,8 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 	});
 
 	it("returns raw text when clearing queued heartbeat prompts while previews remain labeled", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return {
-					content: [{ type: "text", text: "released" }],
-					details: {},
-				};
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		const heartbeatText = "Check whether the long-running task needs another step.";
 		const heartbeatPreview = `Heartbeat prompt: ${heartbeatText}`;
 		harness.setResponses([
@@ -438,25 +404,8 @@ describe("ENG-4482 heartbeat injected prompt UI", () => {
 	});
 
 	it("removes queued steered heartbeat prompts by heartbeat queue key", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return {
-					content: [{ type: "text", text: "released" }],
-					details: {},
-				};
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		const heartbeatText = "Check whether the long-running task needs another step.";
 		const heartbeatPreview = `Heartbeat prompt: ${heartbeatText}`;
 		harness.setResponses([

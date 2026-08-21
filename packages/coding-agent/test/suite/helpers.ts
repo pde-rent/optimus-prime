@@ -5,10 +5,17 @@
 
 import { afterEach } from "bun:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { type AssistantMessage, fauxAssistantMessage, Type } from "@earendil-works/pi-ai";
+import {
+	type AssistantMessage,
+	type FauxProviderRegistration,
+	fauxAssistantMessage,
+	Type,
+} from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentCronJob } from "../../src/core/cron-jobs.js";
 import type { RefinementResult } from "../../src/core/refinement/index.js";
-import type { Harness } from "./harness.js";
+import type { ExtensionFactory } from "../../src/index.js";
+import { createHarness, type Harness, type HarnessOptions } from "./harness.js";
 
 export function delay(ms: number): Promise<void> {
 	return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -121,4 +128,36 @@ export function trackHarnesses(): Harness[] {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 	return harnesses;
+}
+
+/** Extension factory registering the faux provider's models in a runtime model registry. */
+export function fauxProviderExtension(
+	faux: FauxProviderRegistration,
+	after?: (pi: ExtensionAPI) => void,
+): ExtensionFactory {
+	return (pi) => {
+		pi.registerProvider(faux.getModel().provider, {
+			baseUrl: faux.getModel().baseUrl,
+			apiKey: "faux-key",
+			api: faux.api,
+			models: faux.models.map((registeredModel) => ({
+				id: registeredModel.id,
+				name: registeredModel.name,
+				api: registeredModel.api,
+				reasoning: registeredModel.reasoning,
+				input: registeredModel.input,
+				cost: registeredModel.cost,
+				contextWindow: registeredModel.contextWindow,
+				maxTokens: registeredModel.maxTokens,
+			})),
+		});
+		after?.(pi);
+	};
+}
+
+/** createHarness plus registration in a tracked registry for per-test cleanup. */
+export async function createTrackedHarness(harnesses: Harness[], options: HarnessOptions = {}): Promise<Harness> {
+	const harness = await createHarness(options);
+	harnesses.push(harness);
+	return harness;
 }

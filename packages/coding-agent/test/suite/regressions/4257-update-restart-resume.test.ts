@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
@@ -15,7 +15,10 @@ import type { DaemonUpdateRestartManifest } from "../../../src/modes/daemon/daem
 import { MutationDrainLatch } from "../../../src/modes/daemon/mutation-drain-latch.js";
 import { prepareDaemonUpdateRestart } from "../../../src/package-manager-cli.js";
 import { createHarness, getMessageText, getUserTexts, type Harness } from "../harness.js";
+import { createTrackedHarness, trackHarnesses } from "../helpers.js";
 import { createDeferred } from "../scheduling.js";
+
+const harnesses = trackHarnesses();
 
 type AgentDaemonUpdateInternals = {
 	sessions: Map<string, ActiveSessionState>;
@@ -143,14 +146,6 @@ function createCustomMessage(content: string): CustomMessage {
 }
 
 describe("issue #4257 update restart resume", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it.each([
 		[undefined, "shutdown"],
 		["preparing", "shutdown"],
@@ -158,8 +153,7 @@ describe("issue #4257 update restart resume", () => {
 		["prepared", "shutdown"],
 		["publishing", "update"],
 	] as const)("uses %s restart phase as %s shutdown", async (phase, expected) => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = createDaemonInternals(harness);
 		if (phase) {
 			internals.updateRestart = {
@@ -178,7 +172,7 @@ describe("issue #4257 update restart resume", () => {
 		const assistantMessageEndBlocked = new Promise<void>((resolve) => {
 			releaseAssistantMessageEnd = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			extensionFactories: [
 				(pi) => {
@@ -190,7 +184,6 @@ describe("issue #4257 update restart resume", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("restart response")]);
 		let promptAdmitted = false;
 		const originalPrompt = harness.session.agent.prompt.bind(harness.session.agent);
@@ -267,8 +260,7 @@ describe("issue #4257 update restart resume", () => {
 		{ name: "worker cancel releases a prepare blocked on an executing mutation", release: "cancel" },
 		{ name: "standalone prepare waits for an executing daemon mutation", release: "drain" },
 	] as const)("$name", async ({ release }) => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = createDaemonInternals(harness, { worker: true });
 		internals.mutationDrain.begin();
 		const writes: string[] = [];
@@ -308,8 +300,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("fences and drains a mutation admitted at the first drain boundary before checkpointing", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = createDaemonInternals(harness);
 		const mutationDrain = new MutationDrainLatch();
 		const transaction = {
@@ -346,8 +337,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("waits for an already-claimed one-shot dispatch and runs it exactly once", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("scheduled response")]);
 		const promptSpy = vi.spyOn(harness.session, "promptUntilAccepted");
 		const state = createState(harness, "active-1", { kind: "top-level", createdAt: Date.now() });
@@ -514,8 +504,7 @@ describe("issue #4257 update restart resume", () => {
 			},
 		},
 	])("$name", async ({ run }) => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = createDaemonInternals(harness);
 		const writes: string[] = [];
 		const makeClient = (id: string) =>
@@ -533,8 +522,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("captures a restart manifest and aborts running bash without archiving the session", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.session.recordBashResult("echo before", {
 			output: "before",
 			exitCode: 0,
@@ -640,8 +628,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("keeps active goal abort state until update restart abort settles", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.session.handleGoalHostRequest("goal.create", { objective: "finish the update-safe task" });
 		let releaseIdle: (() => void) | undefined;
 		const idlePromise = new Promise<void>((resolve) => {
@@ -665,8 +652,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("rolls back a preselected prompt when update restart pauses the pump", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("done")]);
 		const idleReached = createDeferred();
 		const idleGate = createDeferred();
@@ -698,8 +684,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("rejects new daemon sessions after update restart preparation starts", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const createRuntime = vi.fn(async () => {
 			throw new Error("unexpected runtime creation");
 		});
@@ -855,8 +840,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("captures next-turn context and full queued actions in the restart manifest", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 
 		const pendingNextTurn = createCustomMessage("pending next turn");
 		const queuedContext = createCustomMessage("queued prompt context");
@@ -899,8 +883,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("materializes queued in-memory drafts before update restart", async () => {
-		const harness = await createHarness({ persistSession: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: false });
 
 		const followUpContent: TextContent[] = [
 			{ type: "text", text: "queued context" },
@@ -937,8 +920,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("materializes busy in-memory drafts before update restart", async () => {
-		const harness = await createHarness({ persistSession: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: false });
 		(harness.session.agent.state as { isStreaming: boolean }).isStreaming = true;
 
 		const sessionDir = `${harness.tempDir}/sessions`;
@@ -997,8 +979,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("accepts restore_next_turn through daemon command parsing", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 
 		const internals = createDaemonInternals(harness);
 		internals.sessions.set(
@@ -1030,8 +1011,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("accepts restored prompt content through daemon command parsing", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("accepted restored prompt")]);
 
 		const internals = createDaemonInternals(harness);
@@ -1073,8 +1053,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("restores agent-message ids and reports deduped follow-ups", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 
 		const internals = createDaemonInternals(harness);
 		internals.sessions.set(
@@ -1169,8 +1148,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("resumes restored queues without promoting steering messages to prompts", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([
 			fauxAssistantMessage("seed response"),
 			fauxAssistantMessage("handled steer 1"),
@@ -1245,8 +1223,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("drains restored queues when a continuation prompt resumes interrupted work", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("handled continuation"), fauxAssistantMessage("handled follow-up")]);
 		harness.session.agent.state.messages.push(createCustomMessage("update interrupted"));
 
@@ -1309,8 +1286,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("resumes restored queues after an update marker without prior transcript messages", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("handled restored follow-up")]);
 		harness.session.agent.state.messages.push(createCustomMessage("update interrupted"));
 
@@ -1358,8 +1334,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("adopts attach env after a fenced update preparation rolls back", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		const internals = createDaemonInternals(harness);
 		const state = createState(harness, "active-1", { kind: "top-level", createdAt: Date.now() });
 		internals.sessions.set(state.activeSessionId, state);
@@ -1387,8 +1362,7 @@ describe("issue #4257 update restart resume", () => {
 	});
 
 	it("reports resume_queue failure when no work can resume", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 
 		const internals = createDaemonInternals(harness);
 		internals.sessions.set(

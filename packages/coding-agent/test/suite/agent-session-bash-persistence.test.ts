@@ -1,23 +1,19 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { BashOperations } from "../../src/core/tools/bash.js";
 import { createHarness, getMessageText, type Harness } from "./harness.js";
+import { createTrackedHarness, trackHarnesses } from "./helpers.js";
+import { gatedWaitTool } from "./scheduling.js";
+
+const harnesses = trackHarnesses();
 
 function getEntryTypes(harness: Harness): string[] {
 	return harness.sessionManager.getEntries().map((entry) => entry.type);
 }
 
 describe("AgentSession bash and persistence characterization", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("records bash results immediately while idle", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
@@ -35,25 +31,8 @@ describe("AgentSession bash and persistence characterization", () => {
 	});
 
 	it("defers bash results while streaming and flushes them before the next prompt", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return {
-					content: [{ type: "text", text: "released" }],
-					details: {},
-				};
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("wait", {})], { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
@@ -142,8 +121,7 @@ describe("AgentSession bash and persistence characterization", () => {
 				return { content: [{ type: "text", text: `echo:${text}` }], details: { text } };
 			},
 		};
-		const harness = await createHarness({ tools: [echoTool] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { tools: [echoTool] });
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("echo", { text: "hello" })], { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
@@ -350,14 +328,13 @@ describe("AgentSession bash and persistence characterization", () => {
 				return { exitCode: 0 };
 			},
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("user_bash", async () => ({ operations }));
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("after bash")]);
 		const agentPrompt =
 			"Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: agentmsg_bash\n\nqueued after bash";
@@ -395,14 +372,13 @@ describe("AgentSession bash and persistence characterization", () => {
 				return { exitCode: 0 };
 			},
 		};
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			extensionFactories: [
 				(pi) => {
 					pi.on("user_bash", async () => ({ operations }));
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("after steer"), fauxAssistantMessage("after follow-up")]);
 		const steerPrompt =
 			"Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: agentmsg_bash_steer\n\nsteer after bash";
@@ -430,22 +406,8 @@ describe("AgentSession bash and persistence characterization", () => {
 	});
 
 	it("flushes pending bash output before draining queued prompts", async () => {
-		let releaseToolExecution: (() => void) | undefined;
-		const toolRelease = new Promise<void>((resolve) => {
-			releaseToolExecution = resolve;
-		});
-		const waitTool: AgentTool = {
-			name: "wait",
-			label: "Wait",
-			description: "Wait for release",
-			parameters: Type.Object({}),
-			execute: async () => {
-				await toolRelease;
-				return { content: [{ type: "text", text: "released" }], details: {} };
-			},
-		};
-		const harness = await createHarness({ tools: [waitTool] });
-		harnesses.push(harness);
+		const { tool: waitTool, release: releaseToolExecution } = gatedWaitTool();
+		const harness = await createTrackedHarness(harnesses, { tools: [waitTool] });
 		harness.setResponses([
 			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
 			fauxAssistantMessage("turn complete"),

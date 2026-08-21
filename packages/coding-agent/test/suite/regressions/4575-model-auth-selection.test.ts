@@ -7,7 +7,8 @@ import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
 import { getModelArgumentCompletions } from "../../../src/modes/model-autocomplete.js";
 import stripAnsi from "../../../src/utils/ansi.js";
-import { createHarness, type Harness } from "../harness.js";
+import type { Harness } from "../harness.js";
+import { createTrackedHarness } from "../helpers.js";
 
 interface ConnectionAuthRefreshHarness {
 	agentConnection: { getModelCatalog(): Promise<AgentConnectionModelCatalog> };
@@ -53,10 +54,9 @@ describe("ENG-4575 model authentication", () => {
 	});
 
 	test("shows unauthenticated public models after authenticated providers", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [{ id: "base", name: "Base", reasoning: true }],
 		});
-		harnesses.push(harness);
 
 		const base = harness.getModel("base")!;
 		const unauthenticated = { ...base, provider: "a-unauthenticated", id: "requires-auth" };
@@ -91,10 +91,9 @@ describe("ENG-4575 model authentication", () => {
 	});
 
 	test("keeps locally authenticated providers configured when the connection catalog omits them", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			models: [{ id: "base", name: "Base", reasoning: true }],
 		});
-		harnesses.push(harness);
 		const model = harness.getModel("base")!;
 		const selector = new ModelSelectorComponent(
 			{ requestRender: () => {} } as unknown as TUI,
@@ -118,8 +117,9 @@ describe("ENG-4575 model authentication", () => {
 	});
 
 	test("refetches configured providers after authentication changes", async () => {
-		const harness = await createHarness({ models: [{ id: "base", name: "Base", reasoning: true }] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, {
+			models: [{ id: "base", name: "Base", reasoning: true }],
+		});
 		const model = { ...harness.getModel("base")!, provider: "openai" } as AgentConnectionModel;
 		const getModelCatalog = vi.fn(async () => ({ models: [model], configuredProviders: [] }));
 		const fakeThis = Object.create(InteractiveMode.prototype) as ConnectionAuthRefreshHarness;
@@ -140,8 +140,9 @@ describe("ENG-4575 model authentication", () => {
 	});
 
 	test("returns the full public catalog to catalog-facing selectors", async () => {
-		const harness = await createHarness({ models: [{ id: "base", name: "Base", reasoning: true }] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, {
+			models: [{ id: "base", name: "Base", reasoning: true }],
+		});
 		const model = { ...harness.getModel("base")!, provider: "openai" } as AgentConnectionModel;
 		const fakeThis = Object.create(InteractiveMode.prototype) as ConnectionAuthRefreshHarness;
 		fakeThis.agentConnection = {
@@ -159,8 +160,9 @@ describe("ENG-4575 model authentication", () => {
 	});
 
 	test("uses the full public catalog for scoped-session model autocomplete", async () => {
-		const harness = await createHarness({ models: [{ id: "base", name: "Base", reasoning: true }] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, {
+			models: [{ id: "base", name: "Base", reasoning: true }],
+		});
 		const base = harness.getModel("base")!;
 		const scoped = { ...base, provider: "custom", id: "scoped-only" } as AgentConnectionModel;
 		const publicModel = { ...base, provider: "openai", id: "gpt-5.4" } as AgentConnectionModel;
