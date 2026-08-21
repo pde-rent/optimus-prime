@@ -5,3 +5,9 @@ linker = "hoisted"
 # versions); already-locked versions are unaffected.
 # Urgent security patch override: bun add --minimum-release-age=0 <pkg>
 minimumReleaseAge = 604800
+
+# Don't auto-install peer dependencies. The only peer in the tree is
+# `typescript` (peered by @crafter/charts for tsc users); Bun transpiles the
+# chart skill's TS source natively and the repo type-checks with tsgo, so the
+# 23 MB `typescript` package is dead weight here.
+peer = false
