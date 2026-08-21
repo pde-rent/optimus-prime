@@ -327,7 +327,7 @@ function rewriteDeclaration(src: string): { out: string; names: string[] } {
 		const afterName = trimmed.slice(m[1] ? m[1].length : 0).replace(/^class\s+/, "");
 		// afterName = "Name <tail>"; need "Name <tail>" for the anonymous-class name
 		const tail = afterName.slice(name.length);
-		return { out: leadingComments.join("") + `globalThis.${name} = class ${name}${tail}`, names: [name] };
+		return { out: `${leadingComments.join("")}globalThis.${name} = class ${name}${tail}`, names: [name] };
 	}
 
 	m = /^(async\s+)?function\s+([A-Za-z_$][\w$]*)/.exec(trimmed);
@@ -338,7 +338,7 @@ function rewriteDeclaration(src: string): { out: string; names: string[] } {
 		const tail = trimmed.slice(tailStart);
 		const kw = isAsync ? "async function" : "function";
 		return {
-			out: leadingComments.join("") + `globalThis.${name} = ${kw} ${name}${tail}`,
+			out: `${leadingComments.join("")}globalThis.${name} = ${kw} ${name}${tail}`,
 			names: [name],
 		};
 	}
