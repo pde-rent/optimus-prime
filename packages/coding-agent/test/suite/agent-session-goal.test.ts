@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { existsSync } from "node:fs";
 import type { AgentContext, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
@@ -12,6 +12,9 @@ import { SessionManager } from "../../src/core/session-manager.js";
 import { SettingsManager } from "../../src/core/settings-manager.js";
 import { createTestResourceLoader } from "../utilities.js";
 import { createHarness, getAssistantTexts, getMessageText, type Harness } from "./harness.js";
+import { createTrackedHarness, trackHarnesses, waitFor } from "./helpers.js";
+
+const harnesses = trackHarnesses();
 
 function assistantWithUsage(message: string | AssistantMessage, usage: Partial<Usage>): AssistantMessage {
 	const base = typeof message === "string" ? fauxAssistantMessage(message) : message;
@@ -46,22 +49,6 @@ function currentAgentContext(harness: Harness): AgentContext {
 		tools: [...state.tools],
 	};
 }
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
 async function waitForCondition(predicate: () => boolean): Promise<void> {
 	for (let attempt = 0; attempt < 100; attempt++) {
 		if (predicate()) {
@@ -159,14 +146,6 @@ function createWaitingTool(): {
 }
 
 describe("AgentSession goals", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	async function createGoalHarness(extraTools: AgentTool[] = []): Promise<Harness> {
 		const sessionRef: { current?: AgentSession } = {};
 		const harness = await createHarness({ tools: [createFauxReplTool(sessionRef), ...extraTools] });
@@ -604,8 +583,7 @@ describe("AgentSession goals", () => {
 	});
 
 	it("does not resume an errored goal", async () => {
-		const harness = await createHarness({ settings: { retry: { enabled: false } } });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { settings: { retry: { enabled: false } } });
 		harness.setResponses([
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" }),
 			fauxAssistantMessage("should not run"),
@@ -655,8 +633,7 @@ describe("AgentSession goals", () => {
 	});
 
 	it("does not persist a goal when start preflight fails", async () => {
-		const harness = await createHarness({ withConfiguredAuth: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { withConfiguredAuth: false });
 
 		await harness.session.prompt("/goal do task");
 
@@ -733,8 +710,7 @@ describe("AgentSession goals", () => {
 				}
 			});
 		};
-		const harness = await createHarness({ extensionFactories: [extension] });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { extensionFactories: [extension] });
 		harness.setResponses([
 			assistantWithUsage("Spent the budget.", { input: 6, output: 5, totalTokens: 11 }),
 			fauxAssistantMessage("Wrapping up."),
@@ -784,8 +760,7 @@ describe("AgentSession goals", () => {
 	);
 
 	it("marks the goal as errored on terminal provider errors", async () => {
-		const harness = await createHarness({ settings: { retry: { enabled: false } } });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { settings: { retry: { enabled: false } } });
 		harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_api_key" })]);
 
 		await harness.session.prompt("/goal do work");
@@ -879,20 +854,11 @@ describe("AgentSession goals", () => {
 });
 
 describe("initial goal seeding from config", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("seeds an active goal from initialGoal config on a fresh top-level session", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			initialGoal: { objective: "Write tests", tokenBudget: 50000 },
 		});
-		harnesses.push(harness);
 
 		expect(harness.session.goalState).toMatchObject({
 			active: true,
@@ -922,11 +888,10 @@ describe("initial goal seeding from config", () => {
 	});
 
 	it("drops the seeded goal context when the goal is cleared before the first prompt", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			initialGoal: { objective: "Write tests", tokenBudget: 50000 },
 		});
-		harnesses.push(harness);
 
 		harness.setResponses([fauxAssistantMessage("ack")]);
 		await harness.session.prompt("/goal clear");
@@ -936,12 +901,11 @@ describe("initial goal seeding from config", () => {
 	});
 
 	it("does not seed initialGoal for subagent sessions (rlmDepth > 0)", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			rlmDepth: 1,
 			initialGoal: { objective: "Subagent goal" },
 		});
-		harnesses.push(harness);
 
 		expect(harness.session.goalState.status).toBe("idle");
 		expect(harness.session.goalState.active).toBe(false);
@@ -989,11 +953,10 @@ describe("initial goal seeding from config", () => {
 	}
 
 	it("does not reseed after goal is cleared (idempotent restart)", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			initialGoal: { objective: "Initial goal" },
 		});
-		harnesses.push(harness);
 
 		expect(harness.session.goalState.status).toBe("active");
 
@@ -1012,11 +975,10 @@ describe("initial goal seeding from config", () => {
 	});
 
 	it("does not reseed after goal is completed (idempotent restart)", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			initialGoal: { objective: "Complete me" },
 		});
-		harnesses.push(harness);
 
 		expect(harness.session.goalState.status).toBe("active");
 
@@ -1034,11 +996,10 @@ describe("initial goal seeding from config", () => {
 	});
 
 	it("does not reseed when branch has messages (idempotent restart after use)", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			initialGoal: { objective: "Initial goal" },
 		});
-		harnesses.push(harness);
 
 		expect(harness.session.goalState.status).toBe("active");
 

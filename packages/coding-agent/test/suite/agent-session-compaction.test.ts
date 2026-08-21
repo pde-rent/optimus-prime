@@ -3,7 +3,13 @@ import { appendFileSync } from "node:fs";
 import type { AgentMessage, ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage, type Model, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../../src/core/session-manager.js";
-import { createHarness, getMessageText, type Harness } from "./harness.js";
+import { createHarness, getMessageText } from "./harness.js";
+import { createAssistant, createTrackedHarness, createUsage, trackHarnesses, waitFor } from "./helpers.js";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+const harnesses = trackHarnesses();
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (
@@ -20,71 +26,12 @@ type SessionWithCompactionInternals = {
 	) => void;
 };
 
-function createUsage(totalTokens: number) {
-	return {
-		input: totalTokens,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-}
-
-function createAssistant(
-	harness: Harness,
-	options: {
-		stopReason?: AssistantMessage["stopReason"];
-		errorMessage?: string;
-		totalTokens?: number;
-		timestamp?: number;
-	},
-): AssistantMessage {
-	const model = harness.getModel();
-	return {
-		...fauxAssistantMessage("", {
-			stopReason: options.stopReason,
-			errorMessage: options.errorMessage,
-			timestamp: options.timestamp,
-		}),
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: createUsage(options.totalTokens ?? 0),
-	};
-}
-
 function failingGateCommand(): string {
 	return `${process.execPath} -e "console.error('gate failed'); process.exit(1)"`;
 }
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
 describe("AgentSession compaction characterization", () => {
-	const harnesses: Harness[] = [];
-
-	afterEach(() => {
-		vi.restoreAllMocks();
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
 	it("manually compacts using an extension-provided summary", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -99,7 +46,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
@@ -113,11 +59,10 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("compacts through the model summarizer, persists metadata, emits events, and remains usable", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			persistSession: true,
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("one response"),
 			fauxAssistantMessage("two response"),
@@ -170,7 +115,7 @@ describe("AgentSession compaction characterization", () => {
 		const compactionGate = new Promise<void>((resolve) => {
 			releaseCompaction = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			persistSession: true,
 			extensionFactories: [
@@ -181,7 +126,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		let releaseTurn: () => void = () => {};
 		const turnGate = new Promise<void>((resolve) => {
 			releaseTurn = resolve;
@@ -219,7 +163,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("reschedules a pending post-compaction continuation after successful manual compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -234,7 +178,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_schedulePostCompactionContinue(): void;
 			_cancelPostCompactionContinue(): void;
@@ -254,7 +197,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("treats session-owned queued inputs as queued work after compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -269,7 +212,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const internals = harness.session as unknown as {
 			_cancelPostCompactionContinue(): void;
 			_scheduleAutoRefineAfterCompaction(willContinueAfterCompaction: boolean): void;
@@ -302,7 +244,7 @@ describe("AgentSession compaction characterization", () => {
 		const preparationGate = new Promise<void>((resolve) => {
 			releasePreparation = resolve;
 		});
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -322,7 +264,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage("one response"),
 			fauxAssistantMessage("two response"),
@@ -356,14 +297,13 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("throws when compacting without configured auth", async () => {
-		const harness = await createHarness({ withConfiguredAuth: false });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { withConfiguredAuth: false });
 
 		await expect(harness.session.compact()).rejects.toThrow(`No API key found for ${harness.getModel().provider}.`);
 	});
 
 	it("cancels in-progress manual compaction when abortCompaction is called", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -375,7 +315,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
@@ -388,7 +327,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("resumes after threshold compaction when only agent-level queued messages exist", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
 				(pi) => {
@@ -403,7 +342,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		await harness.session.prompt("first");
 		await harness.session.prompt("second");
@@ -425,7 +363,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("keeps prior autonomous continuations when later threshold compaction is skipped", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 4,
@@ -433,7 +371,6 @@ describe("AgentSession compaction characterization", () => {
 				gates: { commands: [failingGateCommand()], maxRetries: 5 },
 			},
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as {
 			_queueAutonomousContinuationForThresholdCompaction(
 				message: AssistantMessage,
@@ -461,7 +398,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("clears queued autonomous continuations when threshold compaction is skipped", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -470,7 +407,6 @@ describe("AgentSession compaction characterization", () => {
 			},
 			settings: { compaction: { keepRecentTokens: 1 } },
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "toolUse",
@@ -649,11 +585,10 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("triggers threshold compaction when trailing context exceeds the model window", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "stop",
@@ -680,11 +615,10 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("stops a tool loop for threshold compaction before the next model call", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "toolUse",
@@ -717,7 +651,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("queues a failing autonomous gate continuation before threshold compaction stops a tool loop", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -739,7 +673,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "toolUse",
@@ -805,7 +738,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("keeps autonomous continuation bookkeeping when only steering queue is drained", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -815,7 +748,6 @@ describe("AgentSession compaction characterization", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 1 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as {
 			_schedulePostCompactionContinue(): void;
 			_postCompactionContinuationMessages: AgentMessage[];
@@ -903,7 +835,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("keeps autonomous threshold continuations when post-compaction continue must retry", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -913,7 +845,6 @@ describe("AgentSession compaction characterization", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 1 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as {
 			_schedulePostCompactionContinue(): void;
 			_postCompactionContinuationMessages: AgentMessage[];
@@ -941,7 +872,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("clears queued autonomous threshold continuations when autonomous mode is disabled", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -963,7 +894,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "toolUse",
@@ -1023,7 +953,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("queues a failing autonomous gate continuation before post-turn threshold compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -1033,7 +963,6 @@ describe("AgentSession compaction characterization", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 1 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "stop",
@@ -1068,7 +997,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("does not queue autonomous gate continuations for pre-prompt threshold compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 2,
@@ -1078,7 +1007,6 @@ describe("AgentSession compaction characterization", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 1 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 		const successfulAssistant = createAssistant(harness, {
 			stopReason: "stop",
@@ -1111,7 +1039,7 @@ describe("AgentSession compaction characterization", () => {
 
 	// The autonomous gate spawns a real subprocess, so this flow only completes in real time.
 	it("waits for threshold-compaction autonomous continuations before finishing prompt", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			autonomous: {
 				enabled: true,
 				maxContinuations: 1,
@@ -1121,7 +1049,6 @@ describe("AgentSession compaction characterization", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 1 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(harness);
 		const highUsageDone = {
 			...fauxAssistantMessage("done"),
 			usage: createUsage(10_000),
@@ -1205,13 +1132,11 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("does not trigger threshold compaction below the threshold or when disabled", async () => {
-		const belowThresholdHarness = await createHarness({
+		const belowThresholdHarness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
 		});
-		harnesses.push(belowThresholdHarness);
-		const disabledHarness = await createHarness({ settings: { compaction: { enabled: false } } });
-		harnesses.push(disabledHarness);
+		const disabledHarness = await createTrackedHarness(harnesses, { settings: { compaction: { enabled: false } } });
 
 		const belowThresholdInternals = belowThresholdHarness.session as unknown as SessionWithCompactionInternals;
 		const disabledInternals = disabledHarness.session as unknown as SessionWithCompactionInternals;
@@ -1230,8 +1155,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("rolls back failed outcome persistence without breaking the persisted branch", async () => {
-		const harness = await createHarness({ persistSession: true });
-		harnesses.push(harness);
+		const harness = await createTrackedHarness(harnesses, { persistSession: true });
 		harness.setResponses([fauxAssistantMessage("persisted response")]);
 		await harness.session.prompt("persist this turn");
 
@@ -1295,7 +1219,7 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("keeps an unpersisted outcome in agent state after a successful compaction", async () => {
-		const harness = await createHarness({
+		const harness = await createTrackedHarness(harnesses, {
 			persistSession: true,
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
@@ -1311,7 +1235,6 @@ describe("AgentSession compaction characterization", () => {
 				},
 			],
 		});
-		harnesses.push(harness);
 		harness.setResponses([fauxAssistantMessage("one response"), fauxAssistantMessage("two response")]);
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
