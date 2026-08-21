@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { appendRotatingLog, expandTildePath, getClientErrorLogPath, getDaemonLogPath, VERSION } from "../config.js";
 import { ORPHAN_PROCESS_JOURNAL_ENV } from "../core/orphan-process-journal.js";
 import { getProcessStartId, SESSION_LEASE_OWNER_ID_ENV, SESSION_LEASES_ENABLED_ENV } from "../core/session-lease.js";
@@ -39,10 +40,6 @@ export function isDaemonSessionSummary(value: unknown): value is SessionSummary 
 	return typeof summary.activeSessionId === "string" || typeof summary.id === "string";
 }
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // Daemon replacement used to be silent (no crash, no log), so a daemon dying
 // out from under another window looked "random". Trace the decisions to the
 // client-errors log so replacements are attributable after the fact.
@@ -50,7 +47,7 @@ function logDaemonLaunch(message: string): void {
 	appendRotatingLog(getClientErrorLogPath(), `[${new Date().toISOString()}] daemon-launch: ${message}`);
 }
 
-async function canConnectToDaemon(socketPath: string, timeoutMs: number): Promise<boolean> {
+export async function canConnectToDaemon(socketPath: string, timeoutMs: number): Promise<boolean> {
 	const client = new DaemonClient(socketPath);
 	try {
 		await client.connect(timeoutMs);
@@ -342,6 +339,27 @@ async function shutdownStaleDaemonIfNotBusy(socketPath: string): Promise<boolean
 	return shutdownDaemonAndWait(socketPath);
 }
 
+/**
+ * A copy of the current environment with the daemon worker/supervisor role variables
+ * stripped, so a spawned process does not inherit worker-mode behavior from this one.
+ */
+export function createDetachedDaemonEnvironment(): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...process.env };
+	for (const key of [
+		DAEMON_WORKER_ROLE_ENV,
+		DAEMON_WORKER_TOKEN_ENV,
+		DAEMON_WORKER_ACTIVE_SESSION_ID_ENV,
+		DAEMON_WORKER_RECOVERY_JOURNAL_ENV,
+		DAEMON_WORKER_SUPERVISOR_SOCKET_ENV,
+		ORPHAN_PROCESS_JOURNAL_ENV,
+		SESSION_LEASES_ENABLED_ENV,
+		SESSION_LEASE_OWNER_ID_ENV,
+	]) {
+		delete env[key];
+	}
+	return env;
+}
+
 async function ensureDaemonRunning(socketPath: string, spawnCwd?: string): Promise<void> {
 	const probe = await probeDaemonVersion(socketPath);
 	if (probe.status === "current") {
@@ -357,20 +375,7 @@ async function ensureDaemonRunning(socketPath: string, spawnCwd?: string): Promi
 		throw new Error("Cannot determine current CLI entrypoint for daemon launch");
 	}
 
-	// Strip inherited daemon worker/supervisor role env vars so the spawned
-	// daemon supervisor does not inherit worker-mode behavior. Without this,
-	// a CLI running inside a daemon worker (e.g. a test spawned by the Prime
-	// Agent daemon) would launch the supervisor in worker mode, which listens
-	// on the socket but never sends the daemon_hello handshake.
-	const env: NodeJS.ProcessEnv = { ...process.env };
-	delete env[DAEMON_WORKER_ROLE_ENV];
-	delete env[DAEMON_WORKER_TOKEN_ENV];
-	delete env[DAEMON_WORKER_ACTIVE_SESSION_ID_ENV];
-	delete env[DAEMON_WORKER_RECOVERY_JOURNAL_ENV];
-	delete env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV];
-	delete env[ORPHAN_PROCESS_JOURNAL_ENV];
-	delete env[SESSION_LEASES_ENABLED_ENV];
-	delete env[SESSION_LEASE_OWNER_ID_ENV];
+	const env = createDetachedDaemonEnvironment();
 
 	const logOffset = currentDaemonLogSize(socketPath);
 	const child = spawn(

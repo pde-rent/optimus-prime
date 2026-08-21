@@ -109,7 +109,7 @@ import { initTheme, preloadCodeHighlighter, stopThemeWatcher } from "./modes/int
 import { handleConfigCommand } from "./package-manager-cli.js";
 import { color as chalk } from "./utils/ansi.js";
 import { isLocalPath } from "./utils/paths.js";
-import { isTruthyEnvVar } from "./utils/shared.js";
+import { errorMessage, isTruthyEnvVar } from "./utils/shared.js";
 
 /**
  * Read all content from piped stdin.
@@ -385,7 +385,7 @@ async function takeOverStaleDaemonOrExit(socketPath: string): Promise<DaemonRead
 	try {
 		await ready;
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorMessage(error);
 		console.error(chalk.red(`Could not start the background service: ${message}`));
 		process.exit(1);
 	}
@@ -429,7 +429,7 @@ function forkSessionOrExit(sourcePath: string, cwd: string, sessionDir?: string)
 	try {
 		return SessionManager.forkFrom(sourcePath, cwd, sessionDir);
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorMessage(error);
 		console.error(chalk.red(`Error: ${message}`));
 		process.exit(1);
 	}
@@ -566,6 +566,7 @@ function buildSessionOptions(
 	if (config.graphMaxTokens !== undefined) settingsOverrides.graphMaxTokens = config.graphMaxTokens;
 	if (config.dynamicDepth !== undefined) settingsOverrides.dynamicDepth = config.dynamicDepth;
 	if (config.degeneracyGuard !== undefined) settingsOverrides.degeneracyGuard = config.degeneracyGuard;
+	if (config.reasoningLoopGuard !== undefined) settingsOverrides.reasoningLoopGuard = config.reasoningLoopGuard;
 	if (config.dynamicEffort !== undefined) settingsOverrides.dynamicEffort = config.dynamicEffort;
 	if (config.serviceTier !== undefined) settingsOverrides.defaultServiceTier = config.serviceTier;
 	if (config.compaction !== undefined) settingsOverrides.compaction = { enabled: config.compaction };
@@ -604,6 +605,19 @@ function buildSessionOptions(
 	}
 
 	return { options, cliThinkingFromModel, diagnostics };
+}
+
+function logModelScope(scopedModels: readonly ScopedModel[], settingsManager: SettingsManager, verbose: boolean): void {
+	if (scopedModels.length === 0 || !(verbose || !settingsManager.getQuietStartup())) {
+		return;
+	}
+	const modelList = scopedModels
+		.map((sm) => {
+			const thinkingStr = sm.thinkingLevel ? `:${sm.thinkingLevel}` : "";
+			return `${sm.model.id}${thinkingStr}`;
+		})
+		.join(", ");
+	console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`));
 }
 
 function resolveCliPaths(cwd: string, paths: string[] | undefined): string[] | undefined {
@@ -1132,7 +1146,7 @@ export async function main(args: string[], options?: MainOptions) {
 		try {
 			process.chdir(cwd);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			console.error(chalk.red(`Error: Cannot use cwd ${cwd}: ${message}`));
 			process.exit(1);
 		}
@@ -1202,7 +1216,7 @@ export async function main(args: string[], options?: MainOptions) {
 				{ fallbackOnError: !publicCommand.attachAgent },
 			);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			console.error(chalk.red(`Error: Could not look up active agent '${resumeSelector}': ${message}`));
 			process.exit(1);
 		}
@@ -1366,15 +1380,7 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 		time("prepareInteractiveServices");
 
-		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
-			const modelList = scopedModels
-				.map((sm) => {
-					const thinkingStr = sm.thinkingLevel ? `:${sm.thinkingLevel}` : "";
-					return `${sm.model.id}${thinkingStr}`;
-				})
-				.join(", ");
-			console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`));
-		}
+		logModelScope(scopedModels, settingsManager, parsed.verbose === true);
 
 		const promptStashStore = new ClientPromptStashStore();
 		const daemonUiServices = createInteractiveModeUiServicesFromServices({
@@ -1636,15 +1642,7 @@ export async function main(args: string[], options?: MainOptions) {
 		if (explicitAgentsView || parsed.resume === true) {
 			console.error(chalk.yellow("Warning: the agents view needs the daemon; opening a normal chat instead"));
 		}
-		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
-			const modelList = scopedModels
-				.map((sm) => {
-					const thinkingStr = sm.thinkingLevel ? `:${sm.thinkingLevel}` : "";
-					return `${sm.model.id}${thinkingStr}`;
-				})
-				.join(", ");
-			console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`));
-		}
+		logModelScope(scopedModels, settingsManager, parsed.verbose === true);
 
 		const interactiveMode = new InteractiveMode({
 			agentConnection: new InProcessAgentConnection(runtime),

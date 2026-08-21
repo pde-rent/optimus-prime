@@ -1,19 +1,15 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import lockfile from "proper-lockfile";
 import { ENV_AGENT_DIR, SELF_UPDATE_INTERACTIVE_CHILD_ENV } from "../config.js";
-import { ORPHAN_PROCESS_JOURNAL_ENV } from "../core/orphan-process-journal.js";
-import { getProcessStartId, SESSION_LEASE_OWNER_ID_ENV, SESSION_LEASES_ENABLED_ENV } from "../core/session-lease.js";
+import { getProcessStartId } from "../core/session-lease.js";
 import { defaultDaemonSocketDir, defaultDaemonSocketPath, normalizeSocketPath } from "../modes/daemon/daemon-socket.js";
-import {
-	DAEMON_WORKER_ACTIVE_SESSION_ID_ENV,
-	DAEMON_WORKER_RECOVERY_JOURNAL_ENV,
-	DAEMON_WORKER_ROLE_ENV,
-	DAEMON_WORKER_SUPERVISOR_SOCKET_ENV,
-	DAEMON_WORKER_TOKEN_ENV,
-} from "../modes/daemon/daemon-worker-protocol.js";
+import { DAEMON_WORKER_ACTIVE_SESSION_ID_ENV } from "../modes/daemon/daemon-worker-protocol.js";
+import { writeJsonAtomically } from "../utils/shared.js";
+import { createDetachedDaemonEnvironment } from "./daemon-launch.js";
 import { createCliSubprocessLaunchSpec } from "./subprocess-launch.js";
 
 export const DAEMON_UPDATE_RESTART_COORDINATOR_FLAG = "--internal-update-restart-coordinator";
@@ -143,27 +139,12 @@ export function buildDaemonUpdateRestartReport(status: DaemonUpdateRestartStatus
 	return report;
 }
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
 function statusLivenessId(status: DaemonUpdateRestartStatus): string {
 	return status.heartbeatAt ?? status.updatedAt;
 }
 
 function socketKey(socketPath: string): string {
 	return createHash("sha256").update(normalizeSocketPath(socketPath)).digest("hex");
-}
-
-function writeJsonAtomically(path: string, value: unknown): void {
-	const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-		renameSync(tempPath, path);
-	} catch (error) {
-		rmSync(tempPath, { force: true });
-		throw error;
-	}
 }
 
 function isProcessIdentity(value: unknown): value is DaemonUpdateRestartProcessIdentity {
@@ -513,17 +494,9 @@ function createStatusPath(agentDir: string, socketPath: string, requestId: strin
 }
 
 function coordinatorEnvironment(agentDir: string): NodeJS.ProcessEnv {
-	const environment = { ...process.env };
+	const environment = createDetachedDaemonEnvironment();
 	environment[ENV_AGENT_DIR] = agentDir;
 	delete environment[SELF_UPDATE_INTERACTIVE_CHILD_ENV];
-	delete environment[DAEMON_WORKER_ROLE_ENV];
-	delete environment[DAEMON_WORKER_TOKEN_ENV];
-	delete environment[DAEMON_WORKER_ACTIVE_SESSION_ID_ENV];
-	delete environment[DAEMON_WORKER_RECOVERY_JOURNAL_ENV];
-	delete environment[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV];
-	delete environment[ORPHAN_PROCESS_JOURNAL_ENV];
-	delete environment[SESSION_LEASES_ENABLED_ENV];
-	delete environment[SESSION_LEASE_OWNER_ID_ENV];
 	return environment;
 }
 

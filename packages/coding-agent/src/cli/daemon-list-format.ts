@@ -1,6 +1,7 @@
 import { formatSessionDisplayId } from "../modes/daemon/daemon-session-id.js";
 import type { SessionSummary } from "../modes/daemon/daemon-session-list.js";
 import { color as chalk } from "../utils/ansi.js";
+import { formatElapsedDuration, formatTable } from "../utils/shared.js";
 
 // Display status derived from the lifecycle + activity axes.
 type ListStatus = "working" | "idle" | "archived";
@@ -76,50 +77,9 @@ function formatSessionAge(modified: string | undefined, nowMs: number): string {
 	if (Number.isNaN(modifiedMs)) {
 		return "";
 	}
-	const ageSeconds = Math.max(0, Math.floor((nowMs - modifiedMs) / 1000));
-	if (ageSeconds < 60) {
-		return `${ageSeconds}s`;
-	}
-	const ageMinutes = Math.floor(ageSeconds / 60);
-	if (ageMinutes < 60) {
-		return `${ageMinutes}m`;
-	}
-	const ageHours = Math.floor(ageMinutes / 60);
-	if (ageHours < 24) {
-		return `${ageHours}h`;
-	}
-	const ageDays = Math.floor(ageHours / 24);
-	if (ageDays < 7) {
-		return `${ageDays}d`;
-	}
-	const ageWeeks = Math.floor(ageDays / 7);
-	if (ageWeeks < 52) {
-		return `${ageWeeks}w`;
-	}
-	return `${Math.floor(ageWeeks / 52)}y`;
+	return formatElapsedDuration(Math.max(0, Math.floor((nowMs - modifiedMs) / 1000)), "year");
 }
 
 function formatSessionModel(model: SessionSummary["model"]): string {
 	return model ? `${model.provider}/${model.id}` : "";
-}
-
-function formatTable<T extends Record<string, string>>(
-	columns: Array<keyof T>,
-	rows: T[],
-	formatCell?: (row: T, column: keyof T, value: string) => string,
-): string {
-	const widths = columns.map((column) =>
-		Math.max(String(column).length, ...rows.map((row) => String(row[column]).length)),
-	);
-	const lines = [columns.map((column, index) => String(column).padEnd(widths[index])).join("  ")];
-	for (const row of rows) {
-		const line = columns
-			.map((column, index) => {
-				const value = String(row[column]).padEnd(widths[index]);
-				return formatCell ? formatCell(row, column, value) : value;
-			})
-			.join("  ");
-		lines.push(line);
-	}
-	return lines.join("\n");
 }

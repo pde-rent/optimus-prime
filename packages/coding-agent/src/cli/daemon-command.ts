@@ -15,8 +15,10 @@ import { defaultDaemonSocketPath, normalizeSocketPath } from "../modes/daemon/da
 import { color as chalk } from "../utils/ansi.js";
 import { isLocalPath } from "../utils/paths.js";
 import { isValidThinkingLevel } from "./args.js";
+import { canConnectToDaemon } from "./daemon-launch.js";
 import { formatSessionListTable } from "./daemon-list-format.js";
 import { runPs, runReap } from "./daemon-ps.js";
+import { looksLikeSessionPath } from "./session-resolver.js";
 
 interface ParsedDaemonClientCommand {
 	command: string;
@@ -621,10 +623,6 @@ function parseExtensionFlagOption(
 	return { consumed: 0, daemonArg: arg };
 }
 
-function looksLikeSessionPath(value: string): boolean {
-	return value.includes("/") || value.includes("\\") || value.endsWith(".jsonl");
-}
-
 function requireOptionValue(args: string[], index: number, option: string): string {
 	const value = args[index + 1];
 	if (!value) {
@@ -728,18 +726,6 @@ async function runPsCommand(parsed: ParsedDaemonClientCommand): Promise<void> {
 		return;
 	}
 	await runPs(parsed.json);
-}
-
-async function canConnectToDaemon(socketPath: string, timeoutMs: number): Promise<boolean> {
-	const client = new DaemonClient(socketPath);
-	try {
-		await client.connect(timeoutMs);
-		return true;
-	} catch {
-		return false;
-	} finally {
-		client.close();
-	}
 }
 
 async function runList(client: DaemonClient, args: string[], json: boolean): Promise<void> {

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { APP_NAME, getAgentDir, VERSION } from "../config.js";
 import { isOrphanProcessIdentityCurrent, readActiveOrphanProcesses } from "../core/orphan-process-journal.js";
 import { getProcessStartId } from "../core/session-lease.js";
@@ -16,6 +17,7 @@ import type { DaemonWorkerDescriptor } from "../modes/daemon/daemon-worker-proto
 import { color as chalk } from "../utils/ansi.js";
 import { signalProcessGroupOrProcess } from "../utils/child-process.js";
 import { readJsonFile } from "../utils/shared.js";
+import { canConnectToDaemon } from "./daemon-launch.js";
 import { formatDaemonListTable } from "./daemon-ps-format.js";
 import { promptYesNo } from "./daemon-stop-confirm.js";
 
@@ -894,7 +896,7 @@ async function stopBackgroundService(
 		}
 		return { reaped: `stopped background service${pid ? ` (pid ${pid})` : ""}` };
 	}
-	if (!(await canConnectToSocket(socketPath, 250))) {
+	if (!(await canConnectToDaemon(socketPath, 250))) {
 		await assertAdmission();
 		removeSocketFile(socketPath);
 		return { reaped: "background service already stopped" };
@@ -1200,22 +1202,6 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function canConnectToSocket(socketPath: string, timeoutMs: number): Promise<boolean> {
-	const client = new DaemonClient(socketPath);
-	try {
-		await client.connect(timeoutMs);
-		return true;
-	} catch {
-		return false;
-	} finally {
-		client.close();
-	}
-}
-
 /**
  * Ask a daemon to shut down and confirm it actually stopped listening. The
  * shutdown ack alone is not proof, so success is reported only once the socket
@@ -1239,7 +1225,7 @@ async function shutdownDaemon(socketPath: string, force: boolean): Promise<boole
 
 	const deadline = Date.now() + 5000;
 	while (Date.now() < deadline) {
-		if (!(await canConnectToSocket(socketPath, 250))) {
+		if (!(await canConnectToDaemon(socketPath, 250))) {
 			return true;
 		}
 		await delay(50);

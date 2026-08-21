@@ -1,4 +1,5 @@
 import { color as chalk } from "../utils/ansi.js";
+import { formatElapsedDuration, formatTable } from "../utils/shared.js";
 import type { DaemonInfo, DaemonStatus } from "./daemon-ps.js";
 
 type DaemonRow = {
@@ -49,42 +50,5 @@ export function formatUptime(uptimeSeconds: number | undefined): string {
 	if (uptimeSeconds === undefined || !Number.isFinite(uptimeSeconds)) {
 		return "";
 	}
-	const seconds = Math.max(0, Math.floor(uptimeSeconds));
-	if (seconds < 60) {
-		return `${seconds}s`;
-	}
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) {
-		return `${minutes}m`;
-	}
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) {
-		return `${hours}h`;
-	}
-	const days = Math.floor(hours / 24);
-	if (days < 7) {
-		return `${days}d`;
-	}
-	return `${Math.floor(days / 7)}w`;
-}
-
-function formatTable<T extends Record<string, string>>(
-	columns: Array<keyof T>,
-	rows: T[],
-	formatCell?: (row: T, column: keyof T, value: string) => string,
-): string {
-	const widths = columns.map((column) =>
-		Math.max(String(column).length, ...rows.map((row) => String(row[column]).length)),
-	);
-	const lines = [columns.map((column, index) => String(column).padEnd(widths[index])).join("  ")];
-	for (const row of rows) {
-		const line = columns
-			.map((column, index) => {
-				const value = String(row[column]).padEnd(widths[index]);
-				return formatCell ? formatCell(row, column, value) : value;
-			})
-			.join("  ");
-		lines.push(line);
-	}
-	return lines.join("\n");
+	return formatElapsedDuration(Math.max(0, Math.floor(uptimeSeconds)));
 }
