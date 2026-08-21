@@ -332,7 +332,7 @@ function legendBlock(entries, width, color) {
 		}
 		const sep = plain === "" ? "" : "  ";
 		plain += sep + item;
-		painted += sep + paint(symbol, e.color, color) + ` ${e.label}`;
+		painted += `${sep}${paint(symbol, e.color, color)} ${e.label}`;
 	}
 	lines.push(" ".repeat(LEGEND_INDENT) + painted);
 	return lines;

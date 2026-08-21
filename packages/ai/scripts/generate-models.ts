@@ -427,7 +427,8 @@ function getPrimeInferenceCacheCosts(modelId: string, inputCost: number): { cach
 }
 
 function getExistingPrimeInferenceModels(): Model<"openai-completions">[] {
-	const models = EXISTING_MODELS["prime-inference"] as unknown as Record<string, Model<"openai-completions">>;
+	const models = EXISTING_MODELS["prime-inference"] as unknown as Record<string, Model<"openai-completions">> | undefined;
+	if (!models) return [];
 	return Object.values(models)
 		.filter((model) => !isPrimeInferenceRawVariant(model.id) && !isPrimeInferencePrivateModel(model.id))
 		.map((model) => ({

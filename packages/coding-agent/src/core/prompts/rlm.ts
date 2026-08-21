@@ -10,7 +10,7 @@ import { type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "../
  */
 export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"the whole Bun namespace (Bun.file, Bun.write, Bun.Glob, Bun.spawn, Bun.Image, Bun.Transpiler, Bun.CryptoHasher, Bun.markdown, Bun.YAML/TOML/JSON5, Bun.zstd*/gzip*, Bun.stringWidth, Bun.semver, Bun.which, ...)",
-	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring)",
+	"`$` — Bun's shell, pre-bound (``await $`git status --short`.text()``). `Bun.$` is the same function; if `$` is not callable in a cell, use `Bun.$` directly. It runs real binaries with pipes, redirects, `&&`, globs and `$(...)`, but it is a reimplementation, not bash: no loops, `[[ ]]`, functions, heredocs, or backtick substitution (backticks return the literal text rather than erroring)",
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
 	"databases with no driver to install: `bun:sqlite` (`new Database(path)`, local and durable — reach for it before anything networked), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), `Bun.redis`/`Bun.RedisClient`",
 	"networking with nothing to install: `fetch` and `WebSocket` clients, `Bun.serve` for an HTTP/WebSocket server with static file routes, `HTMLRewriter` for streaming HTML parsing, `Bun.connect`/`Bun.listen` for raw TCP and TLS, `Bun.S3Client` for S3-compatible object storage",
@@ -282,14 +282,16 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 		if (hasAgentMessage) {
 			parts.push(
 				"Children reply explicitly with `await agent_message.send(message, { receiver_role: 'parent' })` when an answer is needed. Replies and follow-ups arrive as ordinary agent messages; not every task requires a reply.",
-				"Use `await agent_message.list_agents()` to discover family and `await rlm.list_subagents()` to recover direct child handles. Use `agent_message.send(message, { receiver_role: 'child', receiver_name: child.name })` for follow-ups.",
+				"Use `await agent_message.list_agents()` (returns `{ current, entries }`) to discover family and `await rlm.list_subagents()` (returns `{ subagents: [...] }`) to recover direct child handles. Use `agent_message.send(message, { receiver_role: 'child', receiver_name: child.name })` for follow-ups.",
 			);
 		} else {
-			parts.push("Use `await rlm.list_subagents()` to recover direct child handles after admission.");
+			parts.push(
+				"Use `await rlm.list_subagents()` (returns `{ subagents: [...] }`) to recover direct child handles after admission.",
+			);
 		}
 		if (hasAgentObserve) {
 			parts.push(
-				"Use `agent_observe` to inspect a child's rollout. Observation is restricted to your parent, siblings, and direct children; relay through the intermediate child for deeper descendants.",
+				"Use `agent_observe.list_agents()`, `.get_agent(target)`, or `.recent_messages(target, limit?, maxChars?)` to inspect a child's rollout. Observation is restricted to your parent, siblings, and direct children; relay through the intermediate child for deeper descendants.",
 			);
 		} else {
 			parts.push("Inspect files a child wrote when you need to collect its work without an observation capability.");
@@ -367,7 +369,7 @@ export function buildSubagentGuidance(
 		// remaining turn, so the cost is the size times the turns left, not once.
 		"Delegate a read when the source is large and you need a conclusion rather than the text: a long article, a full build log, a wide search sweep. Have the child report the conclusion with its sources. Read inline when you need the actual bytes, such as a file you are about to edit.",
 		"Have children write files and read those files for fan-in.",
-		"Recover direct child handles with `await rlm.list_subagents()` after a kernel restart or compaction.",
+		"Recover direct child handles with `await rlm.list_subagents()` (returns `{ subagents: [...] }`) after a kernel restart or compaction.",
 	];
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");
