@@ -4,7 +4,7 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
+
 import * as path from "node:path";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../config.js";
@@ -12,6 +12,7 @@ import { createEventBus, type EventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.js";
 import { execCommand } from "../exec.js";
 import { createSyntheticSourceInfo } from "../source-info.js";
+import { expandTildePath } from "../tools/path-utils.js";
 import { importExtensionModule } from "./native-import.js";
 import type {
 	Extension,
@@ -25,18 +26,8 @@ import type {
 	ToolDefinition,
 } from "./types.js";
 
-function expandPath(p: string): string {
-	if (p.startsWith("~/")) {
-		return path.join(os.homedir(), p.slice(2));
-	}
-	if (p.startsWith("~")) {
-		return path.join(os.homedir(), p.slice(1));
-	}
-	return p;
-}
-
 function resolvePath(extPath: string, cwd: string): string {
-	const expanded = expandPath(extPath);
+	const expanded = expandTildePath(extPath);
 	if (path.isAbsolute(expanded)) {
 		return expanded;
 	}

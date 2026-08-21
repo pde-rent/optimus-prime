@@ -1,13 +1,16 @@
 import { getLogger } from "@earendil-works/pi-ai";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { homedir } from "os";
+
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
 import ignore from "../utils/ignore-matcher.js";
 import { canonicalizePath } from "../utils/paths.js";
+import { toPosixPath } from "../utils/shared.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
+import { addIgnoreRules, type IgnoreMatcher } from "./ignore-rules.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
+import { expandTildePath } from "./tools/path-utils.js";
 
 const log = getLogger("coding-agent.skills");
 
@@ -27,59 +30,6 @@ const MAX_DESCRIPTION_LENGTH = 1024;
  * skill cannot price itself into every request.
  */
 const MAX_SUMMARY_LENGTH = 80;
-
-const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
-
-type IgnoreMatcher = ReturnType<typeof ignore>;
-
-function toPosixPath(p: string): string {
-	return p.split(sep).join("/");
-}
-
-function prefixIgnorePattern(line: string, prefix: string): string | null {
-	const trimmed = line.trim();
-	if (!trimmed) return null;
-	if (trimmed.startsWith("#") && !trimmed.startsWith("\\#")) return null;
-
-	let pattern = line;
-	let negated = false;
-
-	if (pattern.startsWith("!")) {
-		negated = true;
-		pattern = pattern.slice(1);
-	} else if (pattern.startsWith("\\!")) {
-		pattern = pattern.slice(1);
-	}
-
-	if (pattern.startsWith("/")) {
-		pattern = pattern.slice(1);
-	}
-
-	const prefixed = prefix ? `${prefix}${pattern}` : pattern;
-	return negated ? `!${prefixed}` : prefixed;
-}
-
-function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
-	const relativeDir = relative(rootDir, dir);
-	const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
-
-	for (const filename of IGNORE_FILE_NAMES) {
-		const ignorePath = join(dir, filename);
-		if (!existsSync(ignorePath)) continue;
-		try {
-			const content = readFileSync(ignorePath, "utf-8");
-			const patterns = content
-				.split(/\r?\n/)
-				.map((line) => prefixIgnorePattern(line, prefix))
-				.filter((line): line is string => Boolean(line));
-			if (patterns.length > 0) {
-				ig.add(patterns);
-			}
-		} catch {
-			// Unreadable ignore file: skip it rather than failing skill discovery.
-		}
-	}
-}
 
 export interface SkillFrontmatter {
 	name?: string;
@@ -581,16 +531,8 @@ export interface LoadSkillsOptions {
 	includeDefaults: boolean;
 }
 
-function normalizePath(input: string): string {
-	const trimmed = input.trim();
-	if (trimmed === "~") return homedir();
-	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
-	return trimmed;
-}
-
 function resolveSkillPath(p: string, cwd: string): string {
-	const normalized = normalizePath(p);
+	const normalized = expandTildePath(p.trim());
 	return isAbsolute(normalized) ? normalized : resolve(cwd, normalized);
 }
 

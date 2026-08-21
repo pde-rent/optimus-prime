@@ -8,12 +8,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
-import {
-	convertToLlm,
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-} from "../messages.js";
+import { convertToLlm } from "../messages.js";
 import type { ReadonlySessionManager, SessionEntry } from "../session-manager.js";
 import { estimateTokens } from "./compaction.js";
 import {
@@ -22,6 +17,7 @@ import {
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
+	getMessageFromEntry,
 	SUMMARIZATION_SYSTEM_PROMPT,
 	serializeConversation,
 } from "./utils.js";
@@ -115,38 +111,6 @@ export function collectEntriesForBranchSummary(
 
 	return { entries, commonAncestorId };
 }
-/**
- * Extract AgentMessage from a session entry.
- * Similar to getMessageFromEntry in compaction.ts but also handles compaction entries.
- */
-function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
-	switch (entry.type) {
-		case "message":
-			// Tool-result context remains attached to its assistant tool call.
-			if (entry.message.role === "toolResult") return undefined;
-			return entry.message;
-
-		case "custom_message":
-			return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
-
-		case "branch_summary":
-			return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);
-
-		case "compaction":
-			return createCompactionSummaryMessage(
-				entry.summary,
-				entry.tokensBefore,
-				entry.timestamp,
-				entry.customInstructions,
-			);
-		case "thinking_level_change":
-		case "model_change":
-		case "custom":
-		case "label":
-		case "session_info":
-			return undefined;
-	}
-}
 
 /**
  * Prepare entries for summarization with token budget.
@@ -184,7 +148,7 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 	}
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		const message = getMessageFromEntry(entry);
+		const message = getMessageFromEntry(entry, { excludeToolResults: true });
 		if (!message) continue;
 		extractFileOpsFromMessage(message, fileOps);
 

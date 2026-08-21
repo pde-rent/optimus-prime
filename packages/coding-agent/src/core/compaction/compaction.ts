@@ -8,12 +8,7 @@
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
-import {
-	convertToLlm,
-	createBranchSummaryMessage,
-	createCompactionSummaryMessage,
-	createCustomMessage,
-} from "../messages.js";
+import { convertToLlm } from "../messages.js";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../session-manager.js";
 import {
 	computeFileLists,
@@ -21,6 +16,7 @@ import {
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
+	getMessageFromEntry,
 	SUMMARIZATION_SYSTEM_PROMPT,
 	serializeLlmMessage,
 	truncateForSummary,
@@ -60,36 +56,8 @@ function extractFileOperations(
 
 	return fileOps;
 }
-/**
- * Extract AgentMessage from an entry if it produces one.
- * Returns undefined for entries that don't contribute to LLM context.
- */
-function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "message") {
-		return entry.message;
-	}
-	if (entry.type === "custom_message") {
-		return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
-	}
-	if (entry.type === "branch_summary") {
-		return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);
-	}
-	if (entry.type === "compaction") {
-		return createCompactionSummaryMessage(
-			entry.summary,
-			entry.tokensBefore,
-			entry.timestamp,
-			entry.customInstructions,
-		);
-	}
-	return undefined;
-}
-
 function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "compaction") {
-		return undefined;
-	}
-	return getMessageFromEntry(entry);
+	return getMessageFromEntry(entry, { excludeCompactions: true });
 }
 
 /** Result from compact() - SessionManager adds uuid/parentUuid when saving */

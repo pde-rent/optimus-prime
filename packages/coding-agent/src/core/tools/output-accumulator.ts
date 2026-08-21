@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, type TruncationResult, truncateTail } from "./truncate.js";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	type TruncationResult,
+	truncateTail,
+	utf8BoundaryStart,
+} from "./truncate.js";
 
 export interface OutputAccumulatorOptions {
 	maxLines?: number;
@@ -177,10 +183,7 @@ export class OutputAccumulator {
 			return;
 		}
 
-		let start = buffer.length - this.maxRollingBytes;
-		while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) {
-			start++;
-		}
+		const start = utf8BoundaryStart(buffer, buffer.length - this.maxRollingBytes);
 
 		this.tailStartsAtLineBoundary = start === 0 ? this.tailStartsAtLineBoundary : buffer[start - 1] === 0x0a;
 		this.tailText = buffer.subarray(start).toString("utf-8");

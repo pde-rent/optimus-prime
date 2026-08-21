@@ -7,6 +7,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import { isRecord } from "../utils/shared.js";
 import type { AgentCronJob } from "./cron-jobs.js";
 import { isSessionSlashCommandName, parseSessionSlashCommand, type SessionSlashCommand } from "./slash-commands.js";
 
@@ -322,10 +323,6 @@ export function createCompactionOutcomeMessage(
 		details: { ...details },
 		timestamp,
 	};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 function hasValidCustomMessageEnvelope(message: Record<string, unknown>, customType: string): boolean {

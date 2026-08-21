@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import * as os from "node:os";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { isAbsolute, join, resolve as resolvePath } from "node:path";
 
 const NARROW_NO_BREAK_SPACE = "\u202F";
 
@@ -41,6 +41,23 @@ export function expandPath(filePath: string): string {
 		return os.homedir() + normalized.slice(1);
 	}
 	return normalized;
+}
+/**
+ * Expand a leading `~` to the home directory: bare `~`, `~/...`, and `~name`
+ * (treated as `~/{name}`, matching the resource-loader convention).
+ * Does not trim or strip `@` prefixes; callers keep that responsibility.
+ */
+export function expandTildePath(filePath: string): string {
+	if (filePath === "~") {
+		return os.homedir();
+	}
+	if (filePath.startsWith("~/")) {
+		return join(os.homedir(), filePath.slice(2));
+	}
+	if (filePath.startsWith("~")) {
+		return join(os.homedir(), filePath.slice(1));
+	}
+	return filePath;
 }
 
 /**

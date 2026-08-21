@@ -9,6 +9,7 @@ import {
 	FILE_CHANGE_DIFF_INDENT,
 	formatFileChangeSummaryLine,
 } from "../../modes/interactive/components/edit-summary.js";
+import type { theme } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import {
 	applyEditsToNormalizedContent,
@@ -26,6 +27,8 @@ import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import { invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+
+type Theme = typeof theme;
 
 type EditPreview = EditDiffResult | EditDiffError;
 
@@ -195,10 +198,7 @@ function getRenderablePreviewInput(args: RenderableEditArgs | undefined): { path
 	return null;
 }
 
-function formatEditCall(
-	args: RenderableEditArgs | undefined,
-	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
-): string {
+function formatEditCall(args: RenderableEditArgs | undefined, theme: Theme): string {
 	const invalidArg = invalidArgText(theme);
 	const rawPath = str(args?.file_path ?? args?.path);
 	const path = rawPath !== null ? shortenPath(rawPath) : null;
@@ -210,7 +210,7 @@ function formatEditResult(
 	args: RenderableEditArgs | undefined,
 	preview: EditPreview | undefined,
 	result: EditToolResultLike,
-	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+	theme: Theme,
 	isError: boolean,
 ): string | undefined {
 	const rawPath = str(args?.file_path ?? args?.path);
@@ -238,7 +238,7 @@ function formatEditResult(
 function getEditHeaderBg(
 	preview: EditPreview | undefined,
 	settledError: boolean | undefined,
-	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+	theme: Theme,
 ): (text: string) => string {
 	if (settledError || (preview && "error" in preview)) {
 		return (text: string) => theme.bg("toolErrorBg", text);
@@ -281,7 +281,7 @@ class EditChangeSummaryComponent implements Component {
 function buildEditCallComponent(
 	component: EditCallRenderComponent,
 	args: RenderableEditArgs | undefined,
-	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+	theme: Theme,
 	expanded: boolean,
 	cwd: string,
 ): EditCallRenderComponent {

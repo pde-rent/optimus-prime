@@ -44,6 +44,14 @@ export interface TruncationOptions {
 	maxBytes?: number;
 }
 
+/** First byte index at or after `start` that begins a UTF-8 character. */
+export function utf8BoundaryStart(buf: Buffer, start: number): number {
+	while (start < buf.length && (buf[start] & 0xc0) === 0x80) {
+		start++;
+	}
+	return start;
+}
+
 /**
  * Format bytes as human-readable size.
  */
@@ -232,13 +240,7 @@ function truncateStringToBytesFromEnd(str: string, maxBytes: number): string {
 		return str;
 	}
 
-	let start = buf.length - maxBytes;
-
-	// Find a valid UTF-8 boundary (start of a character)
-	while (start < buf.length && (buf[start] & 0xc0) === 0x80) {
-		start++;
-	}
-
+	const start = utf8BoundaryStart(buf, buf.length - maxBytes);
 	return buf.slice(start).toString("utf-8");
 }
 

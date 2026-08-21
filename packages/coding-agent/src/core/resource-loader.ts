@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+
 import { join, resolve, sep } from "node:path";
 import { CONFIG_DIR_NAME, getBundledSkillsDir } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
@@ -19,6 +19,7 @@ import { SettingsManager } from "./settings-manager.js";
 import type { Skill } from "./skills.js";
 import { loadSkills } from "./skills.js";
 import { createSourceInfo, type SourceInfo } from "./source-info.js";
+import { expandTildePath } from "./tools/path-utils.js";
 import {
 	SEARXNG_CREDENTIAL_ID,
 	SERPER_CREDENTIAL_ID,
@@ -748,16 +749,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private resolveResourcePath(p: string): string {
-		const trimmed = p.trim();
-		let expanded = trimmed;
-		if (trimmed === "~") {
-			expanded = homedir();
-		} else if (trimmed.startsWith("~/")) {
-			expanded = join(homedir(), trimmed.slice(2));
-		} else if (trimmed.startsWith("~")) {
-			expanded = join(homedir(), trimmed.slice(1));
-		}
-		return resolve(this.cwd, expanded);
+		return resolve(this.cwd, expandTildePath(p.trim()));
 	}
 
 	private loadThemes(

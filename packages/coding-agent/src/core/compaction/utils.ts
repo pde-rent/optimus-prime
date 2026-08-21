@@ -4,6 +4,8 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "../messages.js";
+import type { SessionEntry } from "../session-manager.js";
 export interface FileOperations {
 	read: Set<string>;
 	written: Set<string>;
@@ -16,6 +18,38 @@ export function createFileOps(): FileOperations {
 		written: new Set(),
 		edited: new Set(),
 	};
+}
+
+/**
+ * Extract the AgentMessage a session entry contributes to LLM context, or
+ * undefined for bookkeeping entries. Callers summarizing a conversation branch
+ * pass excludeToolResults (tool-result context stays attached to its assistant
+ * tool call) or excludeCompactions (a prior summary must not summarize itself).
+ */
+export function getMessageFromEntry(
+	entry: SessionEntry,
+	options: { excludeToolResults?: boolean; excludeCompactions?: boolean } = {},
+): AgentMessage | undefined {
+	if (entry.type === "message") {
+		if (options.excludeToolResults && entry.message.role === "toolResult") return undefined;
+		return entry.message;
+	}
+	if (entry.type === "custom_message") {
+		return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
+	}
+	if (entry.type === "branch_summary") {
+		return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);
+	}
+	if (entry.type === "compaction") {
+		if (options.excludeCompactions) return undefined;
+		return createCompactionSummaryMessage(
+			entry.summary,
+			entry.tokensBefore,
+			entry.timestamp,
+			entry.customInstructions,
+		);
+	}
+	return undefined;
 }
 
 /**

@@ -255,6 +255,28 @@ function preRenderCustomTools(
 	return renderedTools;
 }
 
+/** Normalize the string-or-object options form both export entry points accept. */
+function normalizeExportOptions(options?: ExportOptions | string): ExportOptions {
+	return typeof options === "string" ? { outputPath: options } : options || {};
+}
+
+/**
+ * Render the session data and write the HTML file, defaulting the output path
+ * from the session file name.
+ */
+function writeHtmlExport(sessionData: SessionData, sourceFile: string, opts: ExportOptions): string {
+	const html = generateHtml(sessionData, opts.themeName);
+
+	let outputPath = opts.outputPath;
+	if (!outputPath) {
+		const sessionBasename = basename(sourceFile, ".jsonl");
+		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
+	}
+
+	writeFileSync(outputPath, html, "utf8");
+	return outputPath;
+}
+
 /**
  * Export session to HTML using SessionManager and AgentState.
  * Used by TUI's /export command.
@@ -264,7 +286,7 @@ export async function exportSessionToHtml(
 	state?: AgentState,
 	options?: ExportOptions | string,
 ): Promise<string> {
-	const opts: ExportOptions = typeof options === "string" ? { outputPath: options } : options || {};
+	const opts = normalizeExportOptions(options);
 
 	const sessionFile = sm.getSessionFile();
 	if (!sessionFile) {
@@ -292,16 +314,7 @@ export async function exportSessionToHtml(
 		renderedTools,
 	};
 
-	const html = generateHtml(sessionData, opts.themeName);
-
-	let outputPath = opts.outputPath;
-	if (!outputPath) {
-		const sessionBasename = basename(sessionFile, ".jsonl");
-		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
-	}
-
-	writeFileSync(outputPath, html, "utf8");
-	return outputPath;
+	return writeHtmlExport(sessionData, sessionFile, opts);
 }
 
 /**
@@ -309,7 +322,7 @@ export async function exportSessionToHtml(
  * Used by CLI for exporting arbitrary session files.
  */
 export async function exportFromFile(inputPath: string, options?: ExportOptions | string): Promise<string> {
-	const opts: ExportOptions = typeof options === "string" ? { outputPath: options } : options || {};
+	const opts = normalizeExportOptions(options);
 
 	if (!existsSync(inputPath)) {
 		throw new Error(`File not found: ${inputPath}`);
@@ -322,18 +335,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 		header: sm.getHeader(),
 		entries,
 		leafId,
-		systemPrompt: undefined,
-		tools: undefined,
 	};
 
-	const html = generateHtml(sessionData, opts.themeName);
-
-	let outputPath = opts.outputPath;
-	if (!outputPath) {
-		const inputBasename = basename(inputPath, ".jsonl");
-		outputPath = `${APP_NAME}-session-${inputBasename}.html`;
-	}
-
-	writeFileSync(outputPath, html, "utf8");
-	return outputPath;
+	return writeHtmlExport(sessionData, inputPath, opts);
 }

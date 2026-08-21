@@ -11,6 +11,13 @@ const RECENT_MODELS_LIMIT = 20;
 export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
 export const DEFAULT_REPL_IDLE_TIMEOUT_MINUTES = 10;
 
+export interface ToolTimeoutsSettings {
+	/** Default repl cell timeout in ms; a call-level timeout overrides it. default: 120000 */
+	replMs?: number;
+	/** Default bash tool timeout in seconds; 0 keeps the current no-default behavior. default: 0 */
+	bashSeconds?: number;
+}
+
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
@@ -148,10 +155,13 @@ export interface Settings {
 	/** Let an agent raise its own recursion limit after an observed failure. default: true */
 	dynamicDepth?: boolean;
 	dynamicContext?: boolean; // default: true - allow the agent to adjust context budget and compaction trigger at runtime
+	toolTimeouts?: ToolTimeoutsSettings;
 	/** Show the live sub-agent graph while children are running. default: true */
 	subagentGraph?: boolean;
 	/** Abort a turn whose streamed text or reasoning collapses into a repetition loop. default: true */
 	degeneracyGuard?: boolean;
+	/** Steer, abort, or stop a run whose assistant keeps planning without acting. default: true */
+	reasoningLoopGuard?: boolean;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
 	/** Multi-agent graph budget dial. "off" keeps the single-agent path. default: "off" */
@@ -548,6 +558,31 @@ export class SettingsManager {
 			this.modifiedProjectNestedFields.get(field)!.add(nestedKey);
 		}
 	}
+	/** Set one top-level global setting and persist it. */
+	private setGlobalField<K extends keyof Settings>(key: K, value: Settings[K]): void {
+		this.globalSettings[key] = value;
+		this.markModified(key);
+		this.save();
+	}
+
+	private ensureGlobalSection<K extends "compaction" | "agentTraces" | "retry" | "terminal" | "images">(
+		key: K,
+	): NonNullable<Settings[K]> {
+		if (!this.globalSettings[key]) {
+			this.globalSettings[key] = {} as NonNullable<Settings[K]>;
+		}
+		return this.globalSettings[key] as NonNullable<Settings[K]>;
+	}
+
+	private setProjectListField(
+		key: "packages" | "extensions" | "skills" | "prompts" | "themes",
+		value: unknown[],
+	): void {
+		const projectSettings = structuredClone(this.projectSettings);
+		(projectSettings as Record<string, unknown>)[key] = value;
+		this.markProjectModified(key);
+		this.saveProjectSettings(projectSettings);
+	}
 
 	private recordError(scope: SettingsScope, error: unknown): void {
 		const normalizedError = error instanceof Error ? error : new Error(String(error));
@@ -615,48 +650,35 @@ export class SettingsManager {
 		});
 	}
 
-	private save(): void {
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
-
-		if (this.globalSettingsLoadError) {
+	private persistScope(scope: SettingsScope, settings: Settings, loadError: Error | null): void {
+		if (loadError) {
+			const label = scope === "global" ? "Global" : "Project";
 			this.recordError(
-				"global",
-				new Error(
-					`Global settings not saved: settings file failed to parse: ${this.globalSettingsLoadError.message}`,
-				),
+				scope,
+				new Error(`${label} settings not saved: settings file failed to parse: ${loadError.message}`),
 			);
 			return;
 		}
 
-		const snapshotGlobalSettings = structuredClone(this.globalSettings);
-		const modifiedFields = new Set(this.modifiedFields);
-		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedNestedFields);
-
-		this.enqueueWrite("global", () => {
-			this.persistScopedSettings("global", snapshotGlobalSettings, modifiedFields, modifiedNestedFields);
+		const snapshot = structuredClone(settings);
+		const modifiedFields = new Set(scope === "global" ? this.modifiedFields : this.modifiedProjectFields);
+		const modifiedNestedFields = this.cloneModifiedNestedFields(
+			scope === "global" ? this.modifiedNestedFields : this.modifiedProjectNestedFields,
+		);
+		this.enqueueWrite(scope, () => {
+			this.persistScopedSettings(scope, snapshot, modifiedFields, modifiedNestedFields);
 		});
+	}
+
+	private save(): void {
+		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.persistScope("global", this.globalSettings, this.globalSettingsLoadError);
 	}
 
 	private saveProjectSettings(settings: Settings): void {
 		this.projectSettings = structuredClone(settings);
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
-
-		if (this.projectSettingsLoadError) {
-			this.recordError(
-				"project",
-				new Error(
-					`Project settings not saved: settings file failed to parse: ${this.projectSettingsLoadError.message}`,
-				),
-			);
-			return;
-		}
-
-		const snapshotProjectSettings = structuredClone(this.projectSettings);
-		const modifiedFields = new Set(this.modifiedProjectFields);
-		const modifiedNestedFields = this.cloneModifiedNestedFields(this.modifiedProjectNestedFields);
-		this.enqueueWrite("project", () => {
-			this.persistScopedSettings("project", snapshotProjectSettings, modifiedFields, modifiedNestedFields);
-		});
+		this.persistScope("project", this.projectSettings, this.projectSettingsLoadError);
 	}
 
 	async flush(): Promise<void> {
@@ -679,9 +701,7 @@ export class SettingsManager {
 	}
 
 	setOnboardingShown(shown: boolean): void {
-		this.globalSettings.onboardingShown = shown;
-		this.markModified("onboardingShown");
-		this.save();
+		this.setGlobalField("onboardingShown", shown);
 	}
 
 	getSessionDir(): string | undefined {
@@ -707,15 +727,11 @@ export class SettingsManager {
 	}
 
 	setDefaultProvider(provider: string): void {
-		this.globalSettings.defaultProvider = provider;
-		this.markModified("defaultProvider");
-		this.save();
+		this.setGlobalField("defaultProvider", provider);
 	}
 
 	setDefaultModel(modelId: string): void {
-		this.globalSettings.defaultModel = modelId;
-		this.markModified("defaultModel");
-		this.save();
+		this.setGlobalField("defaultModel", modelId);
 	}
 
 	setDefaultModelAndProvider(provider: string, modelId: string): void {
@@ -743,9 +759,7 @@ export class SettingsManager {
 	}
 
 	setSteeringMode(mode: "all" | "one-at-a-time"): void {
-		this.globalSettings.steeringMode = mode;
-		this.markModified("steeringMode");
-		this.save();
+		this.setGlobalField("steeringMode", mode);
 	}
 
 	getFollowUpMode(): "all" | "one-at-a-time" {
@@ -753,9 +767,7 @@ export class SettingsManager {
 	}
 
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
-		this.globalSettings.followUpMode = mode;
-		this.markModified("followUpMode");
-		this.save();
+		this.setGlobalField("followUpMode", mode);
 	}
 
 	getTheme(): string | undefined {
@@ -763,9 +775,7 @@ export class SettingsManager {
 	}
 
 	setTheme(theme: string): void {
-		this.globalSettings.theme = theme;
-		this.markModified("theme");
-		this.save();
+		this.setGlobalField("theme", theme);
 	}
 
 	getDefaultThinkingLevel(): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined {
@@ -773,9 +783,7 @@ export class SettingsManager {
 	}
 
 	setDefaultThinkingLevel(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"): void {
-		this.globalSettings.defaultThinkingLevel = level;
-		this.markModified("defaultThinkingLevel");
-		this.save();
+		this.setGlobalField("defaultThinkingLevel", level);
 	}
 
 	getDynamicEffort(): DynamicEffortMode {
@@ -783,9 +791,7 @@ export class SettingsManager {
 	}
 
 	setDynamicEffort(mode: DynamicEffortMode): void {
-		this.globalSettings.dynamicEffort = mode;
-		this.markModified("dynamicEffort");
-		this.save();
+		this.setGlobalField("dynamicEffort", mode);
 	}
 
 	/** Opt out to pin recursion at the configured `rlmMaxDepth`. */
@@ -794,19 +800,24 @@ export class SettingsManager {
 	}
 
 	setDynamicDepth(enabled: boolean): void {
-		this.globalSettings.dynamicDepth = enabled;
-		this.markModified("dynamicDepth");
-		this.save();
+		this.setGlobalField("dynamicDepth", enabled);
 	}
 
 	getDynamicContext(): boolean {
 		return this.settings.dynamicContext ?? true;
 	}
 
+	getToolTimeoutReplMs(): number {
+		const value = this.settings.toolTimeouts?.replMs;
+		return value !== undefined && value > 0 ? value : 120_000;
+	}
+
+	getToolTimeoutBashSeconds(): number {
+		return this.settings.toolTimeouts?.bashSeconds ?? 0;
+	}
+
 	setDynamicContext(enabled: boolean): void {
-		this.globalSettings.dynamicContext = enabled;
-		this.markModified("dynamicContext");
-		this.save();
+		this.setGlobalField("dynamicContext", enabled);
 	}
 
 	/** Opt out only to inspect a collapse; the loop otherwise streams and is billed to max_tokens. */
@@ -821,9 +832,16 @@ export class SettingsManager {
 	}
 
 	setDegeneracyGuard(enabled: boolean): void {
-		this.globalSettings.degeneracyGuard = enabled;
-		this.markModified("degeneracyGuard");
-		this.save();
+		this.setGlobalField("degeneracyGuard", enabled);
+	}
+
+	/** Kill switch for the reasoning-loop guard; the protection itself is default-on. */
+	getReasoningLoopGuard(): boolean {
+		return this.settings.reasoningLoopGuard ?? true;
+	}
+
+	setReasoningLoopGuard(enabled: boolean): void {
+		this.setGlobalField("reasoningLoopGuard", enabled);
 	}
 
 	getSubagentGraph(): boolean {
@@ -831,9 +849,7 @@ export class SettingsManager {
 	}
 
 	setSubagentGraph(enabled: boolean): void {
-		this.globalSettings.subagentGraph = enabled;
-		this.markModified("subagentGraph");
-		this.save();
+		this.setGlobalField("subagentGraph", enabled);
 	}
 
 	getDefaultServiceTier(): ServiceTier {
@@ -841,9 +857,7 @@ export class SettingsManager {
 	}
 
 	setDefaultServiceTier(serviceTier: ServiceTier): void {
-		this.globalSettings.defaultServiceTier = serviceTier;
-		this.markModified("defaultServiceTier");
-		this.save();
+		this.setGlobalField("defaultServiceTier", serviceTier);
 	}
 
 	getRlmMaxDepth(): number | undefined {
@@ -851,9 +865,7 @@ export class SettingsManager {
 	}
 
 	setRlmMaxDepth(maxDepth: number): void {
-		this.globalSettings.rlmMaxDepth = maxDepth;
-		this.markModified("rlmMaxDepth");
-		this.save();
+		this.setGlobalField("rlmMaxDepth", maxDepth);
 	}
 
 	/**
@@ -868,9 +880,7 @@ export class SettingsManager {
 	}
 
 	setGraphResolver(level: GraphResolverLevel): void {
-		this.globalSettings.graphResolver = level;
-		this.markModified("graphResolver");
-		this.save();
+		this.setGlobalField("graphResolver", level);
 	}
 
 	getGraphMaxTokens(): number | undefined {
@@ -879,9 +889,7 @@ export class SettingsManager {
 	}
 
 	setGraphMaxTokens(maxTokens: number): void {
-		this.globalSettings.graphMaxTokens = maxTokens;
-		this.markModified("graphMaxTokens");
-		this.save();
+		this.setGlobalField("graphMaxTokens", maxTokens);
 	}
 
 	getIdleEvictionMinutes(): number | "off" {
@@ -894,9 +902,7 @@ export class SettingsManager {
 		if (value !== "off" && (!Number.isFinite(value) || value <= 0)) {
 			throw new Error("Idle eviction minutes must be a positive number or off");
 		}
-		this.globalSettings.idleEvictionMinutes = value;
-		this.markModified("idleEvictionMinutes");
-		this.save();
+		this.setGlobalField("idleEvictionMinutes", value);
 	}
 
 	getReplIdleTimeoutMinutes(): number | "off" {
@@ -911,9 +917,7 @@ export class SettingsManager {
 		if (value !== "off" && (!Number.isFinite(value) || value <= 0)) {
 			throw new Error("REPL idle timeout minutes must be a positive number or off");
 		}
-		this.globalSettings.replIdleTimeoutMinutes = value;
-		this.markModified("replIdleTimeoutMinutes");
-		this.save();
+		this.setGlobalField("replIdleTimeoutMinutes", value);
 	}
 
 	getTransport(): TransportSetting {
@@ -921,9 +925,7 @@ export class SettingsManager {
 	}
 
 	setTransport(transport: TransportSetting): void {
-		this.globalSettings.transport = transport;
-		this.markModified("transport");
-		this.save();
+		this.setGlobalField("transport", transport);
 	}
 
 	getCompactionEnabled(): boolean {
@@ -931,10 +933,7 @@ export class SettingsManager {
 	}
 
 	setCompactionEnabled(enabled: boolean): void {
-		if (!this.globalSettings.compaction) {
-			this.globalSettings.compaction = {};
-		}
-		this.globalSettings.compaction.enabled = enabled;
+		this.ensureGlobalSection("compaction").enabled = enabled;
 		this.markModified("compaction", "enabled");
 		this.save();
 	}
@@ -944,10 +943,7 @@ export class SettingsManager {
 	}
 
 	setAgentTracesEnabled(enabled: boolean): void {
-		if (!this.globalSettings.agentTraces) {
-			this.globalSettings.agentTraces = {};
-		}
-		this.globalSettings.agentTraces.enabled = enabled;
+		this.ensureGlobalSection("agentTraces").enabled = enabled;
 		this.markModified("agentTraces", "enabled");
 		this.save();
 	}
@@ -1065,10 +1061,7 @@ export class SettingsManager {
 	}
 
 	setRetryEnabled(enabled: boolean): void {
-		if (!this.globalSettings.retry) {
-			this.globalSettings.retry = {};
-		}
-		this.globalSettings.retry.enabled = enabled;
+		this.ensureGlobalSection("retry").enabled = enabled;
 		this.markModified("retry", "enabled");
 		this.save();
 	}
@@ -1094,9 +1087,7 @@ export class SettingsManager {
 	}
 
 	setHideThinkingBlock(hide: boolean): void {
-		this.globalSettings.hideThinkingBlock = hide;
-		this.markModified("hideThinkingBlock");
-		this.save();
+		this.setGlobalField("hideThinkingBlock", hide);
 	}
 
 	getShellPath(): string | undefined {
@@ -1104,9 +1095,7 @@ export class SettingsManager {
 	}
 
 	setShellPath(path: string | undefined): void {
-		this.globalSettings.shellPath = path;
-		this.markModified("shellPath");
-		this.save();
+		this.setGlobalField("shellPath", path);
 	}
 
 	/** Start-up brand animation and sound. default: true */
@@ -1115,9 +1104,7 @@ export class SettingsManager {
 	}
 
 	setIgnition(enabled: boolean): void {
-		this.globalSettings.ignition = enabled;
-		this.markModified("ignition");
-		this.save();
+		this.setGlobalField("ignition", enabled);
 	}
 
 	getQuietStartup(): boolean {
@@ -1125,9 +1112,7 @@ export class SettingsManager {
 	}
 
 	setQuietStartup(quiet: boolean): void {
-		this.globalSettings.quietStartup = quiet;
-		this.markModified("quietStartup");
-		this.save();
+		this.setGlobalField("quietStartup", quiet);
 	}
 
 	getShellCommandPrefix(): string | undefined {
@@ -1135,9 +1120,7 @@ export class SettingsManager {
 	}
 
 	setShellCommandPrefix(prefix: string | undefined): void {
-		this.globalSettings.shellCommandPrefix = prefix;
-		this.markModified("shellCommandPrefix");
-		this.save();
+		this.setGlobalField("shellCommandPrefix", prefix);
 	}
 
 	getNpmCommand(): string[] | undefined {
@@ -1145,9 +1128,7 @@ export class SettingsManager {
 	}
 
 	setNpmCommand(command: string[] | undefined): void {
-		this.globalSettings.npmCommand = command ? [...command] : undefined;
-		this.markModified("npmCommand");
-		this.save();
+		this.setGlobalField("npmCommand", command === undefined ? undefined : [...command]);
 	}
 
 	getPackages(): PackageSource[] {
@@ -1155,16 +1136,11 @@ export class SettingsManager {
 	}
 
 	setPackages(packages: PackageSource[]): void {
-		this.globalSettings.packages = packages;
-		this.markModified("packages");
-		this.save();
+		this.setGlobalField("packages", packages);
 	}
 
 	setProjectPackages(packages: PackageSource[]): void {
-		const projectSettings = structuredClone(this.projectSettings);
-		projectSettings.packages = packages;
-		this.markProjectModified("packages");
-		this.saveProjectSettings(projectSettings);
+		this.setProjectListField("packages", packages);
 	}
 
 	getExtensionPaths(): string[] {
@@ -1172,16 +1148,11 @@ export class SettingsManager {
 	}
 
 	setExtensionPaths(paths: string[]): void {
-		this.globalSettings.extensions = paths;
-		this.markModified("extensions");
-		this.save();
+		this.setGlobalField("extensions", paths);
 	}
 
 	setProjectExtensionPaths(paths: string[]): void {
-		const projectSettings = structuredClone(this.projectSettings);
-		projectSettings.extensions = paths;
-		this.markProjectModified("extensions");
-		this.saveProjectSettings(projectSettings);
+		this.setProjectListField("extensions", paths);
 	}
 
 	getSkillPaths(): string[] {
@@ -1189,16 +1160,11 @@ export class SettingsManager {
 	}
 
 	setSkillPaths(paths: string[]): void {
-		this.globalSettings.skills = paths;
-		this.markModified("skills");
-		this.save();
+		this.setGlobalField("skills", paths);
 	}
 
 	setProjectSkillPaths(paths: string[]): void {
-		const projectSettings = structuredClone(this.projectSettings);
-		projectSettings.skills = paths;
-		this.markProjectModified("skills");
-		this.saveProjectSettings(projectSettings);
+		this.setProjectListField("skills", paths);
 	}
 
 	getPromptTemplatePaths(): string[] {
@@ -1206,16 +1172,11 @@ export class SettingsManager {
 	}
 
 	setPromptTemplatePaths(paths: string[]): void {
-		this.globalSettings.prompts = paths;
-		this.markModified("prompts");
-		this.save();
+		this.setGlobalField("prompts", paths);
 	}
 
 	setProjectPromptTemplatePaths(paths: string[]): void {
-		const projectSettings = structuredClone(this.projectSettings);
-		projectSettings.prompts = paths;
-		this.markProjectModified("prompts");
-		this.saveProjectSettings(projectSettings);
+		this.setProjectListField("prompts", paths);
 	}
 
 	getThemePaths(): string[] {
@@ -1223,16 +1184,11 @@ export class SettingsManager {
 	}
 
 	setThemePaths(paths: string[]): void {
-		this.globalSettings.themes = paths;
-		this.markModified("themes");
-		this.save();
+		this.setGlobalField("themes", paths);
 	}
 
 	setProjectThemePaths(paths: string[]): void {
-		const projectSettings = structuredClone(this.projectSettings);
-		projectSettings.themes = paths;
-		this.markProjectModified("themes");
-		this.saveProjectSettings(projectSettings);
+		this.setProjectListField("themes", paths);
 	}
 
 	getEnableSkillCommands(): boolean {
@@ -1240,9 +1196,7 @@ export class SettingsManager {
 	}
 
 	setEnableSkillCommands(enabled: boolean): void {
-		this.globalSettings.enableSkillCommands = enabled;
-		this.markModified("enableSkillCommands");
-		this.save();
+		this.setGlobalField("enableSkillCommands", enabled);
 	}
 
 	getBundledSkills(): { websearch: boolean } {
@@ -1260,9 +1214,7 @@ export class SettingsManager {
 	}
 
 	setEnableBuiltinSkills(enabled: boolean): void {
-		this.globalSettings.enableBuiltinSkills = enabled;
-		this.markModified("enableBuiltinSkills");
-		this.save();
+		this.setGlobalField("enableBuiltinSkills", enabled);
 	}
 
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
@@ -1274,10 +1226,7 @@ export class SettingsManager {
 	}
 
 	setShowImages(show: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.showImages = show;
+		this.ensureGlobalSection("terminal").showImages = show;
 		this.markModified("terminal", "showImages");
 		this.save();
 	}
@@ -1290,10 +1239,7 @@ export class SettingsManager {
 	}
 
 	setClearOnShrink(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.clearOnShrink = enabled;
+		this.ensureGlobalSection("terminal").clearOnShrink = enabled;
 		this.markModified("terminal", "clearOnShrink");
 		this.save();
 	}
@@ -1306,10 +1252,7 @@ export class SettingsManager {
 	}
 
 	setFullscreen(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.fullscreen = enabled;
+		this.ensureGlobalSection("terminal").fullscreen = enabled;
 		this.markModified("terminal", "fullscreen");
 		this.save();
 	}
@@ -1319,10 +1262,7 @@ export class SettingsManager {
 	}
 
 	setFullscreenMouse(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.fullscreenMouse = enabled;
+		this.ensureGlobalSection("terminal").fullscreenMouse = enabled;
 		this.markModified("terminal", "fullscreenMouse");
 		this.save();
 	}
@@ -1332,10 +1272,7 @@ export class SettingsManager {
 	}
 
 	setShowTerminalProgress(enabled: boolean): void {
-		if (!this.globalSettings.terminal) {
-			this.globalSettings.terminal = {};
-		}
-		this.globalSettings.terminal.showTerminalProgress = enabled;
+		this.ensureGlobalSection("terminal").showTerminalProgress = enabled;
 		this.markModified("terminal", "showTerminalProgress");
 		this.save();
 	}
@@ -1345,10 +1282,7 @@ export class SettingsManager {
 	}
 
 	setImageAutoResize(enabled: boolean): void {
-		if (!this.globalSettings.images) {
-			this.globalSettings.images = {};
-		}
-		this.globalSettings.images.autoResize = enabled;
+		this.ensureGlobalSection("images").autoResize = enabled;
 		this.markModified("images", "autoResize");
 		this.save();
 	}
@@ -1358,10 +1292,7 @@ export class SettingsManager {
 	}
 
 	setBlockImages(blocked: boolean): void {
-		if (!this.globalSettings.images) {
-			this.globalSettings.images = {};
-		}
-		this.globalSettings.images.blockImages = blocked;
+		this.ensureGlobalSection("images").blockImages = blocked;
 		this.markModified("images", "blockImages");
 		this.save();
 	}
@@ -1375,9 +1306,7 @@ export class SettingsManager {
 	}
 
 	setEnabledModels(patterns: string[] | undefined): void {
-		this.globalSettings.enabledModels = patterns;
-		this.markModified("enabledModels");
-		this.save();
+		this.setGlobalField("enabledModels", patterns);
 	}
 
 	getTreeFilterMode(): "default" | "no-tools" | "user-only" | "labeled-only" | "all" {
@@ -1387,9 +1316,7 @@ export class SettingsManager {
 	}
 
 	setTreeFilterMode(mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all"): void {
-		this.globalSettings.treeFilterMode = mode;
-		this.markModified("treeFilterMode");
-		this.save();
+		this.setGlobalField("treeFilterMode", mode);
 	}
 
 	getShowHardwareCursor(): boolean {
@@ -1397,9 +1324,7 @@ export class SettingsManager {
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
-		this.globalSettings.showHardwareCursor = enabled;
-		this.markModified("showHardwareCursor");
-		this.save();
+		this.setGlobalField("showHardwareCursor", enabled);
 	}
 
 	getEditorPaddingX(): number {
@@ -1407,9 +1332,7 @@ export class SettingsManager {
 	}
 
 	setEditorPaddingX(padding: number): void {
-		this.globalSettings.editorPaddingX = Math.max(0, Math.min(3, Math.floor(padding)));
-		this.markModified("editorPaddingX");
-		this.save();
+		this.setGlobalField("editorPaddingX", Math.max(0, Math.min(3, Math.floor(padding))));
 	}
 
 	getAutocompleteMaxVisible(): number {
@@ -1417,9 +1340,7 @@ export class SettingsManager {
 	}
 
 	setAutocompleteMaxVisible(maxVisible: number): void {
-		this.globalSettings.autocompleteMaxVisible = Math.max(3, Math.min(20, Math.floor(maxVisible)));
-		this.markModified("autocompleteMaxVisible");
-		this.save();
+		this.setGlobalField("autocompleteMaxVisible", Math.max(3, Math.min(20, Math.floor(maxVisible))));
 	}
 
 	getCodeBlockIndent(): string {
@@ -1431,8 +1352,6 @@ export class SettingsManager {
 	}
 
 	setWarnings(warnings: WarningSettings): void {
-		this.globalSettings.warnings = { ...warnings };
-		this.markModified("warnings");
-		this.save();
+		this.setGlobalField("warnings", { ...warnings });
 	}
 }

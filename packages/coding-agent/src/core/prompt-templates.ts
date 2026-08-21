@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { homedir } from "os";
+
 import { basename, dirname, isAbsolute, join, resolve, sep } from "path";
 import { CONFIG_DIR_NAME } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
 import { parseSlashCommand } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
+import { expandTildePath } from "./tools/path-utils.js";
 
 /**
  * Represents a prompt template loaded from a markdown file
@@ -187,16 +188,8 @@ export interface LoadPromptTemplatesOptions {
 	includeDefaults: boolean;
 }
 
-function normalizePath(input: string): string {
-	const trimmed = input.trim();
-	if (trimmed === "~") return homedir();
-	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
-	return trimmed;
-}
-
 function resolvePromptPath(p: string, cwd: string): string {
-	const normalized = normalizePath(p);
+	const normalized = expandTildePath(p.trim());
 	return isAbsolute(normalized) ? normalized : resolve(cwd, normalized);
 }
 
