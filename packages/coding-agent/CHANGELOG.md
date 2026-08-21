@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
-- Fixed `/compact` failing on sessions already over the model's context limit: summarization now splits the conversation into chunks that fit the context window and merges them into one summary.
+- Fixed REPL cells losing top-level declarations that were preceded by a comment; the next cell could not see them.
+- Added a configurable context budget: `compaction.maxContextTokens` (default 666000, hard-capped by the model window) and `compaction.compactAtTokens` (default 500000) control where threshold compaction triggers on large-window models.
+- Added dynamic context control for the main agent: `rlm.get_context_budget()` / `rlm.set_context_budget({ maxContextTokens?, compactAtTokens? })`, session-scoped and gated by the new `dynamicContext` setting (default on).
+- Converted the remaining `vi.hoisted`/`vi.mock` test files to native bun:test module mocks; fixed fake-timer API usage that no longer exists in bun:test.- Fixed `/compact` failing on sessions already over the model's context limit: summarization now splits the conversation into chunks that fit the context window and merges them into one summary.
 - Fixed `compaction-summary-reasoning.test.ts` crashing at load on the removed vitest compat layer; it now uses bun:test module mocks and restores them after the run.
 - Added on-demand memory recall with `rlm.harness.search_memory()` for deterministic BM25F-ranked hits and `rlm.harness.get_memory()` for one entry in full.
 - Removed memory contents from the injected system prompt; memories are now reachable only through on-demand search.
@@ -25,7 +28,10 @@
 - Added built-in code craft and verification guidance to the default system prompt: a reuse-first order of preference before adding code, aggressive consolidation of duplicated logic into one generic unit bounded by whether a peer can review and test it, a blast-radius check before widening a shared change, a list of things never traded away, and proof against the real path rather than a clean build or a self-report.
 - Added an explicit precedence line to the project context block, so `AGENTS.md` and `CLAUDE.md` rules now state that they outrank the general guidance above them.
 - Removed a duplicated dependency-preference sentence from the REPL guidance, now covered once by the code craft section.
-
+- Fixed agent message bodies re-wrapping their full text on every frame; the wrap is now cached per width and invalidated on content changes.
+- Fixed bash output blocks rebuilding their whole display on every stdout chunk; appends now mark the block dirty and the display rebuilds lazily on render, removing quadratic cost on chatty commands.
+- Removed the blocking existsSync/mkdirSync syscalls from the per-message session persistence hot path; the session directory and file are now checked once per session, with ENOENT recovery rebuilding the file if it vanished.
+- Added idle reaping of Bun REPL kernel processes: after `replIdleTimeoutMinutes` (default 10, "off" to disable) without a cell, the kernel is disposed with a final snapshot and a later cell transparently restarts it and restores that snapshot.
 ## [0.7.3] - 2026-08-17
 
 - Fixed assistant rendering when provider payloads contain null or sparse content blocks.

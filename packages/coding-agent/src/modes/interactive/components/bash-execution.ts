@@ -28,6 +28,7 @@ export class BashExecutionComponent extends ExpandableComponent implements Colla
 	private truncationResult?: TruncationResult;
 	private fullOutputPath?: string;
 	private contentContainer: Container;
+	private displayDirty = false;
 
 	constructor(command: string, ui: TUI, excludeFromContext = false, options: { suppressLeadingSpace?: boolean } = {}) {
 		super();
@@ -61,7 +62,16 @@ export class BashExecutionComponent extends ExpandableComponent implements Colla
 
 	override invalidate(): void {
 		super.invalidate();
+		this.displayDirty = false;
 		this.updateDisplay();
+	}
+
+	override render(width: number): string[] {
+		if (this.displayDirty) {
+			this.displayDirty = false;
+			this.updateDisplay();
+		}
+		return super.render(width);
 	}
 
 	appendOutput(chunk: string): void {
@@ -76,7 +86,7 @@ export class BashExecutionComponent extends ExpandableComponent implements Colla
 			this.outputLines.push(...newLines);
 		}
 
-		this.updateDisplay();
+		this.displayDirty = true;
 	}
 
 	setComplete(
@@ -96,6 +106,7 @@ export class BashExecutionComponent extends ExpandableComponent implements Colla
 
 		this.loader.stop();
 
+		this.displayDirty = false;
 		this.updateDisplay();
 	}
 
@@ -104,6 +115,7 @@ export class BashExecutionComponent extends ExpandableComponent implements Colla
 		this.errorMessage = message;
 		this.status = "error";
 		this.loader.stop();
+		this.displayDirty = false;
 		this.updateDisplay();
 	}
 

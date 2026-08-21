@@ -5,6 +5,7 @@ import {
 	Spacer,
 	Text,
 	truncateToWidth,
+	VersionedRenderCache,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
@@ -46,13 +47,22 @@ export function agentMessageBodyLines(message: string, width: number): string[] 
 }
 
 class AgentMessageBodyComponent implements Component {
+	private readonly renderCache = new VersionedRenderCache();
+
 	constructor(private readonly message: string) {}
 
 	render(width: number): string[] {
-		return agentMessageBodyLines(this.message, width);
+		const safeWidth = Math.max(1, width);
+		const cached = this.renderCache.get(safeWidth, 0);
+		if (cached) {
+			return cached;
+		}
+		return this.renderCache.set(safeWidth, 0, agentMessageBodyLines(this.message, safeWidth));
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.renderCache.invalidate();
+	}
 }
 
 export class AgentMessageComponent extends Container implements Collapsible {

@@ -88,3 +88,27 @@ describe("BashExecutionComponent width handling (#2569)", () => {
 		expect(rendered).not.toContain("Running...");
 	});
 });
+describe("BashExecutionComponent lazy display rebuild", () => {
+	beforeAll(() => {
+		initTheme(undefined, false);
+	});
+
+	it("reflects appended output on the next render and keeps getOutput exact", () => {
+		const { stub } = createTuiStub(120);
+		const component = new BashExecutionComponent("seq 3", stub);
+
+		component.appendOutput("line1\nline2\n");
+		component.appendOutput("line3\n");
+
+		const rendered = component
+			.render(120)
+			.map((line) => line.replace(/\[[0-9;]*m/g, ""))
+			.join("\n");
+		expect(rendered).toContain("line1");
+		expect(rendered).toContain("line2");
+		expect(rendered).toContain("line3");
+
+		// getOutput must keep exact truncateTail input semantics.
+		expect(component.getOutput()).toBe("line1\nline2\nline3\n");
+	});
+});
