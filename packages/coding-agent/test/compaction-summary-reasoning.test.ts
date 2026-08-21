@@ -1,23 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 
-const { completeSimpleMock } = vi.hoisted(() => ({
-	completeSimpleMock: vi.fn(),
-}));
-
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualEarendilWorksPiAi = { ...(await import("@earendil-works/pi-ai")) };
-vi.mock("@earendil-works/pi-ai", () => {
-	const actual = actualEarendilWorksPiAi;
-	return {
-		...actual,
-		completeSimple: completeSimpleMock,
-	};
-});
-
-const { generateSummary } = await import("../src/core/compaction/index.js");
 
 function createModel(reasoning: boolean): Model<"anthropic-messages"> {
 	return {
@@ -52,12 +39,28 @@ const mockSummaryResponse: AssistantMessage = {
 	timestamp: Date.now(),
 };
 
+const completeSimpleMock = mock((_model: unknown, _messages: unknown, _options: unknown) =>
+	Promise.resolve(mockSummaryResponse),
+);
+
+mock.module("@earendil-works/pi-ai", () => ({
+	...actualEarendilWorksPiAi,
+	completeSimple: completeSimpleMock,
+}));
+
+const { generateSummary } = await import("../src/core/compaction/index.js");
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("@earendil-works/pi-ai", () => actualEarendilWorksPiAi);
+});
+
 const messages: AgentMessage[] = [{ role: "user", content: "Summarize this.", timestamp: Date.now() }];
 
 describe("generateSummary reasoning options", () => {
 	beforeEach(() => {
 		completeSimpleMock.mockReset();
-		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
+		completeSimpleMock.mockImplementation(() => Promise.resolve(mockSummaryResponse));
 	});
 
 	it("uses the provided thinking level for reasoning-capable models", async () => {

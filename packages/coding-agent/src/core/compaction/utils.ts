@@ -76,25 +76,24 @@ const TOOL_RESULT_MAX_CHARS = 2000;
  * Truncate text to a maximum character length for summarization.
  * Keeps the beginning and appends a truncation marker.
  */
-function truncateForSummary(text: string, maxChars: number): string {
+export function truncateForSummary(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
 	const truncatedChars = text.length - maxChars;
 	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
 }
 
 /**
- * Serialize LLM messages to text for summarization.
+ * Serialize a single LLM message to text for summarization.
+ * Returns undefined for messages with no serializable content.
  * This prevents the model from treating it as a conversation to continue.
  * Call convertToLlm() first to handle custom message types.
  *
  * Tool results are truncated to keep the summarization request within
  * reasonable token budgets. Full content is not needed for summarization.
  */
-export function serializeConversation(messages: Message[]): string {
-	const parts: string[] = [];
-
-	for (const msg of messages) {
-		if (msg.role === "user") {
+export function serializeLlmMessage(msg: Message): string | undefined {
+	switch (msg.role) {
+		case "user": {
 			const content =
 				typeof msg.content === "string"
 					? msg.content
@@ -102,8 +101,9 @@ export function serializeConversation(messages: Message[]): string {
 							.filter((c): c is { type: "text"; text: string } => c.type === "text")
 							.map((c) => c.text)
 							.join("");
-			if (content) parts.push(`[User]: ${content}`);
-		} else if (msg.role === "assistant") {
+			return content ? `[User]: ${content}` : undefined;
+		}
+		case "assistant": {
 			const textParts: string[] = [];
 			const thinkingParts: string[] = [];
 			const toolCalls: string[] = [];
@@ -122,6 +122,7 @@ export function serializeConversation(messages: Message[]): string {
 				}
 			}
 
+			const parts: string[] = [];
 			if (thinkingParts.length > 0) {
 				parts.push(`[Assistant thinking]: ${thinkingParts.join("\n")}`);
 			}
@@ -131,17 +132,26 @@ export function serializeConversation(messages: Message[]): string {
 			if (toolCalls.length > 0) {
 				parts.push(`[Assistant tool calls]: ${toolCalls.join("; ")}`);
 			}
-		} else if (msg.role === "toolResult") {
+			return parts.length > 0 ? parts.join("\n\n") : undefined;
+		}
+		case "toolResult": {
 			const content = msg.content
 				.filter((c): c is { type: "text"; text: string } => c.type === "text")
 				.map((c) => c.text)
 				.join("");
-			if (content) {
-				parts.push(`[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}`);
-			}
+			return content ? `[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}` : undefined;
 		}
+		default:
+			return undefined;
 	}
+}
 
+/**
+ * Serialize LLM messages to text for summarization.
+ * Call convertToLlm() first to handle custom message types.
+ */
+export function serializeConversation(messages: Message[]): string {
+	const parts = messages.map(serializeLlmMessage).filter((p): p is string => p !== undefined);
 	return parts.join("\n\n");
 }
 export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed `/compact` failing on sessions already over the model's context limit: summarization now splits the conversation into chunks that fit the context window and merges them into one summary.
+- Fixed `compaction-summary-reasoning.test.ts` crashing at load on the removed vitest compat layer; it now uses bun:test module mocks and restores them after the run.
 - Added on-demand memory recall with `rlm.harness.search_memory()` for deterministic BM25F-ranked hits and `rlm.harness.get_memory()` for one entry in full.
 - Removed memory contents from the injected system prompt; memories are now reachable only through on-demand search.
 - Fixed ordinary continual harness writes invalidating the whole prompt cache: the injected harness block no longer carries entry counts, entry versions, or the recent refinement log.

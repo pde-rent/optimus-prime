@@ -6,7 +6,7 @@
  */
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
@@ -22,7 +22,8 @@ import {
 	type FileOperations,
 	formatFileOperations,
 	SUMMARIZATION_SYSTEM_PROMPT,
-	serializeConversation,
+	serializeLlmMessage,
+	truncateForSummary,
 } from "./utils.js";
 /** Details stored in CompactionEntry.details for file tracking */
 export interface CompactionDetails {
@@ -500,6 +501,123 @@ export function buildSummarizationPrompt(customInstructions?: string, previousSu
 	}
 	return `${basePrompt}\n\n${KERNEL_PERSIST_SUMMARY_NOTE}`;
 }
+/**
+ * Conservative chars-per-token estimate, matching estimateTokens().
+ */
+const ESTIMATED_CHARS_PER_TOKEN = 4;
+/** Overhead for the system prompt, wrappers, and instructions, in tokens. */
+const SUMMARIZATION_OVERHEAD_TOKENS = 2048;
+
+/**
+ * Maximum serialized conversation characters per summarization request, so the
+ * request fits the model's context window even when the conversation exceeds it.
+ */
+export function summarizeChunkCharBudget(contextWindow: number | undefined, reserveTokens: number): number {
+	const window = contextWindow && contextWindow > 0 ? contextWindow : 128000;
+	const budgetTokens = Math.max(4096, Math.floor(window - reserveTokens - SUMMARIZATION_OVERHEAD_TOKENS));
+	return budgetTokens * ESTIMATED_CHARS_PER_TOKEN;
+}
+
+/**
+ * Group serialized messages into chunks of at most maxChars each.
+ * A single message larger than maxChars is truncated.
+ */
+export function chunkSerializedParts(parts: string[], maxChars: number): string[] {
+	const chunks: string[] = [];
+	let current: string[] = [];
+	let size = 0;
+	for (const raw of parts) {
+		const part = raw.length > maxChars ? truncateForSummary(raw, maxChars) : raw;
+		if (current.length > 0 && size + part.length > maxChars) {
+			chunks.push(current.join("\n\n"));
+			current = [];
+			size = 0;
+		}
+		current.push(part);
+		size += part.length;
+	}
+	if (current.length > 0) chunks.push(current.join("\n\n"));
+	return chunks;
+}
+
+interface SummarizationRequest {
+	model: Model<any>;
+	reserveTokens: number;
+	apiKey: string;
+	headers?: Record<string, string>;
+	signal?: AbortSignal;
+	thinkingLevel?: ThinkingLevel;
+	systemPrompt: string;
+	maxOutputTokens: number;
+	buildPrompt: (previousSummary?: string) => string;
+	previousSummary?: string;
+	errorLabel: string;
+}
+
+/**
+ * Summarize serialized LLM messages. When the serialized conversation exceeds
+ * the model's context window it is split into chunks; each chunk after the
+ * first merges into the accumulated summary through buildPrompt's
+ * previousSummary argument (the update template).
+ */
+async function summarizeMessages(llmMessages: Message[], options: SummarizationRequest): Promise<string> {
+	const { model } = options;
+	const maxChunkChars = summarizeChunkCharBudget(model.contextWindow, options.reserveTokens);
+	const parts = llmMessages.map(serializeLlmMessage).filter((p): p is string => p !== undefined);
+	const chunks = chunkSerializedParts(parts, maxChunkChars);
+
+	let summary: string | undefined;
+	for (let i = 0; i < chunks.length; i++) {
+		const previousSummary = i === 0 ? options.previousSummary : summary;
+		let promptText = `<conversation>\n${chunks[i]}\n</conversation>\n\n`;
+		if (previousSummary) {
+			promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+		}
+		promptText += options.buildPrompt(previousSummary);
+
+		const completionOptions =
+			model.reasoning && options.thinkingLevel && options.thinkingLevel !== "off"
+				? {
+						maxTokens: options.maxOutputTokens,
+						signal: options.signal,
+						apiKey: options.apiKey,
+						headers: options.headers,
+						reasoning: options.thinkingLevel,
+					}
+				: {
+						maxTokens: options.maxOutputTokens,
+						signal: options.signal,
+						apiKey: options.apiKey,
+						headers: options.headers,
+					};
+
+		const response = await completeSimple(
+			model,
+			{
+				systemPrompt: options.systemPrompt,
+				messages: [
+					{
+						role: "user" as const,
+						content: [{ type: "text" as const, text: promptText }],
+						timestamp: Date.now(),
+					},
+				],
+			},
+			completionOptions,
+		);
+
+		if (response.stopReason === "error") {
+			throw new Error(`${options.errorLabel}: ${response.errorMessage || "Unknown error"}`);
+		}
+
+		summary = response.content
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map((c) => c.text)
+			.join("\n");
+	}
+
+	return summary ?? "";
+}
 
 /**
  * Generate a summary of the conversation using the LLM.
@@ -516,47 +634,21 @@ export async function generateSummary(
 	previousSummary?: string,
 	thinkingLevel?: ThinkingLevel,
 ): Promise<string> {
-	const maxTokens = Math.floor(0.8 * reserveTokens);
-
-	const basePrompt = buildSummarizationPrompt(customInstructions, previousSummary);
 	// Serialize before the LLM call so it summarizes rather than continues this conversation.
 	const llmMessages = convertToLlm(currentMessages);
-	const conversationText = serializeConversation(llmMessages);
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-	if (previousSummary) {
-		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-	}
-	promptText += basePrompt;
-
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
-
-	const completionOptions =
-		model.reasoning && thinkingLevel && thinkingLevel !== "off"
-			? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-			: { maxTokens, signal, apiKey, headers };
-
-	const response = await completeSimple(
+	return summarizeMessages(llmMessages, {
 		model,
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		completionOptions,
-	);
-
-	if (response.stopReason === "error") {
-		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
-	}
-
-	const textContent = response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
-
-	return textContent;
+		reserveTokens,
+		apiKey,
+		headers,
+		signal,
+		thinkingLevel,
+		systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+		maxOutputTokens: Math.floor(0.8 * reserveTokens),
+		buildPrompt: (prev) => buildSummarizationPrompt(customInstructions, prev),
+		previousSummary,
+		errorLabel: "Summarization failed",
+	});
 }
 export interface CompactionPreparation {
 	/** UUID of first entry to keep */
@@ -771,32 +863,18 @@ async function generateTurnPrefixSummary(
 	signal?: AbortSignal,
 	thinkingLevel?: ThinkingLevel,
 ): Promise<string> {
-	const maxTokens = Math.floor(0.5 * reserveTokens); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
-	const conversationText = serializeConversation(llmMessages);
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
-
-	const response = await completeSimple(
+	return summarizeMessages(llmMessages, {
 		model,
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		model.reasoning && thinkingLevel && thinkingLevel !== "off"
-			? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-			: { maxTokens, signal, apiKey, headers },
-	);
-
-	if (response.stopReason === "error") {
-		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
-	}
-
-	return response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
+		reserveTokens,
+		apiKey,
+		headers,
+		signal,
+		thinkingLevel,
+		systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+		// Smaller budget for turn prefix
+		maxOutputTokens: Math.floor(0.5 * reserveTokens),
+		buildPrompt: () => TURN_PREFIX_SUMMARIZATION_PROMPT,
+		errorLabel: "Turn prefix summarization failed",
+	});
 }
