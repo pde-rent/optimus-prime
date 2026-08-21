@@ -17,7 +17,6 @@ import {
 	renameSync,
 	rmSync,
 	statSync,
-	writeFileSync,
 	writeSync,
 } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
@@ -42,6 +41,13 @@ const SESSION_LIST_PARSE_MAX_LINE_CHARS = 1024 * 1024;
 const SESSION_LIST_LARGE_MESSAGE_PREVIEW_MAX_CHARS = 256;
 const SESSION_STREAMING_LOAD_THRESHOLD_BYTES = 128 * 1024 * 1024;
 const SESSION_ASYNC_PARSE_YIELD_BYTES = 4 * 1024 * 1024;
+// Entry types whose payloads can dominate resident memory (multi-MB tool
+// results, images). Only these become stubs on offload; small bookkeeping
+// entries stay intact.
+const OFFLOADABLE_ENTRY_TYPES = new Set(["message", "custom_message"]);
+// _rewriteFile flushes serialized entries to its temp file in chunks of about
+// this size instead of materializing one string for the whole file.
+const REWRITE_FLUSH_BYTES = 1024 * 1024;
 
 // Entry types that can represent user intent (vs. daemon bookkeeping like
 // session_state/agent_status/git_state/child_usage_attributed). Used by
@@ -426,6 +432,47 @@ export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEnt
 		}
 	}
 	return null;
+}
+/**
+ * Stub left in resident memory when an entry is offloaded after compaction.
+ * Keeps identity/tree fields plus the fields usage accounting and index
+ * building read; the full entry stays in the session file and is hydrated
+ * back on demand.
+ */
+function createOffloadedStub(entry: SessionEntry): SessionEntry {
+	const base = { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp };
+	if (entry.type === "message") {
+		const message = entry.message;
+		// usage must survive offload: computeOwnAndTotalUsage sums it across all
+		// entries, cumulative across compactions. Assistant stubs also keep the
+		// provider/model fields buildSessionContext reads for model attribution.
+		const stubMessage: AgentMessage =
+			message.role === "assistant"
+				? ({
+						role: "assistant",
+						usage: message.usage,
+						provider: message.provider,
+						model: message.model,
+						stopReason: message.stopReason,
+					} as AssistantMessage)
+				: ({ role: message.role } as Message);
+		return { type: "message", ...base, message: stubMessage };
+	}
+	return {
+		type: "custom_message",
+		...base,
+		customType: (entry as CustomMessageEntry).customType,
+		content: "",
+		display: (entry as CustomMessageEntry).display,
+	};
+}
+
+function writeAllSync(fd: number, text: string): void {
+	const buffer = Buffer.from(text, "utf8");
+	let written = 0;
+	while (written < buffer.length) {
+		written += writeSync(fd, buffer, written);
+	}
 }
 
 export function buildSessionContext(
@@ -1125,6 +1172,7 @@ export class SessionManager {
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 	private persistListeners = new Set<SessionPersistListener>();
+	private stubIds: Set<string> = new Set();
 
 	private constructor(
 		cwd: string,
@@ -1242,6 +1290,7 @@ export class SessionManager {
 		this.flushed = false;
 		this.fileEnsured = false;
 		this.hasAssistantEntry = false;
+		this.stubIds.clear();
 
 		if (this.persist) {
 			this.sessionFile = sessionFile;
@@ -1255,6 +1304,7 @@ export class SessionManager {
 		this.labelTimestampsById.clear();
 		this.leafId = null;
 		this.hasAssistantEntry = false;
+		this.stubIds.clear();
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
 			this.byId.set(entry.id, entry);
@@ -1276,20 +1326,54 @@ export class SessionManager {
 
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const content = `${this.fileEntries.map((e) => JSON.stringify(e)).join("\n")}\n`;
+		// Stubs only exist to shrink resident memory; the file must keep full
+		// entries, so hydrate everything before serializing. If the file is gone
+		// the offloaded history is unrecoverable — refuse to write gutted stubs
+		// rather than silently corrupting the session.
+		if (this.stubIds.size > 0) {
+			this._hydrateOffloadedEntries(new Set(this.stubIds));
+			if (this.stubIds.size > 0) {
+				throw new Error(
+					`Cannot rewrite session file: ${this.stubIds.size} offloaded entries could not be re-read from disk`,
+				);
+			}
+		}
 		const targetPath = realpathIfPresent(this.sessionFile);
 		const directory = dirname(targetPath);
 		mkdirSync(directory, { recursive: true });
 		const tempPath = join(directory, `.${basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`);
+		let fd: number | undefined;
 		try {
 			const metadata = statMetadataIfPresent(targetPath);
-			writeFileSync(tempPath, content, metadata === undefined ? undefined : { mode: metadata.mode });
+			fd = openSync(tempPath, "w", metadata === undefined ? undefined : metadata.mode);
+			// Stream entries out in bounded chunks; joining everything into one string
+			// transiently costs ~2x the file size on large sessions.
+			let pending: string[] = [];
+			let pendingBytes = 0;
+			const flushPending = () => {
+				if (pending.length === 0 || fd === undefined) return;
+				writeAllSync(fd, `${pending.join("\n")}\n`);
+				pending = [];
+				pendingBytes = 0;
+			};
+			for (const entry of this.fileEntries) {
+				const line = JSON.stringify(entry);
+				pending.push(line);
+				pendingBytes += line.length;
+				if (pendingBytes >= REWRITE_FLUSH_BYTES) {
+					flushPending();
+				}
+			}
+			flushPending();
+			closeSync(fd);
+			fd = undefined;
 			if (metadata !== undefined) {
 				chownSync(tempPath, metadata.uid, metadata.gid);
 				chmodSync(tempPath, metadata.mode);
 			}
 			renameSync(tempPath, targetPath);
 		} finally {
+			if (fd !== undefined) closeSync(fd);
 			rmSync(tempPath, { force: true });
 		}
 		this._notifyPersistListeners();
@@ -1338,6 +1422,11 @@ export class SessionManager {
 	materializeSessionFile(sessionDir?: string): string {
 		if (this.sessionFile) {
 			return this.sessionFile;
+		}
+		// Hydrate before this.sessionFile is repointed at the new target, so any
+		// stubs still re-read from the original file.
+		if (this.stubIds.size > 0) {
+			this._hydrateOffloadedEntries(new Set(this.stubIds));
 		}
 		const dir = sessionDir ?? (this.sessionDir || getDefaultSessionDir(this.cwd));
 		ensureDir(dir);
@@ -1513,6 +1602,7 @@ export class SessionManager {
 			customInstructions,
 		};
 		this._appendEntry(entry);
+		this._offloadPreCompactionEntries(entry.id);
 		return entry.id;
 	}
 
@@ -1755,17 +1845,120 @@ export class SessionManager {
 			throw error;
 		}
 	}
+	/**
+	 * Replace entries summarized away by the last compaction with lightweight
+	 * stubs so multi-MB tool results and images stop costing resident memory.
+	 * The session file on disk is untouched; stubs are hydrated back to full
+	 * entries lazily from it (see {@link _hydrateOffloadedEntries}).
+	 */
+	private _offloadPreCompactionEntries(compactionId: string): void {
+		if (!this.persist || !this.sessionFile) return;
+		const compaction = this.byId.get(compactionId);
+		if (compaction?.type !== "compaction") return;
+		const cutoffIndex = this.fileEntries.findIndex(
+			(e) => e.type !== "session" && e.id === compaction.firstKeptEntryId,
+		);
+		if (cutoffIndex < 0) return;
+		for (let i = 1; i < cutoffIndex; i++) {
+			const entry = this.fileEntries[i];
+			if (entry.type === "session" || !OFFLOADABLE_ENTRY_TYPES.has(entry.type)) continue;
+			if (this.stubIds.has(entry.id)) continue;
+			this.fileEntries[i] = createOffloadedStub(entry);
+			this.stubIds.add(entry.id);
+		}
+	}
+
+	/** Hydrate every offloaded entry in one pass over the session file. */
+	hydrateOffloadedEntries(): void {
+		if (this.stubIds.size === 0) return;
+		this._hydrateOffloadedEntries(new Set(this.stubIds));
+	}
+
+	private _hydrateEntry(entry: SessionEntry): SessionEntry {
+		if (!this.stubIds.has(entry.id)) return entry;
+		this._hydrateOffloadedEntries(new Set([entry.id]));
+		const full = this.byId.get(entry.id);
+		return full && !this.stubIds.has(full.id) ? full : entry;
+	}
+
+	private _hydratePathEntries(path: SessionEntry[]): SessionEntry[] {
+		if (this.stubIds.size === 0) return path;
+		const stubIds = path.filter((e) => this.stubIds.has(e.id)).map((e) => e.id);
+		if (stubIds.length === 0) return path;
+		this._hydrateOffloadedEntries(new Set(stubIds));
+		return path.map((e) => (this.stubIds.has(e.id) ? e : (this.byId.get(e.id) ?? e)));
+	}
+
+	private _hydrateOffloadedEntries(ids: Set<string>): void {
+		if (this.stubIds.size === 0 || !this.persist || !this.sessionFile) return;
+		const pending = new Set([...ids].filter((id) => this.stubIds.has(id)));
+		if (pending.size === 0) return;
+		let buffer: Buffer;
+		try {
+			buffer = readFileSync(this.sessionFile);
+		} catch {
+			return;
+		}
+		let start = 0;
+		while (start < buffer.length && pending.size > 0) {
+			const end = buffer.indexOf(0x0a, start);
+			const lineEnd = end === -1 ? buffer.length : end;
+			if (lineEnd > start) {
+				const line = buffer.toString("utf8", start, lineEnd);
+				// Check every pending id against the line: an earlier corrupt match on
+				// the same line must not strand later stubs. One line holds one entry,
+				// so parse at most once per candidate line.
+				const candidates: string[] = [];
+				for (const id of pending) {
+					if (line.includes(id)) candidates.push(id);
+				}
+				if (candidates.length > 0) {
+					let parsed: FileEntry | undefined;
+					try {
+						parsed = JSON.parse(line) as FileEntry;
+					} catch {
+						// Malformed line: no id on it can be restored; stubs stay in place.
+					}
+					if (parsed && parsed.type !== "session") {
+						for (const id of candidates) {
+							if (parsed.id !== id) continue;
+							const restored = parsed as SessionEntry;
+							// Attributions appended after offload mutated the stub's usage;
+							// re-apply them so the hydrated entry keeps the folded aggregate.
+							if (restored.type === "message" && restored.message.role === "assistant") {
+								for (const entry of this.byId.values()) {
+									if (entry.type === "child_usage_attributed" && entry.targetId === id) {
+										(restored as AssistantSessionMessageEntry).message.usage = cloneUsage(
+											entry.aggregateUsage,
+										);
+									}
+								}
+							}
+							const index = this.fileEntries.findIndex((e) => e.type !== "session" && e.id === id);
+							if (index >= 0) this.fileEntries[index] = restored;
+							this.byId.set(id, restored);
+							this.stubIds.delete(id);
+							pending.delete(id);
+							break;
+						}
+					}
+				}
+			}
+			start = lineEnd + 1;
+		}
+	}
 
 	getLeafId(): string | null {
 		return this.leafId;
 	}
 
 	getLeafEntry(): SessionEntry | undefined {
-		return this.leafId ? this.byId.get(this.leafId) : undefined;
+		return this.leafId ? this.getEntry(this.leafId) : undefined;
 	}
 
 	getEntry(id: string): SessionEntry | undefined {
-		return this.byId.get(id);
+		const entry = this.byId.get(id);
+		return entry ? this._hydrateEntry(entry) : undefined;
 	}
 
 	getChildren(parentId: string): SessionEntry[] {
@@ -1775,7 +1968,7 @@ export class SessionManager {
 				children.push(entry);
 			}
 		}
-		return children;
+		return this._hydratePathEntries(children);
 	}
 
 	getLabel(id: string): string | undefined {
@@ -1815,10 +2008,15 @@ export class SessionManager {
 			current = current.parentId ? this.byId.get(current.parentId) : undefined;
 		}
 		path.reverse();
-		return path;
+		return this._hydratePathEntries(path);
 	}
 
 	buildSessionContext(): SessionContext {
+		// Offloaded stubs are safe here without hydration: stubs keep role, usage,
+		// provider/model, and stopReason, which is all the walk below reads, and
+		// message bodies are only collected from firstKeptEntryId onward - never
+		// from the stubbed pre-compaction window. Hydrating here would undo the
+		// offload on every call (and _performCompaction calls this immediately).
 		// Pass fileEntries directly rather than getEntries(): the resolved context
 		// is computed from the leaf-to-root walk over byId (which already excludes
 		// the header), so the entries argument is only a fallback for an undefined
@@ -1837,6 +2035,9 @@ export class SessionManager {
 	}
 
 	getFlatTree(): SessionTreeFlatNode[] {
+		// Hydrate before mapping: tree UI and daemon session-tree consumers read
+		// entry content (roles, previews, content search), which stubs lack.
+		this.hydrateOffloadedEntries();
 		return this.getEntries().map((entry) => ({
 			entry,
 			label: this.labelsById.get(entry.id),

@@ -10,6 +10,7 @@ import {
 	type AgentMessage,
 	type AgentState,
 	type AgentTool,
+	extractTurnProgress,
 	type GetContinuationMessagesContext,
 	type ShouldStopAfterTurnContext,
 	type ThinkingLevel,
@@ -85,10 +86,12 @@ import {
 	autonomousStatus,
 	createAutonomousRuntimeState,
 	nextAutonomousContinuation,
+	noteAutonomousTurnProgress,
 	refreshAutonomousQualityGates,
 	setAutonomousEnabled,
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
+
 import {
 	expandInjectionRefs,
 	type InjectionRefSite,
@@ -3780,6 +3783,7 @@ export class AgentSession {
 				toolResults: event.toolResults,
 			};
 			await this._extensionRunner.emit(extensionEvent);
+			noteAutonomousTurnProgress(this._autonomousState, extractTurnProgress(event.message, event.toolResults));
 			this._turnIndex++;
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
@@ -9052,6 +9056,7 @@ export class AgentSession {
 				shellPath: this.settingsManager.getShellPath(),
 				commandPrefix: this.settingsManager.getShellCommandPrefix(),
 				idleTimeoutMs: replIdleMinutes === "off" ? 0 : replIdleMinutes * 60_000,
+				defaultTimeoutMs: this.settingsManager.getToolTimeoutReplMs(),
 				readyGate: previousDispose,
 				onRestore: notifyRestore ? (restored) => this._onReplStateRestored(restored) : undefined,
 				onLateSentAgentMessage: (toolCallId, message) => this._recordLateReplSentAgentMessage(toolCallId, message),
@@ -9545,6 +9550,7 @@ export class AgentSession {
 			maxRetryDelayMs: this.settingsManager.getProviderRetrySettings().maxRetryDelayMs,
 			toolExecution: this.agent.toolExecution,
 			degeneracyGuard: this.agent.degeneracyGuard,
+			reasoningLoopGuard: this.agent.reasoningLoopGuard,
 		});
 
 		const child = new AgentSession({
@@ -11396,6 +11402,9 @@ export class AgentSession {
 	}
 
 	getUserMessagesForForking(): Array<{ entryId: string; text: string }> {
+		// Offloaded (pre-compaction) message entries are stubs without content;
+		// hydrate them so the fork picker still lists every user message.
+		this.sessionManager.hydrateOffloadedEntries();
 		const entries = this.sessionManager.getEntries();
 		const result: Array<{ entryId: string; text: string }> = [];
 

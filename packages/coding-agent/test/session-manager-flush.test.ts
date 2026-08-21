@@ -14,6 +14,7 @@ import {
 	statSync,
 	symlinkSync,
 	type writeFileSync,
+	type writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -22,9 +23,11 @@ type ChmodSync = typeof chmodSync;
 type ChownSync = typeof chownSync;
 type RenameSync = typeof renameSync;
 type WriteFileSync = typeof writeFileSync;
+type WriteSync = typeof writeSync;
 
 const fsMocks = {
 	actualWriteFileSync: undefined as WriteFileSync | undefined,
+	writeSync: mock<WriteSync>(),
 	chmodSync: mock<ChmodSync>(),
 	chownSync: mock<ChownSync>(),
 	renameSync: mock<RenameSync>(),
@@ -36,6 +39,7 @@ const actualNodeFs = { ...(await import("node:fs")) };
 mock.module("node:fs", () => {
 	const actual = actualNodeFs;
 	fsMocks.actualWriteFileSync = actual.writeFileSync;
+	fsMocks.writeSync.mockImplementation(actual.writeSync);
 	fsMocks.chmodSync.mockImplementation(actual.chmodSync);
 	fsMocks.chownSync.mockImplementation(actual.chownSync);
 	fsMocks.renameSync.mockImplementation(actual.renameSync);
@@ -46,6 +50,7 @@ mock.module("node:fs", () => {
 		chownSync: fsMocks.chownSync,
 		renameSync: fsMocks.renameSync,
 		writeFileSync: fsMocks.writeFileSync,
+		writeSync: fsMocks.writeSync,
 	};
 });
 
@@ -114,8 +119,9 @@ describe("SessionManager.flushNow", () => {
 		const tempPrefix = `.${basename(file)}.`;
 
 		mgr.appendMessage({ role: "user", content: "pending", timestamp: Date.now() });
-		fsMocks.writeFileSync.mockImplementationOnce((path, data, options) => {
-			fsMocks.actualWriteFileSync!(path, Buffer.from(String(data)).subarray(0, 12), options);
+		// The rewrite streams through a temp-file fd, so simulate the failure on
+		// the streamed write instead of writeFileSync.
+		fsMocks.writeSync.mockImplementationOnce(() => {
 			throw new Error("disk full");
 		});
 
