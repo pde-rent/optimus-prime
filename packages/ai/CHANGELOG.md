@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added an overflow pattern for OpenRouter credit-tier prompt token limit errors (HTTP 402 "Prompt tokens limit exceeded") so sessions auto-compact instead of failing.
 
 ## [0.7.3] - 2026-08-17
 

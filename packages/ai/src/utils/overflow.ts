@@ -15,6 +15,7 @@ import type { AssistantMessage } from "../types.js";
  * - xAI: "This model's maximum prompt length is 131072 but the request contains 537812 tokens"
  * - Groq: "Please reduce the length of the messages or completion"
  * - OpenRouter: "This endpoint's maximum context length is X tokens. However, you requested about Y tokens"
+ * - OpenRouter: "402 Prompt tokens limit exceeded: 435790 > 359353. To increase, visit https://openrouter.ai/settings/credits"
  * - llama.cpp: "the request exceeds the available context size, try increasing it"
  * - LM Studio: "tokens to keep from the initial prompt is greater than the context length"
  * - GitHub Copilot: "prompt token count of X exceeds the limit of Y"
@@ -35,6 +36,7 @@ const OVERFLOW_PATTERNS = [
 	/input token count.*exceeds the maximum/i, // Google (Gemini)
 	/maximum prompt length is \d+/i, // xAI (Grok)
 	/reduce the length of the messages/i, // Groq
+	/prompt tokens limit exceeded/i, // OpenRouter credit-tier prompt limit (HTTP 402)
 	/maximum context length is \d+ tokens/i, // OpenRouter (all backends)
 	/exceeds the limit of \d+/i, // GitHub Copilot
 	/exceeds the available context size/i, // llama.cpp server

@@ -35,6 +35,13 @@ describe("isContextOverflow", () => {
 		expect(isContextOverflow(message, 32768)).toBe(true);
 	});
 
+	it("detects OpenRouter credit-tier prompt token limit errors", () => {
+		const message = createErrorMessage(
+			"402 Prompt tokens limit exceeded: 435790 > 359353. To increase, visit https://openrouter.ai/settings/credits and add more credits",
+		);
+		expect(isContextOverflow(message, 0)).toBe(true);
+	});
+
 	it("does not treat generic non-overflow Ollama errors as overflow", () => {
 		const message = createErrorMessage("500 `model runner crashed unexpectedly`");
 		expect(isContextOverflow(message, 32768)).toBe(false);
