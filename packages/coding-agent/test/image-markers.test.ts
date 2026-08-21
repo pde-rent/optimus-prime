@@ -5,6 +5,7 @@ import {
 	evictImagesToBudget,
 	formatImageMarker,
 	imageMarkerIds,
+	parsePastedTokens,
 	remapImageMarkers,
 } from "../src/modes/interactive/image-markers.js";
 
@@ -96,5 +97,32 @@ describe("image markers", () => {
 		const images = new Map([[1, "aa"]]);
 		evictImagesToBudget(images, size, 100, new Set());
 		expect([...images.keys()]).toEqual([1]);
+	});
+
+	describe("parsePastedTokens", () => {
+		test("splits plain whitespace-separated paths", () => {
+			expect(parsePastedTokens("/a/one.png /a/two.png")).toEqual(["/a/one.png", "/a/two.png"]);
+		});
+
+		test("keeps backslash-escaped whitespace inside a path (terminal drag-and-drop spelling)", () => {
+			expect(parsePastedTokens("/Users/x/My\\ File.png")).toEqual(["/Users/x/My File.png"]);
+		});
+
+		test("keeps whitespace inside quoted paths and strips the quotes", () => {
+			expect(parsePastedTokens('"/Users/x/My File.png"')).toEqual(["/Users/x/My File.png"]);
+			expect(parsePastedTokens("'/Users/x/My File.png'")).toEqual(["/Users/x/My File.png"]);
+		});
+
+		test("handles several paths mixing escaping styles", () => {
+			expect(parsePastedTokens('/a/b.png "/a/c d.png" /a/e\\ f.gif')).toEqual([
+				"/a/b.png",
+				"/a/c d.png",
+				"/a/e f.gif",
+			]);
+		});
+
+		test("returns no tokens for whitespace-only text", () => {
+			expect(parsePastedTokens("   \n\t ")).toEqual([]);
+		});
 	});
 });

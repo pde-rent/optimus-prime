@@ -30,6 +30,55 @@ export function remapImageMarkers(text: string, remaps: ReadonlyMap<number, numb
 }
 
 /**
+ * Split bracketed-paste text into path candidates. Terminals escape whitespace
+ * when inserting a dragged file ("/a/b\ c.png") or quote the whole path
+ * ('"/a/b c.png"'), so a plain whitespace split destroys any path containing a
+ * space. Backslash escapes and matching quotes are resolved here; unterminated
+ * quotes keep their content.
+ */
+export function parsePastedTokens(text: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let quote: string | undefined;
+	let started = false;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i]!;
+		if (char === "\\") {
+			const next = text[i + 1];
+			if (next !== undefined) {
+				current += next;
+				started = true;
+				i++;
+				continue;
+			}
+		}
+		if (quote === undefined && (char === '"' || char === "'")) {
+			quote = char;
+			started = true;
+			continue;
+		}
+		if (char === quote) {
+			quote = undefined;
+			continue;
+		}
+		if (quote === undefined && /\s/.test(char)) {
+			if (started) {
+				tokens.push(current);
+				current = "";
+				started = false;
+			}
+			continue;
+		}
+		current += char;
+		started = true;
+	}
+	if (started) {
+		tokens.push(current);
+	}
+	return tokens;
+}
+
+/**
  * Images from `pending` whose marker still appears in `text`, in paste order
  * (the map's insertion order). Each image is returned at most once even if its
  * marker is duplicated in the text.

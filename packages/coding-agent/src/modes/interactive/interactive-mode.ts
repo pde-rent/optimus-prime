@@ -168,6 +168,7 @@ import { BranchSummaryMessageComponent } from "./components/branch-summary-messa
 import { type FullPaneOverlayOptions, showFullPaneOverlay } from "./components/centered-overlay.js";
 import {
 	isCollapsible,
+	parseOpenAgentTarget,
 	parseToggleTarget,
 	setClickTargetsEnabled,
 	THINKING_TOGGLE_TARGET,
@@ -190,7 +191,7 @@ import { type FileChangeSummary, formatTotalChangeSummary, mergeTurnFileChanges 
 import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
-import { FEATURE_HINT_ANIMATION_INTERVAL_MS, FeatureHintComponent } from "./components/feature-hint.js";
+import { FeatureHintComponent } from "./components/feature-hint.js";
 import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
 import { formatKeyText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
@@ -224,6 +225,7 @@ import {
 	evictImagesToBudget,
 	formatImageMarker,
 	imageMarkerIds,
+	parsePastedTokens,
 	remapImageMarkers,
 } from "./image-markers.js";
 import type {
@@ -252,7 +254,7 @@ import {
 	type ThemeColor,
 	theme,
 } from "./theme/theme.js";
-import { setWorkingPulseFrame, WORKING_ICON_INTERVAL_MS } from "./theme/working-icon.js";
+import { setWorkingPulseFrame } from "./theme/working-icon.js";
 
 interface Expandable {
 	setExpanded(expanded: boolean): void;
@@ -917,6 +919,8 @@ export interface InteractiveModeOptions {
 export interface InteractiveModeRunResult {
 	type: "agents_view" | "scoped_agents_view";
 	source: Pick<AgentConnectionState, "activeSessionId" | "sessionFile" | "sessionId" | "sessionName" | "cwd">;
+	/** Set when the user clicked a subagent row; the agents view preselects that child. */
+	focusChildActiveSessionId?: string;
 }
 
 export function formatAgentDepthLabel(depth: number | undefined, hasChildren: boolean): string | undefined {
@@ -973,6 +977,7 @@ export class InteractiveMode {
 	private readonly retainedSubmissionGenerations = new WeakMap<PromptStash, number>();
 	private admitPendingStartupPrompts: (() => Promise<StartupPromptBarrierOutcome>) | undefined;
 	private agentsViewRequest: InteractiveModeRunResult["type"] | undefined;
+	private agentsViewFocusChildActiveSessionId: string | undefined;
 	private loadingAnimation: Loader | undefined = undefined;
 	private workingMessage: string | undefined = undefined;
 	private workingVisible = true;
@@ -983,11 +988,11 @@ export class InteractiveMode {
 	private currentFeatureHint: string | undefined;
 	private featureHintEligibleAt = 0;
 	private featureHintTimer: NodeJS.Timeout | undefined;
-	private featureHintAnimationTimer: NodeJS.Timeout | undefined;
+	private featureHintAnimationUnsubscribe: (() => void) | undefined;
 	private featureHintComponent: FeatureHintComponent | undefined;
 	private featureHintRunPending = false;
 	private featureHintSuppressedByQueue = false;
-	private pulseTimer: NodeJS.Timeout | undefined = undefined;
+	private pulseUnsubscribe: (() => void) | undefined = undefined;
 	private pulseFrame = 0;
 	private readonly activityTracker = new AgentActivityTracker();
 	// activityTracker token count already folded into the context snapshot; only output beyond
@@ -1765,6 +1770,9 @@ export class InteractiveMode {
 				sessionName: state?.sessionName,
 				cwd: state?.cwd ?? this.getCurrentCwd(),
 			},
+			...(this.agentsViewFocusChildActiveSessionId !== undefined
+				? { focusChildActiveSessionId: this.agentsViewFocusChildActiveSessionId }
+				: {}),
 		};
 	}
 
@@ -3273,11 +3281,7 @@ export class InteractiveMode {
 		this.featureHintComponent = new FeatureHintComponent(this.currentFeatureHint);
 		this.featureHintContainer.addChild(this.featureHintComponent);
 		this.renderRecap();
-		this.featureHintAnimationTimer = setInterval(() => {
-			this.featureHintComponent?.advance();
-			this.ui.requestRender();
-		}, FEATURE_HINT_ANIMATION_INTERVAL_MS);
-		this.featureHintAnimationTimer.unref?.();
+		this.featureHintAnimationUnsubscribe = this.ui.onAnimationTick(() => this.tickFeatureHint());
 		this.ui.requestRender();
 	}
 
@@ -3286,15 +3290,31 @@ export class InteractiveMode {
 			clearTimeout(this.featureHintTimer);
 			this.featureHintTimer = undefined;
 		}
-		if (this.featureHintAnimationTimer) {
-			clearInterval(this.featureHintAnimationTimer);
-			this.featureHintAnimationTimer = undefined;
-		}
+		this.clearFeatureHintAnimation();
 		if (this.featureHintComponent) {
 			this.featureHintContainer.removeChild(this.featureHintComponent);
 			this.featureHintComponent = undefined;
 			this.renderRecap();
 		}
+	}
+
+	/** Stop the shared-ticker subscription for the feature-hint shimmer. */
+	private clearFeatureHintAnimation(): void {
+		if (this.featureHintAnimationUnsubscribe) {
+			this.featureHintAnimationUnsubscribe();
+			this.featureHintAnimationUnsubscribe = undefined;
+		}
+	}
+
+	private tickFeatureHint(): void {
+		// Self-teardown: when the container no longer shows the hint (cleared,
+		// hidden, or replaced), stop ticking instead of animating nothing.
+		if (!this.featureHintComponent || !this.featureHintContainer.children.includes(this.featureHintComponent)) {
+			this.clearFeatureHintAnimation();
+			return;
+		}
+		this.featureHintComponent.advance();
+		this.ui.requestRender();
 	}
 
 	private resumeFeatureHintPresentation(): void {
@@ -3339,14 +3359,13 @@ export class InteractiveMode {
 	}
 
 	private updateWorkingPulse(): void {
-		const active = this.isAgentStreaming();
+		const active = this.isAgentStreaming() || this.subagentGraphPanel.isAnimating();
 		if (!active) {
 			this.stopWorkingPulse();
 			return;
 		}
-		if (!this.pulseTimer) {
-			this.pulseTimer = setInterval(() => this.tickWorkingPulse(), WORKING_ICON_INTERVAL_MS);
-			this.pulseTimer.unref?.();
+		if (!this.pulseUnsubscribe) {
+			this.pulseUnsubscribe = this.ui.onAnimationTick(() => this.tickWorkingPulse());
 		}
 	}
 
@@ -3357,9 +3376,9 @@ export class InteractiveMode {
 	}
 
 	private stopWorkingPulse(): void {
-		if (this.pulseTimer) {
-			clearInterval(this.pulseTimer);
-			this.pulseTimer = undefined;
+		if (this.pulseUnsubscribe) {
+			this.pulseUnsubscribe();
+			this.pulseUnsubscribe = undefined;
 		}
 	}
 
@@ -4360,10 +4379,7 @@ export class InteractiveMode {
 	 * false for anything else so normal text pastes are untouched.
 	 */
 	private handlePastedPaths(text: string): boolean {
-		const tokens = text
-			.split(/\s+/)
-			.map((token) => token.trim())
-			.filter(Boolean);
+		const tokens = parsePastedTokens(text);
 		if (tokens.length === 0 || tokens.length > 8) return false;
 		const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 		const paths: string[] = [];
@@ -5960,6 +5976,8 @@ export class InteractiveMode {
 			this.rlmNodeId,
 		);
 		if (!this.subagentSummaryLine.isSelectable() && this.subagentSummaryLine.focused) this.focusEditor();
+		// A child starting or finishing changes whether the spinner needs ticks.
+		this.updateWorkingPulse();
 	}
 
 	private removeSubagentSnapshot(id: string): void {
@@ -6848,6 +6866,7 @@ export class InteractiveMode {
 		this.stashDraftForAgentsView();
 		this.agentsViewRequest = request;
 		this.isShuttingDown = true;
+
 		this.unregisterSignalHandlers();
 
 		await this.teardownSessionUi({ preserveAltScreen: true });
@@ -7311,6 +7330,11 @@ export class InteractiveMode {
 	 * platform opener.
 	 */
 	private activateToggleTarget(url: string): boolean {
+		const openTarget = parseOpenAgentTarget(url);
+		if (openTarget !== null) {
+			this.openSubagentFromGraph(openTarget);
+			return true;
+		}
 		const target = parseToggleTarget(url);
 		if (target === null) {
 			return false;
@@ -7332,6 +7356,24 @@ export class InteractiveMode {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Click on a subagent row in the graph panel (fullscreen only, where mouse
+	 * reporting is on): leave to the scoped agents view with that child selected.
+	 */
+	private openSubagentFromGraph(childId: string): void {
+		if (!this.options.returnToAgentsView) {
+			this.showStatus("Opening a subagent needs the daemon; start without --no-daemon");
+			return;
+		}
+		const child = this.subagentSnapshots.get(childId);
+		if (!child?.activeSessionId) {
+			this.showStatus("That subagent has no live runtime to open");
+			return;
+		}
+		this.agentsViewFocusChildActiveSessionId = child.activeSessionId;
+		void this.returnToAgentsView("scoped_agents_view");
 	}
 
 	private applyChatExpansion(): void {
