@@ -1,7 +1,7 @@
 import { getKeybindings } from "../keybindings.js";
 import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
 import type { Component } from "../tui.js";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import { padEndAnsi, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 
 const DEFAULT_PRIMARY_COLUMN_WIDTH = 32;
 const PRIMARY_COLUMN_GAP = 2;
@@ -200,7 +200,7 @@ export class SelectList implements Component {
 	/** Pad a selected row to the full width so `selectedRow` can paint a solid bar. */
 	private fillSelected(content: string, width: number): string {
 		const clamped = truncateToWidth(content, width, "");
-		const padded = clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped)));
+		const padded = padEndAnsi(clamped, width);
 		return this.theme.selectedRow ? this.theme.selectedRow(padded) : padded;
 	}
 

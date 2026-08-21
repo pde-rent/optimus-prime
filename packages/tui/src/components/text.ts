@@ -1,5 +1,6 @@
+import { KeyedRenderCache } from "../render-cache.js";
 import type { Component } from "../tui.js";
-import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import { applyBackgroundToLine, padEndAnsi, withVerticalPadding, wrapTextWithAnsi } from "../utils.js";
 
 /**
  * Text component - displays multi-line text with word wrapping
@@ -10,9 +11,7 @@ export class Text implements Component {
 	private paddingY: number; // Top/bottom padding
 	private customBgFn?: (text: string) => string;
 
-	private cachedText?: string;
-	private cachedWidth?: number;
-	private cachedLines?: string[];
+	private renderCache = new KeyedRenderCache();
 
 	constructor(text: string = "", paddingX: number = 1, paddingY: number = 1, customBgFn?: (text: string) => string) {
 		this.text = text;
@@ -23,35 +22,24 @@ export class Text implements Component {
 
 	setText(text: string): void {
 		this.text = text;
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 	}
 
 	setCustomBgFn(customBgFn?: (text: string) => string): void {
 		this.customBgFn = customBgFn;
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 	}
 
 	invalidate(): void {
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 	}
 
 	render(width: number): string[] {
-		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-			return this.cachedLines;
-		}
+		const cached = this.renderCache.get(this.text, width);
+		if (cached) return cached;
 
 		if (!this.text || this.text.trim() === "") {
-			const result: string[] = [];
-			this.cachedText = this.text;
-			this.cachedWidth = width;
-			this.cachedLines = result;
-			return result;
+			return this.renderCache.set([this.text, width], []);
 		}
 
 		const normalizedText = this.text.replace(/\t/g, "   ");
@@ -60,34 +48,20 @@ export class Text implements Component {
 
 		const wrappedLines = wrapTextWithAnsi(normalizedText, contentWidth);
 
-		const leftMargin = " ".repeat(this.paddingX);
-		const rightMargin = " ".repeat(this.paddingX);
+		const margin = " ".repeat(this.paddingX);
 		const contentLines: string[] = [];
 
 		for (const line of wrappedLines) {
-			const lineWithMargins = leftMargin + line + rightMargin;
-
-			if (this.customBgFn) {
-				contentLines.push(applyBackgroundToLine(lineWithMargins, width, this.customBgFn));
-			} else {
-				const visibleLen = visibleWidth(lineWithMargins);
-				const paddingNeeded = Math.max(0, width - visibleLen);
-				contentLines.push(lineWithMargins + " ".repeat(paddingNeeded));
-			}
+			const lineWithMargins = margin + line + margin;
+			contentLines.push(
+				this.customBgFn
+					? applyBackgroundToLine(lineWithMargins, width, this.customBgFn)
+					: padEndAnsi(lineWithMargins, width),
+			);
 		}
 
-		const emptyLine = " ".repeat(width);
-		const emptyLines: string[] = [];
-		for (let i = 0; i < this.paddingY; i++) {
-			const line = this.customBgFn ? applyBackgroundToLine(emptyLine, width, this.customBgFn) : emptyLine;
-			emptyLines.push(line);
-		}
-
-		const result = [...emptyLines, ...contentLines, ...emptyLines];
-
-		this.cachedText = this.text;
-		this.cachedWidth = width;
-		this.cachedLines = result;
+		const result = withVerticalPadding(contentLines, width, this.paddingY, this.customBgFn);
+		this.renderCache.set([this.text, width], result);
 
 		return result.length > 0 ? result : [""];
 	}

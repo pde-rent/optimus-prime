@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Consolidated duplicated render-cache triplets, ANSI padding, and key-matching branches across TUI components into shared helpers; no behavior change.
 - Added a (text,width) render cache to `TruncatedText` so repeated frames skip re-truncation and width measurement.
 
 ## [0.7.3] - 2026-08-17

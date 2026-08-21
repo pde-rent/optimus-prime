@@ -3,7 +3,14 @@ import { decodeKittyPrintable } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
 import { type Component, CURSOR_MARKER, type Focusable } from "../tui.js";
 import { UndoStack } from "../undo-stack.js";
-import { getSegmenter, isPunctuationChar, isWhitespaceChar, sliceByColumn, visibleWidth } from "../utils.js";
+import {
+	getSegmenter,
+	isPunctuationChar,
+	isWhitespaceChar,
+	reverseVideo,
+	sliceByColumn,
+	visibleWidth,
+} from "../utils.js";
 
 const segmenter = getSegmenter();
 
@@ -450,7 +457,7 @@ export class Input implements Component, Focusable {
 		// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
 		const marker = this.focused ? CURSOR_MARKER : "";
 
-		const cursorChar = `\x1b[7m${atCursor}\x1b[27m`; // ESC[7m = reverse video, ESC[27m = normal
+		const cursorChar = reverseVideo(atCursor);
 		const textWithCursor = beforeCursor + marker + cursorChar + afterCursor;
 
 		const visualLength = visibleWidth(textWithCursor);

@@ -6,7 +6,14 @@ import { KillRing } from "../kill-ring.js";
 import { getSlashCommandContext, type SlashCommandContext } from "../slash-command-context.js";
 import { type Component, CURSOR_MARKER, type Focusable, type OverlayHandle, type TUI } from "../tui.js";
 import { UndoStack } from "../undo-stack.js";
-import { getSegmenter, isPunctuationChar, isWhitespaceChar, truncateToWidth, visibleWidth } from "../utils.js";
+import {
+	getSegmenter,
+	isPunctuationChar,
+	isWhitespaceChar,
+	padEndAnsi,
+	truncateToWidth,
+	visibleWidth,
+} from "../utils.js";
 import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.js";
 
 const baseSegmenter = getSegmenter();
@@ -553,7 +560,7 @@ export class Editor implements Component, Focusable {
 		const promptTrailingPadding = " ".repeat(Math.max(0, paddingX - promptPrefixInset));
 		const cursorReset = useBackgroundSurface ? "\x1b[27m" : "\x1b[0m";
 		const renderSurfaceLine = (line: string): string => {
-			const padded = line + " ".repeat(Math.max(0, width - visibleWidth(line)));
+			const padded = padEndAnsi(line, width);
 			return this.backgroundColor ? this.backgroundColor(padded) : padded;
 		};
 

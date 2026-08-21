@@ -7,7 +7,7 @@
 
 import type { TableCellSelectionRegion } from "./selection-metadata.js";
 import { isImageLine } from "./terminal-image.js";
-import { sliceByColumn, stripAnsi, urlAtColumn, visibleWidth } from "./utils.js";
+import { reverseVideo, sliceByColumn, stripAnsi, urlAtColumn, visibleWidth } from "./utils.js";
 
 export const FULLSCREEN_MIN_TRANSCRIPT_ROWS = 3;
 
@@ -330,7 +330,7 @@ export class FullscreenViewport {
 		const before = sliceByColumn(line, 0, from);
 		const selected = stripAnsi(sliceByColumn(line, from, to - from));
 		const after = sliceByColumn(line, to, Math.max(0, width - to));
-		return `${before}\x1b[0m\x1b[7m${selected}\x1b[27m${after}`;
+		return `${before}\x1b[0m${reverseVideo(selected)}${after}`;
 	}
 
 	private framePoint(

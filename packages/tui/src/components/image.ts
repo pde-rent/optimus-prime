@@ -1,3 +1,4 @@
+import { KeyedRenderCache } from "../render-cache.js";
 import {
 	allocateImageId,
 	getCapabilities,
@@ -44,9 +45,7 @@ export class Image implements Component {
 	private options: ImageOptions;
 	private imageId?: number;
 
-	private cachedLines?: string[];
-	private cachedWidth?: number;
-	private cachedFullscreenFallback?: boolean;
+	private renderCache = new KeyedRenderCache();
 
 	constructor(
 		base64Data: string,
@@ -69,15 +68,12 @@ export class Image implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedLines = undefined;
-		this.cachedWidth = undefined;
-		this.cachedFullscreenFallback = undefined;
+		this.renderCache.invalidate();
 	}
 
 	render(width: number): string[] {
-		if (this.cachedLines && this.cachedWidth === width && this.cachedFullscreenFallback === fullscreenFallback) {
-			return this.cachedLines;
-		}
+		const cached = this.renderCache.get(width, fullscreenFallback);
+		if (cached) return cached;
 
 		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? 60);
 
@@ -126,10 +122,6 @@ export class Image implements Component {
 			lines = [this.theme.fallbackColor(fallback)];
 		}
 
-		this.cachedLines = lines;
-		this.cachedWidth = width;
-		this.cachedFullscreenFallback = fullscreenFallback;
-
-		return lines;
+		return this.renderCache.set([width, fullscreenFallback], lines);
 	}
 }

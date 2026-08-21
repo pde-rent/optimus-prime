@@ -3,7 +3,7 @@ import { keyText } from "../keybinding-format.js";
 import { getKeybindings } from "../keybindings.js";
 import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
 import type { Component } from "../tui.js";
-import { dotJoin, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import { dotJoin, padEndAnsi, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 import { Input } from "./input.js";
 
 export interface SettingItem {
@@ -121,7 +121,7 @@ export class SettingsList implements Component {
 			const prefix = isSelected ? this.theme.cursor : "  ";
 			const prefixWidth = visibleWidth(prefix);
 
-			const labelPadded = item.label + " ".repeat(Math.max(0, maxLabelWidth - visibleWidth(item.label)));
+			const labelPadded = padEndAnsi(item.label, maxLabelWidth);
 			const labelText = this.theme.label(labelPadded, isSelected);
 
 			const separator = "  ";

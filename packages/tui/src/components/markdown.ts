@@ -8,6 +8,7 @@ import {
 	type TableCellNode,
 	type TableNode,
 } from "../markdown-ast.js";
+import { KeyedRenderCache } from "../render-cache.js";
 import {
 	extractTableCellSelectionRegions,
 	markTableCell,
@@ -17,7 +18,14 @@ import {
 } from "../selection-metadata.js";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
 import type { Component } from "../tui.js";
-import { applyBackgroundToLine, stripAnsi, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import {
+	applyBackgroundToLine,
+	padEndAnsi,
+	stripAnsi,
+	visibleWidth,
+	withVerticalPadding,
+	wrapTextWithAnsi,
+} from "../utils.js";
 
 /**
  * Default text styling for markdown content.
@@ -70,9 +78,7 @@ export class Markdown implements Component {
 	private theme: MarkdownTheme;
 	private defaultStylePrefix?: string;
 
-	private cachedText?: string;
-	private cachedWidth?: number;
-	private cachedLines?: string[];
+	private renderCache = new KeyedRenderCache();
 	private selectionRegions: TableCellSelectionRegion[] = [];
 	private tableIdentities: object[] = [];
 	// Per-block render cache so streaming appends only re-render the changing
@@ -98,16 +104,12 @@ export class Markdown implements Component {
 		this.text = text;
 		// Only the whole-result cache is dropped; the per-block cache stays so a
 		// streaming append re-renders just the blocks that actually changed.
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 		this.selectionRegions = [];
 	}
 
 	invalidate(): void {
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 		this.selectionRegions = [];
 		// External invalidation (e.g. theme change) affects rendered output, so
 		// the per-block cache must go too.
@@ -115,19 +117,15 @@ export class Markdown implements Component {
 	}
 
 	render(width: number): string[] {
-		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-			return this.cachedLines;
-		}
+		const cached = this.renderCache.get(this.text, width);
+		if (cached) return cached;
 
 		const contentWidth = Math.max(1, width - this.paddingX * 2);
 
 		if (!this.text || this.text.trim() === "") {
 			const result: string[] = [];
 			this.selectionRegions = [];
-			this.cachedText = this.text;
-			this.cachedWidth = width;
-			this.cachedLines = result;
-			return result;
+			return this.renderCache.set([this.text, width], result);
 		}
 
 		const normalizedText = this.text.replace(/\t/g, "   ");
@@ -157,23 +155,14 @@ export class Markdown implements Component {
 		this.blockCache = nextCache;
 
 		const bgFn = this.defaultTextStyle?.bgColor;
-		const emptyLine = " ".repeat(width);
-		const emptyLines: string[] = [];
-		for (let i = 0; i < this.paddingY; i++) {
-			const line = bgFn ? applyBackgroundToLine(emptyLine, width, bgFn) : emptyLine;
-			emptyLines.push(line);
-		}
-
-		const paddedLines = [...emptyLines, ...contentLines, ...emptyLines];
+		const paddedLines = withVerticalPadding(contentLines, width, this.paddingY, bgFn);
 		const { lines: result, regions } = extractTableCellSelectionRegions(paddedLines, (index) => {
 			this.tableIdentities[index] ??= {};
 			return this.tableIdentities[index];
 		});
 		this.selectionRegions = regions;
 
-		this.cachedText = this.text;
-		this.cachedWidth = width;
-		this.cachedLines = result;
+		this.renderCache.set([this.text, width], result);
 
 		return result.length > 0 ? result : [""];
 	}
@@ -191,8 +180,7 @@ export class Markdown implements Component {
 	): string[] {
 		const tokenLines = this.renderToken(token, contentWidth, nextTokenType);
 
-		const leftMargin = " ".repeat(this.paddingX);
-		const rightMargin = " ".repeat(this.paddingX);
+		const margin = " ".repeat(this.paddingX);
 		const bgFn = this.defaultTextStyle?.bgColor;
 		const blockLines: string[] = [];
 
@@ -202,14 +190,10 @@ export class Markdown implements Component {
 				continue;
 			}
 			for (const wrapped of wrapTextWithAnsi(line, contentWidth)) {
-				const lineWithMargins = leftMargin + wrapped + rightMargin;
-				if (bgFn) {
-					blockLines.push(applyBackgroundToLine(lineWithMargins, width, bgFn));
-				} else {
-					const visibleLen = visibleWidth(lineWithMargins);
-					const paddingNeeded = Math.max(0, width - visibleLen);
-					blockLines.push(lineWithMargins + " ".repeat(paddingNeeded));
-				}
+				const lineWithMargins = margin + wrapped + margin;
+				blockLines.push(
+					bgFn ? applyBackgroundToLine(lineWithMargins, width, bgFn) : padEndAnsi(lineWithMargins, width),
+				);
 			}
 		}
 
@@ -222,30 +206,28 @@ export class Markdown implements Component {
 	 * NOTE: Background color is NOT applied here - it's applied at the padding stage
 	 * to ensure it extends to the full line width.
 	 */
+	/** Apply the full default style chain: color, then bold/italic/strike/underline. */
 	private applyDefaultStyle(text: string): string {
-		if (!this.defaultTextStyle) {
+		let styled = text;
+		const style = this.defaultTextStyle;
+		if (!style) {
 			return text;
 		}
-
-		let styled = text;
-
-		if (this.defaultTextStyle.color) {
-			styled = this.defaultTextStyle.color(styled);
+		if (style.color) {
+			styled = style.color(styled);
 		}
-
-		if (this.defaultTextStyle.bold) {
+		if (style.bold) {
 			styled = this.theme.bold(styled);
 		}
-		if (this.defaultTextStyle.italic) {
+		if (style.italic) {
 			styled = this.theme.italic(styled);
 		}
-		if (this.defaultTextStyle.strikethrough) {
+		if (style.strikethrough) {
 			styled = this.theme.strikethrough(styled);
 		}
-		if (this.defaultTextStyle.underline) {
+		if (style.underline) {
 			styled = this.theme.underline(styled);
 		}
-
 		return styled;
 	}
 
@@ -259,24 +241,7 @@ export class Markdown implements Component {
 		}
 
 		const sentinel = "\u0000";
-		let styled = sentinel;
-
-		if (this.defaultTextStyle.color) {
-			styled = this.defaultTextStyle.color(styled);
-		}
-
-		if (this.defaultTextStyle.bold) {
-			styled = this.theme.bold(styled);
-		}
-		if (this.defaultTextStyle.italic) {
-			styled = this.theme.italic(styled);
-		}
-		if (this.defaultTextStyle.strikethrough) {
-			styled = this.theme.strikethrough(styled);
-		}
-		if (this.defaultTextStyle.underline) {
-			styled = this.theme.underline(styled);
-		}
+		const styled = this.applyDefaultStyle(sentinel);
 
 		const sentinelIndex = styled.indexOf(sentinel);
 		this.defaultStylePrefix = sentinelIndex >= 0 ? styled.slice(0, sentinelIndex) : "";
@@ -802,7 +767,7 @@ export class Markdown implements Component {
 		for (let lineIdx = 0; lineIdx < headerLineCount; lineIdx++) {
 			const rowParts = headerCells.map((cell, colIdx) => {
 				const text = cell.lines[lineIdx] || "";
-				const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+				const padded = padEndAnsi(text, columnWidths[colIdx]);
 				return markTableCell(this.theme.bold(padded), 0, colIdx, lineIdx, cell.content);
 			});
 			lines.push(`│ ${rowParts.join(" │ ")} │`);
@@ -823,7 +788,7 @@ export class Markdown implements Component {
 			for (let lineIdx = 0; lineIdx < rowLineCount; lineIdx++) {
 				const rowParts = rowCells.map((cell, colIdx) => {
 					const text = cell.lines[lineIdx] || "";
-					const padded = text + " ".repeat(Math.max(0, columnWidths[colIdx] - visibleWidth(text)));
+					const padded = padEndAnsi(text, columnWidths[colIdx]);
 					return markTableCell(padded, rowIndex + 1, colIdx, lineIdx, cell.content);
 				});
 				lines.push(`│ ${rowParts.join(" │ ")} │`);

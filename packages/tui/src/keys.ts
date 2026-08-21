@@ -769,6 +769,22 @@ function parseKeyId(
 }
 
 /**
+ * Functional keys that share one matching shape: legacy sequence when
+ * unmodified, legacy modifier sequence + Kitty sequence otherwise.
+ */
+const FUNCTIONAL_KEY_MATCHES: Record<
+	"insert" | "delete" | "home" | "end" | "pageup" | "pagedown",
+	{ codepoint: number; legacy: LegacyModifierKey }
+> = {
+	insert: { codepoint: FUNCTIONAL_CODEPOINTS.insert, legacy: "insert" },
+	delete: { codepoint: FUNCTIONAL_CODEPOINTS.delete, legacy: "delete" },
+	home: { codepoint: FUNCTIONAL_CODEPOINTS.home, legacy: "home" },
+	end: { codepoint: FUNCTIONAL_CODEPOINTS.end, legacy: "end" },
+	pageup: { codepoint: FUNCTIONAL_CODEPOINTS.pageUp, legacy: "pageUp" },
+	pagedown: { codepoint: FUNCTIONAL_CODEPOINTS.pageDown, legacy: "pageDown" },
+};
+
+/**
  * Match input data against a key identifier string.
  *
  * Supported key identifiers:
@@ -943,83 +959,30 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				matchesModifyOtherKeys(data, CODEPOINTS.backspace, modifier)
 			);
 
-		case "insert":
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.insert) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "insert", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.insert, modifier);
-
-		case "delete":
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.delete) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "delete", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.delete, modifier);
-
 		case "clear":
 			if (modifier === 0) {
 				return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.clear);
 			}
 			return matchesLegacyModifierSequence(data, "clear", modifier);
 
+		case "insert":
+		case "delete":
 		case "home":
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.home) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "home", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.home, modifier);
-
 		case "end":
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.end) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "end", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.end, modifier);
-
 		case "pageup":
+		case "pagedown": {
+			const match = FUNCTIONAL_KEY_MATCHES[key as keyof typeof FUNCTIONAL_KEY_MATCHES];
 			if (modifier === 0) {
 				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageUp) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, 0)
+					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[match.legacy]) ||
+					matchesKittySequence(data, match.codepoint, 0)
 				);
 			}
-			if (matchesLegacyModifierSequence(data, "pageUp", modifier)) {
+			if (matchesLegacyModifierSequence(data, match.legacy, modifier)) {
 				return true;
 			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageUp, modifier);
-
-		case "pagedown":
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.pageDown) ||
-					matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "pageDown", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS.pageDown, modifier);
+			return matchesKittySequence(data, match.codepoint, modifier);
+		}
 
 		case "up":
 			if (modifier === MODIFIERS.alt) {

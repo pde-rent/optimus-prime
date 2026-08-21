@@ -273,6 +273,11 @@ export function padStartAnsi(text: string, width: number): string {
 	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
 }
 
+/** Wrap text in reverse-video SGR (negative image), turned off after the text. */
+export function reverseVideo(text: string): string {
+	return `\x1b[7m${text}\x1b[27m`;
+}
+
 /**
  * Flatten every whitespace run — newlines included — to a single space.
  *
@@ -1064,14 +1069,26 @@ function breakLongWord(word: string, width: number, tracker: AnsiCodeTracker): s
  * @returns Line with background applied and padded to width
  */
 export function applyBackgroundToLine(line: string, width: number, bgFn: (text: string) => string): string {
-	// Calculate padding needed
-	const visibleLen = visibleWidth(line);
-	const paddingNeeded = Math.max(0, width - visibleLen);
-	const padding = " ".repeat(paddingNeeded);
+	return bgFn(padEndAnsi(line, width));
+}
 
-	// Apply background to content + padding
-	const withPadding = line + padding;
-	return bgFn(withPadding);
+/**
+ * Surround content lines with `paddingY` blank rows above and below, each
+ * `width` columns wide. Background styling is applied to the blank rows when
+ * provided (content lines are expected to be padded/styled by the caller).
+ */
+export function withVerticalPadding(
+	contentLines: string[],
+	width: number,
+	paddingY: number,
+	bgFn?: (text: string) => string,
+): string[] {
+	const blank = " ".repeat(width);
+	const padding: string[] = [];
+	for (let i = 0; i < paddingY; i++) {
+		padding.push(bgFn ? applyBackgroundToLine(blank, width, bgFn) : blank);
+	}
+	return [...padding, ...contentLines, ...padding];
 }
 
 /**

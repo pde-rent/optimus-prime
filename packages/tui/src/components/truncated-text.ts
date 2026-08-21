@@ -1,5 +1,6 @@
+import { KeyedRenderCache } from "../render-cache.js";
 import type { Component } from "../tui.js";
-import { truncateToWidth, visibleWidth } from "../utils.js";
+import { padEndAnsi, truncateToWidth, withVerticalPadding } from "../utils.js";
 
 /**
  * Text component that truncates to fit viewport width
@@ -8,9 +9,7 @@ export class TruncatedText implements Component {
 	private text: string;
 	private paddingX: number;
 	private paddingY: number;
-	private cachedText?: string;
-	private cachedWidth?: number;
-	private cachedLines?: string[];
+	private renderCache = new KeyedRenderCache();
 
 	constructor(text: string, paddingX: number = 0, paddingY: number = 0) {
 		this.text = text;
@@ -24,23 +23,12 @@ export class TruncatedText implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedText = undefined;
-		this.cachedWidth = undefined;
-		this.cachedLines = undefined;
+		this.renderCache.invalidate();
 	}
 
 	render(width: number): string[] {
-		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
-			return this.cachedLines;
-		}
-
-		const result: string[] = [];
-
-		const emptyLine = " ".repeat(width);
-
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(emptyLine);
-		}
+		const cached = this.renderCache.get(this.text, width);
+		if (cached) return cached;
 
 		const availableWidth = Math.max(1, width - this.paddingX * 2);
 
@@ -52,23 +40,11 @@ export class TruncatedText implements Component {
 
 		const displayText = truncateToWidth(singleLineText, availableWidth);
 
-		const leftPadding = " ".repeat(this.paddingX);
-		const rightPadding = " ".repeat(this.paddingX);
-		const lineWithPadding = leftPadding + displayText + rightPadding;
+		const padding = " ".repeat(this.paddingX);
+		const finalLine = padEndAnsi(padding + displayText + padding, width);
 
-		const lineVisibleWidth = visibleWidth(lineWithPadding);
-		const paddingNeeded = Math.max(0, width - lineVisibleWidth);
-		const finalLine = lineWithPadding + " ".repeat(paddingNeeded);
-
-		result.push(finalLine);
-
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(emptyLine);
-		}
-
-		this.cachedText = this.text;
-		this.cachedWidth = width;
-		this.cachedLines = result;
+		const result = withVerticalPadding([finalLine], width, this.paddingY);
+		this.renderCache.set([this.text, width], result);
 
 		return result;
 	}
