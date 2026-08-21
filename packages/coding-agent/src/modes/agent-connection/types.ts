@@ -569,6 +569,10 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 	repliedSinceTask?: boolean;
 	toolUseCount?: number;
 	tokenCount?: number;
+	/** Prompt-side tokens (input + cache read + cache write) from the child's last assistant turn. */
+	tokensIn?: number;
+	/** Completion tokens from the child's last assistant turn. */
+	tokensOut?: number;
 	recap?: string;
 	sessionDir: string;
 	activity?: AgentConnectionRlmChildAgentActivity;
