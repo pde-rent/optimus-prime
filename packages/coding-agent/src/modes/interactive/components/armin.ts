@@ -4,6 +4,7 @@
 
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
+import { LineRenderCache } from "./render-cache.js";
 
 // XBM image: 31x36 pixels, LSB first, 1=background, 0=foreground
 const WIDTH = 31;
@@ -64,10 +65,8 @@ export class ArminComponent implements Component {
 	private finalGrid: string[][];
 	private currentGrid: string[][];
 	private effectState: Record<string, unknown> = {};
-	private cachedLines: string[] = [];
-	private cachedWidth = 0;
 	private gridVersion = 0;
-	private cachedVersion = -1;
+	private cache = new LineRenderCache();
 
 	constructor(ui: TUI) {
 		this.ui = ui;
@@ -80,18 +79,19 @@ export class ArminComponent implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedWidth = 0;
+		this.cache.invalidate();
 	}
 
 	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedVersion === this.gridVersion) {
-			return this.cachedLines;
+		const cached = this.cache.get(width, this.gridVersion);
+		if (cached) {
+			return cached;
 		}
 
 		const padding = 1;
 		const availableWidth = width - padding;
 
-		this.cachedLines = this.currentGrid.map((row) => {
+		const lines = this.currentGrid.map((row) => {
 			// Clip row to available width before applying color
 			const clipped = row.slice(0, availableWidth).join("");
 			const padRight = Math.max(0, width - padding - clipped.length);
@@ -101,12 +101,9 @@ export class ArminComponent implements Component {
 		// Add "ARMIN SAYS HI" at the end
 		const message = "ARMIN SAYS HI";
 		const msgPadRight = Math.max(0, width - padding - message.length);
-		this.cachedLines.push(` ${theme.fg("accent", message)}${" ".repeat(msgPadRight)}`);
+		lines.push(` ${theme.fg("accent", message)}${" ".repeat(msgPadRight)}`);
 
-		this.cachedWidth = width;
-		this.cachedVersion = this.gridVersion;
-
-		return this.cachedLines;
+		return this.cache.set(width, this.gridVersion, lines);
 	}
 
 	private createEmptyGrid(): string[][] {

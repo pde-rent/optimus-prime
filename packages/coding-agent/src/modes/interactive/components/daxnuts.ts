@@ -6,6 +6,7 @@
 
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
+import { LineRenderCache } from "./render-cache.js";
 
 // 32x32 RGB image of dax, hex encoded (3 bytes per pixel)
 const DAX_HEX =
@@ -60,9 +61,7 @@ export class DaxnutsComponent implements Component {
 	private interval: ReturnType<typeof setInterval> | null = null;
 	private tick = 0;
 	private maxTicks = 25; // ~2 seconds at 80ms
-	private cachedLines: string[] = [];
-	private cachedWidth = 0;
-	private cachedTick = -1;
+	private cache = new LineRenderCache();
 
 	constructor(ui: TUI) {
 		this.ui = ui;
@@ -71,7 +70,7 @@ export class DaxnutsComponent implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedWidth = 0;
+		this.cache.invalidate();
 	}
 
 	private startAnimation(): void {
@@ -80,7 +79,7 @@ export class DaxnutsComponent implements Component {
 			if (this.tick >= this.maxTicks) {
 				this.stopAnimation();
 			}
-			this.cachedWidth = 0;
+			this.cache.invalidate();
 			this.ui.requestRender();
 		}, 80);
 	}
@@ -93,8 +92,9 @@ export class DaxnutsComponent implements Component {
 	}
 
 	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedTick === this.tick) {
-			return this.cachedLines;
+		const cached = this.cache.get(width, this.tick);
+		if (cached) {
+			return cached;
 		}
 
 		const t = theme;
@@ -152,10 +152,7 @@ export class DaxnutsComponent implements Component {
 		}
 		lines.push("");
 
-		this.cachedLines = lines;
-		this.cachedWidth = width;
-		this.cachedTick = this.tick;
-		return lines;
+		return this.cache.set(width, this.tick, lines);
 	}
 
 	dispose(): void {

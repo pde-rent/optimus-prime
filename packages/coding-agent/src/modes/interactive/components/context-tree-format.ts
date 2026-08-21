@@ -5,6 +5,7 @@ import type { ContextUsage } from "../../../core/extensions/index.js";
 import { addAssistantUsage, emptyUsage } from "../../../core/usage.js";
 import { formatTokenCount } from "../agent-activity.js";
 import { theme } from "../theme/theme.js";
+import { padEndAnsi, padStartAnsi } from "./ansi.js";
 
 const CONTEXT_BAR_WIDTH = 10;
 const MIN_LABEL_WIDTH = 16;
@@ -77,14 +78,6 @@ function formatContextColumn(contextUsage: ContextUsage | undefined, withBar: bo
 	const barColor = contextUsage.percent >= 80 ? "warning" : "accent";
 	const bar = theme.fg(barColor, "▓".repeat(filled)) + theme.fg("dim", "░".repeat(CONTEXT_BAR_WIDTH - filled));
 	return `${bar} ${text}`;
-}
-
-function padEndAnsi(text: string, width: number): string {
-	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
-}
-
-function padStartAnsi(text: string, width: number): string {
-	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
 }
 
 function countNodes(root: ContextTreeNode): number {

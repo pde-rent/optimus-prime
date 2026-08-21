@@ -1,9 +1,10 @@
 import type { TextContent } from "@earendil-works/pi-ai";
 import type { Component } from "@earendil-works/pi-tui";
-import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
+import { type Box, Container, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
 import type { MessageRenderer } from "../../../core/extensions/types.js";
 import type { CustomMessage } from "../../../core/messages.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { customMessageBubble, customMessageLabel, customMessageMarkdown } from "./message-surfaces.js";
 
 export class CustomMessageComponent extends Container {
 	private message: CustomMessage<unknown>;
@@ -25,7 +26,7 @@ export class CustomMessageComponent extends Container {
 
 		this.addChild(new Spacer(1));
 
-		this.box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+		this.box = customMessageBubble();
 
 		this.rebuild();
 	}
@@ -65,7 +66,7 @@ export class CustomMessageComponent extends Container {
 		this.addChild(this.box);
 		this.box.clear();
 
-		const label = theme.fg("customMessageLabel", `\x1b[1m[${this.message.customType}]\x1b[22m`);
+		const label = customMessageLabel(this.message.customType);
 		this.box.addChild(new Text(label, 0, 0));
 		this.box.addChild(new Spacer(1));
 
@@ -79,10 +80,6 @@ export class CustomMessageComponent extends Container {
 				.join("\n");
 		}
 
-		this.box.addChild(
-			new Markdown(text, 0, 0, this.markdownTheme, {
-				color: (text: string) => theme.fg("customMessageText", text),
-			}),
-		);
+		this.box.addChild(customMessageMarkdown(text, this.markdownTheme));
 	}
 }

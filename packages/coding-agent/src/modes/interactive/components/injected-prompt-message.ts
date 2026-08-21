@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	Container,
+	collapseText,
 	Markdown,
 	type MarkdownTheme,
 	Spacer,
@@ -47,10 +48,6 @@ function readCustomText(message: CustomMessage): string {
 		return message.content;
 	}
 	return message.content.map((block) => (block.type === "text" ? block.text : "[image]")).join("\n");
-}
-
-function collapseText(text: string): string {
-	return text.replace(/\s+/g, " ").trim();
 }
 
 function goalLabel(details: GoalContextDetails | undefined): string {

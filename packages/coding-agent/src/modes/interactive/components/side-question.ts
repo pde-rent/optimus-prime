@@ -1,6 +1,8 @@
-import { Box, type Component, Markdown, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { type Box, type Component, Markdown, Text, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentConnectionSideQuestionEvent } from "../../agent-connection/types.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { applyBackgroundAcrossResets } from "./ansi.js";
+import { userMessageBubble } from "./message-surfaces.js";
 
 interface SideQuestionTurnState {
 	kind: "turn";
@@ -29,9 +31,7 @@ export class SideQuestionComponent implements Component {
 	addTurn(event: AgentConnectionSideQuestionEvent): void {
 		let questionBubble: Box | undefined;
 		if (this.entries.length > 0) {
-			questionBubble = new Box(this.paddingX, 1, (content: string) =>
-				theme.getUserMessageBackgroundColor()(content),
-			);
+			questionBubble = userMessageBubble(this.paddingX);
 			questionBubble.addChild(
 				new Markdown(event.question, 0, 0, getMarkdownTheme(), {
 					color: (content: string) => theme.fg("userMessageText", content),
@@ -142,11 +142,9 @@ export class SideQuestionComponent implements Component {
 	}
 
 	private applySurface(line: string, width: number): string {
-		const padded = line + " ".repeat(Math.max(0, width - visibleWidth(line)));
-		const background = theme.getPopupBackgroundColor();
-		return padded
-			.split("\x1b[0m")
-			.map((segment) => background(segment))
-			.join("\x1b[0m");
+		return applyBackgroundAcrossResets(
+			line + " ".repeat(Math.max(0, width - visibleWidth(line))),
+			theme.getPopupBackgroundColor(),
+		);
 	}
 }

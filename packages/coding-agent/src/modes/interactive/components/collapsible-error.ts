@@ -1,6 +1,7 @@
-import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { stripAnsi } from "../../../utils/ansi.js";
 import { theme } from "../theme/theme.js";
+import { padEndAnsi } from "./ansi.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
 
 export interface CollapsibleErrorOptions {
@@ -118,6 +119,6 @@ export class CollapsibleErrorComponent implements Component {
 				lines.push(truncateToWidth(padded, safeWidth, ""));
 			}
 		}
-		return lines.map((line) => line + " ".repeat(Math.max(0, safeWidth - visibleWidth(line))));
+		return lines.map((line) => padEndAnsi(line, safeWidth));
 	}
 }

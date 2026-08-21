@@ -1,48 +1,29 @@
-import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
+import type { MarkdownTheme } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import type { BranchSummaryMessage } from "../../../core/messages.js";
-import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { theme } from "../theme/theme.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
+import { LabeledMessageComponent } from "./message-surfaces.js";
 
 /**
  * Component that renders a branch summary message with collapsed/expanded state.
- * Uses same background color as custom messages for visual consistency.
  */
-export class BranchSummaryMessageComponent extends Box {
-	private expanded = false;
+export class BranchSummaryMessageComponent extends LabeledMessageComponent {
 	private message: BranchSummaryMessage;
-	private markdownTheme: MarkdownTheme;
 
-	constructor(message: BranchSummaryMessage, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
-		super(1, 1, (t) => theme.bg("customMessageBg", t));
+	constructor(message: BranchSummaryMessage, markdownTheme?: MarkdownTheme) {
+		super(markdownTheme);
 		this.message = message;
-		this.markdownTheme = markdownTheme;
 		this.updateDisplay();
 	}
 
-	setExpanded(expanded: boolean): void {
-		this.expanded = expanded;
-		this.updateDisplay();
-	}
-
-	override invalidate(): void {
-		super.invalidate();
-		this.updateDisplay();
-	}
-
-	private updateDisplay(): void {
+	protected updateDisplay(): void {
 		this.clear();
 
-		const label = theme.fg("customMessageLabel", `\x1b[1m[branch]\x1b[22m`);
-		this.addChild(new Text(label, 0, 0));
-		this.addChild(new Spacer(1));
+		this.addLabel("branch");
 
-		if (this.expanded) {
-			const header = "**Branch Summary**\n\n";
-			this.addChild(
-				new Markdown(header + this.message.summary, 0, 0, this.markdownTheme, {
-					color: (text: string) => theme.fg("customMessageText", text),
-				}),
-			);
+		if (this.isExpanded()) {
+			this.addMarkdown(`**Branch Summary**\n\n${this.message.summary}`);
 		} else {
 			this.addChild(
 				new Text(

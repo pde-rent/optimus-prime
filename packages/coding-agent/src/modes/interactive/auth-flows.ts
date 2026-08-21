@@ -1,6 +1,7 @@
 import { getProviders, type OAuthProviderId, type OAuthSelectPrompt } from "@earendil-works/pi-ai";
 import type { OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import { getAuthPath } from "../../config.js";
+import type { AuthStatus } from "../../core/auth-storage.js";
 import type { ModelRegistry } from "../../core/model-registry.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.js";
 import { SERPER_CREDENTIAL_ID, SERPER_CREDENTIAL_NAME } from "../../core/websearch-credential.js";
@@ -126,28 +127,13 @@ export class ProviderAuthFlows {
 			return Promise.resolve({ status: "failed" });
 		}
 
-		return new Promise((resolve) => {
-			let handle: OverlayHandle | undefined;
-			const close = () => {
-				handle?.hide();
-				this.host.ui.requestRender();
-			};
-			const selector = new OAuthSelectorComponent(
-				"login",
-				this.host.modelRegistry.authStorage,
-				providerOptions,
-				async (providerOption: AuthSelectorProvider) => {
-					close();
-					resolve(await this.loginProvider(providerOption));
-				},
-				() => {
-					close();
-					resolve({ status: "cancelled" });
-				},
-				(providerId) => this.host.modelRegistry.getProviderAuthStatus(providerId),
-				{ getRows: () => this.host.ui.terminal.rows, initialCategory },
-			);
-			handle = showFullPaneOverlay(this.host.ui, selector, 78);
+		return this.showProviderSelector<AuthenticationResult>({
+			mode: "login",
+			providerOptions,
+			initialCategory,
+			getAuthStatus: (providerId) => this.host.modelRegistry.getProviderAuthStatus(providerId),
+			onSelect: async (providerOption) => this.loginProvider(providerOption),
+			onCancel: () => ({ status: "cancelled" }),
 		});
 	}
 
@@ -168,6 +154,42 @@ export class ProviderAuthFlows {
 			return Promise.resolve(null);
 		}
 
+		return this.showProviderSelector<string | null>({
+			mode: "logout",
+			providerOptions,
+			onSelect: async (providerOption) => {
+				try {
+					this.host.modelRegistry.authStorage.logout(providerOption.id);
+					this.host.modelRegistry.refresh();
+					await this.host.onAuthChanged?.();
+					const message =
+						providerOption.authType === "oauth"
+							? `Logged out of ${providerOption.name}`
+							: `Removed stored API key for ${providerOption.name}. Environment variables and models.json config are unchanged.`;
+					this.host.showStatus(message);
+					return providerOption.id;
+				} catch (error: unknown) {
+					this.host.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+					return null;
+				}
+			},
+			onCancel: () => null,
+		});
+	}
+
+	/**
+	 * Show the shared provider credential selector as a full-pane overlay and
+	 * funnel its outcome through one promise. The selector closes before the
+	 * select/cancel handler runs.
+	 */
+	private showProviderSelector<T>(options: {
+		mode: "login" | "logout";
+		providerOptions: AuthSelectorProvider[];
+		initialCategory?: AuthSelectorCategory;
+		getAuthStatus?: (providerId: string) => AuthStatus;
+		onSelect: (providerOption: AuthSelectorProvider) => Promise<T>;
+		onCancel: () => T;
+	}): Promise<T> {
 		return new Promise((resolve) => {
 			let handle: OverlayHandle | undefined;
 			const close = () => {
@@ -175,33 +197,19 @@ export class ProviderAuthFlows {
 				this.host.ui.requestRender();
 			};
 			const selector = new OAuthSelectorComponent(
-				"logout",
+				options.mode,
 				this.host.modelRegistry.authStorage,
-				providerOptions,
+				options.providerOptions,
 				async (providerOption: AuthSelectorProvider) => {
 					close();
-
-					try {
-						this.host.modelRegistry.authStorage.logout(providerOption.id);
-						this.host.modelRegistry.refresh();
-						await this.host.onAuthChanged?.();
-						const message =
-							providerOption.authType === "oauth"
-								? `Logged out of ${providerOption.name}`
-								: `Removed stored API key for ${providerOption.name}. Environment variables and models.json config are unchanged.`;
-						this.host.showStatus(message);
-						resolve(providerOption.id);
-					} catch (error: unknown) {
-						this.host.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
-						resolve(null);
-					}
+					resolve(await options.onSelect(providerOption));
 				},
 				() => {
 					close();
-					resolve(null);
+					resolve(options.onCancel());
 				},
-				undefined,
-				{ getRows: () => this.host.ui.terminal.rows },
+				options.getAuthStatus,
+				{ getRows: () => this.host.ui.terminal.rows, initialCategory: options.initialCategory },
 			);
 			handle = showFullPaneOverlay(this.host.ui, selector, 78);
 		});

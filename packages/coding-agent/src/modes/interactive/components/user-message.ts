@@ -1,11 +1,17 @@
-import { Box, type Component, Container, Markdown, type MarkdownTheme, visibleWidth } from "@earendil-works/pi-tui";
+import {
+	type Box,
+	type Component,
+	Container,
+	Markdown,
+	type MarkdownTheme,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import { parseSlashCommand } from "../../../core/slash-commands.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { wrapOsc133Zones } from "./ansi.js";
+import { userMessageBubble } from "./message-surfaces.js";
 import { isLeadingSlashCommand } from "./slash-command-message.js";
 
-const OSC133_ZONE_START = "\x1b]133;A\x07";
-const OSC133_ZONE_END = "\x1b]133;B\x07";
-const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 const COMMAND_MASK_BASE = "\uE000";
 const COMMAND_MASK_EXTRA_WIDTH = "\uFF9E";
 const COMMAND_MASK_ZERO_WIDTH = "\u2060";
@@ -62,7 +68,7 @@ export class UserMessageComponent extends Container {
 		isRecognizedSlashCommand: (name: string) => boolean = () => false,
 	) {
 		super();
-		this.contentBox = new Box(2, 1, (content: string) => theme.getUserMessageBackgroundColor()(content));
+		this.contentBox = userMessageBubble();
 		this.contentBox.addChild(
 			isLeadingSlashCommand(text, isRecognizedSlashCommand)
 				? new SlashCommandMarkdown(text, markdownTheme)
@@ -79,8 +85,6 @@ export class UserMessageComponent extends Container {
 			return lines;
 		}
 
-		lines[0] = OSC133_ZONE_START + lines[0];
-		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
-		return lines;
+		return wrapOsc133Zones(lines);
 	}
 }

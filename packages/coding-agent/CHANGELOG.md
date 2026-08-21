@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed deleted RLM subagents lingering in the agents view: deletion now removes the subagent session file and completed subagents can be deleted without an active parent.
+- Changed compaction to offload pre-compaction message entries from resident memory (usage and tree structure retained; full entries re-read from the session file on demand) and to stream full-file rewrites in bounded chunks instead of materializing one ~2x-file-size string.
 - Fixed REPL cells losing top-level declarations that were preceded by a comment; the next cell could not see them.
 - Added a configurable context budget: `compaction.maxContextTokens` (default 666000, hard-capped by the model window) and `compaction.compactAtTokens` (default 500000) control where threshold compaction triggers on large-window models.
 - Added dynamic context control for the main agent: `rlm.get_context_budget()` / `rlm.set_context_budget({ maxContextTokens?, compactAtTokens? })`, session-scoped and gated by the new `dynamicContext` setting (default on).

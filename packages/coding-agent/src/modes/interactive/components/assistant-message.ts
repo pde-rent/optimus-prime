@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { LOGIN_RECOVERY_MESSAGE } from "../../../core/auth-guidance.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
+import { wrapOsc133Zones } from "./ansi.js";
 import { clickToToggle, collapseChevron, THINKING_TOGGLE_TARGET } from "./click-target.js";
 import {
 	CollapsibleErrorComponent,
@@ -20,9 +21,6 @@ import {
 } from "./collapsible-error.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
 
-const OSC133_ZONE_START = "\x1b]133;A\x07";
-const OSC133_ZONE_END = "\x1b]133;B\x07";
-const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 const LOGIN_RECOVERY_SUFFIX = `\n\n${LOGIN_RECOVERY_MESSAGE}`;
 
 export interface AssistantMessageComponentOptions {
@@ -185,9 +183,7 @@ export class AssistantMessageComponent extends Container {
 			return lines;
 		}
 
-		lines[0] = OSC133_ZONE_START + lines[0];
-		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
-		return lines;
+		return wrapOsc133Zones(lines);
 	}
 
 	updateContent(message: AssistantMessage): void {

@@ -1,24 +1,11 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
+import { applyBackgroundAcrossResets } from "./ansi.js";
 
 export const TOOL_PANEL_PADDING_X = 2;
 
-const ANSI_RESET = "\x1b[0m";
-
 export function toolPanelContentWidth(width: number): number {
 	return Math.max(1, width - TOOL_PANEL_PADDING_X * 2);
-}
-
-/**
- * Tool output is arbitrary text and may carry a full ANSI reset, which clears
- * the background for the rest of the line. Re-open the background after every
- * reset so the panel stays one continuous block.
- */
-function withPanelBackground(text: string): string {
-	return text
-		.split(ANSI_RESET)
-		.map((segment) => theme.bg("toolPanelBg", segment))
-		.join(ANSI_RESET);
 }
 
 /**
@@ -31,7 +18,9 @@ export function toolPanelLine(line: string, width: number): string {
 	const truncated = truncateToWidth(line, contentWidth, "");
 	const padding = " ".repeat(Math.max(0, contentWidth - visibleWidth(truncated)));
 	const sidePad = " ".repeat(TOOL_PANEL_PADDING_X);
-	return withPanelBackground(`${sidePad}${truncated}${padding}${sidePad}`);
+	return applyBackgroundAcrossResets(`${sidePad}${truncated}${padding}${sidePad}`, (segment) =>
+		theme.bg("toolPanelBg", segment),
+	);
 }
 
 /**

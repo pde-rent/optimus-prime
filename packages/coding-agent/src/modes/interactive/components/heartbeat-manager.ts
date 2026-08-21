@@ -1,5 +1,6 @@
 import {
 	type Component,
+	collapseText,
 	type Focusable,
 	getKeybindings,
 	listWindow,
@@ -152,11 +153,11 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			const label = heartbeat.job.label?.trim();
 			const delivery = heartbeat.job.deliveryMode === "follow_up" ? "follow-up" : "steer";
 			const details = heartbeat.job.lastError
-				? `${source} · error: ${this.singleLine(heartbeat.job.lastError)}`
+				? `${source} · error: ${collapseText(heartbeat.job.lastError)}`
 				: `${source} · ${this.sessionLabel(heartbeat)} · ${heartbeat.job.schedule.expression} · ${delivery}`;
 			list.addChild(
 				new MenuRow({
-					primary: label || this.singleLine(heartbeat.job.prompt) || this.defaultHeartbeatName(heartbeat),
+					primary: label || collapseText(heartbeat.job.prompt) || this.defaultHeartbeatName(heartbeat),
 					secondary: details,
 					meta: this.formatStatus(heartbeat),
 					selected: index === this.selectedIndex,
@@ -179,7 +180,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 		const name = heartbeat.job.label?.trim() || this.defaultHeartbeatName(heartbeat);
 		const panel = new MenuPanel({
 			title: name,
-			subtitle: this.singleLine(heartbeat.job.prompt),
+			subtitle: collapseText(heartbeat.job.prompt),
 		});
 		panel.addChild(new TruncatedText(theme.fg("muted", this.formatHeartbeatDetails(heartbeat))));
 		panel.addChild(new Spacer(1));
@@ -266,7 +267,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 	}
 
 	private sessionLabel(heartbeat: AgentConnectionHeartbeat): string {
-		return heartbeat.sessionName?.trim() || this.singleLine(heartbeat.firstMessage ?? "") || heartbeat.job.sessionId;
+		return heartbeat.sessionName?.trim() || collapseText(heartbeat.firstMessage ?? "") || heartbeat.job.sessionId;
 	}
 
 	private getListLayout() {
@@ -316,10 +317,6 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			case "stop":
 				return "Permanently remove this heartbeat";
 		}
-	}
-
-	private singleLine(value: string): string {
-		return value.replace(/\s+/g, " ").trim();
 	}
 
 	private formatTimestamp(value: string): string {

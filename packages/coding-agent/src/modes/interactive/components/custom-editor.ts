@@ -8,6 +8,7 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.js";
+import { applyBackgroundAcrossResets } from "./ansi.js";
 
 export interface CustomEditorOptions extends EditorOptions {
 	placeholder?: string;
@@ -286,12 +287,7 @@ export class CustomEditor extends Editor {
 		if (!backgroundColor) {
 			return padded;
 		}
-		// Truncation may inject full ANSI resets; wrap each segment so the
-		// background survives past them instead of falling back to the terminal's.
-		return padded
-			.split("\x1b[0m")
-			.map((segment) => backgroundColor(segment))
-			.join("\x1b[0m");
+		return applyBackgroundAcrossResets(padded, backgroundColor);
 	}
 
 	private renderPlaceholderLine(width: number): string {

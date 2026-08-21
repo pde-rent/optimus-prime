@@ -4,29 +4,23 @@ import { parseGitUrl } from "../../utils/git.js";
 import type { AgentConnectionSourceInfo } from "../agent-connection/index.js";
 import { theme } from "./theme/theme.js";
 
-export function formatSplashCwd(cwd: string): string {
-	const normalized = cwd.replace(/\\/g, "/");
-	const home = os.homedir().replace(/\\/g, "/");
-	if (home && normalized === home) {
+function replaceHomeDirectory(p: string, home: string): string {
+	if (home && p === home) {
 		return "~";
 	}
-	if (home && normalized.startsWith(`${home}/`)) {
-		return `~${normalized.slice(home.length)}`;
+	if (home && p.startsWith(`${home}/`)) {
+		return `~${p.slice(home.length)}`;
 	}
+	return p;
+}
 
-	return normalized;
+export function formatSplashCwd(cwd: string): string {
+	const normalized = cwd.replace(/\\/g, "/");
+	return replaceHomeDirectory(normalized, os.homedir().replace(/\\/g, "/"));
 }
 
 export function formatDisplayPath(p: string): string {
-	const home = os.homedir();
-	let result = p;
-
-	// Replace home directory with ~
-	if (result.startsWith(home)) {
-		result = `~${result.slice(home.length)}`;
-	}
-
-	return result;
+	return replaceHomeDirectory(p, os.homedir());
 }
 
 export function formatExtensionDisplayPath(pathStr: string): string {
