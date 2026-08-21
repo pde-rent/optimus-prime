@@ -4,8 +4,8 @@ import { theme } from "../theme/theme.js";
 /**
  * Dynamic border component that adjusts to viewport width.
  *
- * Note: When used from extensions loaded via jiti, the global `theme` may be undefined
- * because jiti creates a separate module cache. Always pass an explicit color
+ * Note: When used from extensions loaded via the native loader, the global `theme` may be undefined
+ * because extensions run in a separate module graph. Always pass an explicit color
  * function when using DynamicBorder in components exported for extension use.
  */
 export class DynamicBorder implements Component {

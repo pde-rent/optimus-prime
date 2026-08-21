@@ -7,9 +7,9 @@
  * from ~20 chunk files in under half the time. dist/ stays unbundled for
  * library consumers and type resolution; only the bin entry uses the bundle.
  *
- * Extension loading inside the bundle uses jiti virtualModules (same as the
- * compiled Bun binary), keyed off the __PI_BUNDLED__ define below, so extension
- * imports of pi packages share the bundle's module instances.
+ * Extension loading inside the bundle uses native virtual-module shims (see
+ * src/core/extensions/native-import.ts) keyed off the __PI_BUNDLED__ define,
+ * so extension imports of pi packages share the bundle's module instances.
  */
 import { chmodSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";

@@ -3916,7 +3916,7 @@ export class InteractiveMode {
 			}
 
 			// If extending CustomEditor, copy app-level handlers
-			// Use duck typing since instanceof fails across jiti module boundaries
+			// Use duck typing since instanceof fails across extension module boundaries
 			const customEditor = newEditor as unknown as Record<string, unknown>;
 			if ("actionHandlers" in customEditor && customEditor.actionHandlers instanceof Map) {
 				if (!customEditor.onEscape) {

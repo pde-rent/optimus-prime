@@ -1,6 +1,6 @@
 /**
- * Modules made available to extensions via jiti virtualModules in the compiled
- * Bun binary.
+ * Modules made available to extensions as shared instances via native
+ * virtual-module shims (see native-import.ts).
  *
  * These imports MUST be static so Bun bundles them into the compiled binary;
  * the module itself is loaded lazily (dynamic import with a literal specifier,

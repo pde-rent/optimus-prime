@@ -2,18 +2,21 @@
  * Harness reloader — in-session hot-reload for the fork's custom harness
  * modules (coordinator / recursion additions distinct from stock optimus).
  *
- * Each harness module is re-imported from source through jiti with
- * `moduleCache: false`, the same dynamic loader the extension system uses for
- * `/reload` (see src/core/extensions/loader.ts `loadExtensionModule`). Because
- * the module cache is disabled, every call re-reads the module from disk, so a
- * developer's edit is picked up on the next harness reload WITHOUT exiting and
+ * Each harness module is re-imported from source with a cache-busted dynamic
+ * import so every call re-reads the module from disk. A developer's edit is
+ * therefore picked up on the next harness reload without exiting and
  * relaunching the agent.
+ *
+ * Bun's native ESM registry caches modules by URL for the life of the process,
+ * so a plain dynamic import would return the code loaded at process start and
+ * the reload would silently be a no-op. Appending a per-call reload query
+ * forces a fresh URL and a fresh read from disk.
  *
  * Dead modules (present but not yet imported by the running app) are still
  * re-imported so an edit that is about to be wired up is validated for
  * syntax/type/dependency errors — but they are reported as NOT wired and are
  * never activated here (wiring dead modules is out of scope for the reload
- * mechanism). The manifest currently lists none.
+ * mechanism).
  *
  * Safety boundary: call reload only OUTSIDE an active turn. The caller (the
  * `/reload:harness` command) refuses while the agent is streaming or
@@ -50,18 +53,6 @@ export const HARNESS_MODULE_MANIFEST: ReadonlyArray<HarnessModuleSpec> = [
 	{ id: "rlm-max-depth", file: "rlm-max-depth.ts", wired: true },
 ];
 
-/**
- * jiti options that make the reload actually re-read from disk.
- *
- * `tryNative` defaults to ON under Bun, which routes the import to Bun's native
- * ESM registry — that registry caches by URL for the life of the process, so
- * `moduleCache: false` alone would hand back the code loaded at process start
- * and the reload would silently be a no-op. Forcing jiti's own loader restores
- * the hot-swap property. Exported so the test can assert it on this exact
- * config instead of a hand-rolled one.
- */
-export const HARNESS_JITI_OPTIONS = { moduleCache: false, tryNative: false } as const;
-
 export interface HarnessReloadResult {
 	id: string;
 	wired: boolean;
@@ -90,21 +81,34 @@ function resolveHarnessSourcePath(baseDir: string, spec: HarnessModuleSpec): str
 	return tsPath.endsWith(".ts") ? `${tsPath.slice(0, -3)}.js` : tsPath;
 }
 
+let reloadNonce = 0;
+
+/**
+ * Import a module from an absolute path, forcing a fresh read from disk.
+ * Bun caches modules by URL, so a plain import would return the first instance
+ * loaded for the process lifetime. The per-call query forces a distinct URL
+ * and therefore a fresh evaluation, which is the whole hot-reload property.
+ */
+export async function importModuleFresh(modulePath: string): Promise<unknown> {
+	// A file:// URL with a query still hits Bun's per-path cache; a raw absolute
+	// path with a query does not. Keep the raw path so each call re-reads disk.
+	const separator = modulePath.includes("?") ? "&" : "?";
+	return import(`${modulePath}${separator}reload=${++reloadNonce}`);
+}
+
 /**
  * Re-import every harness module from source with the module cache evicted.
  * Never throws: per-module failures are collected and reported so a broken
  * edit does not abort the reload or corrupt the session.
  */
 export async function reloadHarnessModules(): Promise<HarnessReloadSummary> {
-	const { createJiti } = await import("jiti/static");
 	const baseDir = dirname(fileURLToPath(import.meta.url));
-	const jiti = createJiti(import.meta.url, HARNESS_JITI_OPTIONS);
 
 	const results: HarnessReloadResult[] = [];
 	for (const spec of HARNESS_MODULE_MANIFEST) {
 		const resolvedPath = resolveHarnessSourcePath(baseDir, spec);
 		try {
-			await jiti.import(resolvedPath);
+			await importModuleFresh(resolvedPath);
 			results.push({ id: spec.id, wired: spec.wired, ok: true });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

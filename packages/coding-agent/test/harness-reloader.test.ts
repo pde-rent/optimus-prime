@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HARNESS_JITI_OPTIONS, HARNESS_MODULE_MANIFEST, reloadHarnessModules } from "../src/core/harness-reloader.js";
+import { HARNESS_MODULE_MANIFEST, importModuleFresh, reloadHarnessModules } from "../src/core/harness-reloader.js";
 
 const coreDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "core");
 const tempDirs: string[] = [];
@@ -35,24 +35,21 @@ describe("harness reloader", () => {
 		expect(second.results).toEqual(first.results);
 	});
 
-	// The whole point of `/reload:harness` is that an edit on disk is picked up without
-	// restarting the process. That property comes from the jiti options the reloader
-	// uses, so assert it on those exact options rather than trusting the flags.
+	// The whole point of `/reload:harness` is that an edit on disk is picked up
+	// without restarting the process. That property comes from the cache-busted
+	// dynamic import, so assert it on the loader directly.
 	it("hot-reload actually swaps a changed module", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pi-harness-reload-"));
 		tempDirs.push(dir);
 		const modulePath = join(dir, "hot.ts");
 		writeFileSync(modulePath, "export const value = 'before';\n");
 
-		const { createJiti } = await import("jiti/static");
-		const jiti = createJiti(import.meta.url, { ...HARNESS_JITI_OPTIONS });
-
-		const before = (await jiti.import(modulePath)) as { value: string };
+		const before = (await importModuleFresh(modulePath)) as { value: string };
 		expect(before.value).toBe("before");
 
 		writeFileSync(modulePath, "export const value = 'after';\n");
 
-		const after = (await jiti.import(modulePath)) as { value: string };
+		const after = (await importModuleFresh(modulePath)) as { value: string };
 		expect(after.value).toBe("after");
 	});
 });

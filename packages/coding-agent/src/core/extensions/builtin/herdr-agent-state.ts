@@ -6,7 +6,7 @@
  * the extension that `herdr integration install pi` writes, so Optimus Prime
  * works inside Herdr panes out of the box without a manual install step.
  *
- * Unlike the file-based integration (re-evaluated per session load by jiti),
+ * Unlike the file-based integration (re-evaluated per session load by the native loader),
  * this module is statically imported and evaluated once per process. All env
  * capture and state therefore live inside the factory, which the resource
  * loader invokes per session load — inside the daemon's client-env window —

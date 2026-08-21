@@ -58,7 +58,7 @@ export class DoomEngine {
 		const wadData = readFileSync(this.wadPath);
 		const wadArray = Array.from(new Uint8Array(wadData));
 
-		// Load WASM module - eval to bypass jiti completely
+		// Load WASM module - eval to bypass the extension loader
 		const doomJsCode = readFileSync(doomJsPath, "utf-8");
 		const moduleExports: { exports: unknown } = { exports: {} };
 		const nativeRequire = createRequire(doomJsPath);
