@@ -61,9 +61,6 @@
         "@types/proper-lockfile": "^4.1.4",
         "esbuild": "^0.28.1",
       },
-      "optionalDependencies": {
-        "@mariozechner/clipboard": "^0.3.9",
-      },
     },
     "packages/tui": {
       "name": "@earendil-works/pi-tui",
@@ -164,28 +161,6 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.28.2", "", { "os": "win32", "cpu": "ia32" }, "sha512-YmJbfTlvU7Sdn9BB+4PRES4oB6pxgS37MAONj+hBr/cpXS1aBPKXxNnDbu+QCWPj0o9dgyxeq79g6c5P8KeuYA=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.2", "", { "os": "win32", "cpu": "x64" }, "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g=="],
-
-    "@mariozechner/clipboard": ["@mariozechner/clipboard@0.3.9", "", { "optionalDependencies": { "@mariozechner/clipboard-darwin-arm64": "0.3.9", "@mariozechner/clipboard-darwin-universal": "0.3.9", "@mariozechner/clipboard-darwin-x64": "0.3.9", "@mariozechner/clipboard-linux-arm64-gnu": "0.3.9", "@mariozechner/clipboard-linux-arm64-musl": "0.3.9", "@mariozechner/clipboard-linux-riscv64-gnu": "0.3.9", "@mariozechner/clipboard-linux-x64-gnu": "0.3.9", "@mariozechner/clipboard-linux-x64-musl": "0.3.9", "@mariozechner/clipboard-win32-arm64-msvc": "0.3.9", "@mariozechner/clipboard-win32-x64-msvc": "0.3.9" } }, "sha512-ABnA53mdfkGZwOFUdZNv2S0CWGO/EIuPj8Vv9xmBFmSYg/qFc7ihO6q5FcQjvoE67kZpWkEc4AhD6B/os04yuA=="],
-
-    "@mariozechner/clipboard-darwin-arm64": ["@mariozechner/clipboard-darwin-arm64@0.3.9", "", { "os": "darwin", "cpu": "arm64" }, "sha512-BfgV7vCEWZwJwZJw03r6bP5+tf0iI/ANuQYCxi9RNn7FrWB3yzGuMKCrNLRl6V761vXRdL8+OqZ0wd4TqlsNOQ=="],
-
-    "@mariozechner/clipboard-darwin-universal": ["@mariozechner/clipboard-darwin-universal@0.3.9", "", { "os": "darwin" }, "sha512-BGGR4iA9Z2shAjI65eI5xtyb3LYNlDW9X3gxKxDbqtbnREohsrqznov6zpKoIrsRWpzlYVEdKphS7ksJ0/ndSQ=="],
-
-    "@mariozechner/clipboard-darwin-x64": ["@mariozechner/clipboard-darwin-x64@0.3.9", "", { "os": "darwin", "cpu": "x64" }, "sha512-4kURmCbS6nt8uYhtmWpUcJWyPHfmAr5dTpXD1nO3pIfa+TSQ9DbrGOYCKH+aEFW47XhQ4Vp8ZTszie+wfFvDKg=="],
-
-    "@mariozechner/clipboard-linux-arm64-gnu": ["@mariozechner/clipboard-linux-arm64-gnu@0.3.9", "", { "os": "linux", "cpu": "arm64" }, "sha512-g59OkUGP2DDfCOIKypHeYgv2M55u/cKvXa5dSxFbEJ34XvIQMdcVmpKCkGUro3ZgefXiGVdwguvTMQGpHWzIXw=="],
-
-    "@mariozechner/clipboard-linux-arm64-musl": ["@mariozechner/clipboard-linux-arm64-musl@0.3.9", "", { "os": "linux", "cpu": "arm64" }, "sha512-AGuJdgKsmJdm4Pych7kv3sqe591ERRaAHW3xjLooiFzn8J+PxUyof++7YZrB5Y5tpnTO+K18Og3taj2NpluCRQ=="],
-
-    "@mariozechner/clipboard-linux-riscv64-gnu": ["@mariozechner/clipboard-linux-riscv64-gnu@0.3.9", "", { "os": "linux", "cpu": "none" }, "sha512-DXBEAiuMpk7dhS1a9NzNxVAFi1vaKoPu7rQNgY8LIDLGrK3lnIp3nT10DUum+PKVJoJppIP+NAA8IZe4DMNDPw=="],
-
-    "@mariozechner/clipboard-linux-x64-gnu": ["@mariozechner/clipboard-linux-x64-gnu@0.3.9", "", { "os": "linux", "cpu": "x64" }, "sha512-WORrMLd6EpElEME7JRKfSaY34nW1P5LbdgK5YNCS1ncG2LqmITsSMEJ8nh2mpvxb3TxqbOOKgY7k9eMJYlW9Mw=="],
-
-    "@mariozechner/clipboard-linux-x64-musl": ["@mariozechner/clipboard-linux-x64-musl@0.3.9", "", { "os": "linux", "cpu": "x64" }, "sha512-/DHn+1DrfL6oRaPPWXaOKvonFFrni666fxd+zFqiQEfvBH0tsHVWjq9iqBk0oDp0qaPA72lIMy5BptxISBEhZQ=="],
-
-    "@mariozechner/clipboard-win32-arm64-msvc": ["@mariozechner/clipboard-win32-arm64-msvc@0.3.9", "", { "os": "win32", "cpu": "arm64" }, "sha512-O5FHD3ErkMwMhNzAfu3ggy0ug4z7btZuoQgwwxlzPrwV2bxlD6WDpqBY4NCgICAgZdDKdp+loUEKVAVt8aYnhQ=="],
-
-    "@mariozechner/clipboard-win32-x64-msvc": ["@mariozechner/clipboard-win32-x64-msvc@0.3.9", "", { "os": "win32", "cpu": "x64" }, "sha512-ihQC3EufqEY81vhXBgVBtK4prL+wc62zJsSvxrgz7K1hsdt6OObz6v9p3Rn1OG3GJksTTKMJF0u/guMISHPhSA=="],
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.24", "", {}, "sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw=="],
 

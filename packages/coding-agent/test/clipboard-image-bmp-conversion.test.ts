@@ -64,14 +64,6 @@ vi.mock("child_process", () => ({
 	spawnSync: spawnSyncMock,
 }));
 
-// Mock the native clipboard (not used in Wayland path, but needs to be mocked)
-vi.mock("@mariozechner/clipboard", () => ({
-	default: {
-		hasImage: vi.fn(() => false),
-		getImageBinary: vi.fn(() => Promise.resolve(null)),
-	},
-}));
-
 describe("readClipboardImage BMP conversion", () => {
 	test("converts BMP to PNG on Wayland/WSLg", async () => {
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.js");

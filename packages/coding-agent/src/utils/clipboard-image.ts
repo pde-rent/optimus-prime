@@ -4,8 +4,6 @@ import { readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { clipboard } from "./clipboard-native.js";
-
 export type ClipboardImage = {
 	bytes: Uint8Array;
 	mimeType: string;
@@ -127,35 +125,110 @@ function isWSL(env: NodeJS.ProcessEnv = process.env): boolean {
 	}
 }
 
+function readClipboardImageViaXclip(): ClipboardImage | null {
+	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
+		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
+	});
+
+	let candidateTypes: string[] = [];
+	if (targets.ok) {
+		candidateTypes = targets.stdout
+			.toString("utf-8")
+			.split(/\r?\n/)
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+
+	const preferred = candidateTypes.length > 0 ? selectPreferredImageMimeType(candidateTypes) : null;
+	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
+
+	for (const mimeType of tryTypes) {
+		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
+		if (data.ok && data.stdout.length > 0) {
+			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
+		}
+	}
+
+	return null;
+}
+
 /**
- * On WSL, the Linux clipboard (Wayland/X11) does not receive image data from
- * Windows screenshots (Win+Shift+S). PowerShell can access the Windows clipboard
- * directly, so we use it as a fallback.
+ * Read the macOS clipboard image via AppleScript. The pasteboard exposes a PNG
+ * coercion («class PNGf») regardless of the source image format, so
+ * writing that coercion to a temp file yields the bytes directly. Verified to
+ * round-trip byte-identically; when the clipboard holds no image the script
+ * exits non-zero and leaves an empty file, which we treat as "no image".
  */
-function readClipboardImageViaPowerShell(): ClipboardImage | null {
-	const tmpFile = join(tmpdir(), `pi-wsl-clip-${randomUUID()}.png`);
+function readClipboardImageViaOsascript(): ClipboardImage | null {
+	const tmpFile = join(tmpdir(), `pi-mac-clip-${randomUUID()}.png`);
 
 	try {
-		const winPathResult = runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
-		if (!winPathResult.ok) {
+		const result = runCommand(
+			"osascript",
+			[
+				"-e",
+				`set f to (POSIX file "${tmpFile}")`,
+				"-e",
+				"set fd to open for access f with write permission",
+				"-e",
+				"write (the clipboard as «class PNGf») to fd",
+				"-e",
+				"close access fd",
+			],
+			{ timeoutMs: DEFAULT_READ_TIMEOUT_MS },
+		);
+		if (!result.ok) {
 			return null;
 		}
 
-		const winPath = winPathResult.stdout.toString("utf-8").trim();
-		if (!winPath) {
+		const bytes = readFileSync(tmpFile);
+		if (bytes.length === 0) {
 			return null;
 		}
 
-		const psQuotedWinPath = winPath.replaceAll("'", "''");
+		return { bytes: new Uint8Array(bytes), mimeType: "image/png" };
+	} catch {
+		return null;
+	} finally {
+		try {
+			unlinkSync(tmpFile);
+		} catch {
+			// Ignore cleanup errors.
+		}
+	}
+}
+
+/**
+ * Read the Windows clipboard image via PowerShell, saving it to a PNG temp file.
+ * Works both natively (the temp path is already a Windows path) and under WSL
+ * (the path is converted with wslpath and the script runs in powershell.exe).
+ */
+function readClipboardImageViaPowerShell(wsl: boolean): ClipboardImage | null {
+	const tmpFile = join(tmpdir(), `pi-win-clip-${randomUUID()}.png`);
+
+	try {
+		let psPath = tmpFile;
+		if (wsl) {
+			const winPathResult = runCommand("wslpath", ["-w", tmpFile], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
+			if (!winPathResult.ok) {
+				return null;
+			}
+			psPath = winPathResult.stdout.toString("utf-8").trim();
+			if (!psPath) {
+				return null;
+			}
+		}
+
+		const psQuotedPath = psPath.replaceAll("'", "''");
 		const psScript = [
 			"Add-Type -AssemblyName System.Windows.Forms",
 			"Add-Type -AssemblyName System.Drawing",
-			`$path = '${psQuotedWinPath}'`,
+			`$path = '${psQuotedPath}'`,
 			"$img = [System.Windows.Forms.Clipboard]::GetImage()",
 			"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
 		].join("; ");
 
-		const result = runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
+		const result = runCommand(wsl ? "powershell.exe" : "powershell", ["-NoProfile", "-Command", psScript], {
 			timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
 		});
 		if (!result.ok) {
@@ -184,47 +257,6 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 	}
 }
 
-function readClipboardImageViaXclip(): ClipboardImage | null {
-	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
-		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
-	});
-
-	let candidateTypes: string[] = [];
-	if (targets.ok) {
-		candidateTypes = targets.stdout
-			.toString("utf-8")
-			.split(/\r?\n/)
-			.map((t) => t.trim())
-			.filter(Boolean);
-	}
-
-	const preferred = candidateTypes.length > 0 ? selectPreferredImageMimeType(candidateTypes) : null;
-	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
-
-	for (const mimeType of tryTypes) {
-		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
-		if (data.ok && data.stdout.length > 0) {
-			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
-		}
-	}
-
-	return null;
-}
-
-async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | null> {
-	if (!clipboard || !clipboard.hasImage()) {
-		return null;
-	}
-
-	const imageData = await clipboard.getImageBinary();
-	if (!imageData || imageData.length === 0) {
-		return null;
-	}
-
-	const bytes = imageData instanceof Uint8Array ? imageData : Uint8Array.from(imageData);
-	return { bytes, mimeType: "image/png" };
-}
-
 export async function readClipboardImage(options?: {
 	env?: NodeJS.ProcessEnv;
 	platform?: NodeJS.Platform;
@@ -247,14 +279,16 @@ export async function readClipboardImage(options?: {
 		}
 
 		if (!image && wsl) {
-			image = readClipboardImageViaPowerShell();
+			image = readClipboardImageViaPowerShell(true);
 		}
 
-		if (!image && !wayland) {
-			image = await readClipboardImageViaNativeClipboard();
+		if (!image && !wayland && !wsl) {
+			image = readClipboardImageViaXclip();
 		}
-	} else {
-		image = await readClipboardImageViaNativeClipboard();
+	} else if (platform === "darwin") {
+		image = readClipboardImageViaOsascript();
+	} else if (platform === "win32") {
+		image = readClipboardImageViaPowerShell(false);
 	}
 
 	if (!image) {

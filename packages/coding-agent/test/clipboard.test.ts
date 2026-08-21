@@ -4,19 +4,10 @@ import { platform } from "os";
 
 const mocks = vi.hoisted(() => {
 	return {
-		clipboard: {
-			setText: vi.fn<(text: string) => Promise<void>>(),
-		},
 		execSync: vi.fn(),
 		spawn: vi.fn(),
 		platform: vi.fn<() => NodeJS.Platform>(),
 		isWaylandSession: vi.fn<() => boolean>(),
-	};
-});
-
-vi.mock("../src/utils/clipboard-native.js", () => {
-	return {
-		clipboard: mocks.clipboard,
 	};
 });
 
@@ -47,10 +38,9 @@ const mockedPlatform = vi.mocked(platform);
 
 let originalWrite: typeof process.stdout.write;
 let stdoutWrites: string[];
-let nativeResolved = false;
 
 function osc52Writes(): string[] {
-	return stdoutWrites.filter((write) => write.startsWith("\x1b]52;c;"));
+	return stdoutWrites.filter((write) => write.startsWith("\u001b]52;c;"));
 }
 
 beforeEach(() => {
@@ -59,22 +49,16 @@ beforeEach(() => {
 	vi.stubEnv("SSH_CLIENT", "");
 	vi.stubEnv("MOSH_CONNECTION", "");
 	stdoutWrites = [];
-	nativeResolved = false;
-	mocks.clipboard.setText.mockReset();
 	mocks.execSync.mockReset();
 	mocks.spawn.mockReset();
 	mocks.platform.mockReset();
 	mocks.isWaylandSession.mockReset();
 	mockedPlatform.mockReturnValue("darwin");
 	mocks.isWaylandSession.mockReturnValue(false);
-	mocks.clipboard.setText.mockImplementation(async () => {
-		await new Promise((resolve) => setTimeout(resolve, 1));
-		nativeResolved = true;
-	});
 	originalWrite = process.stdout.write.bind(process.stdout);
 	process.stdout.write = ((...args: Parameters<typeof process.stdout.write>) => {
 		const [chunk] = args;
-		if (typeof chunk === "string" && chunk.startsWith("\x1b]52;c;")) {
+		if (typeof chunk === "string" && chunk.startsWith("\u001b]52;c;")) {
 			stdoutWrites.push(chunk);
 			return true;
 		}
@@ -88,32 +72,7 @@ afterEach(() => {
 });
 
 describe("copyToClipboard", () => {
-	test("local native success skips OSC 52 and shell fallbacks", async () => {
-		await copyToClipboard("hello");
-
-		expect(mocks.clipboard.setText).toHaveBeenCalledWith("hello");
-		expect(osc52Writes()).toHaveLength(0);
-		expect(mockedExecSync).not.toHaveBeenCalled();
-		expect(mockedSpawn).not.toHaveBeenCalled();
-	});
-
-	test("remote native success emits OSC 52 after native write", async () => {
-		vi.stubEnv("SSH_CONNECTION", "client server");
-		mocks.clipboard.setText.mockImplementation(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 1));
-			expect(osc52Writes()).toHaveLength(0);
-			nativeResolved = true;
-		});
-
-		await copyToClipboard("hello");
-
-		expect(nativeResolved).toBe(true);
-		expect(osc52Writes()).toHaveLength(1);
-		expect(mockedExecSync).not.toHaveBeenCalled();
-	});
-
-	test("local shell fallback success skips OSC 52", async () => {
-		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
+	test("darwin local: pbcopy success skips OSC 52", async () => {
 		mockedExecSync.mockReturnValue(Buffer.alloc(0));
 
 		await copyToClipboard("hello");
@@ -124,10 +83,20 @@ describe("copyToClipboard", () => {
 			timeout: 5000,
 		});
 		expect(osc52Writes()).toHaveLength(0);
+		expect(mockedSpawn).not.toHaveBeenCalled();
 	});
 
-	test("uses OSC 52 fallback when native and shell tools fail", async () => {
-		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
+	test("remote: emits OSC 52 after a successful local write", async () => {
+		vi.stubEnv("SSH_CONNECTION", "client server");
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("hello");
+
+		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", expect.anything());
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("darwin: pbcopy failure falls back to OSC 52", async () => {
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
 		});
@@ -137,8 +106,20 @@ describe("copyToClipboard", () => {
 		expect(osc52Writes()).toHaveLength(1);
 	});
 
+	test("win32: uses PowerShell Set-Clipboard for Unicode safety", async () => {
+		mockedPlatform.mockReturnValue("win32");
+		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+
+		await copyToClipboard("héllo 世界");
+
+		expect(mockedExecSync).toHaveBeenCalledWith(
+			'powershell -NoProfile -Command "Set-Clipboard -Value ([Console]::In.ReadToEnd())"',
+			expect.objectContaining({ input: "héllo 世界" }),
+		);
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
 	test("does not emit oversized OSC 52 payloads", async () => {
-		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
 		mockedExecSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
 		});

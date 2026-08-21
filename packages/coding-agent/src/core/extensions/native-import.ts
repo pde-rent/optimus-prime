@@ -78,12 +78,16 @@ function resolveRelativeSpecifier(fromFile: string, specifier: string): string |
  * exists there, symlink it into the mirrored equivalent.
  */
 function mirrorNodeModules(file: string, entryDir: string, outDir: string): void {
+	// Only mirror node_modules directories INSIDE the extension's own tree. An
+	// out-of-tree file (e.g. a host source file reached through an unusual
+	// relative import) must not drag the repo-root node_modules into the temp
+	// mirror, and the link must never escape outDir via ".." segments.
 	let dir = dirname(file);
-	const stopAt = dirname(entryDir);
-	while (dir !== stopAt) {
+	while (dir === entryDir || dir.startsWith(`${entryDir}/`)) {
 		const nm = join(dir, "node_modules");
 		if (existsSync(nm)) {
 			const rel = relative(entryDir, nm);
+			if (rel === ".." || rel.startsWith("../") || rel === "") continue;
 			const outLink = join(outDir, rel);
 			if (!existsSync(outLink)) {
 				mkdirSync(dirname(outLink), { recursive: true });
@@ -124,8 +128,15 @@ function rewriteGraph(entryPath: string, outDir: string, specifierToShim: Map<st
 			const specifier = m[3];
 			if (!specifier.startsWith(".")) continue;
 			const resolved = resolveRelativeSpecifier(file, specifier);
-			if (resolved && !seen.has(resolved)) queue.push(resolved);
-			else if (!resolved) unresolved.push(`${file}:${specifier}`);
+			if (!resolved) {
+				unresolved.push(`${file}:${specifier}`);
+				continue;
+			}
+			// Do not follow relative imports that leave the extension's directory:
+			// those are host-owned (and usually type-only, erased by Bun anyway).
+			const relFromRoot = relative(dirname(entryPath), resolved);
+			if (relFromRoot === ".." || relFromRoot.startsWith("../")) continue;
+			if (!seen.has(resolved)) queue.push(resolved);
 		}
 	}
 

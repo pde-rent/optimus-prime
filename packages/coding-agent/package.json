@@ -63,9 +63,6 @@
 			"rimraf": "6.1.2"
 		}
 	},
-	"optionalDependencies": {
-		"@mariozechner/clipboard": "^0.3.9"
-	},
 	"devDependencies": {
 		"@types/ms": "^2.1.0",
 		"@types/node": "^24.3.0",
