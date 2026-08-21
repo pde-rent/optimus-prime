@@ -12,6 +12,12 @@
 </p>
 
 <p align="center">
+  The most minimal harness we know of that still ships the full feature set — dynamic memory,
+  context and effort management, recursive delegation, skills, MCP, charts, web search —
+  because none of that requires bloat. Small is the discipline; features are the point.
+</p>
+
+<p align="center">
   <a href="#install">Install</a> &bull;
   <a href="packages/coding-agent/docs/index.md">Docs</a> &bull;
   <a href="#numbers">Numbers</a> &bull;
@@ -77,20 +83,22 @@ for this fork, so build from source as above.
 
 ## Numbers
 
-Same machine (M3, macOS), 2026-08-19, clean clone of each. Install weight is a production
-install, so it is what ships rather than dev tooling.
+Measured on the same machine (M3, macOS); competitors on a 2026-08-19 clean clone, Optimus
+re-measured 2026-08-21 after another round of removals. Install weight is a production install,
+so it is what ships rather than dev tooling.
 
 | | prime-agent | pi | **Optimus** |
 |---|---|---|---|
-| Direct dependencies | 33 | 27 | **6** |
-| Packages installed | 125 | 84 | **19** |
-| `node_modules` | 197 MB | 140 MB | **34 MB** |
-| Lockfile entries | 443 | 395 | **93** |
-| Bundle | 13 MB | 11 MB | **6.7 MB** |
-| Cold start, mean of 5 | 230 ms | 350 ms | **74 ms** |
+| Runtime dependencies | 33 | 27 | **4** |
+| Packages installed | 125 | 84 | **25** |
+| `node_modules` | 197 MB | 140 MB | **4.8 MB** |
+| Bundle | 13 MB | 11 MB | **4.5 MB** |
+| Cold start, mean of 5 | 230 ms | 350 ms | **~80 ms** |
 | Default runtime | Node | Node | **Bun** |
 
-Startup includes the runtime difference; the dependency and size figures do not.
+Startup includes the runtime difference; the dependency and size figures do not. Four runtime
+dependencies, each with a written justification below. Everything else the harness needs ships
+inside Bun itself.
 
 ## What changed
 
@@ -144,6 +152,7 @@ arrive as messages or files, so a parent is never blocked on a child.
 | Spawn a child | `rlm('task')` |
 | Depth, adjustable at runtime | `rlm.get_max_depth` / `rlm.set_max_depth` |
 | Reasoning effort per child | `rlm.get_effort` / `rlm.set_effort` |
+| Context budget, session-scoped | `rlm.get_context_budget` / `rlm.set_context_budget` |
 | Roster and teardown | `rlm.list_subagents` / `rlm.delete_subagent` |
 | Talk to family | `agent_message.send(msg, { receiver_role })` — parent, child, sibling |
 | Restrict who a child may reach | `rlm(task, { peers: [...] })` — one-way, `[]` for none |
@@ -155,6 +164,12 @@ Reach is bounded to parent, siblings and children. Siblings talk directly, so a 
 reconcile without routing everything through the coordinator, and a repeated delegation role
 becomes a saved subagent spec instead of prompt text retyped each session. The agents view
 draws the live graph.
+
+The agent also manages its own headroom. Compaction triggers by default at 500k tokens under a
+666k context budget, itself hard-capped by whatever window the model actually has; both are
+settings. Unless `dynamicContext` is switched off, the agent can retune them mid-session —
+tighter before a long mechanical run, wider before an open-ended one — session-scoped, never
+persisted, and thrash-capped like every other self-adjustment it is allowed.
 
 ## The graph resolver
 
@@ -315,17 +330,16 @@ transport is not reachable rather than going missing.
 
 Every dependency runs with your credentials and updates without you reading the diff, and it is
 also startup cost — everything parsed before the first prompt renders. So a dependency earns its
-place or gets written out. Nineteen packages instead of a hundred and twenty-five is an audit a
-person can actually perform.
+place or gets written out. Twenty-five installed packages instead of a hundred and twenty-five
+is an audit a person can actually perform.
 
 | Kept | Why |
 |---|---|
-| `@crafter/charts` | Terminal charts. Zero deps of its own, but a `typescript` peer that package managers install — 23 MB of the 34 MB |
+| `@crafter/charts` | Terminal charts. Zero deps of its own; its `typescript` peer is no longer installed now that peer auto-install is off |
 | `@speed-highlight/core` | Highlighting rule data, zero deps |
 | `jiti` | Extension loading; `Bun.plugin` does not intercept bare specifiers at runtime |
 | `proper-lockfile` | Cross-process file locking |
 | `extract-zip` | Bun's archive API is write-only |
-| `@mariozechner/clipboard` | Optional, native clipboard with images |
 
 Written out instead, each differential-tested against what it replaced: gitignore matching
 (1440/1440 identical), git URL parsing (20/20), globs (512/512), JSON Schema and validation
