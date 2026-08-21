@@ -3,8 +3,6 @@ import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
 import type {
 	AnthropicMessagesCompat,
-	Api,
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	ImageContent,
@@ -27,8 +25,7 @@ import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.js"
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import {
 	classifyStreamFailure,
-	formatStreamFailureMessage,
-	recordStreamFailure,
+	failAssistantStream,
 	StreamFailureError,
 	streamFailureFromStopReason,
 	streamFailureMessage,
@@ -43,25 +40,11 @@ import type {
 	MessageParam,
 	RawMessageStreamEvent,
 } from "./anthropic-wire-types.js";
-
+import { createAssistantMessage } from "./assistant-message.js";
 import { resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.js";
+import { adjustMaxTokensForThinking, buildSimpleBaseOptions, resolveCacheRetention } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
-
-/**
- * Resolve cache retention preference.
- * Defaults to "short" and uses PI_CACHE_RETENTION for backward compatibility.
- */
-function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (typeof process !== "undefined" && process.env.PI_CACHE_RETENTION === "long") {
-		return "long";
-	}
-	return "short";
-}
 
 function getCacheControl(
 	model: Model<"anthropic-messages">,
@@ -331,23 +314,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
 			let injectedClient: AnthropicMessagesClient | undefined;
@@ -598,16 +565,10 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				delete (block as { index?: number }).index;
-				// partialJson is only a streaming scratch buffer; never persist it.
-				delete (block as { partialJson?: string }).partialJson;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatStreamFailureMessage(error);
-			recordStreamFailure(model, output, error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				scratchKeys: ["index", "partialJson"],
+			});
 		}
 	})();
 
@@ -682,12 +643,7 @@ export const streamSimpleAnthropic: StreamFunction<"anthropic-messages", SimpleS
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
+	const base = buildSimpleBaseOptions(model, options);
 	if (!options?.reasoning || options.reasoning === "off") {
 		return streamAnthropic(model, context, { ...base, thinkingEnabled: false } satisfies AnthropicOptions);
 	}

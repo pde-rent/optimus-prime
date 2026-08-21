@@ -11,6 +11,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import type { AnthropicOptions } from "./anthropic.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import type { AzureOpenAIResponsesOptions } from "./azure-openai-responses.js";
 import type { GoogleOptions } from "./google.js";
 import type { MistralOptions } from "./mistral.js";
@@ -97,24 +98,10 @@ function forwardStream(target: AssistantMessageEventStream, source: AsyncIterabl
 }
 
 function createLazyLoadErrorMessage<TApi extends Api>(model: Model<TApi>, error: unknown): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
+	return createAssistantMessage(model, {
 		stopReason: "error",
 		errorMessage: error instanceof Error ? error.message : String(error),
-		timestamp: Date.now(),
-	};
+	});
 }
 
 function createLazyStream<TApi extends Api, TOptions extends StreamOptions, TSimpleOptions extends SimpleStreamOptions>(

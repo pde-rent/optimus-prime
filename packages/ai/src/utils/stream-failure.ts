@@ -1,5 +1,5 @@
 import { getLogger } from "../log.js";
-import type { AssistantMessage } from "../types.js";
+import type { AssistantMessage, AssistantMessageEventStream } from "../types.js";
 import { appendAssistantMessageDiagnostic, extractDiagnosticError } from "./diagnostics.js";
 
 /**
@@ -229,4 +229,39 @@ export function recordStreamFailure(
 		// errorMessage is user-facing and concise; keep the raw cause for debugging.
 		cause: rawMessage === output.errorMessage ? undefined : truncateRawPayload(rawMessage),
 	});
+}
+
+/**
+ * Terminal catch block shared by provider streams: strip streaming scratch
+ * fields from content blocks, set the error/aborted stop reason and message,
+ * optionally record the structured failure diagnostic, emit the `error`
+ * event, and end the stream.
+ */
+export function failAssistantStream(
+	model: { provider: string; id: string; api: string },
+	output: AssistantMessage,
+	stream: AssistantMessageEventStream,
+	error: unknown,
+	options: {
+		aborted: boolean;
+		/** Defaults to {@link formatStreamFailureMessage}(error). */
+		message?: string;
+		/** Scratch field names to delete from every content block. */
+		scratchKeys?: readonly string[];
+		/** Set false for providers that report failures their own way. */
+		recordFailure?: boolean;
+	},
+): void {
+	for (const block of output.content) {
+		for (const key of options.scratchKeys ?? []) {
+			delete (block as unknown as Record<string, unknown>)[key];
+		}
+	}
+	output.stopReason = options.aborted ? "aborted" : "error";
+	output.errorMessage = options.message ?? formatStreamFailureMessage(error);
+	if ((options.recordFailure ?? true) && output.stopReason === "error") {
+		recordStreamFailure(model, output, error);
+	}
+	stream.push({ type: "error", reason: output.stopReason, error: output });
+	stream.end();
 }

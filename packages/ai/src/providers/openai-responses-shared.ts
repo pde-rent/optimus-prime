@@ -16,12 +16,15 @@ import type {
 } from "../types.js";
 import type { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
-import { iterateSse } from "../utils/http.js";
+import { iterateSse, joinUrl, mergeHeaders } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { classifyStreamFailure, StreamFailureError } from "../utils/stream-failure.js";
+import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
+import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import type {
 	Tool as OpenAITool,
+	ResponseCreateParamsStreaming,
 	ResponseFunctionCallOutputItemList,
 	ResponseFunctionToolCall,
 	ResponseInput,
@@ -617,4 +620,120 @@ function mapStopReason(status: ResponseStatus | undefined): StopReason {
 			throw new Error(`Unhandled stop reason: ${_exhaustive}`);
 		}
 	}
+}
+
+/**
+ * Resolve the OpenAI API key: the explicit argument wins, else
+ * OPENAI_API_KEY. Throws with the SDK's historical message when unset.
+ */
+export function resolveOpenAIApiKey(apiKey?: string): string {
+	if (!apiKey) {
+		if (!process.env.OPENAI_API_KEY) {
+			throw new Error(
+				"OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.",
+			);
+		}
+		apiKey = process.env.OPENAI_API_KEY;
+	}
+	return apiKey;
+}
+
+/** Add the per-request GitHub Copilot headers when the model routes through Copilot. */
+export function applyCopilotRequestHeaders(
+	model: { provider: string },
+	context: Context,
+	headers: Record<string, string>,
+): void {
+	if (model.provider !== "github-copilot") return;
+	Object.assign(
+		headers,
+		buildCopilotDynamicHeaders({
+			messages: context.messages,
+			hasImages: hasCopilotVisionInput(context.messages),
+		}),
+	);
+}
+
+/**
+ * Final URL + header assembly shared by the OpenAI-compatible providers:
+ * Cloudflare AI Gateway swaps auth for its own bearer and baseUrl, everything
+ * else joins the endpoint path onto the model baseUrl.
+ *
+ * Header precedence mirrors `buildHeaders` in `openai/client.mjs`: SDK
+ * defaults, then auth, then the client's `defaultHeaders` — which is how the
+ * Cloudflare AI Gateway path deletes `Authorization` by setting it to null.
+ */
+export function finalizeOpenAIRequest(
+	model: Model<Api>,
+	apiKey: string,
+	headers: Record<string, string>,
+	path: "/chat/completions" | "/responses",
+): { url: string; headers: Record<string, string> } {
+	const defaultHeaders =
+		model.provider === "cloudflare-ai-gateway"
+			? {
+					...headers,
+					Authorization: headers.Authorization ?? null,
+					"cf-aig-authorization": `Bearer ${apiKey}`,
+				}
+			: headers;
+
+	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
+
+	return {
+		url: joinUrl(baseUrl, path),
+		headers: mergeHeaders(openaiDefaultHeaders("OpenAI"), { Authorization: `Bearer ${apiKey}` }, defaultHeaders),
+	};
+}
+
+export interface ResponsesReasoningOptions {
+	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+	reasoningSummary?: "auto" | "detailed" | "concise" | null;
+}
+
+/**
+ * Shared `reasoning` block for the Responses-family request bodies: an
+ * explicit effort or summary enables reasoning (with encrypted content), an
+ * unsupported default-off level otherwise disables it unless the provider is
+ * excluded via `applyDefaultOff`.
+ */
+export function applyResponsesReasoningParams(
+	params: ResponseCreateParamsStreaming,
+	model: Pick<Model<"openai-responses">, "reasoning" | "thinkingLevelMap">,
+	options: ResponsesReasoningOptions,
+	applyDefaultOff: boolean,
+): void {
+	if (!model.reasoning) return;
+	if (options.reasoningEffort || options.reasoningSummary) {
+		const effort = options.reasoningEffort
+			? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
+			: "medium";
+		params.reasoning = {
+			effort: effort as NonNullable<typeof params.reasoning>["effort"],
+			summary: options.reasoningSummary || "auto",
+		};
+		params.include = ["reasoning.encrypted_content"];
+	} else if (applyDefaultOff && model.thinkingLevelMap?.off !== null) {
+		params.reasoning = {
+			effort: (model.thinkingLevelMap?.off ?? "none") as NonNullable<typeof params.reasoning>["effort"],
+		};
+	}
+}
+
+/**
+ * Scale service-tier pricing by `multiplier` (no-op at 1). Callers compute the
+ * multiplier so provider-specific model matching stays local.
+ */
+export function applyServiceTierCostMultiplier(
+	usage: Usage,
+	serviceTier: ServiceTier | undefined,
+	multiplier: number,
+): void {
+	if (serviceTier !== "flex" && serviceTier !== "priority") return;
+	if (multiplier === 1) return;
+	usage.cost.input *= multiplier;
+	usage.cost.output *= multiplier;
+	usage.cost.cacheRead *= multiplier;
+	usage.cost.cacheWrite *= multiplier;
+	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
 }

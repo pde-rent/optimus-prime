@@ -15,11 +15,8 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 	});
 }
 
-import { getEnvApiKey } from "../env-api-keys.js";
-import { clampThinkingLevel } from "../models.js";
 import { registerSessionResourceCleanup } from "../session-resources.js";
 import type {
-	Api,
 	AssistantMessage,
 	Context,
 	Model,
@@ -36,8 +33,10 @@ import {
 } from "../utils/diagnostics.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
+import { failAssistantStream } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions, clampSimpleReasoning, requireApiKey } from "./simple-options.js";
 
 const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth" as const;
@@ -112,29 +111,10 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "openai-codex-responses" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			if (!apiKey) {
-				throw new Error(`No API key for provider: ${model.provider}`);
-			}
+			const apiKey = requireApiKey(model.provider, options?.apiKey);
 
 			const accountId = extractAccountId(apiKey);
 			let body = buildRequestBody(model, context, options);
@@ -278,14 +258,12 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 			stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				// partialJson is only a streaming scratch buffer; never persist it.
-				delete (block as { partialJson?: string }).partialJson;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : String(error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				message: error instanceof Error ? error.message : String(error),
+				scratchKeys: ["partialJson"],
+				recordFailure: false,
+			});
 		}
 	})();
 
@@ -297,14 +275,8 @@ export const streamSimpleOpenAICodexResponses: StreamFunction<"openai-codex-resp
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
-	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const base = buildSimpleBaseOptions(model, options);
+	const { reasoningEffort } = clampSimpleReasoning(model, options);
 
 	return streamOpenAICodexResponses(model, context, {
 		...base,

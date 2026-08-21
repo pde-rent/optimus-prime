@@ -1,8 +1,5 @@
 import { getEnvApiKey } from "../env-api-keys.js";
-import { clampThinkingLevel } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	CacheRetention,
 	Context,
 	Model,
@@ -11,43 +8,27 @@ import type {
 	SimpleStreamOptions,
 	StreamFunction,
 	StreamOptions,
-	Usage,
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
-import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
+import { requestWithRetry } from "../utils/http.js";
+import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import {
-	formatStreamFailureMessage,
-	recordStreamFailure,
-	streamFailureFromStopReason,
-} from "../utils/stream-failure.js";
-import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
-import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import {
+	applyCopilotRequestHeaders,
+	applyResponsesReasoningParams,
+	applyServiceTierCostMultiplier,
 	convertResponsesMessages,
 	convertResponsesTools,
+	finalizeOpenAIRequest,
 	iterateOpenAIStream,
-	openaiDefaultHeaders,
 	processResponsesStream,
+	resolveOpenAIApiKey,
 } from "./openai-responses-shared.js";
 import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions, clampSimpleReasoning, resolveCacheRetention } from "./simple-options.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
-
-/**
- * Resolve cache retention preference.
- * Defaults to "short" and uses PI_CACHE_RETENTION for backward compatibility.
- */
-function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (typeof process !== "undefined" && process.env.PI_CACHE_RETENTION === "long") {
-		return "long";
-	}
-	return "short";
-}
 
 function getCompat(model: Model<"openai-responses">): Required<OpenAIResponsesCompat> {
 	return {
@@ -77,23 +58,7 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -120,7 +85,8 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 
 			await processResponsesStream(openaiStream, output, stream, model, {
 				serviceTier: options?.serviceTier,
-				applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
+				applyServiceTierPricing: (usage, serviceTier) =>
+					applyServiceTierCostMultiplier(usage, serviceTier, getServiceTierCostMultiplier(model, serviceTier)),
 			});
 
 			if (options?.signal?.aborted) {
@@ -134,16 +100,10 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				delete (block as { index?: number }).index;
-				// partialJson is only a streaming scratch buffer; never persist it.
-				delete (block as { partialJson?: string }).partialJson;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatStreamFailureMessage(error);
-			recordStreamFailure(model, output, error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				scratchKeys: ["index", "partialJson"],
+			});
 		}
 	})();
 
@@ -155,14 +115,8 @@ export const streamSimpleOpenAIResponses: StreamFunction<"openai-responses", Sim
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
-	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const base = buildSimpleBaseOptions(model, options);
+	const { reasoningEffort } = clampSimpleReasoning(model, options);
 
 	return streamOpenAIResponses(model, context, {
 		...base,
@@ -177,25 +131,11 @@ function createClient(
 	optionsHeaders?: Record<string, string>,
 	sessionId?: string,
 ) {
-	if (!apiKey) {
-		if (!process.env.OPENAI_API_KEY) {
-			throw new Error(
-				"OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.",
-			);
-		}
-		apiKey = process.env.OPENAI_API_KEY;
-	}
+	const key = resolveOpenAIApiKey(apiKey);
 
 	const compat = getCompat(model);
 	const headers = { ...model.headers };
-	if (model.provider === "github-copilot") {
-		const hasImages = hasCopilotVisionInput(context.messages);
-		const copilotHeaders = buildCopilotDynamicHeaders({
-			messages: context.messages,
-			hasImages,
-		});
-		Object.assign(headers, copilotHeaders);
-	}
+	applyCopilotRequestHeaders(model, context, headers);
 
 	if (sessionId) {
 		if (compat.sendSessionIdHeader) {
@@ -208,24 +148,7 @@ function createClient(
 		Object.assign(headers, optionsHeaders);
 	}
 
-	const defaultHeaders =
-		model.provider === "cloudflare-ai-gateway"
-			? {
-					...headers,
-					Authorization: headers.Authorization ?? null,
-					"cf-aig-authorization": `Bearer ${apiKey}`,
-				}
-			: headers;
-
-	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
-
-	// Header precedence mirrors `buildHeaders` in `openai/client.mjs`: SDK
-	// defaults, then auth, then the client's `defaultHeaders` — which is how the
-	// Cloudflare AI Gateway path deletes `Authorization` by setting it to null.
-	return {
-		url: joinUrl(baseUrl, "/responses"),
-		headers: mergeHeaders(openaiDefaultHeaders("OpenAI"), { Authorization: `Bearer ${apiKey}` }, defaultHeaders),
-	};
+	return finalizeOpenAIRequest(model, key, headers, "/responses");
 }
 
 function buildParams(model: Model<"openai-responses">, context: Context, options?: OpenAIResponsesOptions) {
@@ -258,22 +181,7 @@ function buildParams(model: Model<"openai-responses">, context: Context, options
 		params.tools = convertResponsesTools(context.tools);
 	}
 
-	if (model.reasoning) {
-		if (options?.reasoningEffort || options?.reasoningSummary) {
-			const effort = options?.reasoningEffort
-				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-				: "medium";
-			params.reasoning = {
-				effort: effort as NonNullable<typeof params.reasoning>["effort"],
-				summary: options?.reasoningSummary || "auto",
-			};
-			params.include = ["reasoning.encrypted_content"];
-		} else if (model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {
-			params.reasoning = {
-				effort: (model.thinkingLevelMap?.off ?? "none") as NonNullable<typeof params.reasoning>["effort"],
-			};
-		}
-	}
+	applyResponsesReasoningParams(params, model, options ?? {}, model.provider !== "github-copilot");
 
 	return params;
 }
@@ -290,19 +198,4 @@ function getServiceTierCostMultiplier(
 		default:
 			return 1;
 	}
-}
-
-function applyServiceTierPricing(
-	usage: Usage,
-	serviceTier: ServiceTier | undefined,
-	model: Pick<Model<"openai-responses">, "id">,
-) {
-	const multiplier = getServiceTierCostMultiplier(model, serviceTier);
-	if (multiplier === 1) return;
-
-	usage.cost.input *= multiplier;
-	usage.cost.output *= multiplier;
-	usage.cost.cacheRead *= multiplier;
-	usage.cost.cacheWrite *= multiplier;
-	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
 }

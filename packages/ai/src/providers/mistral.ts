@@ -1,5 +1,5 @@
 import { getEnvApiKey } from "../env-api-keys.js";
-import { calculateCost, clampThinkingLevel } from "../models.js";
+import { calculateCost } from "../models.js";
 import type {
 	AssistantMessage,
 	Context,
@@ -19,7 +19,8 @@ import { shortHash } from "../utils/hash.js";
 import { iterateSseJson, joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { recordStreamFailure, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import type {
 	ChatCompletionStreamRequest,
 	ChatCompletionStreamRequestMessage,
@@ -27,7 +28,7 @@ import type {
 	ContentChunk,
 	FunctionTool,
 } from "./mistral-wire-types.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
 /** SDK default `serverURL`; the `/v1` version prefix lives in the request path. */
@@ -54,7 +55,7 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output = createOutput(model);
+		const output = createAssistantMessage(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider);
@@ -93,15 +94,11 @@ export const streamMistral: StreamFunction<"mistral-conversations", MistralOptio
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				// partialArgs is only a streaming scratch buffer; never persist it.
-				delete (block as { partialArgs?: string }).partialArgs;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatMistralError(error);
-			recordStreamFailure(model, output, error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				message: formatMistralError(error),
+				scratchKeys: ["partialArgs"],
+			});
 		}
 	})();
 
@@ -114,14 +111,8 @@ export const streamSimpleMistral: StreamFunction<"mistral-conversations", Simple
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
-	const reasoning = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const base = buildSimpleBaseOptions(model, options);
+	const { clampedReasoning: reasoning } = clampSimpleReasoning(model, options);
 	const shouldUseReasoning = model.reasoning && reasoning !== undefined;
 
 	return streamMistral(model, context, {
@@ -131,26 +122,6 @@ export const streamSimpleMistral: StreamFunction<"mistral-conversations", Simple
 			shouldUseReasoning && usesReasoningEffort(model) ? mapReasoningEffort(model, reasoning) : undefined,
 	} satisfies MistralOptions);
 };
-
-function createOutput(model: Model<"mistral-conversations">): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
 
 function createMistralToolCallIdNormalizer(): (id: string) => string {
 	const idMap = new Map<string, string>();

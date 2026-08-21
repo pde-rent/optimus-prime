@@ -1,12 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { getModel } from "../src/models.js";
 import { complete, stream } from "../src/stream.js";
-import type { Api, Context, Model, StreamOptions } from "../src/types.js";
-import { getKimiCodingTestModel } from "./kimi-test-model.js";
-
-type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
-
+import type { Api, Context, Model } from "../src/types.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
+import { describeProviders, type ProviderSpec, type StreamOptionsWithExtras } from "./helpers.js";
+import { getKimiCodingTestModel } from "./kimi-test-model.js";
 import { resolveApiKey } from "./oauth.js";
 
 // Resolve OAuth tokens at module level (async, runs before tests)
@@ -97,185 +95,87 @@ async function testAbortThenNewMessage<TApi extends Api>(llm: Model<TApi>, optio
 	expect(followUp.stopReason).toBe("stop");
 	expect(followUp.content.length).toBeGreaterThan(0);
 }
-
 describe("AI Providers Abort Tests", () => {
-	describe.skipIf(!process.env.GEMINI_API_KEY)("Google Provider Abort", () => {
-		const llm = getModel("google", "gemini-2.5-flash");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm, { thinking: { enabled: true } });
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm, { thinking: { enabled: true } });
-		});
+	const spec = (
+		name: string,
+		skipIf: boolean,
+		model: () => Model<Api>,
+		options?: StreamOptionsWithExtras,
+	): ProviderSpec => ({
+		name,
+		skipIf,
+		model,
+		cases: [
+			{ name: "should abort mid-stream", fn: testAbortSignal, options },
+			{ name: "should handle immediate abort", fn: testImmediateAbort, options },
+		],
 	});
 
-	describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI Completions Provider Abort", () => {
-		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini")!;
-		void _compat;
-		const llm: Model<"openai-completions"> = {
-			...baseModel,
-			api: "openai-completions",
-		};
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI Responses Provider Abort", () => {
-		const llm = getModel("openai", "gpt-5-mini");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!hasAzureOpenAICredentials())("Azure OpenAI Responses Provider Abort", () => {
-		const llm = getModel("azure-openai-responses", "gpt-4o-mini");
-		const azureDeploymentName = resolveAzureDeploymentName(llm.id);
-		const azureOptions = azureDeploymentName ? { azureDeploymentName } : {};
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm, azureOptions);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm, azureOptions);
-		});
-	});
-
-	describe.skipIf(!process.env.ANTHROPIC_OAUTH_TOKEN)("Anthropic Provider Abort", () => {
-		const llm = getModel("anthropic", "claude-opus-4-6");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm, { thinkingEnabled: true, thinkingBudgetTokens: 2048 });
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm, { thinkingEnabled: true, thinkingBudgetTokens: 2048 });
-		});
-
-		// Previously exercised via Bedrock; re-pointed at Anthropic when that provider was dropped.
-		it("should recover on a new message after an abort", { retry: 3 }, async () => {
-			await testAbortThenNewMessage(llm, { thinkingEnabled: true, thinkingBudgetTokens: 2048 });
-		});
-	});
-
-	describe.skipIf(!process.env.MISTRAL_API_KEY)("Mistral Provider Abort", () => {
-		const llm = getModel("mistral", "devstral-medium-latest");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.MINIMAX_API_KEY)("MiniMax Provider Abort", () => {
-		const llm = getModel("minimax", "MiniMax-M2.7");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider Abort", () => {
-		const llm = getModel("xiaomi", "mimo-v2.5-pro");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)("Xiaomi MiMo Token Plan (CN) Provider Abort", () => {
-		const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)("Xiaomi MiMo Token Plan (AMS) Provider Abort", () => {
-		const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)("Xiaomi MiMo Token Plan (SGP) Provider Abort", () => {
-		const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.KIMI_API_KEY)("Kimi For Coding Provider Abort", () => {
-		const llm = getKimiCodingTestModel();
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider Abort", () => {
-		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
-
-		it("should abort mid-stream", { retry: 3 }, async () => {
-			await testAbortSignal(llm);
-		});
-
-		it("should handle immediate abort", { retry: 3 }, async () => {
-			await testImmediateAbort(llm);
-		});
-	});
+	describeProviders([
+		spec("Google Provider Abort", !process.env.GEMINI_API_KEY, () => getModel("google", "gemini-2.5-flash"), {
+			thinking: { enabled: true },
+		}),
+		spec("OpenAI Completions Provider Abort", !process.env.OPENAI_API_KEY, () => {
+			const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini");
+			void _compat;
+			return { ...baseModel, api: "openai-completions" };
+		}),
+		spec("OpenAI Responses Provider Abort", !process.env.OPENAI_API_KEY, () => getModel("openai", "gpt-5-mini")),
+		spec(
+			"Azure OpenAI Responses Provider Abort",
+			!hasAzureOpenAICredentials(),
+			() => getModel("azure-openai-responses", "gpt-4o-mini"),
+			(() => {
+				const azureDeploymentName = resolveAzureDeploymentName(
+					getModel("azure-openai-responses", "gpt-4o-mini").id,
+				);
+				return azureDeploymentName ? { azureDeploymentName } : {};
+			})(),
+		),
+		{
+			name: "Anthropic Provider Abort",
+			skipIf: !process.env.ANTHROPIC_OAUTH_TOKEN,
+			model: () => getModel("anthropic", "claude-opus-4-6"),
+			cases: [
+				...spec("", false, () => getModel("anthropic", "claude-opus-4-6"), {
+					thinkingEnabled: true,
+					thinkingBudgetTokens: 2048,
+				}).cases,
+				{
+					// Previously exercised via Bedrock; re-pointed at Anthropic when that provider was dropped.
+					name: "should recover on a new message after an abort",
+					fn: testAbortThenNewMessage,
+					options: { thinkingEnabled: true, thinkingBudgetTokens: 2048 },
+				},
+			],
+		},
+		spec("Mistral Provider Abort", !process.env.MISTRAL_API_KEY, () => getModel("mistral", "devstral-medium-latest")),
+		spec("MiniMax Provider Abort", !process.env.MINIMAX_API_KEY, () => getModel("minimax", "MiniMax-M2.7")),
+		spec("Xiaomi MiMo (API billing) Provider Abort", !process.env.XIAOMI_API_KEY, () =>
+			getModel("xiaomi", "mimo-v2.5-pro"),
+		),
+		spec("Xiaomi MiMo Token Plan (CN) Provider Abort", !process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY, () =>
+			getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro"),
+		),
+		spec("Xiaomi MiMo Token Plan (AMS) Provider Abort", !process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY, () =>
+			getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro"),
+		),
+		spec("Xiaomi MiMo Token Plan (SGP) Provider Abort", !process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY, () =>
+			getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro"),
+		),
+		spec("Kimi For Coding Provider Abort", !process.env.KIMI_API_KEY, () => getKimiCodingTestModel()),
+		spec("Vercel AI Gateway Provider Abort", !process.env.AI_GATEWAY_API_KEY, () =>
+			getModel("vercel-ai-gateway", "google/gemini-2.5-flash"),
+		),
+	]);
 
 	describe("OpenAI Codex Provider Abort", () => {
 		it.skipIf(!openaiCodexToken)("should abort mid-stream", { retry: 3 }, async () => {
-			const llm = getModel("openai-codex", "gpt-5.2-codex");
-			await testAbortSignal(llm, { apiKey: openaiCodexToken });
+			await testAbortSignal(getModel("openai-codex", "gpt-5.2-codex"), { apiKey: openaiCodexToken });
 		});
 
 		it.skipIf(!openaiCodexToken)("should handle immediate abort", { retry: 3 }, async () => {
-			const llm = getModel("openai-codex", "gpt-5.2-codex");
-			await testImmediateAbort(llm, { apiKey: openaiCodexToken });
+			await testImmediateAbort(getModel("openai-codex", "gpt-5.2-codex"), { apiKey: openaiCodexToken });
 		});
 	});
 });

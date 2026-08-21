@@ -1,23 +1,12 @@
 import { getEnvApiKey } from "../env-api-keys.js";
-import { clampThinkingLevel } from "../models.js";
-import type {
-	Api,
-	AssistantMessage,
-	Context,
-	Model,
-	SimpleStreamOptions,
-	StreamFunction,
-	StreamOptions,
-} from "../types.js";
+import type { Context, Model, SimpleStreamOptions, StreamFunction, StreamOptions } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
+import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import {
-	formatStreamFailureMessage,
-	recordStreamFailure,
-	streamFailureFromStopReason,
-} from "../utils/stream-failure.js";
-import {
+	applyResponsesReasoningParams,
 	convertResponsesMessages,
 	convertResponsesTools,
 	iterateOpenAIStream,
@@ -25,7 +14,7 @@ import {
 	processResponsesStream,
 } from "./openai-responses-shared.js";
 import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
 
 const DEFAULT_AZURE_API_VERSION = "v1";
 const AZURE_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode", "azure-openai-responses"]);
@@ -69,24 +58,7 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 
 	(async () => {
 		const deploymentName = resolveDeploymentName(model, options);
-
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "azure-openai-responses" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -122,16 +94,10 @@ export const streamAzureOpenAIResponses: StreamFunction<"azure-openai-responses"
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				delete (block as { index?: number }).index;
-				// partialJson is only a streaming scratch buffer; never persist it.
-				delete (block as { partialJson?: string }).partialJson;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatStreamFailureMessage(error);
-			recordStreamFailure(model, output, error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				scratchKeys: ["index", "partialJson"],
+			});
 		}
 	})();
 
@@ -143,14 +109,8 @@ export const streamSimpleAzureOpenAIResponses: StreamFunction<"azure-openai-resp
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
-	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
-	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const base = buildSimpleBaseOptions(model, options);
+	const { reasoningEffort } = clampSimpleReasoning(model, options);
 
 	return streamAzureOpenAIResponses(model, context, {
 		...base,
@@ -271,22 +231,7 @@ function buildParams(
 		params.tools = convertResponsesTools(context.tools);
 	}
 
-	if (model.reasoning) {
-		if (options?.reasoningEffort || options?.reasoningSummary) {
-			const effort = options?.reasoningEffort
-				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-				: "medium";
-			params.reasoning = {
-				effort: effort as NonNullable<typeof params.reasoning>["effort"],
-				summary: options?.reasoningSummary || "auto",
-			};
-			params.include = ["reasoning.encrypted_content"];
-		} else if (model.thinkingLevelMap?.off !== null) {
-			params.reasoning = {
-				effort: (model.thinkingLevelMap?.off ?? "none") as NonNullable<typeof params.reasoning>["effort"],
-			};
-		}
-	}
+	applyResponsesReasoningParams(params, model, options ?? {}, true);
 
 	return params;
 }

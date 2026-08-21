@@ -1,6 +1,6 @@
 import { getAnthropicCacheWriteCost, hasStandardAnthropicCachePricing } from "../cache-pricing.js";
 import { getEnvApiKey } from "../env-api-keys.js";
-import { calculateCost, clampThinkingLevel } from "../models.js";
+import { calculateCost } from "../models.js";
 import type {
 	AssistantMessage,
 	CacheRetention,
@@ -21,12 +21,17 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
-import { joinUrl, mergeHeaders, requestWithRetry } from "../utils/http.js";
+import { requestWithRetry } from "../utils/http.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
-import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import { iterateOpenAIStream, openaiDefaultHeaders } from "./openai-responses-shared.js";
+import { failAssistantStream } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
+import {
+	applyCopilotRequestHeaders,
+	finalizeOpenAIRequest,
+	iterateOpenAIStream,
+	resolveOpenAIApiKey,
+} from "./openai-responses-shared.js";
 import type {
 	ChatCompletionAssistantMessageParam,
 	ChatCompletionChunk,
@@ -40,7 +45,7 @@ import type {
 	ChatCompletionTool,
 	ChatCompletionToolMessageParam,
 } from "./openai-wire-types.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions, clampSimpleReasoning, resolveCacheRetention } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
 /**
@@ -104,16 +109,6 @@ type ChatCompletionToolWithCacheControl = ChatCompletionTool & {
 	cache_control?: OpenAICompatCacheControl;
 };
 
-function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (typeof process !== "undefined" && process.env.PI_CACHE_RETENTION === "long") {
-		return "long";
-	}
-	return "short";
-}
-
 export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenAICompletionsOptions> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -122,23 +117,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -417,19 +396,16 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			for (const block of output.content) {
-				delete (block as { index?: number }).index;
-				// Streaming scratch buffers are only used during parsing; never persist them.
-				delete (block as { partialArgs?: string }).partialArgs;
-				delete (block as { streamIndex?: number }).streamIndex;
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			let message = error instanceof Error ? error.message : JSON.stringify(error);
 			// Some providers via OpenRouter give additional information in this field.
-			const rawMetadata = (error as any)?.error?.metadata?.raw;
-			if (rawMetadata) output.errorMessage += `\n${rawMetadata}`;
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			const rawMetadata = (error as { error?: { metadata?: { raw?: unknown } } })?.error?.metadata?.raw;
+			if (rawMetadata) message += `\n${rawMetadata}`;
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				message,
+				scratchKeys: ["index", "partialArgs", "streamIndex"],
+				recordFailure: false,
+			});
 		}
 	})();
 
@@ -441,16 +417,9 @@ export const streamSimpleOpenAICompletions: StreamFunction<"openai-completions",
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
-	const requestedReasoning = options?.reasoning;
-	const reasoningSpecified = requestedReasoning !== undefined;
-	const clampedReasoning = reasoningSpecified ? clampThinkingLevel(model, requestedReasoning) : undefined;
-	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+	const base = buildSimpleBaseOptions(model, options);
+	const { clampedReasoning, reasoningEffort } = clampSimpleReasoning(model, options);
+	const reasoningSpecified = options?.reasoning !== undefined;
 	const toolChoice = (options as OpenAICompletionsOptions | undefined)?.toolChoice;
 
 	return streamOpenAICompletions(model, context, {
@@ -469,24 +438,10 @@ function createClient(
 	sessionId?: string,
 	compat: ResolvedOpenAICompletionsCompat = getCompat(model),
 ) {
-	if (!apiKey) {
-		if (!process.env.OPENAI_API_KEY) {
-			throw new Error(
-				"OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass it as an argument.",
-			);
-		}
-		apiKey = process.env.OPENAI_API_KEY;
-	}
+	const key = resolveOpenAIApiKey(apiKey);
 
 	const headers = { ...model.headers };
-	if (model.provider === "github-copilot") {
-		const hasImages = hasCopilotVisionInput(context.messages);
-		const copilotHeaders = buildCopilotDynamicHeaders({
-			messages: context.messages,
-			hasImages,
-		});
-		Object.assign(headers, copilotHeaders);
-	}
+	applyCopilotRequestHeaders(model, context, headers);
 
 	if (sessionId && compat.sendSessionAffinityHeaders) {
 		headers.session_id = sessionId;
@@ -498,24 +453,7 @@ function createClient(
 		Object.assign(headers, optionsHeaders);
 	}
 
-	const defaultHeaders =
-		model.provider === "cloudflare-ai-gateway"
-			? {
-					...headers,
-					Authorization: headers.Authorization ?? null,
-					"cf-aig-authorization": `Bearer ${apiKey}`,
-				}
-			: headers;
-
-	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
-
-	// Header precedence mirrors `buildHeaders` in `openai/client.mjs`: SDK
-	// defaults, then auth, then the client's `defaultHeaders` — which is how the
-	// Cloudflare AI Gateway path deletes `Authorization` by setting it to null.
-	return {
-		url: joinUrl(baseUrl, "/chat/completions"),
-		headers: mergeHeaders(openaiDefaultHeaders("OpenAI"), { Authorization: `Bearer ${apiKey}` }, defaultHeaders),
-	};
+	return finalizeOpenAIRequest(model, key, headers, "/chat/completions");
 }
 
 function buildParams(

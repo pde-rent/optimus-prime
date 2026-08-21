@@ -1,8 +1,6 @@
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../models.js";
 import type {
-	Api,
-	AssistantMessage,
 	Context,
 	Model,
 	SimpleStreamOptions,
@@ -23,11 +21,8 @@ import type {
 } from "../utils/google-api-types.js";
 import { iterateSseJson, mergeHeaders, requestWithRetry } from "../utils/http.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import {
-	formatStreamFailureMessage,
-	recordStreamFailure,
-	streamFailureFromStopReason,
-} from "../utils/stream-failure.js";
+import { failAssistantStream, streamFailureFromStopReason } from "../utils/stream-failure.js";
+import { createAssistantMessage } from "./assistant-message.js";
 import type { GoogleThinkingLevel } from "./google-shared.js";
 import {
 	convertMessages,
@@ -38,7 +33,7 @@ import {
 	mapToolChoice,
 	retainThoughtSignature,
 } from "./google-shared.js";
-import { buildBaseOptions } from "./simple-options.js";
+import { buildSimpleBaseOptions } from "./simple-options.js";
 
 export interface GoogleOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "any";
@@ -59,23 +54,7 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 	const stream = new AssistantMessageEventStream();
 
 	(async () => {
-		const output: AssistantMessage = {
-			role: "assistant",
-			content: [],
-			api: "google-generative-ai" as Api,
-			provider: model.provider,
-			model: model.id,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+		const output = createAssistantMessage(model);
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -266,17 +245,10 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();
 		} catch (error) {
-			// Remove internal index property used during streaming
-			for (const block of output.content) {
-				if ("index" in block) {
-					delete (block as { index?: number }).index;
-				}
-			}
-			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-			output.errorMessage = formatStreamFailureMessage(error);
-			recordStreamFailure(model, output, error);
-			stream.push({ type: "error", reason: output.stopReason, error: output });
-			stream.end();
+			failAssistantStream(model, output, stream, error, {
+				aborted: options?.signal?.aborted === true,
+				scratchKeys: ["index"],
+			});
 		}
 	})();
 
@@ -288,12 +260,7 @@ export const streamSimpleGoogle: StreamFunction<"google-generative-ai", SimpleSt
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, options, apiKey);
+	const base = buildSimpleBaseOptions(model, options);
 	if (!options?.reasoning || options.reasoning === "off") {
 		return streamGoogle(model, context, { ...base, thinking: { enabled: false } } satisfies GoogleOptions);
 	}
