@@ -4,12 +4,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
-import { Container, resetCapabilitiesCache, setCapabilities, Text, TUI } from "@earendil-works/pi-tui";
+import { Container, resetCapabilitiesCache, setCapabilities, Text, TUI, urlAtColumn } from "@earendil-works/pi-tui";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.js";
 import type { ToolDefinition } from "../src/core/extensions/types.js";
 import { type BashOperations, createBashTool, createBashToolDefinition } from "../src/core/tools/bash.js";
 import { createEditToolDefinition } from "../src/core/tools/edit.js";
 import { createAgentConnectionToolDefinition } from "../src/modes/agent-connection/tool-definition.js";
+import { parseBlockTarget, setClickTargetsEnabled } from "../src/modes/interactive/components/click-target.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../src/modes/interactive/theme/working-icon.js";
@@ -898,5 +899,67 @@ describe("ToolExecutionComponent parity", () => {
 		expect(withDiffLines.filter((line) => line.includes("╰─ README.md +1 -1")).length).toBe(1);
 		expect(withDiffs).toMatch(/1 - before/);
 		expect(withDiffs).toMatch(/1 \+ after/);
+	});
+});
+
+describe("ToolExecutionComponent click targets", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	test("every rendered panel row resolves the block's pi-block target", () => {
+		setClickTargetsEnabled(true);
+		try {
+			const component = new ToolExecutionComponent(
+				"custom_tool",
+				"tool-9",
+				{ q: 1 },
+				{},
+				undefined,
+				createFakeTui(),
+				process.cwd(),
+			);
+			component.updateResult({ content: [{ type: "text", text: "ok" }], details: {}, isError: false });
+
+			const width = 60;
+			const lines = component.render(width);
+			expect(lines.length).toBeGreaterThan(0);
+			for (const line of lines) {
+				expect(parseBlockTarget(urlAtColumn(line, Math.floor(width / 2)) ?? "")).toEqual({
+					kind: "toolcall",
+					id: "tool:tool-9",
+				});
+			}
+		} finally {
+			setClickTargetsEnabled(false);
+		}
+	});
+
+	test("activating the target toggles the same per-block expansion as the chevron", () => {
+		setClickTargetsEnabled(true);
+		try {
+			const toolDefinition: ToolDefinition = {
+				...createBaseToolDefinition(),
+				renderResult: (_result, options) =>
+					new Text(options.expanded ? "EXPANDED RESULT" : "collapsed result", 0, 0),
+			};
+			const component = new ToolExecutionComponent(
+				"custom_tool",
+				"tool-10",
+				{},
+				{},
+				toolDefinition,
+				createFakeTui(),
+				process.cwd(),
+			);
+			component.updateResult({ content: [{ type: "text", text: "done" }], details: {}, isError: false });
+
+			expect(stripAnsi(component.render(120).join("\n"))).toContain("collapsed result");
+			// This is the call the pi-block://toolcall click handler makes.
+			component.toggleExpandedSelf();
+			expect(stripAnsi(component.render(120).join("\n"))).toContain("EXPANDED RESULT");
+		} finally {
+			setClickTargetsEnabled(false);
+		}
 	});
 });

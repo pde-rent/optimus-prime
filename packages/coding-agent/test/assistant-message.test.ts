@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { setKeybindings } from "@earendil-works/pi-tui";
+import { setKeybindings, urlAtColumn } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent, thinkingRecap } from "../src/modes/interactive/components/assistant-message.js";
+import { parseBlockTarget, setClickTargetsEnabled } from "../src/modes/interactive/components/click-target.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
 import { createAssistantMessage } from "./test-helpers.js";
@@ -240,6 +241,56 @@ describe("AssistantMessageComponent streaming identity", () => {
 		expect(thinkingRecap("   \n\t\n", "Thinking...")).toBe("Thinking...");
 	});
 
+	test("thinking rows carry a full-row pi-block click target", () => {
+		initTheme("dark");
+		setKeybindings(new KeybindingsManager());
+		setClickTargetsEnabled(true);
+		try {
+			const message = createAssistantMessage({
+				content: [
+					{ type: "thinking", thinking: "Line one.\n\nLine two." },
+					{ type: "text", text: "Answer." },
+				],
+			});
+
+			// Collapsed: the single recap row is clickable across its width.
+			const collapsed = new AssistantMessageComponent(message, true).render(80);
+			const clickableRows = collapsed.filter(
+				(line) => stripAnsi(line).trim().length > 0 && parseBlockTarget(urlAtColumn(line, 1) ?? "") !== null,
+			);
+			expect(clickableRows).toHaveLength(1);
+			expect(parseBlockTarget(urlAtColumn(clickableRows[0], 1) ?? "")).toEqual({
+				kind: "thinking",
+				id: "thinking",
+			});
+
+			// Expanded: label and trace lines are clickable; assistant text is not.
+			const expanded = new AssistantMessageComponent(message, false).render(80);
+			let clickableLines = 0;
+			for (const line of expanded) {
+				const plain = stripAnsi(line);
+				if (plain.trim().length === 0) continue;
+				const target = parseBlockTarget(urlAtColumn(line, 1) ?? "");
+				if (plain.includes("Answer.")) {
+					expect(target).toBeNull();
+				} else {
+					expect(target).toEqual({ kind: "thinking", id: "thinking" });
+					clickableLines++;
+				}
+			}
+			expect(clickableLines).toBeGreaterThan(1);
+
+			// The component-level collapse flip keeps the rows clickable.
+			const component = new AssistantMessageComponent(message, false);
+			component.setHideThinkingBlock(true);
+			for (const line of component.render(80)) {
+				if (stripAnsi(line).trim().length === 0 || stripAnsi(line).includes("Answer.")) continue;
+				expect(parseBlockTarget(urlAtColumn(line, 1) ?? "")).toEqual({ kind: "thinking", id: "thinking" });
+			}
+		} finally {
+			setClickTargetsEnabled(false);
+		}
+	});
 	test("recap text with delimiters cannot mask structural changes", () => {
 		initTheme("dark");
 		setKeybindings(new KeybindingsManager());

@@ -12,7 +12,7 @@ import { formatDuration } from "../../../utils/shared.js";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../theme/working-icon.js";
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";
-import { clickToToggle, collapseChevron } from "./click-target.js";
+import { collapseChevron } from "./click-target.js";
 import { normalizeErrorDetails, summarizeErrorDetails } from "./collapsible-error.js";
 import { renderDiffSeparator, renderRichDiff } from "./diff.js";
 import { countChangedLines, FILE_CHANGE_DIFF_INDENT, formatFileChangeSummaryLine } from "./edit-summary.js";
@@ -35,8 +35,7 @@ export interface ReplCellState {
 	agentMessagesExpanded?: boolean;
 	editDiffsExpanded?: boolean;
 	showExpandHint?: boolean;
-	/** Click-target id for the collapse chevron; omitted when the cell is not toggleable. */
-	toggleTargetId?: string;
+
 	executionStarted?: boolean;
 	argsComplete?: boolean;
 	showImages?: boolean;
@@ -386,7 +385,7 @@ export class ReplCellComponent implements Component {
 		const languageLabel = isBashCell && preview.language !== "bash" ? `bash · ${preview.language}` : preview.language;
 		const chevron = theme.fg("dim", collapseChevron(this.state.expanded === true));
 		const head = `${chevron} ${this.marker(details)} ${theme.fg("muted", languageLabel)}`;
-		const parts = [this.state.toggleTargetId === undefined ? head : clickToToggle(head, this.state.toggleTargetId)];
+		const parts = [head];
 
 		if (preview.text) {
 			parts.push(this.highlightInputLine(preview.text, preview.language === "bash"));

@@ -12,7 +12,7 @@ import {
 import { LOGIN_RECOVERY_MESSAGE } from "../../../core/auth-guidance.js";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
 import { wrapOsc133Zones } from "./ansi.js";
-import { clickToToggle, collapseChevron, THINKING_TOGGLE_TARGET } from "./click-target.js";
+import { ClickableBlock, collapseChevron, THINKING_TOGGLE_TARGET } from "./click-target.js";
 import {
 	CollapsibleErrorComponent,
 	normalizeErrorDetails,
@@ -285,18 +285,20 @@ export class AssistantMessageComponent extends Container {
 					.some((c) => (c?.type === "text" && c.text.trim()) || (c?.type === "thinking" && c.thinking.trim()));
 
 				// Thinking visibility is one global setting rebuilt from session
-				// messages, so the chevron toggles all thinking blocks, not this one.
-				const thinkingLabel = clickToToggle(
-					`${theme.fg("dim", collapseChevron(!this.hideThinkingBlock))} ${theme.bold(theme.fg("thinkingText", this.hiddenThinkingLabel))}`,
-					THINKING_TOGGLE_TARGET,
-				);
+				// messages, so clicking a thinking row toggles all thinking blocks,
+				// not this one. The whole row carries the click target.
+				const thinkingLabel = `${theme.fg("dim", collapseChevron(!this.hideThinkingBlock))} ${theme.bold(theme.fg("thinkingText", this.hiddenThinkingLabel))}`;
 				if (this.hideThinkingBlock) {
 					// Collapsed row: bold label, a one-line recap of the trace, and the
 					// hint. The row truncates the recap to the render width so it never
 					// wraps onto a second line on narrow terminals.
 					const recap = thinkingRecap(content.thinking, this.hiddenThinkingLabel);
 					this.contentContainer.addChild(
-						new CollapsedThinkingRow(thinkingLabel, recap, expandCollapseHint("app.thinking.toggle", false)),
+						new ClickableBlock(
+							new CollapsedThinkingRow(thinkingLabel, recap, expandCollapseHint("app.thinking.toggle", false)),
+							"thinking",
+							THINKING_TOGGLE_TARGET,
+						),
 					);
 					if (hasVisibleContentAfter) {
 						this.contentContainer.addChild(new Spacer(1));
@@ -304,9 +306,10 @@ export class AssistantMessageComponent extends Container {
 				} else {
 					// Expanded: the same label line with the collapse hint, then the trace.
 					// Thinking traces keep Markdown structure but stay visually quiet.
-					this.contentContainer.addChild(
-						new Text(`${thinkingLabel} ${expandCollapseHint("app.thinking.toggle", true)}`, 1, 0),
-					);
+					// Label and trace live in one clickable block so clicking anywhere
+					// collapses it.
+					const expanded = new Container();
+					expanded.addChild(new Text(`${thinkingLabel} ${expandCollapseHint("app.thinking.toggle", true)}`, 1, 0));
 					const markdown = new Markdown(
 						content.thinking.trim(),
 						1,
@@ -318,7 +321,8 @@ export class AssistantMessageComponent extends Container {
 					);
 					this.blockMarkdowns.set(i, markdown);
 					this.lastBlockTexts.set(i, content.thinking.trim());
-					this.contentContainer.addChild(markdown);
+					expanded.addChild(markdown);
+					this.contentContainer.addChild(new ClickableBlock(expanded, "thinking", THINKING_TOGGLE_TARGET));
 					if (hasVisibleContentAfter) {
 						this.contentContainer.addChild(new Spacer(1));
 					}

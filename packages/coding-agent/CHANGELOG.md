@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added full-row click targets for thinking blocks and tool-call rows (fullscreen mouse mode): clicking anywhere on the row toggles it, with hover drawn natively by the terminal's OSC 8 rendering and no extra mouse tracking.
 - Changed the live subagent graph panel to one compact line per child: status icon, de-slugged agent name, truncated task summary, and right-aligned runtime plus tokens in/out; running children animate with the shared braille spinner.
 - Added click-to-open on subagent graph rows (fullscreen mouse mode): clicking a child leaves to the scoped agents view with that subagent selected.
 - Changed the agents view to render nested subagent rows through the same shared row renderer as the chat graph panel, so both surfaces read identically.

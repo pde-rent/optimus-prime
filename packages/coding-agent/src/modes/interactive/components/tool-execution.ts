@@ -9,7 +9,7 @@ import type { KernelSentAgentMessage } from "../../../core/tools/repl-types.js";
 import type { AgentConnectionToolDefinition } from "../../agent-connection/index.js";
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
-import { type Collapsible, clickToToggle, collapseChevron } from "./click-target.js";
+import { type Collapsible, clickBlockLines, collapseChevron } from "./click-target.js";
 import { FILE_CHANGE_SUMMARY_PREFIX } from "./edit-summary.js";
 import { ExpandableComponent } from "./expandable-component.js";
 import { getReplCodeFromArgs, ReplCellComponent } from "./repl-cell.js";
@@ -324,7 +324,9 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		if (this.isStatusAnimating() && !this.usesSelfRenderShell()) {
 			this.contentPanel.setHeader(this.panelHeader());
 		}
-		return super.render(width);
+		// The whole rendered block is one pi-block://toolcall target; clicking
+		// anywhere on it toggles the output expansion.
+		return clickBlockLines(super.render(width), "toolcall", this.toggleTargetId);
 	}
 
 	private isStatusAnimating(): boolean {
@@ -363,7 +365,6 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 					showExpandHint: this.showExpandHint,
 					showImages: this.showImages,
 					cwd: this.cwd,
-					toggleTargetId: this.toggleTargetId,
 				};
 				if (!this.replCellComponent) {
 					this.replCellComponent = new ReplCellComponent(state);
@@ -486,8 +487,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 	private panelHeader(): string {
 		const label = this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
 		const chevron = theme.fg("dim", collapseChevron(this.expanded));
-		const head = clickToToggle(`${chevron} ${theme.fg("muted", label)}`, this.toggleTargetId);
-		return `${head}${theme.fg("dim", " · ")}${this.panelStatus()}`;
+		return `${chevron} ${theme.fg("muted", label)}${theme.fg("dim", " · ")}${this.panelStatus()}`;
 	}
 
 	private panelStatus(): string {
