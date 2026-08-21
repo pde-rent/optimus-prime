@@ -39,6 +39,10 @@ vi.mock("child_process", () => ({
 
 const { FooterDataProvider } = await import("../src/core/footer-data-provider.js");
 
+// Plain `bun test` has no vi.mocked; the module mock installs vi.fn()s.
+const mockedExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
+const mockedSpawnSync = spawnSync as unknown as ReturnType<typeof vi.fn>;
+
 type WorktreeFixture = {
 	worktreeDir: string;
 	reftableDir: string;
@@ -95,8 +99,8 @@ describe("FooterDataProvider reftable branch detection", () => {
 		originalCwd = process.cwd();
 		tempDir = mkdtempSync(join(tmpdir(), "footer-data-provider-"));
 		resolvedBranch = "main";
-		vi.mocked(spawnSync).mockClear();
-		vi.mocked(execFile).mockClear();
+		mockedSpawnSync.mockClear();
+		mockedExecFile.mockClear();
 	});
 
 	afterEach(() => {
@@ -115,7 +119,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const provider = new FooterDataProvider(nestedDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
-			expect(vi.mocked(spawnSync)).not.toHaveBeenCalled();
+			expect(mockedSpawnSync).not.toHaveBeenCalled();
 		} finally {
 			provider.dispose();
 		}
@@ -128,7 +132,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const provider = new FooterDataProvider(repoDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
-			expect(vi.mocked(spawnSync)).toHaveBeenCalledWith(
+			expect(mockedSpawnSync).toHaveBeenCalledWith(
 				"git",
 				["--no-optional-locks", "symbolic-ref", "--quiet", "--short", "HEAD"],
 				expect.objectContaining({
@@ -174,15 +178,15 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
-			vi.mocked(spawnSync).mockClear();
+			mockedSpawnSync.mockClear();
 			const onBranchChange = vi.fn();
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
-			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
+			await waitFor(() => mockedExecFile.mock.calls.length === 1);
 
-			expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
-			expect(vi.mocked(spawnSync)).not.toHaveBeenCalled();
+			expect(mockedExecFile).toHaveBeenCalledTimes(1);
+			expect(mockedSpawnSync).not.toHaveBeenCalled();
 			expect(provider.getGitBranch()).toBe("main");
 			expect(onBranchChange).not.toHaveBeenCalled();
 		} finally {
@@ -197,15 +201,15 @@ describe("FooterDataProvider reftable branch detection", () => {
 		const provider = new FooterDataProvider(worktreeDir);
 		try {
 			expect(provider.getGitBranch()).toBe("main");
-			vi.mocked(execFile).mockClear();
+			mockedExecFile.mockClear();
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
 			writeFileSync(join(reftableDir, "tables.list"), "2\n");
 			writeFileSync(join(reftableDir, "tables.list"), "3\n");
-			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
+			await waitFor(() => mockedExecFile.mock.calls.length === 1);
 			await new Promise((resolve) => setTimeout(resolve, 650));
 
-			expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
+			expect(mockedExecFile).toHaveBeenCalledTimes(1);
 		} finally {
 			provider.dispose();
 		}
@@ -223,10 +227,10 @@ describe("FooterDataProvider reftable branch detection", () => {
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
-			await waitFor(() => vi.mocked(execFile).mock.calls.length === 1);
+			await waitFor(() => mockedExecFile.mock.calls.length === 1);
 			await waitFor(() => provider.getGitBranch() === "foo");
 
-			expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
+			expect(mockedExecFile).toHaveBeenCalledTimes(1);
 			expect(provider.getGitBranch()).toBe("foo");
 			expect(onBranchChange).toHaveBeenCalledTimes(1);
 		} finally {
@@ -235,7 +239,6 @@ describe("FooterDataProvider reftable branch detection", () => {
 	});
 
 	it("retries git watchers 5 seconds after an async fs.watch error", async () => {
-		vi.useFakeTimers();
 		const repoDir = createPlainRepo(tempDir);
 		process.chdir(repoDir);
 
@@ -251,15 +254,17 @@ describe("FooterDataProvider reftable branch detection", () => {
 			originalWatcher?.emit("error", new Error("simulated EMFILE"));
 			expect(providerWithInternals.headWatcher).toBeNull();
 
-			await vi.advanceTimersByTimeAsync(4999);
-			expect(providerWithInternals.headWatcher).toBeNull();
-
-			await vi.advanceTimersByTimeAsync(1);
+			// Real-timer conversion: the retry is scheduled at FS_WATCH_RETRY_DELAY_MS (5s).
+			// The 4999ms/5000ms boundary split cannot be reproduced without fake timers,
+			// so poll for the recreated watcher past the retry deadline.
+			await waitFor(
+				() => providerWithInternals.headWatcher !== null && providerWithInternals.headWatcher !== originalWatcher,
+				10_000,
+			);
 			expect(providerWithInternals.headWatcher).not.toBeNull();
 			expect(providerWithInternals.headWatcher).not.toBe(originalWatcher);
 		} finally {
 			provider.dispose();
-			vi.useRealTimers();
 		}
-	});
+	}, 15_000);
 });

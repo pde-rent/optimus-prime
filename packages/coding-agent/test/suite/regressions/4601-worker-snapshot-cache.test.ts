@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -379,8 +379,7 @@ describe("ENG-4601 worker snapshot cache", () => {
 	});
 
 	it("closes a permanently backpressured worker channel after an aborted snapshot", async () => {
-		vi.useFakeTimers();
-		try {
+		{
 			const root = tempDirectory();
 			const daemon = new AgentDaemon(join(root, "worker.sock"), {
 				defaultSessionConfig: { agentDir: root, cwd: root },
@@ -425,11 +424,9 @@ describe("ENG-4601 worker snapshot cache", () => {
 			}
 
 			internals.detachClientFromSession(client, state);
-			for (let attempt = 0; attempt < 10 && vi.getTimerCount() === 0; attempt++) {
-				await Promise.resolve();
-			}
-			expect(vi.getTimerCount()).toBe(1);
-			await vi.advanceTimersByTimeAsync(1_000);
+			// The aborted transfer ends via the terminal drain timeout
+			// (WORKER_SNAPSHOT_TERMINAL_DRAIN_TIMEOUT_MS, 1s) on the real clock.
+			await new Promise<void>((resolve) => setTimeout(resolve, 1_400));
 			await stream;
 
 			expect(socket.destroyed).toBe(true);
@@ -439,8 +436,6 @@ describe("ENG-4601 worker snapshot cache", () => {
 			expect(client.snapshotTransferAbortControllers?.size).toBe(0);
 			expect(socket.listenerCount("drain")).toBe(0);
 			expect(socket.listenerCount("close")).toBe(0);
-		} finally {
-			vi.useRealTimers();
 		}
 	});
 

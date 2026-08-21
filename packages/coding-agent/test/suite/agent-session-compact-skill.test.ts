@@ -26,6 +26,21 @@ function createAssistant(
 	};
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 function setStreaming(harness: Harness, streaming: boolean) {
 	(harness.session.agent.state as { isStreaming: boolean }).isStreaming = streaming;
 }
@@ -174,7 +189,6 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("prioritizes overflow recovery over a pending requested compaction", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [extensionCompaction()],
@@ -194,8 +208,8 @@ describe("AgentSession compact skill host requests", () => {
 		const internals = harness.session as unknown as SessionInternals;
 		const overflow = createAssistant(harness, { stopReason: "error", errorMessage: "prompt is too long" });
 		const compacted = await internals._checkCompaction(overflow);
-		await vi.advanceTimersByTimeAsync(100);
-		vi.useRealTimers();
+		// The retry schedules agent.continue() via _schedulePostCompactionContinue's real 100ms timer.
+		await waitFor(() => expect(continueSpy).toHaveBeenCalled());
 
 		expect(compacted).toBe(true); // willRetry
 		expect(harness.eventsOfType("compaction_start").at(-1)).toMatchObject({
@@ -207,7 +221,6 @@ describe("AgentSession compact skill host requests", () => {
 	});
 
 	it("resumes the loop when a requested compaction is skipped", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness();
 		harnesses.push(harness);
 		await harness.session.prompt("one");
@@ -224,8 +237,8 @@ describe("AgentSession compact skill host requests", () => {
 
 		const internals = harness.session as unknown as SessionInternals;
 		const compacted = await internals._checkCompaction(createAssistant(harness));
-		await vi.advanceTimersByTimeAsync(100);
-		vi.useRealTimers();
+		// The resume schedules agent.continue() via _schedulePostCompactionContinue's real 100ms timer.
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 
 		expect(compacted).toBe(false);
 		expect(harness.eventsOfType("compaction_end").at(-1)?.errorMessage).toContain("Requested compaction skipped");

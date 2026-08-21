@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { appendFileSync } from "node:fs";
 import type { AgentMessage, ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage, type Model, type ToolResultMessage } from "@earendil-works/pi-ai";
@@ -58,15 +58,25 @@ function failingGateCommand(): string {
 	return `${process.execPath} -e "console.error('gate failed'); process.exit(1)"`;
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 describe("AgentSession compaction characterization", () => {
 	const harnesses: Harness[] = [];
 
-	beforeEach(() => {
-		vi.useRealTimers();
-	});
-
 	afterEach(() => {
-		vi.useRealTimers();
 		vi.restoreAllMocks();
 		while (harnesses.length > 0) {
 			harnesses.pop()?.cleanup();
@@ -188,7 +198,7 @@ describe("AgentSession compaction characterization", () => {
 		// Queue the command while the turn streams, then let the turn finish.
 		const queued = harness.session.prompt("/compact", { streamingBehavior: "steer" });
 		releaseTurn();
-		await vi.waitFor(() =>
+		await waitFor(() =>
 			expect(harness.session.getSessionActionSnapshot()).toMatchObject({
 				queuedCount: 0,
 				steering: [],
@@ -209,7 +219,6 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("reschedules a pending post-compaction continuation after successful manual compaction", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
@@ -322,7 +331,7 @@ describe("AgentSession compaction characterization", () => {
 		await harness.session.prompt("one");
 		await harness.session.prompt("two");
 		await harness.session.followUp("preparing across compaction", undefined, { resumeIfIdle: true });
-		await vi.waitFor(() => expect(preparationReached).toHaveBeenCalledOnce());
+		await waitFor(() => expect(preparationReached).toHaveBeenCalledOnce());
 		const internals = harness.session as unknown as SessionWithCompactionInternals & {
 			_cancelPostCompactionContinue(): void;
 			_scheduleAutoRefineAfterCompaction(willContinueAfterCompaction: boolean): void;
@@ -379,7 +388,6 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("resumes after threshold compaction when only agent-level queued messages exist", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
@@ -412,9 +420,8 @@ describe("AgentSession compaction characterization", () => {
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
 
 		await sessionInternals._runAutoCompaction("threshold", false);
-		await vi.advanceTimersByTimeAsync(100);
-
-		expect(continueSpy).toHaveBeenCalledTimes(1);
+		// The continuation is scheduled on a real setTimeout(100).
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 	});
 
 	it("keeps prior autonomous continuations when later threshold compaction is skipped", async () => {
@@ -710,7 +717,6 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("queues a failing autonomous gate continuation before threshold compaction stops a tool loop", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -791,14 +797,14 @@ describe("AgentSession compaction characterization", () => {
 		expect(queuedText).toContain("gate failed");
 
 		await sessionInternals._runAutoCompaction("threshold", false);
-		await vi.advanceTimersByTimeAsync(100);
+		// Give any scheduled post-compaction continue its real 100ms window; it must not run.
+		await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
 		expect(continueSpy).not.toHaveBeenCalled();
 		expect(harness.session.getFollowUpMessages()).toEqual([]);
 	});
 
 	it("keeps autonomous continuation bookkeeping when only steering queue is drained", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -832,9 +838,9 @@ describe("AgentSession compaction characterization", () => {
 		const followUpSpy = vi.spyOn(harness.session.agent, "followUp");
 
 		sessionInternals._schedulePostCompactionContinue();
-		await vi.advanceTimersByTimeAsync(100);
+		// The continuation fires on a real setTimeout(100).
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 
-		expect(continueSpy).toHaveBeenCalledTimes(1);
 		expect(sessionInternals._postCompactionContinuationMessages).toEqual([autonomousMessage]);
 		expect(followUpSpy).toHaveBeenCalledWith(autonomousMessage);
 	});
@@ -853,7 +859,6 @@ describe("AgentSession compaction characterization", () => {
 			tracked: true,
 		},
 	])("does not continue again after the session pump handles $name", async ({ text, response, tracked }) => {
-		vi.useFakeTimers();
 		const harness = await createHarness();
 		harnesses.push(harness);
 		const sessionInternals = harness.session as unknown as {
@@ -884,19 +889,20 @@ describe("AgentSession compaction characterization", () => {
 		const continueSpy = vi.spyOn(harness.session.agent, "continue");
 
 		sessionInternals._schedulePostCompactionContinue();
-		await vi.advanceTimersByTimeAsync(200);
+		// The session pump must handle the input on a real timer instead of agent.continue().
+		await waitFor(() =>
+			expect(harness.session.messages.at(-1)).toMatchObject({
+				role: "assistant",
+				content: [{ type: "text", text: response }],
+			}),
+		);
 
 		expect(continueSpy).not.toHaveBeenCalled();
 		expect(sessionInternals._postCompactionContinuationScheduled).toBe(false);
 		expect(sessionInternals._postCompactionContinuationMessages).toEqual([]);
-		expect(harness.session.messages.at(-1)).toMatchObject({
-			role: "assistant",
-			content: [{ type: "text", text: response }],
-		});
 	});
 
 	it("keeps autonomous threshold continuations when post-compaction continue must retry", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -927,15 +933,14 @@ describe("AgentSession compaction characterization", () => {
 			.mockRejectedValueOnce(new Error("already processing"));
 
 		sessionInternals._schedulePostCompactionContinue();
-		await vi.advanceTimersByTimeAsync(100);
+		// First attempt fires on a real setTimeout(100) and fails; the retry is rescheduled.
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 
-		expect(continueSpy).toHaveBeenCalledTimes(1);
 		expect(sessionInternals._postCompactionContinuationMessages).toEqual([queuedMessage]);
 		expect(sessionInternals._postCompactionContinuationScheduled).toBe(true);
 	});
 
 	it("clears queued autonomous threshold continuations when autonomous mode is disabled", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -1011,13 +1016,13 @@ describe("AgentSession compaction characterization", () => {
 		expect(harness.session.getFollowUpMessages()).toEqual([]);
 
 		await sessionInternals._runAutoCompaction("threshold", false);
-		await vi.advanceTimersByTimeAsync(100);
+		// Let any scheduled post-compaction continuation fire in real time; nothing may be resumed.
+		await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
 		expect(harness.session.getFollowUpMessages()).toEqual([]);
 	});
 
 	it("queues a failing autonomous gate continuation before post-turn threshold compaction", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -1063,7 +1068,6 @@ describe("AgentSession compaction characterization", () => {
 	});
 
 	it("does not queue autonomous gate continuations for pre-prompt threshold compaction", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			autonomous: {
 				enabled: true,
@@ -1105,9 +1109,7 @@ describe("AgentSession compaction characterization", () => {
 		expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(0);
 	});
 
-	// Real timers: the autonomous gate spawns a real subprocess, so this flow only completes when
-	// real time passes. A faked clock cannot drive it — vi.waitFor would burn its whole (faked)
-	// deadline in zero real milliseconds while the gate process is still starting up.
+	// The autonomous gate spawns a real subprocess, so this flow only completes in real time.
 	it("waits for threshold-compaction autonomous continuations before finishing prompt", async () => {
 		const harness = await createHarness({
 			autonomous: {
@@ -1127,9 +1129,7 @@ describe("AgentSession compaction characterization", () => {
 		harness.setResponses([highUsageDone, fauxAssistantMessage("retry")]);
 		const promptPromise = harness.session.prompt("make the change");
 
-		await vi.waitFor(() => expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(1), {
-			timeout: 5000,
-		});
+		await waitFor(() => expect(harness.session.getAutonomousStatus().continuationsUsed).toBe(1), 5_000);
 		await promptPromise;
 
 		expect(harness.session.getAutonomousStatus()).toMatchObject({

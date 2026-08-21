@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { describe, expect, test, vi } from "bun:test";
 import type { ActiveSessionState } from "../src/modes/daemon/active-session-state.js";
 import { DaemonSessionSummarizer } from "../src/modes/daemon/daemon-session-summarizer.js";
-
-// The debounce the summarizer waits for after a turn settles (kept in sync with
-// SETTLE_DEBOUNCE_MS in the module).
-const SETTLE_MS = 2000;
 
 function makeState(
 	opts: { working?: boolean; messages?: number; kind?: "top-level" | "subagent"; persisted?: unknown } = {},
@@ -34,37 +30,48 @@ function makeState(
 	return state;
 }
 
-describe("DaemonSessionSummarizer lifecycle", () => {
-	afterEach(() => {
-		vi.useRealTimers();
-	});
+function sleep(ms: number): Promise<void> {
+	return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
 
+async function waitFor(assertion: () => void, timeoutMs = 4500): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) throw error;
+			await sleep(10);
+		}
+	}
+}
+
+// Real timers: waits out the actual 2s settle debounce.
+describe("DaemonSessionSummarizer lifecycle", () => {
 	test("runs the model call after the settle debounce and records the verdict", async () => {
-		vi.useFakeTimers();
 		const generate = vi.fn().mockResolvedValue({ summary: "Added the health endpoint", taskState: "completed" });
 		const onStatusChanged = vi.fn();
 		const summarizer = new DaemonSessionSummarizer(() => [], onStatusChanged, generate);
 		const state = makeState({ working: false });
 
 		summarizer.notifyActivity(state);
-		// No model call until the agent has settled for the debounce window.
-		await vi.advanceTimersByTimeAsync(SETTLE_MS - 500);
+		// No model call while the debounce window is still running.
+		await sleep(250);
 		expect(generate).not.toHaveBeenCalled();
 
-		await vi.advanceTimersByTimeAsync(600);
-		expect(generate).toHaveBeenCalledOnce();
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(state.summaryState).toMatchObject({ summary: "Added the health endpoint", taskState: "completed" });
 		expect(onStatusChanged).toHaveBeenCalled();
 	});
 
 	test("a failing model on an idle session settles to a needs_input fallback verdict", async () => {
-		vi.useFakeTimers();
 		const generate = vi.fn().mockResolvedValue(undefined); // 404 / 401 / timeout / unparseable
 		const summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 		const state = makeState({ working: false });
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(generate).toHaveBeenCalledOnce();
 		// The activity axis holds an unjudged idle session at "working"; the fallback
 		// settles it to needs_input so it doesn't spin forever.
@@ -72,7 +79,6 @@ describe("DaemonSessionSummarizer lifecycle", () => {
 	});
 
 	test("retries after a needs_input fallback until a real summary lands", async () => {
-		vi.useFakeTimers();
 		const generate = vi
 			.fn()
 			.mockResolvedValueOnce(undefined) // transient failure → blank needs_input fallback
@@ -81,17 +87,15 @@ describe("DaemonSessionSummarizer lifecycle", () => {
 		const state = makeState({ working: false });
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(state.summaryState).toMatchObject({ summary: "", taskState: "needs_input" });
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
-		expect(generate).toHaveBeenCalledTimes(2);
+		await waitFor(() => expect(generate).toHaveBeenCalledTimes(2));
 		expect(state.summaryState).toMatchObject({ summary: "Reviewed the diff", taskState: "completed" });
 	});
 
 	test("refreshes a working session even when the message count is unchanged", async () => {
-		vi.useFakeTimers();
 		const generate = vi.fn().mockResolvedValue({ summary: "Editing the router" });
 		const summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 		const state = makeState({ working: true });
@@ -100,25 +104,23 @@ describe("DaemonSessionSummarizer lifecycle", () => {
 		state.summaryState = { summary: "Editing the router", taskState: undefined, basedOnMessageCount: 2 };
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(generate).toHaveBeenCalledOnce();
 		expect(generate.mock.calls[0]?.[0]).toMatchObject({ isWorking: true });
 	});
 
 	test("a working refresh preserves a still-valid verdict at the same message count", async () => {
-		vi.useFakeTimers();
 		const generate = vi.fn().mockResolvedValue({ summary: "Editing the router" }); // working → no verdict
 		const summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 		const state = makeState({ working: true });
 		state.summaryState = { summary: "Asked which db", taskState: "needs_input", basedOnMessageCount: 2 };
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(state.summaryState).toMatchObject({ summary: "Editing the router", taskState: "needs_input" });
 	});
 
 	test("discards a verdict when the session is forgotten (closed) mid-call", async () => {
-		vi.useFakeTimers();
 		const state = makeState({ working: false });
 		let summarizer!: DaemonSessionSummarizer;
 		const generate = vi.fn().mockImplementation(async () => {
@@ -128,13 +130,12 @@ describe("DaemonSessionSummarizer lifecycle", () => {
 		summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(generate).toHaveBeenCalledOnce();
 		expect(state.summaryState).toBeUndefined();
 	});
 
 	test("discards a verdict when a new turn arrives during the model call", async () => {
-		vi.useFakeTimers();
 		const state = makeState({ working: false });
 		const generate = vi.fn().mockImplementation(async () => {
 			(state.runtime.session.messages as unknown[]).push({ role: "user", content: "another task" });
@@ -143,19 +144,18 @@ describe("DaemonSessionSummarizer lifecycle", () => {
 		const summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 		expect(generate).toHaveBeenCalledOnce();
 		expect(state.summaryState).toBeUndefined();
 	});
 
 	test("summarizes a subagent and persists its settled idle verdict", async () => {
-		vi.useFakeTimers();
 		const generate = vi.fn().mockResolvedValue({ summary: "Auditing the migration scripts", taskState: "completed" });
 		const summarizer = new DaemonSessionSummarizer(() => [], undefined, generate);
 		const state = makeState({ working: false, kind: "subagent" });
 
 		summarizer.notifyActivity(state);
-		await vi.advanceTimersByTimeAsync(SETTLE_MS + 500);
+		await waitFor(() => expect(generate).toHaveBeenCalledOnce());
 
 		expect(generate).toHaveBeenCalledOnce();
 		expect(state.summaryState).toMatchObject({ summary: "Auditing the migration scripts", taskState: "completed" });

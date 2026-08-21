@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -51,6 +51,21 @@ type SteeringStopInternals = {
 	_steeringStopPending: boolean;
 	_clearQueuedGoalContexts(): void;
 };
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
 
 function emptyRefinementResult(): RefinementResult {
 	return {
@@ -213,11 +228,11 @@ describe("AgentSession queue characterization", () => {
 			const reviewer = vi.fn(async () => review);
 			const harness = await createAutoRefineHarness({ settings, autoRefineReviewer: reviewer });
 			harnesses.push(harness);
-			const refine = vi.spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
+			const refine = spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
 			const internals = harness.session as unknown as AutoRefineInternals;
 			internals._assistantTurnsSinceAutoRefine = turns;
-			const scheduleAutoRefine = vi.spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
-			if (queuedMessages) vi.spyOn(harness.session.agent, "hasQueuedMessages").mockReturnValue(true);
+			const scheduleAutoRefine = spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
+			if (queuedMessages) spyOn(harness.session.agent, "hasQueuedMessages").mockReturnValue(true);
 
 			await internals._maybeAutoRefine(reason);
 
@@ -275,7 +290,7 @@ describe("AgentSession queue characterization", () => {
 		});
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
-		const scheduleAutoRefine = vi.spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
+		const scheduleAutoRefine = spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
 
 		act(internals, (called) =>
 			called ? expect(scheduleAutoRefine).toHaveBeenCalled() : expect(scheduleAutoRefine).not.toHaveBeenCalled(),
@@ -286,7 +301,6 @@ describe("AgentSession queue characterization", () => {
 	});
 
 	it("runs a turn-interval review after a concurrent compact review declines", async () => {
-		vi.useFakeTimers();
 		const compactReviewGate = createDeferred();
 		const reviewer = vi.fn(async ({ reason }: { reason: AutoRefineReason }) => {
 			if (reason === "compact") {
@@ -311,62 +325,60 @@ describe("AgentSession queue characterization", () => {
 
 			compactReviewGate.resolve();
 			await compactReview;
-			await vi.runOnlyPendingTimersAsync();
+			// The deferred turn-interval review is scheduled on a real setTimeout(0).
+			await waitFor(() => expect(reviewer).toHaveBeenCalledTimes(2));
 
 			expect(reviewer.mock.calls.map(([context]) => context.reason)).toEqual(["compact", "turn_interval"]);
 			expect(internals._turnIntervalAutoRefinePending).toBe(false);
 			expect(internals._assistantTurnsSinceAutoRefine).toBe(0);
 		} finally {
-			vi.useRealTimers();
+			// Resolving an already-resolved gate is a no-op; the original finally only
+			// restored fake timers, which are gone now.
+			compactReviewGate.resolve();
 		}
 	});
 
 	it("retries a scheduled post-compaction continuation when another run starts first", async () => {
-		vi.useFakeTimers();
 		const harness = await createAutoRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
-		const continueAgent = vi
-			.spyOn(harness.session.agent, "continue")
+		const continueAgent = spyOn(harness.session.agent, "continue")
 			.mockRejectedValueOnce(new Error("Agent is already processing. Wait for completion before continuing."))
 			.mockResolvedValueOnce();
 
 		try {
 			internals._schedulePostCompactionContinue();
-			await vi.advanceTimersByTimeAsync(100);
-
-			expect(continueAgent).toHaveBeenCalledTimes(1);
+			// The continuation and its retry each fire on a real setTimeout(100).
+			await waitFor(() => expect(continueAgent).toHaveBeenCalledTimes(1));
 			expect(internals._postCompactionContinuationScheduled).toBe(true);
 
-			await vi.advanceTimersByTimeAsync(100);
-
-			expect(continueAgent).toHaveBeenCalledTimes(2);
+			await waitFor(() => expect(continueAgent).toHaveBeenCalledTimes(2));
 			expect(internals._postCompactionContinuationScheduled).toBe(false);
 		} finally {
-			vi.useRealTimers();
+			internals._cancelPostCompactionContinue();
 		}
 	});
 
 	it("cancels scheduled post-compaction continuation on branch changes", async () => {
-		vi.useFakeTimers();
 		const harness = await createAutoRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
-		const continueAgent = vi.spyOn(harness.session.agent, "continue").mockResolvedValue();
+		const continueAgent = spyOn(harness.session.agent, "continue").mockResolvedValue();
 
 		try {
 			internals._schedulePostCompactionContinue();
 			await internals._invalidatePendingAutoRefineForBranchChange();
-			await vi.advanceTimersByTimeAsync(100);
+			// Give the cancelled timer its real 100ms window; it must not fire.
+			await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
 			expect(continueAgent).not.toHaveBeenCalled();
 			expect(internals._postCompactionContinuationScheduled).toBe(false);
 		} finally {
-			vi.useRealTimers();
+			internals._cancelPostCompactionContinue();
 		}
 	});
 
@@ -377,29 +389,28 @@ describe("AgentSession queue characterization", () => {
 			abort: (harness: Harness) => harness.session.abortForUpdateRestart(),
 		},
 	])("cancels scheduled post-compaction continuation at $name without dropping queued input", async ({ abort }) => {
-		vi.useFakeTimers();
 		const harness = await createAutoRefineHarness();
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
-		const continueAgent = vi.spyOn(harness.session.agent, "continue").mockResolvedValue();
+		const continueAgent = spyOn(harness.session.agent, "continue").mockResolvedValue();
 
 		try {
 			internals._schedulePostCompactionContinue();
 			await harness.session.followUp("queued across abort");
 
 			abort(harness);
-			await vi.advanceTimersByTimeAsync(100);
+			// Give the cancelled timer its real 100ms window; it must not fire.
+			await new Promise<void>((resolve) => setTimeout(resolve, 250));
 
 			expect(continueAgent).not.toHaveBeenCalled();
 			expect(internals._postCompactionContinuationScheduled).toBe(false);
 			expect(harness.session.getFollowUpMessages()).toEqual(["queued across abort"]);
 		} finally {
-			vi.useRealTimers();
+			internals._cancelPostCompactionContinue();
 		}
 	});
 
 	it("keeps scheduled post-compaction continuation when session-input pump compaction skips without aborting", async () => {
-		vi.useFakeTimers();
 		const harness = await createAutoRefineHarness({
 			settings: { autoRefine: { enabled: true, turnInterval: 25, cooldownMs: 0 } },
 		});
@@ -415,7 +426,6 @@ describe("AgentSession queue characterization", () => {
 			expect(internals._postCompactionContinuationScheduled).toBe(true);
 		} finally {
 			internals._cancelPostCompactionContinue();
-			vi.useRealTimers();
 		}
 	});
 
@@ -430,7 +440,7 @@ describe("AgentSession queue characterization", () => {
 			review: { shouldRefine: true, rationale: "durable lesson" },
 		};
 		let guardWasSetDuringRefine = false;
-		const refine = vi.spyOn(harness.session, "refine").mockImplementation(async () => {
+		const refine = spyOn(harness.session, "refine").mockImplementation(async () => {
 			guardWasSetDuringRefine = internals._autoRefineInProgress;
 			throw new Error("refine failed");
 		});
@@ -468,7 +478,7 @@ describe("AgentSession queue characterization", () => {
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
 		internals._assistantTurnsSinceAutoRefine = 2;
-		vi.spyOn(harness.session, "refine").mockRejectedValueOnce(new Error("refine failed"));
+		spyOn(harness.session, "refine").mockRejectedValueOnce(new Error("refine failed"));
 
 		await internals._maybeAutoRefine("turn_interval");
 
@@ -497,7 +507,7 @@ describe("AgentSession queue characterization", () => {
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
 		internals._assistantTurnsSinceAutoRefine = 1;
-		const refine = vi.spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
+		const refine = spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
 
 		const autoRefinePromise = internals._maybeAutoRefine("turn_interval");
 		expect(reviewer).toHaveBeenCalledTimes(1);
@@ -549,7 +559,7 @@ describe("AgentSession queue characterization", () => {
 			review: { shouldRefine: true, rationale: "durable lesson" },
 		};
 		internals._lastAutoRefineReviewAt = Date.now();
-		const refine = vi.spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
+		const refine = spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
 
 		await internals._maybeAutoRefine("turn_interval");
 
@@ -608,7 +618,7 @@ describe("AgentSession queue characterization", () => {
 			},
 		]);
 		const internals = harness.session as unknown as { _reconnectToAgent(): void };
-		const reconnect = vi.spyOn(internals, "_reconnectToAgent");
+		const reconnect = spyOn(internals, "_reconnectToAgent");
 		const entriesBeforeDispose = harness.sessionManager.getEntries().length;
 
 		const refine = harness.session.refine({ instructions: "write stale state" });
@@ -700,7 +710,7 @@ describe("AgentSession queue characterization", () => {
 
 		treeEvent.resolve();
 		await navigation;
-		await vi.waitFor(() => expect(getUserTexts(harness)).toContain("after navigation"));
+		await waitFor(() => expect(getUserTexts(harness)).toContain("after navigation"));
 	});
 
 	it("queueIfBusy enqueues behind pending work instead of draining it first", async () => {
@@ -745,14 +755,14 @@ describe("AgentSession queue characterization", () => {
 		withStreaming(harness, true);
 		await harness.session.followUp("queued", undefined, { resumeIfIdle: true });
 		withStreaming(harness, false);
-		await vi.waitFor(() => expect(pause).toBeDefined());
+		await waitFor(() => expect(pause).toBeDefined());
 		await harness.session.waitForSessionInputIdle();
 		const store = (
 			harness.session as unknown as {
 				_actionStore: { queuedActions(): readonly { payload: { prepared?: unknown } }[] };
 			}
 		)._actionStore;
-		await vi.waitFor(() => expect(store.queuedActions()[0]?.payload.prepared).toBeDefined());
+		await waitFor(() => expect(store.queuedActions()[0]?.payload.prepared).toBeDefined());
 
 		const navigation = harness.session.navigateTree(target!.id, { summarize: false });
 		pause?.release();
@@ -788,8 +798,8 @@ describe("AgentSession queue characterization", () => {
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
 		internals._assistantTurnsSinceAutoRefine = 1;
-		const refine = vi.spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
-		const scheduleAutoRefine = vi.spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
+		const refine = spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
+		const scheduleAutoRefine = spyOn(internals, "_scheduleAutoRefine").mockImplementation(() => {});
 
 		await internals._maybeAutoRefine("turn_interval");
 		internals._scheduleAutoRefineAfterCompaction(false);
@@ -1316,7 +1326,7 @@ describe("AgentSession queue characterization", () => {
 		await hook.reached;
 
 		const command = harness.session.prompt("/goal status");
-		await vi.waitFor(() => expect(harness.session.getFollowUpMessages()).toContain("/goal status"));
+		await waitFor(() => expect(harness.session.getFollowUpMessages()).toContain("/goal status"));
 		await expect(command).resolves.toBeUndefined();
 
 		hook.release();
@@ -1373,7 +1383,7 @@ describe("AgentSession queue characterization", () => {
 		await Promise.resolve();
 		expect(checkpointSettled).toBe(false);
 		hook.release();
-		await vi.waitFor(() => expect(checkpointSettled).toBe(true));
+		await waitFor(() => expect(checkpointSettled).toBe(true));
 		releaseResponse();
 		await checkpoint;
 		await harness.session.waitForIdle();
@@ -1435,7 +1445,7 @@ describe("AgentSession queue characterization", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		const internals = harness.session as unknown as { _scheduleSessionInputPump(): void };
-		const schedule = vi.spyOn(internals, "_scheduleSessionInputPump").mockImplementation(() => {});
+		const schedule = spyOn(internals, "_scheduleSessionInputPump").mockImplementation(() => {});
 		await harness.session.followUp("visible queued prompt");
 		const hidden = harness.session.sendCustomMessage(
 			{ customType: "hidden-trigger", content: "hidden queued prompt", display: false },
@@ -1443,7 +1453,7 @@ describe("AgentSession queue characterization", () => {
 		);
 		const hiddenRejection = expectRejection(hidden, "Prompt aborted before delivery.");
 
-		await vi.waitFor(() => expect(harness.session.getSessionActionRecoverySnapshot().actions).toHaveLength(2));
+		await waitFor(() => expect(harness.session.getSessionActionRecoverySnapshot().actions).toHaveLength(2));
 		expect(harness.session.getFollowUpMessages()).toEqual(["visible queued prompt"]);
 		expect(harness.session.getFollowUpMessagePreviews()).toEqual(["visible queued prompt"]);
 		expect(harness.session.getSessionActionSnapshot()).toMatchObject({
@@ -1541,7 +1551,7 @@ describe("AgentSession queue characterization", () => {
 
 		pause.release();
 		try {
-			await vi.waitFor(() => expect(harness.session.getSessionActionSnapshot().active?.phase).toBe("preparing"));
+			await waitFor(() => expect(harness.session.getSessionActionSnapshot().active?.phase).toBe("preparing"));
 			expect(harness.session.removeQueuedFollowUp("remove")).toBe(true);
 		} finally {
 			fence.release();
@@ -1810,7 +1820,7 @@ describe("AgentSession queue characterization", () => {
 
 		harness.setResponses([fauxAssistantMessage("seed")]);
 		await harness.session.prompt("seed");
-		vi.spyOn(
+		spyOn(
 			harness.session as unknown as { _checkCompaction(): Promise<boolean> },
 			"_checkCompaction",
 		).mockImplementationOnce(async () => {
@@ -1950,7 +1960,7 @@ describe("AgentSession queue characterization", () => {
 			resumeIfIdle: true,
 		});
 		const terminalRejection = expectRejection(terminalCompletion, "No API key");
-		await vi.waitFor(() => expect(authHarness.session.getFollowUpMessages()).toEqual(["cannot start"]));
+		await waitFor(() => expect(authHarness.session.getFollowUpMessages()).toEqual(["cannot start"]));
 		withStreaming(authHarness, false);
 		await authHarness.session.waitForSessionInputIdle();
 
@@ -2068,7 +2078,7 @@ describe("AgentSession queue characterization", () => {
 			agentMessageId: "agentmsg_dispose",
 			streamingBehavior: "followUp",
 		});
-		await vi.waitFor(() => expect(harness.session.getFollowUpMessages()).toEqual([agentPrompt]));
+		await waitFor(() => expect(harness.session.getFollowUpMessages()).toEqual([agentPrompt]));
 		harness.session.dispose();
 
 		await expect(delivery).rejects.toThrow("disposed before prompt delivery");
@@ -2078,7 +2088,7 @@ describe("AgentSession queue characterization", () => {
 		const handoffHarness = await createHarness();
 		harnesses.push(handoffHarness);
 		const prompt = handoffHarness.session.agent.prompt.bind(handoffHarness.session.agent);
-		vi.spyOn(handoffHarness.session.agent, "prompt").mockImplementationOnce(async (messages) => {
+		spyOn(handoffHarness.session.agent, "prompt").mockImplementationOnce(async (messages) => {
 			await prompt(messages);
 			throw new Error("handoff failed after delivery");
 		});
@@ -2086,7 +2096,7 @@ describe("AgentSession queue characterization", () => {
 		const handoffCompletion = handoffHarness.session.promptAndWait("delivered then failed", {
 			streamingBehavior: "followUp",
 		});
-		await vi.waitFor(() => expect(handoffHarness.session.getFollowUpMessages()).toEqual(["delivered then failed"]));
+		await waitFor(() => expect(handoffHarness.session.getFollowUpMessages()).toEqual(["delivered then failed"]));
 		withStreaming(handoffHarness, false);
 
 		expect(handoffHarness.session.resumeQueuedWork()).toBe(true);
@@ -2117,7 +2127,7 @@ describe("AgentSession queue characterization", () => {
 	it("rejects queued command delivery and completion when the invocation append fails", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		vi.spyOn(harness.sessionManager, "appendCustomMessageEntry").mockImplementationOnce(() => {
+		spyOn(harness.sessionManager, "appendCustomMessageEntry").mockImplementationOnce(() => {
 			throw new Error("durable invocation append failed");
 		});
 		const pause = harness.session.acquireQueuedWorkPause();
@@ -2182,15 +2192,15 @@ describe("AgentSession queue characterization", () => {
 		harnesses.push(harness);
 		harness.session.setFollowUpMode("all");
 		harness.setResponses([fauxAssistantMessage("custom done"), fauxAssistantMessage("follow-up done")]);
-		const prompt = vi.spyOn(harness.session.agent, "prompt");
+		const prompt = spyOn(harness.session.agent, "prompt");
 		const admitted = createDeferred<void>();
 		let pause: { release(): void } | undefined;
 		const internals = harness.session as unknown as {
 			_canStartSessionActionImmediately(): boolean;
 			_scheduleSessionInputPump(): void;
 		};
-		const immediateEligibilitySpy = vi.spyOn(internals, "_canStartSessionActionImmediately").mockReturnValue(false);
-		const scheduleSpy = vi.spyOn(internals, "_scheduleSessionInputPump").mockImplementation(() => {
+		const immediateEligibilitySpy = spyOn(internals, "_canStartSessionActionImmediately").mockReturnValue(false);
+		const scheduleSpy = spyOn(internals, "_scheduleSessionInputPump").mockImplementation(() => {
 			pause = harness.session.acquireQueuedWorkPause();
 			admitted.resolve();
 		});
@@ -2259,8 +2269,8 @@ describe("AgentSession queue characterization", () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		const pause = harness.session.acquireQueuedWorkPause();
-		const release = vi.spyOn(pause, "release");
-		const prompt = vi.spyOn(harness.session.agent, "prompt");
+		const release = spyOn(pause, "release");
+		const prompt = spyOn(harness.session.agent, "prompt");
 		const trigger = harness.session.sendCustomMessage(
 			{ customType: "trigger", content: "trigger", display: false },
 			{ triggerTurn: true },
@@ -2277,7 +2287,7 @@ describe("AgentSession queue characterization", () => {
 	it("rejects a post-disposal action call without prompting the agent", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		const prompt = vi.spyOn(harness.session.agent, "prompt");
+		const prompt = spyOn(harness.session.agent, "prompt");
 		harness.session.dispose();
 
 		await expect(
@@ -2321,7 +2331,7 @@ describe("AgentSession queue characterization", () => {
 				resumeIfIdle: true,
 			});
 			if (phase === "queued") {
-				await vi.waitFor(() => expect(harness.session.getFollowUpMessages()).toEqual(["accepted"]));
+				await waitFor(() => expect(harness.session.getFollowUpMessages()).toEqual(["accepted"]));
 			} else {
 				withStreaming(harness, false);
 				await prepared.promise;
@@ -2360,7 +2370,7 @@ describe("AgentSession queue characterization", () => {
 		withStreaming(harness, true);
 		await harness.session.followUp("queued", undefined, { queueKey: "same", resumeIfIdle: true });
 		withStreaming(harness, false);
-		await vi.waitFor(() => expect(pause).toBeDefined());
+		await waitFor(() => expect(pause).toBeDefined());
 
 		expect(await harness.session.followUp("duplicate", undefined, { queueKey: "same" })).toBe(false);
 		const direct = harness.session.prompt("direct");
@@ -2454,7 +2464,7 @@ describe("AgentSession queue characterization", () => {
 		const secondId = harness.sessionManager.getLeafId();
 
 		const unrelatedNavigation = harness.session.navigateTree(targetId!, { summarize: false });
-		await vi.waitFor(() => expect(navigationStarts).toBe(1));
+		await waitFor(() => expect(navigationStarts).toBe(1));
 		const extensionCommand = harness.session.prompt("/back");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(commandNavigated).toBe(false);
@@ -2472,7 +2482,7 @@ describe("AgentSession queue characterization", () => {
 		const commandGate = createDeferred();
 		const harness = await createHarness();
 		harnesses.push(harness);
-		vi.spyOn(harness.session, "refine").mockImplementation(async () => {
+		spyOn(harness.session, "refine").mockImplementation(async () => {
 			commandStarted.resolve();
 			await commandGate.promise;
 			return emptyRefinementResult();
@@ -2499,7 +2509,7 @@ describe("AgentSession queue characterization", () => {
 		const target = harness.sessionManager.getEntries().find((entry) => entry.type === "message");
 		expect(target).toBeDefined();
 		await harness.session.prompt("two");
-		vi.spyOn(harness.session, "refine").mockImplementation(async () => {
+		spyOn(harness.session, "refine").mockImplementation(async () => {
 			commandStarted.resolve();
 			await commandGate.promise;
 			return emptyRefinementResult();
@@ -2586,7 +2596,7 @@ describe("AgentSession queue characterization", () => {
 		await harness.session.followUp("paused follow-up", undefined, { resumeIfIdle: true });
 		const originalWaitForIdle = harness.session.agent.waitForIdle.bind(harness.session.agent);
 		let waitCalls = 0;
-		vi.spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
+		spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
 			if (++waitCalls > 100) throw new Error("waitForIdle spun without yielding");
 			await originalWaitForIdle();
 		});
@@ -2615,7 +2625,7 @@ describe("AgentSession queue characterization", () => {
 		expect(harness.session.getFollowUpMessages()).toEqual(["queued across abort"]);
 		const originalWaitForIdle = harness.session.agent.waitForIdle.bind(harness.session.agent);
 		let waitCalls = 0;
-		vi.spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
+		spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
 			if (++waitCalls > 100) throw new Error("waitForIdle spun without yielding");
 			await originalWaitForIdle();
 		});
@@ -2728,7 +2738,7 @@ describe("AgentSession queue characterization", () => {
 		]);
 		const agentWaitForIdle = harness.session.agent.waitForIdle.bind(harness.session.agent);
 		let waitCalls = 0;
-		vi.spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
+		spyOn(harness.session.agent, "waitForIdle").mockImplementation(async () => {
 			await agentWaitForIdle();
 			if (waitCalls++ === 0) void harness.session.agent.prompt("late run");
 		});
@@ -2748,7 +2758,7 @@ describe("AgentSession queue characterization", () => {
 	it("parses queued refine rollback ids and global placement without consuming instruction text", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		const refine = vi.spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
+		const refine = spyOn(harness.session, "refine").mockResolvedValue(emptyRefinementResult());
 
 		for (const [command, options] of [
 			["/refine rollback refine_123", { rollbackId: "refine_123", global: false }],
@@ -2768,7 +2778,7 @@ describe("AgentSession queue characterization", () => {
 	it("reports a missing queued refine rollback id without invoking refine", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		const refine = vi.spyOn(harness.session, "refine");
+		const refine = spyOn(harness.session, "refine");
 
 		await harness.session.prompt("/refine rollback");
 
@@ -3074,7 +3084,7 @@ describe("AgentSession scheduler scenarios", () => {
 
 		// Phase 2: release starts preparation with the last message as batch anchor.
 		pause.release();
-		await vi.waitFor(() => expect(prepared).toEqual(["last anchor"]));
+		await waitFor(() => expect(prepared).toEqual(["last anchor"]));
 
 		// Phase 3: removals during preparation re-prepare around the new anchor.
 		expect(harness.session.clearQueuedUserMessagesMatching((text) => text === removedAgentMessage)).toEqual({
@@ -3083,7 +3093,7 @@ describe("AgentSession scheduler scenarios", () => {
 		});
 		expect(harness.session.removeQueuedFollowUp("heartbeat:one")).toBe(true);
 		firstPreparation.resolve();
-		await vi.waitFor(() => expect(providerSystemPrompt).not.toBe(""));
+		await waitFor(() => expect(providerSystemPrompt).not.toBe(""));
 		expect(harness.session.removeQueuedFollowUp("heartbeat:one")).toBe(false);
 		expect(prepared).toEqual(["last anchor", keptAgentMessage]);
 		expect(providerSystemPrompt).toContain(`prepared:${keptAgentMessage}`);
@@ -3121,7 +3131,7 @@ describe("AgentSession scheduler scenarios", () => {
 
 		// Phase 1: queue a follow-up, a command with images, and an agent-message prompt mid-run.
 		const first = harness.session.prompt("first");
-		await vi.waitFor(() => expect(harness.session.isStreaming).toBe(true));
+		await waitFor(() => expect(harness.session.isStreaming).toBe(true));
 		await harness.session.followUp("queued for restart");
 		const image = { type: "image" as const, mimeType: "image/png", data: "image-data" };
 		await harness.session.prompt("/goal inspect image", { streamingBehavior: "followUp", images: [image] });
@@ -3159,7 +3169,7 @@ describe("AgentSession scheduler scenarios", () => {
 		expect(deliverySettled).toBe(false);
 
 		// Phase 3: while suspended, triggerTurn rejects promptly.
-		const agentPromptSpy = vi.spyOn(harness.session.agent, "prompt");
+		const agentPromptSpy = spyOn(harness.session.agent, "prompt");
 		await expect(
 			harness.session.sendCustomMessage(
 				{ customType: "trigger", content: "trigger", display: false },
@@ -3225,7 +3235,7 @@ describe("AgentSession scheduler scenarios", () => {
 		// Phase 1: delivery settles at the durable append, completion stays gated.
 		const started = createDeferred<void>();
 		const release = createDeferred<void>();
-		vi.spyOn(harness.session, "refine")
+		spyOn(harness.session, "refine")
 			.mockImplementationOnce(async () => {
 				started.resolve();
 				await release.promise;
@@ -3306,15 +3316,15 @@ describe("AgentSession scheduler scenarios", () => {
 
 			// Phase 1: interval review approves and the refine applies durably.
 			await harness.session.prompt("first");
-			await vi.waitFor(() => expect(memoryIds()).toContain("auto_one"));
+			await waitFor(() => expect(memoryIds()).toContain("auto_one"));
 			expect(reviewer).toHaveBeenCalledTimes(1);
 			expect(reviewer.mock.calls[0]![0]).toEqual({ reason: "turn_interval", turnsSinceLastReview: 1 });
 
 			// Phase 2: review resolves while busy -> refine defers.
 			await harness.session.prompt("second");
-			await vi.waitFor(() => expect(reviewer).toHaveBeenCalledTimes(2));
+			await waitFor(() => expect(reviewer).toHaveBeenCalledTimes(2));
 			const busyPrompt = harness.session.prompt("busy");
-			await vi.waitFor(() => expect(harness.session.isStreaming).toBe(true));
+			await waitFor(() => expect(harness.session.isStreaming).toBe(true));
 			review2Gate.resolve();
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			expect(memoryIds()).not.toContain("auto_two");
@@ -3322,12 +3332,12 @@ describe("AgentSession scheduler scenarios", () => {
 			// Phase 3: the pending review executes at idle without a second review.
 			busyGate.resolve();
 			await busyPrompt;
-			await vi.waitFor(() => expect(memoryIds()).toContain("auto_two"));
+			await waitFor(() => expect(memoryIds()).toContain("auto_two"));
 			expect(reviewer).toHaveBeenCalledTimes(2);
 
 			// Phase 4: branch navigation discards the in-flight review.
 			await harness.session.prompt("fourth");
-			await vi.waitFor(() => expect(reviewer).toHaveBeenCalledTimes(3));
+			await waitFor(() => expect(reviewer).toHaveBeenCalledTimes(3));
 			const target = harness.sessionManager
 				.getEntries()
 				.find((entry) => entry.type === "message" && entry.message.role === "user");

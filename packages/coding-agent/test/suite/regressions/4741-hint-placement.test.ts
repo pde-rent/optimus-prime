@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { type Component, Container } from "@earendil-works/pi-tui";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.js";
@@ -49,15 +49,6 @@ function createFeatureHintMode() {
 describe("ENG-4741 hint placement", () => {
 	beforeAll(() => {
 		initTheme("dark");
-	});
-
-	beforeEach(() => {
-		vi.useFakeTimers();
-		vi.setSystemTime(0);
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
 	});
 
 	it("orders hints below the recap and above queued messages and side questions", () => {
@@ -155,8 +146,10 @@ describe("ENG-4741 hint placement", () => {
 	it("hides a visible hint while messages are queued and restores it when the queue clears", () => {
 		const { mode, featureHintContainer } = createFeatureHintMode();
 
+		// Make the hint immediately eligible instead of waiting out the real 5s delay;
+		// a zero delay makes startFeatureHintPresentation show it synchronously.
+		(mode as unknown as { featureHintEligibleAt: number }).featureHintEligibleAt = 1;
 		callPrivate(mode, "startFeatureHintPresentation");
-		vi.advanceTimersByTime(5_000);
 		expect(featureHintContainer.children).toHaveLength(1);
 
 		mode.connectionQueue.followUp = ["Continue after this turn"];

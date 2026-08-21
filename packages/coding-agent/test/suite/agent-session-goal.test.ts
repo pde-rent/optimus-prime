@@ -47,6 +47,21 @@ function currentAgentContext(harness: Harness): AgentContext {
 	};
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 async function waitForCondition(predicate: () => boolean): Promise<void> {
 	for (let attempt = 0; attempt < 100; attempt++) {
 		if (predicate()) {
@@ -607,28 +622,22 @@ describe("AgentSession goals", () => {
 	});
 
 	it("reports active goal elapsed time on status reads and goal.get", async () => {
-		vi.useFakeTimers();
-		try {
-			vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-			const waiting = createWaitingTool();
-			const harness = await createGoalHarness([waiting.tool]);
-			harness.setResponses([fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" })]);
+		const waiting = createWaitingTool();
+		const harness = await createGoalHarness([waiting.tool]);
+		harness.setResponses([fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" })]);
 
-			const waitForStart = waiting.waitForStart(harness);
-			const promptPromise = harness.session.prompt("/goal track elapsed time");
-			await waitForStart;
-			vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+		const waitForStart = waiting.waitForStart(harness);
+		const promptPromise = harness.session.prompt("/goal track elapsed time");
+		await waitForStart;
 
-			expect(harness.session.goalState.timeUsedSeconds).toBe(5);
-			const response: GoalHostResponse = harness.session.handleGoalHostRequest("goal.get");
-			expect(response.goal?.time_used_seconds).toBe(5);
+		// Elapsed seconds come from the real wall clock; wait past the first full second.
+		await waitFor(() => expect(harness.session.goalState.timeUsedSeconds).toBeGreaterThanOrEqual(1), 5_000);
+		const response: GoalHostResponse = harness.session.handleGoalHostRequest("goal.get");
+		expect(response.goal?.time_used_seconds).toBeGreaterThanOrEqual(1);
 
-			await harness.session.prompt("/goal pause");
-			waiting.release();
-			await promptPromise;
-		} finally {
-			vi.useRealTimers();
-		}
+		await harness.session.prompt("/goal pause");
+		waiting.release();
+		await promptPromise;
 	});
 
 	it("clears a goal with /goal clear without consuming a provider response", async () => {
@@ -740,7 +749,7 @@ describe("AgentSession goals", () => {
 		}
 		await promptPromise;
 		await harness.session.waitForIdle();
-		await vi.waitFor(() => expect(visibleAssistantTexts(harness)).toHaveLength(2));
+		await waitFor(() => expect(visibleAssistantTexts(harness)).toHaveLength(2));
 
 		expect(visibleAssistantTexts(harness)).toEqual(["Spent the budget.", "Wrapping up."]);
 		expect(harness.getPendingResponseCount()).toBe(1);

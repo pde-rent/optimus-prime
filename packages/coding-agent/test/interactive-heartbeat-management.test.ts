@@ -49,6 +49,21 @@ interface HeartbeatRefreshHarness {
 	scheduleHeartbeatManagerRefresh(): void;
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 function heartbeat(overrides: Partial<AgentCronJob> = {}): AgentCronJob {
 	return {
 		id: "heartbeat-1",
@@ -168,21 +183,15 @@ describe("interactive heartbeat management", () => {
 	});
 
 	it("refreshes an open manager after the next scheduled run", async () => {
-		vi.useFakeTimers();
-		try {
-			vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-			const harness = Object.create(InteractiveMode.prototype) as HeartbeatRefreshHarness;
-			harness.heartbeats = [{ job: { ...heartbeat(), nextRunAt: "2026-01-01T00:00:01.000Z" } }];
-			harness.heartbeatManager = {};
-			harness.heartbeatManagerRefreshTimer = undefined;
-			harness.refreshHeartbeatCatalog = vi.fn(async () => {});
+		// Real-timer conversion: schedule the refresh ~1s out like the fake-clock
+		// setup did, then poll for the scheduled run to fire.
+		const harness = Object.create(InteractiveMode.prototype) as HeartbeatRefreshHarness;
+		harness.heartbeats = [{ job: { ...heartbeat(), nextRunAt: new Date(Date.now() + 1_000).toISOString() } }];
+		harness.heartbeatManager = {};
+		harness.heartbeatManagerRefreshTimer = undefined;
+		harness.refreshHeartbeatCatalog = vi.fn(async () => {});
 
-			harness.scheduleHeartbeatManagerRefresh();
-			await vi.advanceTimersByTimeAsync(1_250);
-
-			expect(harness.refreshHeartbeatCatalog).toHaveBeenCalledOnce();
-		} finally {
-			vi.useRealTimers();
-		}
+		harness.scheduleHeartbeatManagerRefresh();
+		await waitFor(() => expect(harness.refreshHeartbeatCatalog).toHaveBeenCalledOnce(), 5_000);
 	});
 });

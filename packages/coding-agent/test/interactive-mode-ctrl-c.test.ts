@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
+import { beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
@@ -125,12 +125,6 @@ function createInteractiveFake(options: {
 describe("InteractiveMode interrupt shortcuts", () => {
 	beforeEach(() => {
 		setKeybindings(new KeybindingsManager());
-		vi.useFakeTimers();
-		vi.setSystemTime(new Date("2026-06-08T12:00:00Z"));
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
 	});
 
 	it("interrupts streaming and shows the exit hint on first Ctrl+C", () => {
@@ -188,7 +182,8 @@ describe("InteractiveMode interrupt shortcuts", () => {
 			"Press Ctrl+C again to exit",
 		);
 
-		await vi.advanceTimersByTimeAsync(2000);
+		// Real-timer conversion: wait past EXIT_HINT_DURATION_MS (2000ms).
+		await new Promise<void>((resolve) => setTimeout(resolve, 2_100));
 
 		expect(Reflect.get(InteractiveMode.prototype, "getTrayOverrideLabel").call(mode)).toBeUndefined();
 		expect(mode.subagentSummaryLine.invalidate).toHaveBeenCalled();
@@ -348,7 +343,8 @@ describe("InteractiveMode interrupt shortcuts", () => {
 
 		Reflect.get(InteractiveMode.prototype, "setupKeyHandlers").call(mode);
 		defaultEditor.onEscape?.();
-		await vi.advanceTimersByTimeAsync(500);
+		// Real-timer conversion: wait past ESCAPE_REPEAT_WINDOW_MS (500ms).
+		await new Promise<void>((resolve) => setTimeout(resolve, 600));
 		defaultEditor.onEscape?.();
 
 		expect(mode.editor.getText()).toBe("draft");

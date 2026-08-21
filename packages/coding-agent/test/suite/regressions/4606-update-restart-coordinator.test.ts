@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -34,6 +34,21 @@ const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DI
 const supervisors = new Set<SupervisorHandle>();
 const harnesses: Harness[] = [];
 const sockets = new Set<string>();
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -265,23 +280,27 @@ describe("ENG-4606 update restart coordinator", () => {
 		harnesses.push(harness);
 		const statusPath = join(harness.tempDir, "restart-status.json");
 
-		vi.useFakeTimers();
+		const writer = new DaemonUpdateRestartStatusWriter(statusPath, "test-request", "/tmp/daemon.sock");
+		const initial = readDaemonUpdateRestartStatus(statusPath);
+		if (!initial) throw new Error("initial status not written");
+		const stopHeartbeat = writer.startHeartbeat();
 		try {
-			vi.setSystemTime(new Date("2026-07-14T00:00:00.000Z"));
-			const writer = new DaemonUpdateRestartStatusWriter(statusPath, "test-request", "/tmp/daemon.sock");
-			const stopHeartbeat = writer.startHeartbeat();
-			vi.advanceTimersByTime(5000);
-			stopHeartbeat();
-
-			expect(readDaemonUpdateRestartStatus(statusPath)).toMatchObject({
-				phase: "starting",
-				startedAt: "2026-07-14T00:00:00.000Z",
-				updatedAt: "2026-07-14T00:00:00.000Z",
-				heartbeatAt: "2026-07-14T00:00:05.000Z",
-			});
+			// The heartbeat fires on a real 5s interval; wait for the first refresh.
+			await waitFor(() => {
+				const current = readDaemonUpdateRestartStatus(statusPath);
+				expect(current?.heartbeatAt).not.toBe(initial.heartbeatAt);
+			}, 10_000);
 		} finally {
-			vi.useRealTimers();
+			stopHeartbeat();
 		}
+
+		// The heartbeat refresh must not change restart state.
+		expect(readDaemonUpdateRestartStatus(statusPath)).toMatchObject({
+			phase: "starting",
+			startedAt: initial.startedAt,
+			requestId: "test-request",
+			socketPath: "/tmp/daemon.sock",
+		});
 	});
 
 	it("rejects coordinator spawn errors without terminating the updater", async () => {

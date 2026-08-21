@@ -42,6 +42,21 @@ function createUsage(totalTokens: number): Usage {
 	};
 }
 
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 function createAssistant(
 	harness: Harness,
 	options: { stopReason?: AssistantMessage["stopReason"]; totalTokens?: number; timestamp?: number },
@@ -83,7 +98,6 @@ describe("compaction continuation", () => {
 	const harnesses: Harness[] = [];
 
 	afterEach(() => {
-		vi.useRealTimers();
 		vi.restoreAllMocks();
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
@@ -117,7 +131,6 @@ describe("compaction continuation", () => {
 	}
 
 	it("resumes the interrupted tool loop when a threshold compaction is skipped", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
@@ -135,7 +148,7 @@ describe("compaction continuation", () => {
 
 		// The in-memory session has no persisted entries, so _performCompaction throws CompactionSkippedError.
 		await internals._runAutoCompaction("threshold", false);
-		await vi.advanceTimersByTimeAsync(500);
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 
 		const endEvents = harness.eventsOfType("compaction_end");
 		expect(endEvents).toHaveLength(1);
@@ -145,7 +158,6 @@ describe("compaction continuation", () => {
 	});
 
 	it("control: a skipped requested compaction mid tool loop does resume", async () => {
-		vi.useFakeTimers();
 		const harness = await createHarness({
 			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
 			models: [{ id: "faux-1", contextWindow: 200_000 }],
@@ -158,7 +170,7 @@ describe("compaction continuation", () => {
 		const continueSpy = vi.spyOn(harness.session.agent, "continue").mockResolvedValue();
 
 		await internals._runAutoCompaction("requested", false);
-		await vi.advanceTimersByTimeAsync(500);
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
 
 		expect(continueSpy).toHaveBeenCalledTimes(1);
 	});
@@ -231,17 +243,14 @@ describe("compaction continuation", () => {
 		]);
 
 		await harness.session.prompt("/goal finish the task");
-		await vi.waitFor(
-			() => {
-				const compactionReasons = harness.eventsOfType("compaction_start").map((event) => event.reason);
-				expect(compactionReasons).toContain("threshold");
-				expect(compactionReasons).not.toContain("overflow");
-				expect(harness.eventsOfType("compaction_end").find((event) => event.result)?.result).toBeDefined();
-				expect(harness.getPendingResponseCount()).toBe(0);
-				expect(harness.session.goalState.status).toBe("complete");
-			},
-			{ timeout: 5_000 },
-		);
+		await waitFor(() => {
+			const compactionReasons = harness.eventsOfType("compaction_start").map((event) => event.reason);
+			expect(compactionReasons).toContain("threshold");
+			expect(compactionReasons).not.toContain("overflow");
+			expect(harness.eventsOfType("compaction_end").find((event) => event.result)?.result).toBeDefined();
+			expect(harness.getPendingResponseCount()).toBe(0);
+			expect(harness.session.goalState.status).toBe("complete");
+		}, 5_000);
 	});
 
 	// With both drivers active the goal continuation takes exclusive priority, matching _getContinuationMessages.

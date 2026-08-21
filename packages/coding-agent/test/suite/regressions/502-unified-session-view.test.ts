@@ -224,8 +224,7 @@ describe("#502 unified session view regressions", () => {
 	});
 
 	test("reconnect stays active until the heartbeat catalog refresh succeeds", async () => {
-		vi.useFakeTimers();
-		try {
+		{
 			const firstHeartbeatAttempt = deferred<void>();
 			let heartbeatAttempts = 0;
 			const client = {
@@ -277,15 +276,14 @@ describe("#502 unified session view regressions", () => {
 			expect(harness.setStatusMessage).not.toHaveBeenCalledWith("Daemon reconnected", { render: false });
 			expect(client.reconnect).toHaveBeenCalledOnce();
 
-			await vi.advanceTimersByTimeAsync(1_000);
+			// The reconnect retry sleeps RECONNECT_RETRY_MS (1s) on the real clock.
+			await new Promise<void>((resolve) => setTimeout(resolve, 1_400));
 			await harness.reconnectPromise;
 
 			expect(client.reconnect).toHaveBeenCalledTimes(2);
 			expect(harness.applySessionList).toHaveBeenCalledWith([summary("live")], true);
 			expect(harness.heartbeats).toEqual([{ job: { id: "healthy" } }]);
 			expect(harness.reconnectPromise).toBeUndefined();
-		} finally {
-			vi.useRealTimers();
 		}
 	});
 

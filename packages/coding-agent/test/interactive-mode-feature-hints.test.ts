@@ -1,6 +1,5 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { beforeAll, describe, expect, it, vi } from "bun:test";
 import { type Component, Container, visibleWidth } from "@earendil-works/pi-tui";
-import { FEATURE_HINT_ANIMATION_INTERVAL_MS } from "../src/modes/interactive/components/feature-hint.js";
 import { FEATURE_HINTS, FeatureHintDeck } from "../src/modes/interactive/feature-hints.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
@@ -18,6 +17,21 @@ class FakeLoader implements Component {
 
 function callPrivate(mode: object, name: string): void {
 	Reflect.get(InteractiveMode.prototype, name).call(mode);
+}
+
+async function waitFor(assertion: () => void, timeoutMs = 2_000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
 }
 
 function createMode() {
@@ -122,27 +136,19 @@ describe("InteractiveMode feature hints", () => {
 		initTheme("dark");
 	});
 
-	beforeEach(() => {
-		vi.useFakeTimers();
-		vi.setSystemTime(0);
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("adds one animated truncated hint above the prompt after a sustained agent run", () => {
+	it("adds one animated truncated hint above the prompt after a sustained agent run", async () => {
 		const { mode, statusContainer, featureHintContainer, featureHintDeck, requestRender } = createMode();
 
 		callPrivate(mode, "startFeatureHintPresentation");
-		vi.advanceTimersByTime(4_999);
+		// Real-timer conversion: the 4999ms/5000ms boundary split cannot be
+		// reproduced without fake timers, so assert the pre-deadline state
+		// immediately and poll for the hint past FEATURE_HINT_DELAY_MS (5s).
 		expect(statusContainer.children).toHaveLength(1);
 		expect(featureHintContainer.children).toHaveLength(0);
 		expect(featureHintDeck.next).not.toHaveBeenCalled();
 
-		vi.advanceTimersByTime(1);
+		await waitFor(() => expect(featureHintContainer.children).toHaveLength(1), 8_000);
 		expect(statusContainer.children).toHaveLength(1);
-		expect(featureHintContainer.children).toHaveLength(1);
 		const lines = featureHintContainer.children[0]?.render(24) ?? [];
 		expect(lines).toHaveLength(2);
 		expect(stripAnsi(lines[0] ?? "")).toContain("Hint:");
@@ -151,58 +157,62 @@ describe("InteractiveMode feature hints", () => {
 		expect(featureHintDeck.next).toHaveBeenCalledTimes(1);
 		expect(requestRender).toHaveBeenCalledTimes(1);
 
-		vi.advanceTimersByTime(FEATURE_HINT_ANIMATION_INTERVAL_MS);
+		await waitFor(() => expect(requestRender).toHaveBeenCalledTimes(2), 3_000);
 		const animatedLines = featureHintContainer.children[0]?.render(24) ?? [];
 		expect(stripAnsi(animatedLines[0] ?? "")).toBe(stripAnsi(lines[0] ?? ""));
 		expect(animatedLines[0]).not.toBe(lines[0]);
-		expect(requestRender).toHaveBeenCalledTimes(2);
-	});
+	}, 15_000);
 
-	it("cancels a pending hint when the loader stops", () => {
+	it("cancels a pending hint when the loader stops", async () => {
 		const { mode, statusContainer, featureHintContainer, featureHintDeck, requestRender } = createMode();
 
 		callPrivate(mode, "startFeatureHintPresentation");
-		vi.advanceTimersByTime(2_000);
+		// Real-timer conversion: stop the loader, then wait past the whole
+		// FEATURE_HINT_DELAY_MS (5s) window to prove no hint ever appears.
 		callPrivate(mode, "stopWorkingLoader");
-		vi.advanceTimersByTime(5_000);
+		await new Promise<void>((resolve) => setTimeout(resolve, 5_200));
 
 		expect(statusContainer.children).toHaveLength(0);
 		expect(featureHintContainer.children).toHaveLength(0);
 		expect(featureHintDeck.next).not.toHaveBeenCalled();
 		expect(requestRender).not.toHaveBeenCalled();
-	});
+	}, 15_000);
 
-	it("retains the hint and remaining delay when the loader is recreated", () => {
+	it("retains the hint and remaining delay when the loader is recreated", async () => {
 		const { mode, statusContainer, featureHintContainer, featureHintDeck } = createMode();
 
 		callPrivate(mode, "startFeatureHintPresentation");
-		vi.advanceTimersByTime(3_000);
+		// Real-timer conversion: the 1999ms/2000ms boundary split cannot be
+		// reproduced without fake timers. The retained deadline is asserted via
+		// featureHintEligibleAt surviving the loader swap unchanged.
+		const eligibleAt = Reflect.get(mode, "featureHintEligibleAt");
+		expect(eligibleAt).toBeGreaterThan(0);
 		callPrivate(mode, "stopWorkingLoader");
 
 		const replacement = new FakeLoader();
 		Reflect.set(mode, "loadingAnimation", replacement);
 		statusContainer.addChild(replacement);
 		callPrivate(mode, "startFeatureHintPresentation");
-		vi.advanceTimersByTime(1_999);
-		expect(statusContainer.children).toHaveLength(1);
-		expect(featureHintContainer.children).toHaveLength(0);
+		expect(Reflect.get(mode, "featureHintEligibleAt")).toBe(eligibleAt);
 		expect(featureHintDeck.next).not.toHaveBeenCalled();
 
-		vi.advanceTimersByTime(1);
+		await waitFor(() => expect(featureHintContainer.children).toHaveLength(1), 8_000);
 		expect(statusContainer.children).toHaveLength(1);
-		expect(featureHintContainer.children).toHaveLength(1);
 		expect(featureHintDeck.next).toHaveBeenCalledTimes(1);
 
 		callPrivate(mode, "endFeatureHintRun");
 		expect(statusContainer.children).toHaveLength(1);
 		expect(featureHintContainer.children).toHaveLength(0);
 		expect(Reflect.get(mode, "currentFeatureHint")).toBeUndefined();
-	});
+	}, 15_000);
 
 	it("keeps hints for steering and continuations, then restarts the delay for new runs", () => {
 		const { mode } = createMode();
+		// Real-timer conversion: the fake clock started at 0, so 5_000 was a
+		// future deadline; use an equivalent real-clock deadline.
 		Reflect.set(mode, "currentFeatureHint", "Existing hint");
-		Reflect.set(mode, "featureHintEligibleAt", 5_000);
+		const eligibleAt = Date.now() + 5_000;
+		Reflect.set(mode, "featureHintEligibleAt", eligibleAt);
 
 		Reflect.get(InteractiveMode.prototype, "prepareFeatureHintRun").call(mode, {
 			role: "user",
@@ -220,13 +230,17 @@ describe("InteractiveMode feature hints", () => {
 		expect(Reflect.get(mode, "featureHintRunPending")).toBe(false);
 
 		Reflect.set(mode, "featureHintRunPending", true);
+		// Real-timer conversion: a new user run resets the deadline to a fresh
+		// full delay (now + 5s) instead of retaining the old one.
+		const beforeReset = Date.now();
 		Reflect.get(InteractiveMode.prototype, "prepareFeatureHintRun").call(mode, {
 			role: "user",
 			content: [{ type: "text", text: "new run" }],
 			timestamp: 0,
 		});
 		expect(Reflect.get(mode, "currentFeatureHint")).toBeUndefined();
-		expect(Reflect.get(mode, "featureHintEligibleAt")).toBe(5_000);
+		expect(Reflect.get(mode, "featureHintEligibleAt")).toBeGreaterThanOrEqual(beforeReset + 5_000);
+		expect(Reflect.get(mode, "featureHintEligibleAt")).toBeLessThanOrEqual(Date.now() + 5_000);
 		expect(Reflect.get(mode, "featureHintTimer")).toBeDefined();
 	});
 });

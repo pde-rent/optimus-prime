@@ -41,6 +41,35 @@ interface SupervisorInternals {
 	handleCommand(client: object, command: object): Promise<unknown>;
 }
 
+// Real timers: the sweep interval comes from src constants, so clamp long
+// setTimeout delays instead of waiting out the real 5-minute schedule.
+const realSetTimeout = globalThis.setTimeout;
+
+function useFastTimers(): void {
+	(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
+		handler: () => void,
+		timeout?: number,
+		...args: unknown[]
+	) => realSetTimeout(handler, Math.min(timeout ?? 0, 25), ...(args as []))) as unknown as typeof setTimeout;
+}
+
+function useRealTimers(): void {
+	(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = realSetTimeout;
+}
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) throw error;
+			await new Promise<void>((resolve) => realSetTimeout(resolve, 5));
+		}
+	}
+}
+
 const tempDirs: string[] = [];
 
 afterEach(() => {
@@ -186,7 +215,7 @@ describe("daemon supervisor whole-tree eviction", () => {
 		supervisor.workers.set("active", active);
 
 		const sweep = supervisor.runIdleEvictionSweep(now);
-		await vi.waitFor(() => expect(active.client?.requestWorker).toHaveBeenCalledOnce());
+		await waitFor(() => expect(active.client?.requestWorker).toHaveBeenCalledOnce());
 
 		expect(supervisor.idleEvictionFence).toBeUndefined();
 		releasePassivation();
@@ -235,9 +264,8 @@ describe("daemon supervisor whole-tree eviction", () => {
 	});
 
 	it("awaits an in-flight eviction sweep before shutdown tears down workers", async () => {
-		vi.useFakeTimers();
+		useFastTimers();
 		const now = Date.parse("2026-08-01T12:00:00.000Z");
-		vi.setSystemTime(now);
 		let resolveList: (response: ReturnType<typeof success>) => void = () => undefined;
 		const listResponse = new Promise<ReturnType<typeof success>>((resolve) => {
 			resolveList = resolve;
@@ -253,8 +281,7 @@ describe("daemon supervisor whole-tree eviction", () => {
 
 		try {
 			supervisor.scheduleIdleEvictionSweep();
-			await vi.advanceTimersByTimeAsync(5 * 60_000);
-			expect(idle.client?.request).toHaveBeenCalledOnce();
+			await waitFor(() => expect(idle.client?.request).toHaveBeenCalledOnce());
 
 			const shutdown = supervisor.shutdown(42, false).then(
 				() => undefined,
@@ -270,7 +297,7 @@ describe("daemon supervisor whole-tree eviction", () => {
 			expect(exit).toHaveBeenCalledWith(42);
 		} finally {
 			exit.mockRestore();
-			vi.useRealTimers();
+			useRealTimers();
 		}
 	});
 

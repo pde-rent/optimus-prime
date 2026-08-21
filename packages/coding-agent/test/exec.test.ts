@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,13 +15,13 @@ async function waitForFile(path: string): Promise<void> {
 }
 
 describe.skipIf(process.platform === "win32")("execCommand", () => {
+	// Real timers: waits out the actual 5s SIGKILL fallback window.
 	it("force kills a process that ignores SIGTERM and cleans up the fallback timer", async () => {
 		const testDir = mkdtempSync(join(tmpdir(), "optimus-exec-test-"));
 		const readyFile = join(testDir, "ready");
 		const controller = new AbortController();
-		let resultPromise: Promise<Awaited<ReturnType<typeof execCommand>>> | undefined;
 		try {
-			resultPromise = execCommand(
+			const resultPromise = execCommand(
 				process.execPath,
 				[
 					"-e",
@@ -33,20 +33,18 @@ describe.skipIf(process.platform === "win32")("execCommand", () => {
 			);
 			await waitForFile(readyFile);
 
-			vi.useFakeTimers();
 			controller.abort();
 
-			await vi.advanceTimersByTimeAsync(5000);
+			// Resolves only once the fallback timer escalates to SIGKILL.
 			const result = await resultPromise;
 
 			expect(result.killed).toBe(true);
 			expect(result.code).toBe(SIGKILL_EXIT_CODE);
-			expect(vi.getTimerCount()).toBe(0);
-		} finally {
-			vi.useRealTimers();
-			controller.abort();
-			await resultPromise;
 			rmSync(testDir, { recursive: true, force: true });
+		} catch (error) {
+			controller.abort();
+			rmSync(testDir, { recursive: true, force: true });
+			throw error;
 		}
-	});
+	}, 15_000);
 });

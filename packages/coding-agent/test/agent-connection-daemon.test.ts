@@ -695,6 +695,20 @@ function emitSequencedQueueUpdate(client: FakeDaemonClient, activeSessionId: str
 	});
 }
 
+// vi.waitFor is unavailable in this bun version; poll on the assertion instead.
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) throw error;
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
+
 describe("DaemonAgentConnection", () => {
 	it("forwards queueIfBusy for prompt admission", async () => {
 		const fakeClient = new FakeDaemonClient();
@@ -781,7 +795,7 @@ describe("DaemonAgentConnection", () => {
 
 		const prompt = connection.prompt("startup", { signal: abort.signal });
 		abort.abort();
-		await vi.waitFor(() =>
+		await waitFor(() =>
 			expect(fakeClient.requests.map((request) => request.type)).toContain("cancel_prompt_admission"),
 		);
 		releasePrompt();
@@ -802,7 +816,7 @@ describe("DaemonAgentConnection", () => {
 
 		const prompt = connection.prompt("startup", { signal: abort.signal });
 		abort.abort();
-		await vi.waitFor(() =>
+		await waitFor(() =>
 			expect(fakeClient.requests.map((request) => request.type)).toContain("cancel_prompt_admission"),
 		);
 		releasePrompt();
@@ -879,7 +893,7 @@ describe("DaemonAgentConnection", () => {
 
 		const first = connection.addCronJob("0 * * * *", "first");
 		const second = connection.addCronJob("30 * * * *", "second");
-		await vi.waitFor(() => {
+		await waitFor(() => {
 			expect(fakeClient.requests.filter((request) => request.type === "cron_add")).toHaveLength(1);
 		});
 		releaseFirst();
@@ -990,7 +1004,7 @@ describe("DaemonAgentConnection", () => {
 			activeSessionId: "active-original",
 			reason: "update",
 		});
-		await vi.waitFor(() => {
+		await waitFor(() => {
 			expect(fakeClient.closeCount).toBe(1);
 			expect(fakeClient.reconnectCount).toBe(1);
 		});
@@ -1009,7 +1023,7 @@ describe("DaemonAgentConnection", () => {
 			activeSessionId: "active-restored",
 			resumeCursor: undefined,
 		});
-		await vi.waitFor(() => {
+		await waitFor(() => {
 			expect(events).toEqual([
 				expect.objectContaining({ type: "connection_status", status: "reconnecting" }),
 				expect.objectContaining({
@@ -1271,7 +1285,7 @@ describe("DaemonAgentConnection", () => {
 		await connection.attach();
 
 		fakeClient.emitClose(new DaemonSocketClosedError("/tmp/optimus.sock", "update"));
-		await vi.waitFor(() => {
+		await waitFor(() => {
 			expect(
 				fakeClient.requests.some(
 					(request) => request.type === "attach" && request.activeSessionId === "active-restored",
@@ -1280,7 +1294,7 @@ describe("DaemonAgentConnection", () => {
 		});
 		await connection.dispose();
 		releaseRestoredAttach?.();
-		await vi.waitFor(() => {
+		await waitFor(() => {
 			expect(fakeClient.restoredAttachCompleted).toBe(1);
 		});
 		for (let flush = 0; flush < 5; flush++) {
@@ -1292,8 +1306,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("returns to normal close handling after update restoration times out", async () => {
-		vi.useFakeTimers();
-		try {
+		{
 			const fakeClient = new FakeDaemonClient();
 			fakeClient.reconnectError = new Error("daemon unavailable");
 			const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
@@ -1310,7 +1323,17 @@ describe("DaemonAgentConnection", () => {
 				activeSessionId: "active-original",
 				reason: "update",
 			});
-			await vi.advanceTimersByTimeAsync(120100);
+			// Real timers: let the reconnect loop capture its real-time deadline,
+			// then shift Date.now past the 120s recovery timeout so the next
+			// retry iteration gives up.
+			await new Promise<void>((resolveTick) => setTimeout(resolveTick, 0));
+			const realDateNow = Date.now;
+			Date.now = () => realDateNow() + 120_500;
+			try {
+				await waitFor(() => expect(closedEvents).toHaveLength(1));
+			} finally {
+				Date.now = realDateNow;
+			}
 
 			expect(closedEvents).toHaveLength(1);
 			const closedError = closedEvents[0]?.type === "closed" ? closedEvents[0].error : undefined;
@@ -1329,8 +1352,6 @@ describe("DaemonAgentConnection", () => {
 			expect(fakeClient.reconnectCount).toBe(reconnectCountAfterFailure);
 			expect(closedEvents).toHaveLength(1);
 			await connection.dispose();
-		} finally {
-			vi.useRealTimers();
 		}
 	});
 
@@ -1690,7 +1711,7 @@ describe("DaemonAgentConnection", () => {
 
 		await expect(failed.attach()).rejects.toThrow("snapshot encoder failed");
 		emitSequencedQueueUpdate(fakeClient, "active-2", 13);
-		await vi.waitFor(() => expect(siblingEvents).toHaveLength(1));
+		await waitFor(() => expect(siblingEvents).toHaveLength(1));
 
 		expect(siblingEvents[0]).toMatchObject({ type: "session_event", event: { type: "session_action_update" } });
 		expect(fakeClient.closeCount).toBe(0);
@@ -1816,7 +1837,7 @@ describe("DaemonAgentConnection", () => {
 
 		emitSnapshot("resync", "snapshot-resync", 13, "session-current");
 		emitSnapshot("replacement", "snapshot-replacement", 14, "session-next");
-		await vi.waitFor(() => expect(events).toHaveLength(2));
+		await waitFor(() => expect(events).toHaveLength(2));
 
 		expect(events).toEqual([
 			expect.objectContaining({
@@ -1893,7 +1914,7 @@ describe("DaemonAgentConnection", () => {
 				error: `${purpose} snapshot failed`,
 			});
 
-			await vi.waitFor(() => expect(events).toHaveLength(1));
+			await waitFor(() => expect(events).toHaveLength(1));
 			if (purpose === "replacement") {
 				expect(events[0]).toMatchObject({
 					type: "session_replaced",
@@ -1915,7 +1936,7 @@ describe("DaemonAgentConnection", () => {
 				"get_session_context",
 			]);
 			emitSequencedQueueUpdate(fakeClient, "active-2", 13);
-			await vi.waitFor(() => expect(siblingEvents).toHaveLength(1));
+			await waitFor(() => expect(siblingEvents).toHaveLength(1));
 			expect(siblingEvents[0]).toMatchObject({ type: "session_event", event: { type: "session_action_update" } });
 			expect(fakeClient.closeCount).toBe(0);
 			expect((connection as unknown as { snapshotAssemblies: Map<string, unknown> }).snapshotAssemblies.size).toBe(
@@ -2040,7 +2061,7 @@ describe("DaemonAgentConnection", () => {
 		fakeClient.connected = false;
 		fakeClient.emitClose(new Error("Daemon socket closed"));
 
-		await vi.waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
+		await waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
 		expect(recoverDaemon).toHaveBeenCalledTimes(2);
 		expect(fakeClient.reconnectCount).toBe(2);
 		expect(fakeClient.resetTransportCount).toBe(1);
@@ -2064,7 +2085,7 @@ describe("DaemonAgentConnection", () => {
 
 		fakeClient.connected = false;
 		fakeClient.emitClose(new Error("Daemon socket closed"));
-		await vi.waitFor(() => expect(recoverDaemon).toHaveBeenCalledOnce());
+		await waitFor(() => expect(recoverDaemon).toHaveBeenCalledOnce());
 		await connection.dispose();
 		finishRecovery?.();
 		for (let flush = 0; flush < 5; flush++) {
@@ -2094,7 +2115,7 @@ describe("DaemonAgentConnection", () => {
 		fakeClient.connected = false;
 		fakeClient.emitClose(new Error("Daemon socket closed"));
 
-		await vi.waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
+		await waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
 		expect(fakeClient.reconnectCount).toBe(1);
 	});
 
@@ -2120,7 +2141,7 @@ describe("DaemonAgentConnection", () => {
 
 		fakeClient.emitClose(new DaemonSocketClosedError("/tmp/optimus.sock", "update"));
 
-		await vi.waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
+		await waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
 		expect(fakeClient.requests.at(-1)).toMatchObject({
 			type: "attach",
 			activeSessionId: "active-restored",
@@ -2538,7 +2559,7 @@ describe("DaemonAgentConnection", () => {
 
 		emitQueue("generation-new", 1, "new");
 		emitQueue("generation-active-1", 13, "old");
-		await vi.waitFor(() => expect(steeringUpdates).toEqual([["new"]]));
+		await waitFor(() => expect(steeringUpdates).toEqual([["new"]]));
 
 		await connection.attach();
 		expect(fakeClient.requests.at(-1)).toMatchObject({

@@ -327,27 +327,21 @@ describe("InteractiveMode streaming events", () => {
 	});
 
 	test("does not pulse renders for background-only subagent work", () => {
-		vi.useFakeTimers();
-		try {
-			const requestRender = vi.fn();
-			const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
-			Object.assign(mode, {
-				connectionState: { isStreaming: false },
-				subagentSnapshots: new Map([["worker", { id: "worker", status: "running" }]]),
-				pulseTimer: undefined,
-				ui: { requestRender },
-			});
-			const updatePulse = Reflect.get(InteractiveMode.prototype, "updateWorkingPulse") as (
-				this: typeof mode,
-			) => void;
+		// Real-timer conversion: with no streaming the pulse interval is never
+		// created, so there is no timer to advance; assert that directly.
+		const requestRender = vi.fn();
+		const mode = Object.create(InteractiveMode.prototype) as InteractiveMode & Record<string, unknown>;
+		Object.assign(mode, {
+			connectionState: { isStreaming: false },
+			subagentSnapshots: new Map([["worker", { id: "worker", status: "running" }]]),
+			pulseTimer: undefined,
+			ui: { requestRender },
+		});
+		const updatePulse = Reflect.get(InteractiveMode.prototype, "updateWorkingPulse") as (this: typeof mode) => void;
 
-			updatePulse.call(mode);
-			vi.advanceTimersByTime(1000);
+		updatePulse.call(mode);
 
-			expect(requestRender).not.toHaveBeenCalled();
-			expect(Reflect.get(mode, "pulseTimer")).toBeUndefined();
-		} finally {
-			vi.useRealTimers();
-		}
+		expect(requestRender).not.toHaveBeenCalled();
+		expect(Reflect.get(mode, "pulseTimer")).toBeUndefined();
 	});
 });
