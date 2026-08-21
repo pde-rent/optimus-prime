@@ -925,6 +925,7 @@ const MAX_EFFORT_CHANGES_PER_RUN = 3;
  */
 const MODEL_MAX_RLM_DEPTH = 3;
 const MAX_DEPTH_CHANGES_PER_RUN = 2;
+const MAX_CONTEXT_CHANGES_PER_RUN = 2;
 const EFFORT_ESCALATION_TOOL_ERROR_THRESHOLD = 3;
 const BANDED_EFFORT_MIN: ThinkingLevel = "low";
 const BANDED_EFFORT_MAX: ThinkingLevel = "high";
@@ -1130,6 +1131,9 @@ export class AgentSession {
 	private _graphChildTokensThisRun = 0;
 	private _graphNodesThisRun = 0;
 	private _effortToolErrorStreaks = new Map<string, number>();
+	/** Session-scoped model-requested compaction overrides; never persisted to user settings. */
+	private _modelContextOverride: { maxContextTokens?: number; compactAtTokens?: number } | undefined;
+	private _contextChangesThisRun = 0;
 	/** A user interrupt ends the run it happened in, so its trigger is carried into the next one. */
 	private _effortEscalationCarryOver = false;
 	private _autonomousContinuationSuppressedMessages = new WeakSet<AgentMessage>();
@@ -2708,7 +2712,7 @@ export class AgentSession {
 	}
 
 	private async _thresholdCompactionNeeded(context: ShouldStopAfterTurnContext): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 		if (!settings.enabled) return false;
 
 		const contextWindow = this.model?.contextWindow ?? 0;
@@ -2970,10 +2974,7 @@ export class AgentSession {
 						reason: "no active turn; compaction can only be requested while a turn is running",
 					};
 				}
-				const preparation = prepareCompaction(
-					this.sessionManager.getBranch(),
-					this.settingsManager.getCompactionSettings(),
-				);
+				const preparation = prepareCompaction(this.sessionManager.getBranch(), this._effectiveCompactionSettings());
 				if (!preparation) {
 					const lastEntry = this.sessionManager.getBranch().at(-1);
 					return {
@@ -5950,7 +5951,7 @@ export class AgentSession {
 			throw new Error(formatNoModelSelectedMessage());
 		}
 		const { apiKey, headers } = await this._getRequiredRequestAuth(this.model);
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 		const messages = this.sessionManager.buildSessionContext().messages;
 		return generateSummary(
 			messages,
@@ -7129,6 +7130,101 @@ export class AgentSession {
 	}
 
 	/**
+	 * Compaction settings with session-scoped model-requested overrides applied.
+	 * User settings are never mutated; overrides die with the session.
+	 */
+	private _effectiveCompactionSettings(): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		maxContextTokens: number;
+		compactAtTokens: number;
+	} {
+		const settings = this.settingsManager.getCompactionSettings();
+		if (!this._modelContextOverride) return settings;
+		return {
+			...settings,
+			maxContextTokens: this._modelContextOverride.maxContextTokens ?? settings.maxContextTokens,
+			compactAtTokens: this._modelContextOverride.compactAtTokens ?? settings.compactAtTokens,
+		};
+	}
+
+	/**
+	 * Model-initiated context-budget change, mirroring the effort and depth gates.
+	 * Session-scoped: it never writes the user's settings. The budget is hard-capped
+	 * by the current model's context window; the trigger point is clamped under it.
+	 */
+	setModelRequestedContextBudget(request: { maxContextTokens?: number; compactAtTokens?: number }): {
+		maxContextTokens: number;
+		compactAtTokens: number;
+		model_window: number;
+		capped: boolean;
+		refused?: "disabled" | "cap" | "thrash";
+	} {
+		const settings = this.settingsManager.getCompactionSettings();
+		const modelWindow = this.model?.contextWindow ?? 0;
+		const current = this._effectiveCompactionSettings();
+		const report = () => ({
+			maxContextTokens: current.maxContextTokens,
+			compactAtTokens: current.compactAtTokens,
+			model_window: modelWindow,
+			capped: false,
+		});
+		if (!this.settingsManager.getDynamicContext()) {
+			return { ...report(), refused: "disabled" };
+		}
+		if (this._contextChangesThisRun >= MAX_CONTEXT_CHANGES_PER_RUN) {
+			return { ...report(), capped: true, refused: "thrash" };
+		}
+		const requestedMax = request.maxContextTokens;
+		const requestedTrigger = request.compactAtTokens;
+		if (
+			(requestedMax === undefined || requestedMax === current.maxContextTokens) &&
+			(requestedTrigger === undefined || requestedTrigger === current.compactAtTokens)
+		) {
+			return report();
+		}
+		let maxContextTokens = requestedMax ?? current.maxContextTokens;
+		let capped = false;
+		if (requestedMax !== undefined && requestedMax <= 0) {
+			maxContextTokens = 0;
+		} else if (modelWindow > 0 && maxContextTokens > modelWindow) {
+			maxContextTokens = modelWindow;
+			capped = true;
+		}
+		let compactAtTokens = requestedTrigger ?? current.compactAtTokens;
+		if (compactAtTokens > 0 && maxContextTokens > 0 && compactAtTokens > maxContextTokens) {
+			compactAtTokens = Math.max(0, maxContextTokens - settings.reserveTokens);
+			capped = true;
+		}
+		this._modelContextOverride = { maxContextTokens, compactAtTokens };
+		this._contextChangesThisRun += 1;
+		const effective = this._effectiveCompactionSettings();
+		return {
+			maxContextTokens: effective.maxContextTokens,
+			compactAtTokens: effective.compactAtTokens,
+			model_window: modelWindow,
+			capped,
+		};
+	}
+
+	/**
+	 * Current effective context budget state for rlm.get_context.
+	 */
+	getContextBudgetState(): {
+		max_context_tokens: number;
+		compact_at_tokens: number;
+		model_window: number;
+	} {
+		const settings = this._effectiveCompactionSettings();
+		return {
+			max_context_tokens: settings.maxContextTokens,
+			compact_at_tokens: settings.compactAtTokens,
+			model_window: this.model?.contextWindow ?? 0,
+		};
+	}
+
+	/**
 	 * Model-initiated recursion-depth change. Session-scoped: it never writes the
 	 * user's global `rlmMaxDepth`, mirroring the effort gate, and it records
 	 * `source: "model"` so it is not mistaken for the user pin that retires the
@@ -7479,7 +7575,7 @@ export class AgentSession {
 	}): Promise<CompactionResult> {
 		const { model, apiKey, headers, customInstructions, force, signal } = options;
 		const pathEntries = this.sessionManager.getBranch();
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 
 		const preparation = prepareCompaction(pathEntries, settings, force);
 		if (!preparation) {
@@ -8326,7 +8422,7 @@ export class AgentSession {
 			if (skipAbortedCheck) return false;
 		}
 
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 		const contextWindow = this.model?.contextWindow ?? 0;
 
 		// Skip overflow check if the message came from a different model.
@@ -9068,6 +9164,22 @@ export class AgentSession {
 				depth: this._rlmDepth,
 				model_max: MODEL_MAX_RLM_DEPTH,
 			}),
+			"rlm.set_context_budget": async (payload) => {
+				const p = payload as { maxContextTokens?: unknown; compactAtTokens?: unknown };
+				const request: { maxContextTokens?: number; compactAtTokens?: number } = {};
+				if (p.maxContextTokens !== undefined) {
+					if (typeof p.maxContextTokens !== "number")
+						throw new Error("rlm.set_context_budget maxContextTokens must be a number");
+					request.maxContextTokens = p.maxContextTokens;
+				}
+				if (p.compactAtTokens !== undefined) {
+					if (typeof p.compactAtTokens !== "number")
+						throw new Error("rlm.set_context_budget compactAtTokens must be a number");
+					request.compactAtTokens = p.compactAtTokens;
+				}
+				return this.setModelRequestedContextBudget(request) as unknown as Record<string, unknown>;
+			},
+			"rlm.get_context_budget": async () => this.getContextBudgetState() as unknown as Record<string, unknown>,
 			"rlm.find_models": createRlmFindModelsHostHandler((query, limit) => this.findRlmModels(query, limit)),
 			"rlm.list_subagents": createRlmListSubagentsHostHandler(() => this.listRlmSubagents()),
 			"rlm.delete_subagent": createRlmDeleteSubagentHostHandler((target) => this.deleteRlmSubagent(target)),

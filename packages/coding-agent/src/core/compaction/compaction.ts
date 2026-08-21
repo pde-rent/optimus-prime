@@ -106,13 +106,20 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/** Harness-side context budget, hard-capped by the model window. 0 or undefined disables the cap. */
+	maxContextTokens?: number;
+	/** Absolute context level where threshold compaction triggers. Falls back to the effective budget minus reserveTokens. */
+	compactAtTokens?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
+	maxContextTokens: 666000,
+	compactAtTokens: 500000,
 };
+
 /**
  * Calculate total context tokens from usage.
  * Uses the native totalTokens field when available, falls back to computing from components.
@@ -206,8 +213,17 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
-	if (contextWindow <= 0) return false;
-	return contextTokens > contextWindow - settings.reserveTokens;
+	// Effective limit is the smaller of the model window and the harness-side budget.
+	let limit = Infinity;
+	if (contextWindow > 0) limit = contextWindow;
+	if (settings.maxContextTokens && settings.maxContextTokens > 0) limit = Math.min(limit, settings.maxContextTokens);
+	if (!Number.isFinite(limit)) return false;
+	const windowTrigger = limit - settings.reserveTokens;
+	const trigger =
+		settings.compactAtTokens && settings.compactAtTokens > 0
+			? Math.min(windowTrigger, settings.compactAtTokens)
+			: windowTrigger;
+	return contextTokens > trigger;
 }
 /**
  * Estimate token count for a message using chars/4 heuristic.

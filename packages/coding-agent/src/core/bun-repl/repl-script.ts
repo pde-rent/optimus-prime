@@ -192,6 +192,9 @@ const rlmObj = Object.assign(rlm, {
 	get_effort: () => hostBridge.hostRequest("rlm.get_effort", {}),
 	set_max_depth: (maxDepth: number) => hostBridge.hostRequest("rlm.set_max_depth", { maxDepth }),
 	get_max_depth: () => hostBridge.hostRequest("rlm.get_max_depth", {}),
+	set_context_budget: (request: { maxContextTokens?: number; compactAtTokens?: number }) =>
+		hostBridge.hostRequest("rlm.set_context_budget", request),
+	get_context_budget: () => hostBridge.hostRequest("rlm.get_context_budget", {}),
 	find_models: (query: string) => hostBridge.hostRequest("rlm.find_models", { query }),
 	list_subagents: () => hostBridge.hostRequest("rlm.list_subagents", {}),
 	delete_subagent: (target: string) => hostBridge.hostRequest("rlm.delete_subagent", { target }),

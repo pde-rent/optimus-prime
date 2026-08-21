@@ -283,6 +283,56 @@ describe("shouldCompact", () => {
 
 		expect(shouldCompact(95000, 0, settings)).toBe(false);
 	});
+
+	it("should trigger at the compaction point before the budget", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			maxContextTokens: 666000,
+			compactAtTokens: 500000,
+		};
+
+		expect(shouldCompact(500001, 1000000, settings)).toBe(true);
+		expect(shouldCompact(500000, 1000000, settings)).toBe(false);
+	});
+
+	it("should still respect a model window smaller than the budget and trigger point", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			maxContextTokens: 666000,
+			compactAtTokens: 500000,
+		};
+
+		expect(shouldCompact(91000, 100000, settings)).toBe(true);
+		expect(shouldCompact(89000, 100000, settings)).toBe(false);
+	});
+
+	it("should use the budget alone when the model window is unknown", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			maxContextTokens: 666000,
+		};
+
+		expect(shouldCompact(660001, 0, settings)).toBe(true);
+		expect(shouldCompact(600000, 0, settings)).toBe(false);
+	});
+
+	it("should treat a zero budget as uncapped", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			maxContextTokens: 0,
+		};
+
+		expect(shouldCompact(95000, 100000, settings)).toBe(true);
+		expect(shouldCompact(80000, 100000, settings)).toBe(false);
+	});
 });
 
 describe("findCutPoint", () => {

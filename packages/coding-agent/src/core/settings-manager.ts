@@ -14,6 +14,8 @@ export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
+	maxContextTokens?: number; // default: 666000 - harness-side context budget, hard-capped by the model window
+	compactAtTokens?: number; // default: 500000 - context level where threshold compaction triggers
 	agentCallable?: boolean; // default: true - expose the compact skill so the model can request compaction
 }
 
@@ -144,6 +146,7 @@ export interface Settings {
 	dynamicEffort?: DynamicEffortMode; // default: "banded"
 	/** Let an agent raise its own recursion limit after an observed failure. default: true */
 	dynamicDepth?: boolean;
+	dynamicContext?: boolean; // default: true - allow the agent to adjust context budget and compaction trigger at runtime
 	/** Show the live sub-agent graph while children are running. default: true */
 	subagentGraph?: boolean;
 	/** Abort a turn whose streamed text or reasoning collapses into a repetition loop. default: true */
@@ -793,6 +796,16 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getDynamicContext(): boolean {
+		return this.settings.dynamicContext ?? true;
+	}
+
+	setDynamicContext(enabled: boolean): void {
+		this.globalSettings.dynamicContext = enabled;
+		this.markModified("dynamicContext");
+		this.save();
+	}
+
 	/** Opt out only to inspect a collapse; the loop otherwise streams and is billed to max_tokens. */
 	getDegeneracyGuard(): boolean {
 		// Default off until the repetition rule stops firing on ordinary enumeration. A review
@@ -976,14 +989,29 @@ export class SettingsManager {
 		return this.settings.compaction?.agentCallable ?? true;
 	}
 
-	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+	getCompactionMaxContextTokens(): number {
+		return this.settings.compaction?.maxContextTokens ?? 666000;
+	}
+
+	getCompactionCompactAtTokens(): number {
+		return this.settings.compaction?.compactAtTokens ?? 500000;
+	}
+
+	getCompactionSettings(): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		maxContextTokens: number;
+		compactAtTokens: number;
+	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
+			maxContextTokens: this.getCompactionMaxContextTokens(),
+			compactAtTokens: this.getCompactionCompactAtTokens(),
 		};
 	}
-
 	getAutoRefineSettings(): { enabled: boolean; turnInterval: number; compact: boolean; cooldownMs: number } {
 		const turnInterval = this.settings.autoRefine?.turnInterval;
 		const cooldownMs = this.settings.autoRefine?.cooldownMs;
