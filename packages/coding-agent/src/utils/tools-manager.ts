@@ -1,5 +1,4 @@
 import { spawnSync } from "child_process";
-import extractZip from "extract-zip";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
 import { arch, platform } from "os";
 import { join } from "path";
@@ -230,7 +229,16 @@ async function downloadTool(tool: ManagedTool): Promise<string> {
 				throw new Error(`Failed to extract ${assetName}: ${errMsg}`);
 			}
 		} else if (assetName.endsWith(".zip")) {
-			await extractZip(archivePath, { dir: extractDir });
+			const extractResult = spawnSync("unzip", ["-oq", archivePath, "-d", extractDir], { stdio: "pipe" });
+			if (extractResult.error && (extractResult.error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error(
+					"Failed to extract zip archive: the 'unzip' command was not found. Install unzip and retry.",
+				);
+			}
+			if (extractResult.error || extractResult.status !== 0) {
+				const errMsg = extractResult.error?.message ?? extractResult.stderr?.toString().trim() ?? "unknown error";
+				throw new Error(`Failed to extract ${assetName}: ${errMsg}`);
+			}
 		} else {
 			throw new Error(`Unsupported archive format: ${assetName}`);
 		}

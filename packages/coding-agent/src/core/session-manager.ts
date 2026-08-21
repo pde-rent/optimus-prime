@@ -1,7 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, ServiceTier, TextContent, Usage } from "@earendil-works/pi-ai";
-import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	chmodSync,

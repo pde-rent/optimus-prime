@@ -6,12 +6,10 @@ const toolState = {
 	toolsDir: `/tmp/optimus-tools-manager-${process.pid}`,
 	platform: "linux",
 	architecture: "x64",
-	extractZip: async (_source: string, _options: { dir: string }): Promise<void> => {},
 };
 
 const actualConfig = { ...(await import("../src/config.js")) };
 const actualOs = { ...(await import("os")) };
-const actualExtractZip = { ...(await import("extract-zip")) };
 
 mock.module("../src/config.js", () => ({
 	APP_NAME: "optimus",
@@ -23,15 +21,10 @@ mock.module("os", () => ({
 	platform: () => toolState.platform,
 }));
 
-mock.module("extract-zip", () => ({
-	default: (source: string, options: { dir: string }) => toolState.extractZip(source, options),
-}));
-
 // Restore the real modules so the mocks do not leak into other test files in this process.
 afterAll(() => {
 	mock.module("../src/config.js", () => actualConfig);
 	mock.module("os", () => actualOs);
-	mock.module("extract-zip", () => actualExtractZip);
 });
 
 import type { ToolUnavailableResult } from "../src/utils/tools-manager.js";
@@ -50,6 +43,20 @@ function writeExecutable(filePath: string, exitCode = 0): void {
 	chmodSync(filePath, 0o755);
 }
 
+// Stub the system unzip command on PATH. Invoked as: unzip -oq ARCHIVE -d DIR,
+// so "$4" is the extraction directory.
+function writeUnzipStub(extractedBinaryExitCode = 0): void {
+	writeFileSync(
+		join(pathDir, "unzip"),
+		`#!/bin/sh
+printf '#!/bin/sh\nexit ${extractedBinaryExitCode}\n' > "$4/rg.exe"
+/bin/chmod 755 "$4/rg.exe"
+`,
+		"utf8",
+	);
+	chmodSync(join(pathDir, "unzip"), 0o755);
+}
+
 function unavailable(
 	platform: string,
 	reason: ToolUnavailableResult["reason"] = "download_failed",
@@ -65,7 +72,6 @@ describe("tools manager", () => {
 		delete process.env.PI_OFFLINE;
 		toolState.platform = "linux";
 		toolState.architecture = "x64";
-		toolState.extractZip = async () => {};
 	});
 
 	afterEach(() => {
@@ -136,9 +142,7 @@ describe("tools manager", () => {
 			)
 			.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
 		globalThis.fetch = fetchMock;
-		toolState.extractZip = async (_source, options) => {
-			writeExecutable(join(options.dir, "rg.exe"));
-		};
+		writeUnzipStub(0);
 
 		await expect(ensureToolWithStatus("rg")).resolves.toEqual({
 			status: "available",
@@ -152,15 +156,26 @@ describe("tools manager", () => {
 		globalThis.fetch = mock()
 			.mockResolvedValueOnce(new Response(JSON.stringify({ tag_name: "15.1.0" }), { status: 200 }))
 			.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
-		toolState.extractZip = async (_source, options) => {
-			writeExecutable(join(options.dir, "rg.exe"), 1);
-		};
+		writeUnzipStub(1);
 
 		await expect(ensureToolWithStatus("rg")).resolves.toMatchObject({
 			status: "unavailable",
 			reason: "download_failed",
 		});
 		expect(existsSync(join(toolState.toolsDir, "rg.exe"))).toBe(false);
+	});
+
+	it("reports a clear failure when unzip is missing", async () => {
+		toolState.platform = "win32";
+		globalThis.fetch = mock()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ tag_name: "15.1.0" }), { status: 200 }))
+			.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
+
+		await expect(ensureToolWithStatus("rg")).resolves.toMatchObject({
+			status: "unavailable",
+			reason: "download_failed",
+			detail: expect.stringContaining("'unzip' command was not found"),
+		});
 	});
 
 	it("formats actionable platform-specific ripgrep warnings", () => {

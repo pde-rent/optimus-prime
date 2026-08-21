@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { spawnSync } from "child_process";
-import { randomUUID } from "crypto";
 import { readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

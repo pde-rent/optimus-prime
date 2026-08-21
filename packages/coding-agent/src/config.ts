@@ -1,5 +1,5 @@
+import { createHash } from "node:crypto";
 import { spawnSync } from "child_process";
-import { createHash } from "crypto";
 import {
 	accessSync,
 	appendFileSync,
