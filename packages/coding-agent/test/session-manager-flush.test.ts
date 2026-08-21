@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import {
 	appendFileSync,
 	chmodSync,
@@ -23,17 +23,17 @@ type ChownSync = typeof chownSync;
 type RenameSync = typeof renameSync;
 type WriteFileSync = typeof writeFileSync;
 
-const fsMocks = vi.hoisted(() => ({
+const fsMocks = {
 	actualWriteFileSync: undefined as WriteFileSync | undefined,
-	chmodSync: vi.fn<ChmodSync>(),
-	chownSync: vi.fn<ChownSync>(),
-	renameSync: vi.fn<RenameSync>(),
-	writeFileSync: vi.fn<WriteFileSync>(),
-}));
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+	chmodSync: mock<ChmodSync>(),
+	chownSync: mock<ChownSync>(),
+	renameSync: mock<RenameSync>(),
+	writeFileSync: mock<WriteFileSync>(),
+};
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualNodeFs = { ...(await import("node:fs")) };
-vi.mock("node:fs", () => {
+mock.module("node:fs", () => {
 	const actual = actualNodeFs;
 	fsMocks.actualWriteFileSync = actual.writeFileSync;
 	fsMocks.chmodSync.mockImplementation(actual.chmodSync);
@@ -47,6 +47,11 @@ vi.mock("node:fs", () => {
 		renameSync: fsMocks.renameSync,
 		writeFileSync: fsMocks.writeFileSync,
 	};
+});
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:fs", () => actualNodeFs);
 });
 
 const { SessionManager } = await import("../src/core/session-manager.js");
@@ -301,7 +306,7 @@ describe("SessionManager.flushNow", () => {
 			stopReason: "stop",
 			timestamp: Date.now(),
 		});
-		const rewriteFile = vi.spyOn(mgr as unknown as { _rewriteFile(): void }, "_rewriteFile");
+		const rewriteFile = spyOn(mgr as unknown as { _rewriteFile(): void }, "_rewriteFile");
 
 		mgr.appendCustomEntry("thread_goal_state", { active: true, status: "active" });
 		mgr.flushNow();

@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
-const netMock = vi.hoisted(() => {
+const netMock = (() => {
 	type Listener = (...args: unknown[]) => void;
 	type TrackedListener = Listener & { originalListener?: Listener };
 
@@ -71,18 +71,26 @@ const netMock = vi.hoisted(() => {
 	}
 
 	const sockets: MockSocket[] = [];
-	const createConnection = vi.fn((path: string) => {
+	const createConnection = mock((path: string) => {
 		const socket = new MockSocket(path);
 		sockets.push(socket);
 		return socket;
 	});
 
 	return { createConnection, sockets };
-});
+})();
 
-vi.mock("node:net", () => ({
+// Snapshot the real exports: mock.module patches the live module namespace in place.
+const actualNodeNet = { ...(await import("node:net")) };
+mock.module("node:net", () => ({
+	...actualNodeNet,
 	createConnection: netMock.createConnection,
 }));
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:net", () => actualNodeNet);
+});
 
 const { DaemonClient, getDaemonSocketCloseReason } = await import("../src/modes/daemon/daemon-client.js");
 const { DAEMON_COMMAND_COMPATIBILITY, DAEMON_PROTOCOL_VERSION, DAEMON_SCHEMA_REVISION } = await import(
@@ -113,11 +121,6 @@ describe("DaemonClient", () => {
 	beforeEach(() => {
 		netMock.sockets.length = 0;
 		netMock.createConnection.mockClear();
-		vi.useRealTimers();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
 	});
 
 	it("allows connect retry after the socket emits an error before connecting", async () => {
@@ -147,16 +150,13 @@ describe("DaemonClient", () => {
 	});
 
 	it("allows connect retry after the initial connection times out", async () => {
-		vi.useFakeTimers();
 		const client = new DaemonClient("/tmp/optimus-slow.sock");
 
 		const firstAttempt = captureRejection(client.connect(5));
 		expect(netMock.sockets).toHaveLength(1);
 		const firstSocket = netMock.sockets[0]!;
 
-		// `expect(promise).resolves` drains the event loop synchronously in Bun, so it must not be
-		// built while the promise can only settle by advancing the fake clock — that deadlocks.
-		await vi.advanceTimersByTimeAsync(5);
+		await firstAttempt;
 		await expect(firstAttempt).resolves.toMatchObject({
 			message: expect.stringContaining("Timed out after 5ms connecting to the Optimus Prime daemon."),
 		});
@@ -243,7 +243,7 @@ describe("DaemonClient", () => {
 			activeSessionId: "active-1",
 			childId: "child-1",
 		});
-		await vi.waitFor(() => expect(socket.writes).toHaveLength(1));
+		await waitFor(() => expect(socket.writes).toHaveLength(1));
 		client.close();
 		await expect(request).rejects.toThrow("closed before the operation completed");
 	});
@@ -313,7 +313,7 @@ describe("DaemonClient", () => {
 			message: "hello",
 			admissionId: "a-1",
 		});
-		await vi.waitFor(() => expect(socket.writes).toHaveLength(1));
+		await waitFor(() => expect(socket.writes).toHaveLength(1));
 		client.close();
 		await expect(request).rejects.toThrow("closed before the operation completed");
 	});
@@ -790,7 +790,6 @@ describe("DaemonClient", () => {
 	});
 
 	it("pauses request timeouts while a recoverable connection is disconnected", async () => {
-		vi.useFakeTimers();
 		const client = new DaemonClient("/tmp/optimus.sock");
 		client.enableRequestRecovery();
 		const firstConnect = client.connect();
@@ -811,7 +810,8 @@ describe("DaemonClient", () => {
 		);
 		const firstEnvelope = JSON.parse(firstSocket.writes[0]!) as { id: string };
 		firstSocket.emit("close");
-		await vi.advanceTimersByTimeAsync(500);
+		// Real timers: wait past the 50ms request timeout.
+		await new Promise<void>((resolve) => setTimeout(resolve, 120));
 		expect(settled).toBe(false);
 
 		const secondConnect = client.connect();
@@ -829,7 +829,6 @@ describe("DaemonClient", () => {
 	});
 
 	it("rejects a pending admission-gated prompt when the reconnected daemon is downgraded", async () => {
-		vi.useFakeTimers();
 		const client = new DaemonClient("/tmp/optimus.sock");
 		client.enableRequestRecovery();
 		const firstConnect = client.connect();
@@ -874,7 +873,7 @@ describe("DaemonClient", () => {
 		emitHello(firstSocket);
 
 		const statuses: string[] = [];
-		const recoverDaemon = vi.fn(async () => {});
+		const recoverDaemon = mock(async () => {});
 		client.enableAutoReconnect({
 			recoverDaemon,
 			onStatus: (status) => statuses.push(status.status),
@@ -884,7 +883,7 @@ describe("DaemonClient", () => {
 		const firstEnvelope = JSON.parse(firstWireData) as { id: string };
 
 		firstSocket.emit("close");
-		await vi.waitFor(() => expect(netMock.sockets).toHaveLength(2));
+		await waitFor(() => expect(netMock.sockets).toHaveLength(2));
 		const secondSocket = netMock.sockets[1]!;
 		secondSocket.emit("connect");
 		await Promise.resolve();
@@ -899,7 +898,7 @@ describe("DaemonClient", () => {
 			})}\n`,
 		);
 
-		await vi.waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
+		await waitFor(() => expect(statuses).toEqual(["reconnecting", "connected"]));
 		expect(recoverDaemon).toHaveBeenCalledOnce();
 		expect(secondSocket.writes).toEqual([firstWireData]);
 
@@ -911,6 +910,21 @@ describe("DaemonClient", () => {
 		client.close();
 	});
 });
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}
 
 async function captureRejection(promise: Promise<unknown>): Promise<Error> {
 	try {

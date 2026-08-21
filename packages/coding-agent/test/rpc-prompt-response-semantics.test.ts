@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,27 +12,40 @@ import {
 } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
 
-const rpcIo = vi.hoisted(() => ({
+const rpcIo = {
 	outputLines: [] as string[],
 	lineHandler: undefined as ((line: string) => void) | undefined,
-}));
+};
 
-vi.mock("../src/core/output-guard.js", () => ({
-	takeOverStdout: vi.fn(),
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualOutputGuard = { ...(await import("../src/core/output-guard.js")) };
+const actualTheme = { ...(await import("../src/modes/interactive/theme/theme.js")) };
+const actualJsonl = { ...(await import("../src/modes/rpc/jsonl.js")) };
+
+mock.module("../src/core/output-guard.js", () => ({
+	takeOverStdout: mock(),
 	writeRawStdout: (line: string) => {
 		rpcIo.outputLines.push(line);
 	},
 }));
 
-vi.mock("../src/modes/interactive/theme/theme.js", () => ({ theme: {} }));
+mock.module("../src/modes/interactive/theme/theme.js", () => ({ theme: {} }));
 
-vi.mock("../src/modes/rpc/jsonl.js", () => ({
-	attachJsonlLineReader: vi.fn((_stream: NodeJS.ReadableStream, onLine: (line: string) => void) => {
+mock.module("../src/modes/rpc/jsonl.js", () => ({
+	attachJsonlLineReader: mock((_stream: NodeJS.ReadableStream, onLine: (line: string) => void) => {
 		rpcIo.lineHandler = onLine;
 		return () => {};
 	}),
 	serializeJsonLine: (value: unknown) => `${JSON.stringify(value)}\n`,
 }));
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../src/core/output-guard.js", () => actualOutputGuard);
+	mock.module("../src/modes/interactive/theme/theme.js", () => actualTheme);
+	mock.module("../src/modes/rpc/jsonl.js", () => actualJsonl);
+});
 
 const { AgentSession } = await import("../src/core/agent-session.js");
 // `await import` only binds a value; classes used as types need this alias.
@@ -96,6 +109,21 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitFor(assert: () => void): Promise<void> {
+	const deadline = Date.now() + 5000;
+	let lastError: unknown;
+	while (Date.now() < deadline) {
+		try {
+			assert();
+			return;
+		} catch (error) {
+			lastError = error;
+			await sleep(25);
+		}
+	}
+	throw lastError;
+}
+
 function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): {
 	runtimeHost: AgentSessionRuntime;
 	session: AgentSession;
@@ -147,11 +175,11 @@ function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number
 
 	const runtimeHost = {
 		session,
-		newSession: vi.fn(async () => ({ cancelled: true })),
-		switchSession: vi.fn(async () => ({ cancelled: true })),
-		fork: vi.fn(async () => ({ cancelled: true, selectedText: "" })),
-		dispose: vi.fn(async () => {}),
-		setRebindSession: vi.fn(),
+		newSession: mock(async () => ({ cancelled: true })),
+		switchSession: mock(async () => ({ cancelled: true })),
+		fork: mock(async () => ({ cancelled: true, selectedText: "" })),
+		dispose: mock(async () => {}),
+		setRebindSession: mock(),
 	} as unknown as AgentSessionRuntime;
 
 	return {
@@ -183,7 +211,7 @@ async function startRpcMode(options: { withAuth: boolean; responseDelayMs: numbe
 
 	const { runtimeHost, session, cleanup } = createRuntimeHost(options);
 	void runRpcMode(runtimeHost);
-	await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
+	await waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
 
 	return { lineHandler: rpcIo.lineHandler!, session, cleanup };
 }
@@ -215,7 +243,7 @@ describe("RPC prompt response semantics", () => {
 		try {
 			lineHandler(JSON.stringify({ id: "b1", type: "prompt", message: "Hello" }));
 
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				const responses = getPromptResponses(rpcIo.outputLines, "b1");
 				expect(responses).toHaveLength(1);
 				expect(responses[0]).toMatchObject({
@@ -239,7 +267,7 @@ describe("RPC prompt response semantics", () => {
 		try {
 			lineHandler(JSON.stringify({ id: "b2", type: "prompt", message: "Hello" }));
 
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				const responses = getPromptResponses(rpcIo.outputLines, "b2");
 				expect(responses).toHaveLength(1);
 				expect(responses[0]).toMatchObject({
@@ -249,7 +277,7 @@ describe("RPC prompt response semantics", () => {
 					success: true,
 				});
 			});
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				expect(parseOutputLines(rpcIo.outputLines).some((record) => record.type === "agent_start")).toBe(true);
 			});
 			expect(session.isStreaming).toBe(true);
@@ -263,7 +291,7 @@ describe("RPC prompt response semantics", () => {
 
 		try {
 			lineHandler(JSON.stringify({ id: "b3-start", type: "prompt", message: "Start" }));
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				expect(getPromptResponses(rpcIo.outputLines, "b3-start")).toHaveLength(1);
 			});
 
@@ -277,7 +305,7 @@ describe("RPC prompt response semantics", () => {
 				}),
 			);
 
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				const responses = getPromptResponses(rpcIo.outputLines, "b3");
 				expect(responses).toHaveLength(1);
 				expect(responses[0]).toMatchObject({
@@ -296,7 +324,7 @@ describe("RPC prompt response semantics", () => {
 
 	it("preserves omitted global scope on RPC refine commands", async () => {
 		const { lineHandler, session, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 0 });
-		const refine = vi.spyOn(session, "refine").mockResolvedValue({
+		const refine = spyOn(session, "refine").mockResolvedValue({
 			id: "refine_rpc",
 			summary: "RPC refinement",
 			rationale: "Test refine scope default",
@@ -309,7 +337,7 @@ describe("RPC prompt response semantics", () => {
 		try {
 			lineHandler(JSON.stringify({ id: "r1", type: "refine", instructions: "record local lesson" }));
 
-			await vi.waitFor(() => {
+			await waitFor(() => {
 				expect(refine).toHaveBeenCalledWith({
 					instructions: "record local lesson",
 					rollbackId: undefined,

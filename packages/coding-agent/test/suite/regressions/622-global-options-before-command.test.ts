@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	daemonCommands: [] as string[][],
-}));
+};
 
-vi.mock("../../../src/cli/daemon-command.js", () => ({
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualDaemonCommand = { ...(await import("../../../src/cli/daemon-command.js")) };
+
+mock.module("../../../src/cli/daemon-command.js", () => ({
 	handleDaemonCommand: async (args: string[]) => {
 		mocks.daemonCommands.push(args);
 		return true;
@@ -12,6 +16,11 @@ vi.mock("../../../src/cli/daemon-command.js", () => ({
 }));
 
 const { handlePublicCommand } = await import("../../../src/cli/public-command.js");
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../../../src/cli/daemon-command.js", () => actualDaemonCommand);
+});
 
 describe("issue #622 global options before commands", () => {
 	beforeEach(() => {

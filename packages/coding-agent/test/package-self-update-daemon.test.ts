@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,7 +96,7 @@ interface MockDaemonRequest {
 
 type MockDaemonResponse = { success: true; data?: unknown } | { success: false; error: string };
 
-const mockState = vi.hoisted(() => ({
+const mockState = {
 	calls: [] as string[],
 	createActiveSessionIds: [] as string[],
 	createThrowSessionPaths: [] as string[],
@@ -139,7 +139,7 @@ const mockState = vi.hoisted(() => ({
 	successorSocketPath: undefined as string | undefined,
 	spawnExitCodes: [] as number[],
 	shutdownResult: true,
-}));
+};
 
 function useFixedOwnerHello(): void {
 	mockState.hello = {
@@ -156,7 +156,26 @@ function useFixedOwnerHello(): void {
 // Bun routes a "child_process" mock to "node:child_process" importers too, so the factory has to
 // carry the full surface — src/core/session-lease.ts imports execFileSync from the node: specifier.
 const actualNodeChildProcess = { ...(await import("node:child_process")) };
-vi.mock("child_process", () => ({
+const actualChildProcess = { ...(await import("child_process")) };
+const actualDaemonUpdateRestartJs = { ...(await import("../src/cli/daemon-update-restart.js")) };
+const actualDaemonSocketJs = { ...(await import("../src/modes/daemon/daemon-socket.js")) };
+const actualDaemonSupervisorOwnershipJs = {
+	...(await import("../src/modes/daemon/daemon-supervisor-ownership.js")),
+};
+const actualDaemonLaunchJs = { ...(await import("../src/cli/daemon-launch.js")) };
+const actualDaemonClientJs = { ...(await import("../src/modes/daemon/daemon-client.js")) };
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("child_process", () => actualChildProcess);
+	mock.module("../src/cli/daemon-update-restart.js", () => actualDaemonUpdateRestartJs);
+	mock.module("../src/modes/daemon/daemon-socket.js", () => actualDaemonSocketJs);
+	mock.module("../src/modes/daemon/daemon-supervisor-ownership.js", () => actualDaemonSupervisorOwnershipJs);
+	mock.module("../src/cli/daemon-launch.js", () => actualDaemonLaunchJs);
+	mock.module("../src/modes/daemon/daemon-client.js", () => actualDaemonClientJs);
+});
+
+mock.module("child_process", () => ({
 	...actualNodeChildProcess,
 	spawn: vi.fn((command: string, args: string[]) => {
 		mockState.calls.push(`spawn:${command} ${args.join(" ")}`);
@@ -180,10 +199,10 @@ vi.mock("child_process", () => ({
 	})),
 }));
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcCliDaemonUpdateRestartJs = { ...(await import("../src/cli/daemon-update-restart.js")) };
-vi.mock("../src/cli/daemon-update-restart.js", () => {
+mock.module("../src/cli/daemon-update-restart.js", () => {
 	const original = actualSrcCliDaemonUpdateRestartJs;
 	return {
 		...original,
@@ -203,15 +222,15 @@ vi.mock("../src/cli/daemon-update-restart.js", () => {
 	};
 });
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcModesDaemonDaemonSocketJs = { ...(await import("../src/modes/daemon/daemon-socket.js")) };
-vi.mock("../src/modes/daemon/daemon-socket.js", () => ({
+mock.module("../src/modes/daemon/daemon-socket.js", () => ({
 	...actualSrcModesDaemonDaemonSocketJs,
 	defaultDaemonSocketPath: () => mockState.socketPath,
 }));
 
-vi.mock("../src/modes/daemon/daemon-supervisor-ownership.js", () => ({
+mock.module("../src/modes/daemon/daemon-supervisor-ownership.js", () => ({
 	acquireDaemonShutdownAdmission: vi.fn(async () => {
 		mockState.calls.push("acquire-daemon-shutdown-admission");
 		return {
@@ -231,7 +250,7 @@ vi.mock("../src/modes/daemon/daemon-supervisor-ownership.js", () => ({
 	}),
 }));
 
-vi.mock("../src/cli/daemon-launch.js", () => ({
+mock.module("../src/cli/daemon-launch.js", () => ({
 	ensureInteractiveDaemonRunning: vi.fn(async () => {
 		mockState.calls.push("ensure-daemon");
 	}),
@@ -262,7 +281,7 @@ vi.mock("../src/cli/daemon-launch.js", () => ({
 	}),
 }));
 
-vi.mock("../src/modes/daemon/daemon-client.js", () => ({
+mock.module("../src/modes/daemon/daemon-client.js", () => ({
 	DaemonClient: class {
 		private connected = false;
 		private observedHello: typeof mockState.hello | undefined;
@@ -408,6 +427,7 @@ describe("self-update daemon restart", () => {
 	let originalPiPackageDir: string | undefined;
 	let originalCwd: string;
 	let originalExecPath: string;
+	let originalFetch: typeof globalThis.fetch;
 	let originalExitCode: typeof process.exitCode;
 
 	async function performUpdateAndRunCoordinator(originActiveSessionId?: string): Promise<void> {
@@ -531,14 +551,12 @@ describe("self-update daemon restart", () => {
 			value: join(packageDir, "dist", "cli.js"),
 			configurable: true,
 		});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => Response.json({ version: "999.0.0" })),
-		);
+		originalFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(async () => Response.json({ version: "999.0.0" }));
 	});
 
 	afterEach(() => {
-		vi.unstubAllGlobals();
+		globalThis.fetch = originalFetch;
 		process.chdir(originalCwd);
 		process.exitCode = originalExitCode ?? 0;
 		if (originalAgentDir === undefined) {
@@ -578,10 +596,7 @@ describe("self-update daemon restart", () => {
 
 	it("uses the interactive no-change sentinel only when self-update is unchanged", async () => {
 		process.env[SELF_UPDATE_INTERACTIVE_CHILD_ENV] = "1";
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => Response.json({ version: "0.2.6" })),
-		);
+		globalThis.fetch = vi.fn(async () => Response.json({ version: "0.2.6" }));
 
 		await expect(handlePackageCommand(["update", "--self"])).resolves.toBe(true);
 

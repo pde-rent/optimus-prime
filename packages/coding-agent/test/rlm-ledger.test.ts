@@ -1,3 +1,4 @@
+import { afterAll, describe, expect, it, mock, spyOn } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -10,11 +11,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 
-const linkFailure = vi.hoisted(() => ({ code: undefined as string | undefined }));
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+const linkFailure = { code: undefined as string | undefined };
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualNodeFs = { ...(await import("node:fs")) };
-vi.mock("node:fs", () => {
+mock.module("node:fs", () => {
 	const actual = actualNodeFs;
 	return {
 		...actual,
@@ -32,7 +33,11 @@ vi.mock("node:fs", () => {
 	};
 });
 
-import { describe, expect, it, vi } from "bun:test";
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:fs", () => actualNodeFs);
+});
+
 import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
@@ -452,7 +457,7 @@ describe("rlm spawn ledger", () => {
 
 function makeDaemonFixture(tempDir: string) {
 	const sessionsDir = join(tempDir, "sessions");
-	const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
+	const createRuntime = mock(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
 		session: makeRuntimeSession(options.sessionManager),
 		extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
 			ReturnType<CreateAgentSessionRuntimeFactory>
@@ -491,28 +496,28 @@ function makeRuntimeSession(
 	return {
 		sessionManager,
 		messages: [],
-		extensionRunner: { hasHandlers: vi.fn(() => false), emit: vi.fn(async () => {}) },
+		extensionRunner: { hasHandlers: mock(() => false), emit: mock(async () => {}) },
 		sessionFile: sessionManager.getSessionFile(),
 		sessionId: sessionManager.getSessionId(),
 		get sessionName() {
 			return sessionManager.getSessionName();
 		},
 		rlmDepth: sessionManager.getHeader()?.rlmDepth ?? 0,
-		setSubagentRuntimeHost: vi.fn(),
-		getRlmChildRunStatus: vi.fn(() => "running"),
-		registerRlmChildSession: vi.fn(() => true),
-		releaseRlmChildSession: vi.fn(() => vi.fn()),
-		subscribe: vi.fn(() => vi.fn()),
-		bindExtensions: vi.fn(async () => {}),
-		setExecEnvProvider: vi.fn(),
-		getAvailableThinkingLevels: vi.fn(() => []),
+		setSubagentRuntimeHost: mock(),
+		getRlmChildRunStatus: mock(() => "running"),
+		registerRlmChildSession: mock(() => true),
+		releaseRlmChildSession: mock(() => mock()),
+		subscribe: mock(() => mock()),
+		bindExtensions: mock(async () => {}),
+		setExecEnvProvider: mock(),
+		getAvailableThinkingLevels: mock(() => []),
 		scopedModels: [],
-		getActiveToolNames: vi.fn(() => []),
-		getContextUsage: vi.fn(() => undefined),
-		setSessionName: vi.fn((name: string) => sessionManager.appendSessionInfo(name)),
-		dispose: vi.fn(),
-		disposeAsync: vi.fn(async () => {}),
-		abort: vi.fn(async () => {}),
+		getActiveToolNames: mock(() => []),
+		getContextUsage: mock(() => undefined),
+		setSessionName: mock((name: string) => sessionManager.appendSessionInfo(name)),
+		dispose: mock(),
+		disposeAsync: mock(async () => {}),
+		abort: mock(async () => {}),
 	} as unknown as Awaited<ReturnType<CreateAgentSessionRuntimeFactory>>["session"];
 }
 
@@ -617,7 +622,7 @@ describe("rlm spawn ledger daemon wiring", () => {
 			if (!parentFile) throw new Error("Missing parent session file");
 			const parentState = await internals.createRuntime({ type: "create", sessionPath: parentFile });
 			const ledger = internals.rlmSpawnLedger();
-			const failingAppend = vi.spyOn(ledger, "appendSpawn").mockRejectedValue(new Error("ledger disk exploded"));
+			const failingAppend = spyOn(ledger, "appendSpawn").mockRejectedValue(new Error("ledger disk exploded"));
 			const childDir = join(parentManager.getSessionArtifactDir()!, "sub-badbadba");
 
 			await expect(
@@ -1077,7 +1082,7 @@ describe("rlm spawn ledger supervisor wiring", () => {
 				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: sessionsDir },
 				descriptorDir: join(tempDir, "workers"),
 			}) as unknown as SupervisorLedgerInternals;
-			const rename = vi.fn(async () => {});
+			const rename = mock(async () => {});
 			Object.assign(supervisor.catalog, { rename });
 			const ledger = supervisor.rlmSpawnLedger();
 			await ledger.appendSpawn({

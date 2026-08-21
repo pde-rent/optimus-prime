@@ -1,22 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import { APP_NAME } from "../src/config.js";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	daemonCommands: [] as string[][],
 	packageCommands: [] as string[][],
 	psCalls: [] as boolean[],
 	reapCalls: [] as Array<[boolean, boolean]>,
 	shutdownCalls: [] as Array<[boolean, boolean]>,
-}));
+};
 
-vi.mock("../src/cli/daemon-command.js", () => ({
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualDaemonCommand = { ...(await import("../src/cli/daemon-command.js")) };
+const actualPackageManagerCli = { ...(await import("../src/package-manager-cli.js")) };
+const actualDaemonPs = { ...(await import("../src/cli/daemon-ps.js")) };
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../src/cli/daemon-command.js", () => actualDaemonCommand);
+	mock.module("../src/package-manager-cli.js", () => actualPackageManagerCli);
+	mock.module("../src/cli/daemon-ps.js", () => actualDaemonPs);
+});
+
+mock.module("../src/cli/daemon-command.js", () => ({
 	handleDaemonCommand: async (args: string[]) => {
 		mocks.daemonCommands.push(args);
 		return true;
 	},
 }));
 
-vi.mock("../src/package-manager-cli.js", () => ({
+mock.module("../src/package-manager-cli.js", () => ({
 	handlePackageCommand: async (args: string[]) => {
 		mocks.packageCommands.push(args);
 		return true;
@@ -24,7 +37,7 @@ vi.mock("../src/package-manager-cli.js", () => ({
 	isSelfUpdateSource: (source: string) => source === "self" || source === "pi" || source === "optimus",
 }));
 
-vi.mock("../src/cli/daemon-ps.js", () => ({
+mock.module("../src/cli/daemon-ps.js", () => ({
 	runPs: async (json: boolean) => {
 		mocks.psCalls.push(json);
 	},

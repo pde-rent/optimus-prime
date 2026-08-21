@@ -1,17 +1,30 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, vi } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentAutonomousStatus } from "../src/core/autonomous.js";
 import type { SessionShutdownEvent } from "../src/index.js";
 
-const output = vi.hoisted(() => ({ write: vi.fn(), flush: vi.fn(async () => {}) }));
-vi.mock("../src/core/output-guard.js", () => ({
+const output = { write: vi.fn(), flush: vi.fn(async () => {}) };
+
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualOutputGuard = { ...(await import("../src/core/output-guard.js")) };
+const actualShell = { ...(await import("../src/utils/shell.js")) };
+mock.module("../src/core/output-guard.js", () => ({
+	...actualOutputGuard,
 	writeRawStdout: output.write,
 	flushRawStdout: output.flush,
 }));
-vi.mock("../src/utils/shell.js", () => ({
+mock.module("../src/utils/shell.js", () => ({
+	...actualShell,
 	killTrackedDetachedChildren: vi.fn(),
 }));
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../src/core/output-guard.js", () => actualOutputGuard);
+	mock.module("../src/utils/shell.js", () => actualShell);
+});
 
 const { createCompactionOutcomeMessage, createCustomMessage, createSessionSlashCommandResultMessage } = await import(
 	"../src/core/messages.js"
@@ -129,6 +142,22 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+// bun:test has no vi.waitFor; poll until the assertion stops throwing.
+async function waitFor(assert: () => void): Promise<void> {
+	const deadline = Date.now() + 5_000;
+	let lastError: unknown;
+	while (Date.now() < deadline) {
+		try {
+			assert();
+			return;
+		} catch (error) {
+			lastError = error;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw lastError;
+}
+
 describe("runPrintMode", () => {
 	it("emits session_shutdown in text mode", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }));
@@ -164,13 +193,13 @@ describe("runPrintMode", () => {
 			mode: "text",
 			initialMessage: "Wait",
 		});
-		await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalled());
+		await waitFor(() => expect(session.promptAndWait).toHaveBeenCalled());
 		const handler = onSpy.mock.calls.find(([event]) => event === "SIGINT")?.[1];
 		if (typeof handler !== "function") throw new Error("SIGINT handler was not registered");
 
 		handler();
 
-		await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
+		await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
 		expect(runtimeHost.dispose).toHaveBeenCalledTimes(1);
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
 		resolvePrompt?.();
@@ -723,12 +752,24 @@ describe("runPrintMode", () => {
 			() => statuses[Math.min(statusIndex++, statuses.length - 1)] as AgentAutonomousStatus,
 		);
 
+		const callOrder: string[] = [];
+		const originalWaitForIdle = session.waitForIdle;
+		const originalPrompt = session.prompt;
+		session.waitForIdle = vi.fn(async () => {
+			callOrder.push("waitForIdle");
+			await originalWaitForIdle();
+		});
+		session.prompt = vi.fn(async (...args: Parameters<typeof originalPrompt>) => {
+			callOrder.push("prompt");
+			return originalPrompt(...args);
+		});
+
 		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
 			mode: "text",
 		});
 
 		expect(exitCode).toBe(0);
-		expect(session.waitForIdle).toHaveBeenCalledBefore(session.prompt);
+		expect(callOrder.indexOf("waitForIdle")).toBeLessThan(callOrder.indexOf("prompt"));
 		expect(session.prompt).toHaveBeenCalledTimes(2);
 		expect(session.prompt.mock.calls[0][0]).toContain("Autonomous quality gate failed (attempt 1/3)");
 		expect(session.prompt.mock.calls[0][0]).toContain("0/9");

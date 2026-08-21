@@ -1,27 +1,38 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const toolState = vi.hoisted(() => ({
+const toolState = {
 	toolsDir: `/tmp/optimus-tools-manager-${process.pid}`,
 	platform: "linux",
 	architecture: "x64",
 	extractZip: async (_source: string, _options: { dir: string }): Promise<void> => {},
-}));
+};
 
-vi.mock("../src/config.js", () => ({
+const actualConfig = { ...(await import("../src/config.js")) };
+const actualOs = { ...(await import("os")) };
+const actualExtractZip = { ...(await import("extract-zip")) };
+
+mock.module("../src/config.js", () => ({
 	APP_NAME: "optimus",
 	getBinDir: () => toolState.toolsDir,
 }));
 
-vi.mock("os", () => ({
+mock.module("os", () => ({
 	arch: () => toolState.architecture,
 	platform: () => toolState.platform,
 }));
 
-vi.mock("extract-zip", () => ({
+mock.module("extract-zip", () => ({
 	default: (source: string, options: { dir: string }) => toolState.extractZip(source, options),
 }));
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../src/config.js", () => actualConfig);
+	mock.module("os", () => actualOs);
+	mock.module("extract-zip", () => actualExtractZip);
+});
 
 import type { ToolUnavailableResult } from "../src/utils/tools-manager.js";
 
@@ -29,6 +40,7 @@ const { ensureToolWithStatus, formatMissingRipgrepMessage, getToolPath } = await
 	"../src/utils/tools-manager.js"
 );
 
+const originalFetch = globalThis.fetch;
 const originalPath = process.env.PATH;
 const originalOffline = process.env.PI_OFFLINE;
 const pathDir = join(toolState.toolsDir, "path");
@@ -57,7 +69,7 @@ describe("tools manager", () => {
 	});
 
 	afterEach(() => {
-		vi.unstubAllGlobals();
+		globalThis.fetch = originalFetch;
 		if (originalPath === undefined) delete process.env.PATH;
 		else process.env.PATH = originalPath;
 		if (originalOffline === undefined) delete process.env.PI_OFFLINE;
@@ -104,10 +116,7 @@ describe("tools manager", () => {
 		});
 
 		toolState.platform = "linux";
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => Promise.reject(new Error("network unavailable"))),
-		);
+		globalThis.fetch = mock(async () => Promise.reject(new Error("network unavailable")));
 		await expect(ensureToolWithStatus("rg")).resolves.toMatchObject({
 			status: "unavailable",
 			reason: "download_failed",
@@ -118,8 +127,7 @@ describe("tools manager", () => {
 	it("validates a downloaded binary before reporting it available", async () => {
 		toolState.platform = "win32";
 		writeExecutable(join(toolState.toolsDir, "rg.exe"), 1);
-		const fetchMock = vi
-			.fn()
+		const fetchMock = mock()
 			.mockResolvedValueOnce(
 				new Response(JSON.stringify({ tag_name: "15.1.0" }), {
 					status: 200,
@@ -127,7 +135,7 @@ describe("tools manager", () => {
 				}),
 			)
 			.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
-		vi.stubGlobal("fetch", fetchMock);
+		globalThis.fetch = fetchMock;
 		toolState.extractZip = async (_source, options) => {
 			writeExecutable(join(options.dir, "rg.exe"));
 		};
@@ -141,13 +149,9 @@ describe("tools manager", () => {
 
 	it("removes a downloaded binary that fails its version check", async () => {
 		toolState.platform = "win32";
-		vi.stubGlobal(
-			"fetch",
-			vi
-				.fn()
-				.mockResolvedValueOnce(new Response(JSON.stringify({ tag_name: "15.1.0" }), { status: 200 }))
-				.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 })),
-		);
+		globalThis.fetch = mock()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ tag_name: "15.1.0" }), { status: 200 }))
+			.mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 200 }));
 		toolState.extractZip = async (_source, options) => {
 			writeExecutable(join(options.dir, "rg.exe"), 1);
 		};

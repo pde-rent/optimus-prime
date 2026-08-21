@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, vi } from "bun:test";
 import { Readable } from "node:stream";
 
-const fsMocks = vi.hoisted(() => ({
+const fsMocks = {
 	createReadStream: vi.fn(),
-}));
+};
 
 // Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualNodeFs = { ...(await import("node:fs")) };
-vi.mock("node:fs", () => {
+mock.module("node:fs", () => {
 	const actual = actualNodeFs;
 	return {
 		...actual,
@@ -17,6 +17,11 @@ vi.mock("node:fs", () => {
 });
 
 const { readLinesAsBuffers } = await import("../src/utils/file-lines.js");
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:fs", () => actualNodeFs);
+});
 
 afterEach(() => {
 	fsMocks.createReadStream.mockReset();

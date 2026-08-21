@@ -1,17 +1,24 @@
-import { beforeEach, describe, expect, test, vi } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { SpawnSyncReturns } from "child_process";
 import { writeFileSync } from "fs";
 
-const mocks = vi.hoisted(() => {
-	return {
-		spawnSync: vi.fn<(command: string, args: string[], options: unknown) => SpawnSyncReturns<Buffer>>(),
-	};
-});
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualChildProcess = { ...(await import("child_process")) };
 
-vi.mock("child_process", () => {
+const mocks = {
+	spawnSync: mock<(command: string, args: string[], options: unknown) => SpawnSyncReturns<Buffer>>(),
+};
+
+mock.module("child_process", () => {
 	return {
 		spawnSync: mocks.spawnSync,
 	};
+});
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("child_process", () => actualChildProcess);
 });
 
 function spawnOk(stdout: Buffer): SpawnSyncReturns<Buffer> {
@@ -39,7 +46,6 @@ function spawnError(error: Error): SpawnSyncReturns<Buffer> {
 
 describe("readClipboardImage", () => {
 	beforeEach(() => {
-		vi.resetModules();
 		mocks.spawnSync.mockReset();
 	});
 

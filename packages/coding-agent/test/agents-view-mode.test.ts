@@ -1,47 +1,51 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import type { ModelRegistry } from "../src/core/model-registry.js";
 import type { AgentConnectionSavedSessionInfo } from "../src/modes/agent-connection/types.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import type { InteractiveModeUiServices } from "../src/modes/interactive/interactive-mode-services.js";
 
-const modeMocks = vi.hoisted(() => ({
-	interactiveRun: vi.fn<() => Promise<never>>(),
-	teardownSessionUi: vi.fn(async () => undefined),
-	dispose: vi.fn(async () => undefined),
-	connectionPrompt: vi.fn(async () => undefined),
-	clientRequest: vi.fn<() => Promise<unknown>>(),
-}));
+const modeMocks = {
+	interactiveRun: mock<() => Promise<never>>(),
+	teardownSessionUi: mock(async () => undefined),
+	dispose: mock(async () => undefined),
+	connectionPrompt: mock(async () => undefined),
+	clientRequest: mock<() => Promise<unknown>>(),
+};
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcConfigJs = { ...(await import("../src/config.js")) };
-vi.mock("../src/config.js", () => {
+const actualSrcModesDaemonDaemonClientJs = { ...(await import("../src/modes/daemon/daemon-client.js")) };
+const actualSrcModesAgentConnectionDaemonAgentConnectionJs = {
+	...(await import("../src/modes/agent-connection/daemon-agent-connection.js")),
+};
+mock.module("../src/config.js", () => {
 	const actual = actualSrcConfigJs;
-	return { ...actual, appendRotatingLog: vi.fn() };
+	return { ...actual, appendRotatingLog: mock() };
 });
 
-vi.mock("../src/modes/daemon/daemon-client.js", () => ({
+mock.module("../src/modes/daemon/daemon-client.js", () => ({
 	DaemonClient: class {
-		connect = vi.fn(async () => undefined);
-		close = vi.fn();
+		connect = mock(async () => undefined);
+		close = mock();
 		request = modeMocks.clientRequest;
 	},
-	getDaemonSocketCloseReason: vi.fn(),
+	getDaemonSocketCloseReason: mock(),
 }));
 
-vi.mock("../src/modes/agent-connection/daemon-agent-connection.js", () => ({
+mock.module("../src/modes/agent-connection/daemon-agent-connection.js", () => ({
 	DaemonAgentConnection: Object.assign(function DaemonAgentConnection() {}, {
-		attach: vi.fn(async () => ({ prompt: modeMocks.connectionPrompt, dispose: modeMocks.dispose })),
+		attach: mock(async () => ({ prompt: modeMocks.connectionPrompt, dispose: modeMocks.dispose })),
 	}),
 }));
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcModesInteractiveInteractiveModeJs = {
 	...(await import("../src/modes/interactive/interactive-mode.js")),
 };
-vi.mock("../src/modes/interactive/interactive-mode.js", () => {
+mock.module("../src/modes/interactive/interactive-mode.js", () => {
 	const actual = actualSrcModesInteractiveInteractiveModeJs;
 	return {
 		...actual,
@@ -50,6 +54,17 @@ vi.mock("../src/modes/interactive/interactive-mode.js", () => {
 			teardownSessionUi = modeMocks.teardownSessionUi;
 		},
 	};
+});
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("../src/config.js", () => actualSrcConfigJs);
+	mock.module("../src/modes/daemon/daemon-client.js", () => actualSrcModesDaemonDaemonClientJs);
+	mock.module(
+		"../src/modes/agent-connection/daemon-agent-connection.js",
+		() => actualSrcModesAgentConnectionDaemonAgentConnectionJs,
+	);
+	mock.module("../src/modes/interactive/interactive-mode.js", () => actualSrcModesInteractiveInteractiveModeJs);
 });
 
 import type { AgentsViewPersistentState } from "../src/modes/agents-view/agents-view-mode.js";
@@ -100,16 +115,16 @@ const settingsManager = {
 
 describe("AgentsViewMode", () => {
 	beforeAll(() => setKeybindings(new KeybindingsManager()));
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => mock.clearAllMocks());
 
 	it("keeps the selection chosen by row rebuilding when the query changes", () => {
 		const self = {
 			editor: { getText: () => "matching query" },
 			persistentState: { query: "" },
 			selectedIndex: 4,
-			rebuildRows: vi.fn(),
-			syncSelectedRowState: vi.fn(),
-			ui: { requestRender: vi.fn() },
+			rebuildRows: mock(),
+			syncSelectedRowState: mock(),
+			ui: { requestRender: mock() },
 		};
 
 		invoke("queryChanged", self);
@@ -127,11 +142,11 @@ describe("AgentsViewMode", () => {
 			runtimeKind: "subagent",
 			rlmChildId: "passive-child",
 		});
-		const request = vi.fn(async (command: { type: string }) => ({
+		const request = mock(async (command: { type: string }) => ({
 			success: true as const,
 			data: command.type === "cancel_rlm_child" ? { cancelled: false } : { deleted: true },
 		}));
-		const client = { request, supportsServerCapability: vi.fn(() => true) };
+		const client = { request, supportsServerCapability: mock(() => true) };
 		const self = {
 			rows: [
 				{
@@ -155,10 +170,10 @@ describe("AgentsViewMode", () => {
 			pendingKillSubagent: undefined,
 			deleteConfirmExpiresAt: 0,
 			deleteConfirmTimer: undefined,
-			ui: { requestRender: vi.fn() },
+			ui: { requestRender: mock() },
 			requireClient: () => client,
-			setStatusMessage: vi.fn(),
-			refreshSessions: vi.fn(async () => true),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
 			handleKillSubagentSelected(row: unknown) {
 				return invoke("handleKillSubagentSelected", self, row);
 			},
@@ -196,11 +211,11 @@ describe("AgentsViewMode", () => {
 	});
 
 	it("uses cancel when an inactive subagent starts running during confirmation", async () => {
-		const request = vi.fn(async () => ({ success: true as const, data: { cancelled: true } }));
+		const request = mock(async () => ({ success: true as const, data: { cancelled: true } }));
 		const self = {
 			requireClient: () => ({ request, supportsServerCapability: () => true }),
-			setStatusMessage: vi.fn(),
-			refreshSessions: vi.fn(async () => true),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
 		};
 		await invoke(
 			"killSubagent",
@@ -217,11 +232,11 @@ describe("AgentsViewMode", () => {
 	});
 
 	it("falls back to cancel-only when subagent deletion is unsupported", async () => {
-		const request = vi.fn(async () => ({ success: true as const, data: { cancelled: false } }));
+		const request = mock(async () => ({ success: true as const, data: { cancelled: false } }));
 		const self = {
 			requireClient: () => ({ request, supportsServerCapability: () => false }),
-			setStatusMessage: vi.fn(),
-			refreshSessions: vi.fn(async () => true),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
 		};
 		await invoke(
 			"killSubagent",
@@ -243,8 +258,7 @@ describe("AgentsViewMode", () => {
 	it("uses the opened session as the crash-path back target", async () => {
 		const opened = summary({ sessionName: "opened" });
 		const previous = summary({ id: "previous", activeSessionId: "previous", sessionId: "previous" });
-		const runView = vi
-			.spyOn(AgentsViewMode.prototype, "run")
+		const runView = spyOn(AgentsViewMode.prototype, "run")
 			.mockResolvedValueOnce({ type: "open", summary: opened })
 			.mockImplementationOnce(function (this: AgentsViewMode) {
 				const state = (this as unknown as { persistentState: AgentsViewPersistentState }).persistentState;
@@ -279,8 +293,7 @@ describe("AgentsViewMode", () => {
 	it("invalidates the persisted scope root after popping a scope frame", async () => {
 		const parent = summary({ id: "parent", activeSessionId: "parent", sessionId: "parent" });
 		const child = summary({ id: "child", activeSessionId: "child", sessionId: "child" });
-		const runView = vi
-			.spyOn(AgentsViewMode.prototype, "run")
+		const runView = spyOn(AgentsViewMode.prototype, "run")
 			.mockImplementationOnce(function (this: AgentsViewMode) {
 				const state = (this as unknown as { persistentState: AgentsViewPersistentState }).persistentState;
 				state.scopeFrames = [
@@ -319,8 +332,7 @@ describe("AgentsViewMode", () => {
 	it("invalidates the persisted scope root after pushing a scope frame", async () => {
 		const parent = summary({ id: "parent", activeSessionId: "parent", sessionId: "parent" });
 		const child = summary({ id: "child", activeSessionId: "child", sessionId: "child" });
-		const runView = vi
-			.spyOn(AgentsViewMode.prototype, "run")
+		const runView = spyOn(AgentsViewMode.prototype, "run")
 			.mockImplementationOnce(function (this: AgentsViewMode) {
 				const state = (this as unknown as { persistentState: AgentsViewPersistentState }).persistentState;
 				state.scopeFrames = [{ scope: { sessionId: parent.sessionId, activeSessionId: parent.activeSessionId } }];
@@ -361,7 +373,7 @@ describe("AgentsViewMode", () => {
 
 	it("does not discard scope while the saved-session refresh is in flight", async () => {
 		let finishRefresh: ((value: { success: true; data: { sessions: unknown[] } }) => void) | undefined;
-		const request = vi.fn(
+		const request = mock(
 			() =>
 				new Promise<{ success: true; data: { sessions: unknown[] } }>((resolve) => {
 					finishRefresh = resolve;
@@ -381,12 +393,12 @@ describe("AgentsViewMode", () => {
 			savedSessions: [],
 			requireClient: () => ({ request }),
 			getSavedSessionCatalogContext: () => ({ cwd: "/tmp" }),
-			reconcileCatalogs: vi.fn(),
-			resolveMissingSelectionAnchor: vi.fn(),
+			reconcileCatalogs: mock(),
+			resolveMissingSelectionAnchor: mock(),
 		};
 
 		const refresh = invoke("refreshSavedSessions", self) as Promise<boolean>;
-		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+		await waitFor(() => expect(request).toHaveBeenCalledOnce());
 		expect(self.savedCatalogReady).toBe(false);
 
 		Object.assign(self, {
@@ -401,10 +413,10 @@ describe("AgentsViewMode", () => {
 			programShownParents: new Set(),
 			editor: { getText: () => "" },
 			getFilteredRecords: () => Reflect.get(self, "scopedRecords"),
-			applyPendingAncestorExpansion: vi.fn(),
-			restoreSelection: vi.fn(),
-			ui: { requestRender: vi.fn() },
-			setStatusMessage: vi.fn(),
+			applyPendingAncestorExpansion: mock(),
+			restoreSelection: mock(),
+			ui: { requestRender: mock() },
+			setStatusMessage: mock(),
 			withPendingDeleteSession: (sessions: SessionSummary[]) => sessions,
 		});
 		self.reconcileCatalogs = () => invoke("reconcileCatalogs", self);
@@ -456,10 +468,10 @@ describe("AgentsViewMode", () => {
 			programShownParents: new Set(),
 			editor: { getText: () => "" },
 			getFilteredRecords: () => Reflect.get(self, "scopedRecords"),
-			applyPendingAncestorExpansion: vi.fn(),
-			restoreSelection: vi.fn(),
-			ui: { requestRender: vi.fn() },
-			setStatusMessage: vi.fn(),
+			applyPendingAncestorExpansion: mock(),
+			restoreSelection: mock(),
+			ui: { requestRender: mock() },
+			setStatusMessage: mock(),
 			withPendingDeleteSession: (sessions: SessionSummary[]) => sessions,
 		};
 		invoke("reconcileCatalogs", self);
@@ -543,10 +555,10 @@ describe("AgentsViewMode", () => {
 				programShownParents: new Set(),
 				editor: { getText: () => "" },
 				getFilteredRecords: () => Reflect.get(self, "scopedRecords"),
-				applyPendingAncestorExpansion: vi.fn(),
-				restoreSelection: vi.fn(),
-				ui: { requestRender: vi.fn() },
-				setStatusMessage: vi.fn(),
+				applyPendingAncestorExpansion: mock(),
+				restoreSelection: mock(),
+				ui: { requestRender: mock() },
+				setStatusMessage: mock(),
 				withPendingDeleteSession: (sessions: SessionSummary[]) => sessions,
 			};
 			invoke("reconcileCatalogs", self);
@@ -594,9 +606,9 @@ describe("AgentsViewMode", () => {
 			persistentState,
 			expandedSubagentParents,
 			programShownParents,
-			rebuildRows: vi.fn(),
-			syncSelectedRowState: vi.fn(),
-			ui: { requestRender: vi.fn() },
+			rebuildRows: mock(),
+			syncSelectedRowState: mock(),
+			ui: { requestRender: mock() },
 		};
 		const summaryRow = { kind: "subagent-summary", parentIdentity: "root-row", expanded: true };
 
@@ -624,7 +636,7 @@ function createUiServices(): InteractiveModeUiServices {
 }
 
 afterEach(() => {
-	vi.restoreAllMocks();
+	mock.restore();
 });
 
 describe("AgentsViewMode persistent catalog state", () => {
@@ -639,7 +651,7 @@ describe("AgentsViewMode persistent catalog state", () => {
 		const view = new AgentsViewMode({ config: {}, uiServices: createUiServices() }, persistentState);
 		Reflect.set(view, "client", {
 			isConnected: true,
-			request: vi.fn(async () => {
+			request: mock(async () => {
 				throw new Error("transient list failure");
 			}),
 		});
@@ -672,7 +684,7 @@ describe("AgentsViewMode persistent catalog state", () => {
 		const view = new AgentsViewMode({ config: {}, uiServices: createUiServices() }, persistentState);
 		Reflect.set(view, "client", {
 			isConnected: true,
-			request: vi.fn(async () => {
+			request: mock(async () => {
 				throw new Error("transient list failure");
 			}),
 		});
@@ -688,7 +700,6 @@ describe("AgentsViewMode persistent catalog state", () => {
 	});
 
 	it("keeps a live-only scope through reconnect timeout and settles it on the next successful list", async () => {
-		vi.useFakeTimers();
 		const root = summary();
 		const frame = { scope: { sessionId: root.sessionId, activeSessionId: root.activeSessionId } };
 		const persistentState: AgentsViewPersistentState = {
@@ -700,7 +711,7 @@ describe("AgentsViewMode persistent catalog state", () => {
 			{ config: {}, uiServices: createUiServices(), reconnectTimeoutMs: 0 },
 			persistentState,
 		);
-		const client = { isConnected: false, reconnect: vi.fn() };
+		const client = { isConnected: false, reconnect: mock() };
 		Reflect.set(view, "client", client);
 		Reflect.set(view, "liveCatalogReady", true);
 		Reflect.set(view, "savedCatalogReady", true);
@@ -712,12 +723,11 @@ describe("AgentsViewMode persistent catalog state", () => {
 
 			Reflect.set(view, "client", {
 				isConnected: true,
-				request: vi.fn(async () => ({ success: true, data: { sessions: [] } })),
+				request: mock(async () => ({ success: true, data: { sessions: [] } })),
 			});
 			await expect(invoke("refreshSessions", view)).resolves.toBe(true);
 			expect(persistentState.scopeFrames).toEqual([]);
 		} finally {
-			vi.useRealTimers();
 		}
 	});
 
@@ -727,7 +737,7 @@ describe("AgentsViewMode persistent catalog state", () => {
 		const returnedRoot = { ...root, sessionName: "Updated root" };
 		const scope = { sessionId: root.sessionId, activeSessionId: root.activeSessionId };
 		let runs = 0;
-		vi.spyOn(AgentsViewMode.prototype, "run").mockImplementation(async function (this: AgentsViewMode) {
+		spyOn(AgentsViewMode.prototype, "run").mockImplementation(async function (this: AgentsViewMode) {
 			runs += 1;
 			const persistentState = Reflect.get(this, "persistentState") as AgentsViewPersistentState;
 			if (runs === 1) {
@@ -739,7 +749,7 @@ describe("AgentsViewMode persistent catalog state", () => {
 			expect(persistentState.lastSuccessfulLiveSummaries).toEqual([other, returnedRoot]);
 			Reflect.set(this, "client", {
 				isConnected: true,
-				request: vi.fn(async () => {
+				request: mock(async () => {
 					throw new Error("transient list failure");
 				}),
 			});
@@ -786,7 +796,7 @@ describe("agents view startup notices", () => {
 			sessionFile: "/tmp/root.jsonl",
 		});
 		let runs = 0;
-		vi.spyOn(AgentsViewMode.prototype, "run").mockImplementation(async function (this: AgentsViewMode) {
+		spyOn(AgentsViewMode.prototype, "run").mockImplementation(async function (this: AgentsViewMode) {
 			runs += 1;
 			if (runs === 1) {
 				return {
@@ -825,3 +835,18 @@ describe("agents view startup notices", () => {
 		expect(runs).toBe(2);
 	});
 });
+
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			if (Date.now() > deadline) {
+				throw error;
+			}
+			await new Promise<void>((resolve) => setTimeout(resolve, 5));
+		}
+	}
+}

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, mock, vi } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import type { DaemonSocketClient } from "../src/modes/daemon/active-session-stat
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import type { PrivateFrame } from "../src/modes/session-worker/private-framing.js";
 
-const workerLaunchTestState = vi.hoisted(() => ({
+const workerLaunchTestState = (() => ({
 	capture: false,
 	forceMissingProcessStartId: false,
 	fixtureMode: "worker" as "worker" | "close-gate" | "rollback-gate" | "successful-gate",
@@ -18,12 +18,12 @@ const workerLaunchTestState = vi.hoisted(() => ({
 	loaderCliPath: "",
 	cliEntrypoint: "",
 	spawned: [] as Array<{ child: ChildProcess; args: readonly string[] }>,
-}));
+}))();
 
 // Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualNodeChildProcess = { ...(await import("node:child_process")) };
-vi.mock("node:child_process", () => {
+mock.module("node:child_process", () => {
 	const actual = actualNodeChildProcess as Record<string, unknown> & {
 		spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
 	};
@@ -39,10 +39,8 @@ vi.mock("node:child_process", () => {
 	};
 });
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
-// bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcCliSubprocessLaunchJs = { ...(await import("../src/cli/subprocess-launch.js")) };
-vi.mock("../src/cli/subprocess-launch.js", () => {
+mock.module("../src/cli/subprocess-launch.js", () => {
 	const actual = actualSrcCliSubprocessLaunchJs as Record<string, unknown>;
 	return {
 		...actual,
@@ -87,10 +85,8 @@ vi.mock("../src/cli/subprocess-launch.js", () => {
 	};
 });
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
-// bare namespace reference would resolve to the mock and recurse forever.
 const actualSrcCoreSessionLeaseJs = { ...(await import("../src/core/session-lease.js")) };
-vi.mock("../src/core/session-lease.js", () => {
+mock.module("../src/core/session-lease.js", () => {
 	const actual = actualSrcCoreSessionLeaseJs as Record<string, unknown> & {
 		getProcessStartId(pid: number): string | undefined;
 	};
@@ -121,6 +117,13 @@ const { MutationDrainLatch } = await import("../src/modes/daemon/mutation-drain-
 const { WorkerRecoveryJournal } = await import("../src/modes/daemon/worker-recovery-journal.js");
 const { createDeferred } = await import("./suite/scheduling.js");
 const childProcessModule = await import("../src/utils/child-process.js");
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:child_process", () => actualNodeChildProcess);
+	mock.module("../src/cli/subprocess-launch.js", () => actualSrcCliSubprocessLaunchJs);
+	mock.module("../src/core/session-lease.js", () => actualSrcCoreSessionLeaseJs);
+});
 
 const supervisorRegistryDirEnv = "OPTIMUS_INTERNAL_DAEMON_SUPERVISOR_REGISTRY_DIR";
 const previousSupervisorRegistryDir = process.env[supervisorRegistryDirEnv];

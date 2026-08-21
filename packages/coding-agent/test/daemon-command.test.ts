@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 
-const daemonClientMock = vi.hoisted(() => {
+const daemonClientMock = (() => {
 	type Listener = (message: { type: string; activeSessionId?: string; event?: { type: string } }) => void;
 	type CloseListener = (error: Error) => void;
 	type Command = {
@@ -30,6 +30,7 @@ const daemonClientMock = vi.hoisted(() => {
 		promptSucceeds: false,
 		emitStaleAgentEndOnAttach: false,
 		connectFails: false,
+		spawnedDaemon: false,
 		sessions: [] as Array<Record<string, unknown>>,
 	};
 
@@ -45,7 +46,9 @@ const daemonClientMock = vi.hoisted(() => {
 		}
 
 		async connect(): Promise<void> {
-			if (behavior.connectFails) throw new Error("mock connect failed");
+			// Model "daemon not up yet": fail until the start command has spawned it,
+			// then let runStart's readiness loop observe a successful connect.
+			if (behavior.connectFails && !behavior.spawnedDaemon) throw new Error("mock connect failed");
 		}
 
 		async request(command: Command): Promise<Response> {
@@ -95,18 +98,22 @@ const daemonClientMock = vi.hoisted(() => {
 	}
 
 	return { MockDaemonClient, behavior, instances };
-});
+})();
 
-vi.mock("../src/modes/daemon/daemon-client.js", () => ({
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualDaemonClientJs = { ...(await import("../src/modes/daemon/daemon-client.js")) };
+mock.module("../src/modes/daemon/daemon-client.js", () => ({
 	DaemonClient: daemonClientMock.MockDaemonClient,
 }));
 
-const spawnMock = vi.hoisted(() => {
+const spawnMock = (() => {
 	const calls: string[][] = [];
 	return {
 		calls,
 		mockSpawn: (...args: unknown[]) => {
 			calls.push(args[1] as string[]);
+			daemonClientMock.behavior.spawnedDaemon = true;
 			return {
 				unref: () => {},
 				kill: () => {},
@@ -119,17 +126,23 @@ const spawnMock = vi.hoisted(() => {
 			};
 		},
 	};
-});
+})();
 
 // Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualNodeChildProcess = { ...(await import("node:child_process")) };
-vi.mock("node:child_process", () => {
+mock.module("node:child_process", () => {
 	const original = actualNodeChildProcess as Record<string, unknown>;
 	return { ...original, spawn: spawnMock.mockSpawn as never };
 });
 
 const { handleDaemonCommand } = await import("../src/cli/daemon-command.js");
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("node:child_process", () => actualNodeChildProcess);
+	mock.module("../src/modes/daemon/daemon-client.js", () => actualDaemonClientJs);
+});
 
 describe("daemon command", () => {
 	let consoleErrorMessages: unknown[];
@@ -142,6 +155,7 @@ describe("daemon command", () => {
 		daemonClientMock.behavior.promptSucceeds = false;
 		daemonClientMock.behavior.emitStaleAgentEndOnAttach = false;
 		daemonClientMock.behavior.connectFails = false;
+		daemonClientMock.behavior.spawnedDaemon = false;
 		daemonClientMock.behavior.sessions = [];
 		consoleErrorMessages = [];
 		vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null | undefined) => {

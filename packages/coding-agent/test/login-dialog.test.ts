@@ -1,23 +1,53 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import { resetCapabilitiesCache, setCapabilities, setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "../src/utils/ansi.js";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	copyToClipboard: vi.fn(),
 	execFile: vi.fn(),
-}));
+};
 
-vi.mock("child_process", () => ({
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualChildProcess = { ...(await import("child_process")) };
+const actualSrcUtilsClipboardJs = { ...(await import("../src/utils/clipboard.js")) };
+
+mock.module("child_process", () => ({
 	execFile: mocks.execFile,
 }));
 
-vi.mock("../src/utils/clipboard.js", () => ({
+mock.module("../src/utils/clipboard.js", () => ({
 	copyToClipboard: mocks.copyToClipboard,
 }));
 
 const { KeybindingsManager } = await import("../src/core/keybindings.js");
 const { LoginDialogComponent } = await import("../src/modes/interactive/components/login-dialog.js");
 const { initTheme } = await import("../src/modes/interactive/theme/theme.js");
+
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("child_process", () => actualChildProcess);
+	mock.module("../src/utils/clipboard.js", () => actualSrcUtilsClipboardJs);
+});
+
+/**
+ * `bun:test` exposes a `vi` compat object but not `vi.waitFor`. Poll instead of
+ * sleeping a fixed amount: a sleep either flakes under load or wastes the slack.
+ */
+async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	let lastError: unknown;
+	while (Date.now() < deadline) {
+		try {
+			assertion();
+			return;
+		} catch (error) {
+			lastError = error;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	}
+	throw lastError ?? new Error("waitFor timed out");
+}
 
 function createFakeTui(): TUI {
 	return {
@@ -66,7 +96,7 @@ describe("LoginDialogComponent", () => {
 		dialog.showAuth(url);
 		dialog.handleInput("c");
 
-		await vi.waitFor(() => expect(mocks.copyToClipboard).toHaveBeenCalledWith(url));
+		await waitFor(() => expect(mocks.copyToClipboard).toHaveBeenCalledWith(url));
 		expect(stripAnsi(dialog.render(48).join("\n"))).toContain("Copied sign-in link");
 	});
 
@@ -81,7 +111,7 @@ describe("LoginDialogComponent", () => {
 		expect(mocks.copyToClipboard).not.toHaveBeenCalled();
 
 		dialog.handleInput("\x19");
-		await vi.waitFor(() => expect(mocks.copyToClipboard).toHaveBeenCalledWith(url));
+		await waitFor(() => expect(mocks.copyToClipboard).toHaveBeenCalledWith(url));
 	});
 
 	it.each([

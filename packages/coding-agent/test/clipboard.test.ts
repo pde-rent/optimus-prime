@@ -1,40 +1,48 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
-import { execSync, spawn } from "child_process";
-import { platform } from "os";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-const mocks = vi.hoisted(() => {
-	return {
-		execSync: vi.fn(),
-		spawn: vi.fn(),
-		platform: vi.fn<() => NodeJS.Platform>(),
-		isWaylandSession: vi.fn<() => boolean>(),
-	};
-});
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
+// bare namespace reference would resolve to the mock and recurse forever.
+const actualChildProcess = { ...(await import("child_process")) };
+const actualOs = { ...(await import("os")) };
+const actualClipboardImage = { ...(await import("../src/utils/clipboard-image.js")) };
 
-vi.mock("child_process", () => {
+const mocks = {
+	execSync: mock(),
+	spawn: mock(),
+	platform: mock<() => NodeJS.Platform>(),
+	isWaylandSession: mock<() => boolean>(),
+};
+
+mock.module("child_process", () => {
 	return {
+		...actualChildProcess,
 		execSync: mocks.execSync,
 		spawn: mocks.spawn,
 	};
 });
 
-vi.mock("os", () => {
+mock.module("os", () => {
 	return {
+		...actualOs,
 		platform: mocks.platform,
 	};
 });
 
-vi.mock("../src/utils/clipboard-image.js", () => {
+mock.module("../src/utils/clipboard-image.js", () => {
 	return {
+		...actualClipboardImage,
 		isWaylandSession: mocks.isWaylandSession,
 	};
 });
 
 const { copyToClipboard } = await import("../src/utils/clipboard.js");
 
-const mockedExecSync = vi.mocked(execSync);
-const mockedSpawn = vi.mocked(spawn);
-const mockedPlatform = vi.mocked(platform);
+// Restore the real modules so the mocks do not leak into other test files in this process.
+afterAll(() => {
+	mock.module("child_process", () => actualChildProcess);
+	mock.module("os", () => actualOs);
+	mock.module("../src/utils/clipboard-image.js", () => actualClipboardImage);
+});
 
 let originalWrite: typeof process.stdout.write;
 let stdoutWrites: string[];
@@ -43,17 +51,20 @@ function osc52Writes(): string[] {
 	return stdoutWrites.filter((write) => write.startsWith("\u001b]52;c;"));
 }
 
+const stubbedEnvKeys = ["SSH_CONNECTION", "SSH_CLIENT", "MOSH_CONNECTION"] as const;
+const originalEnvValues = new Map<string, string | undefined>();
+
 beforeEach(() => {
-	vi.unstubAllEnvs();
-	vi.stubEnv("SSH_CONNECTION", "");
-	vi.stubEnv("SSH_CLIENT", "");
-	vi.stubEnv("MOSH_CONNECTION", "");
+	for (const key of stubbedEnvKeys) {
+		originalEnvValues.set(key, process.env[key]);
+		process.env[key] = "";
+	}
 	stdoutWrites = [];
 	mocks.execSync.mockReset();
 	mocks.spawn.mockReset();
 	mocks.platform.mockReset();
 	mocks.isWaylandSession.mockReset();
-	mockedPlatform.mockReturnValue("darwin");
+	mocks.platform.mockReturnValue("darwin");
 	mocks.isWaylandSession.mockReturnValue(false);
 	originalWrite = process.stdout.write.bind(process.stdout);
 	process.stdout.write = ((...args: Parameters<typeof process.stdout.write>) => {
@@ -68,36 +79,43 @@ beforeEach(() => {
 
 afterEach(() => {
 	process.stdout.write = originalWrite;
-	vi.unstubAllEnvs();
+	for (const key of stubbedEnvKeys) {
+		const original = originalEnvValues.get(key);
+		if (original === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = original;
+		}
+	}
 });
 
 describe("copyToClipboard", () => {
 	test("darwin local: pbcopy success skips OSC 52", async () => {
-		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+		mocks.execSync.mockReturnValue(Buffer.alloc(0));
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", {
+		expect(mocks.execSync).toHaveBeenCalledWith("pbcopy", {
 			input: "hello",
 			stdio: ["pipe", "ignore", "ignore"],
 			timeout: 5000,
 		});
 		expect(osc52Writes()).toHaveLength(0);
-		expect(mockedSpawn).not.toHaveBeenCalled();
+		expect(mocks.spawn).not.toHaveBeenCalled();
 	});
 
 	test("remote: emits OSC 52 after a successful local write", async () => {
-		vi.stubEnv("SSH_CONNECTION", "client server");
-		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+		process.env.SSH_CONNECTION = "client server";
+		mocks.execSync.mockReturnValue(Buffer.alloc(0));
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", expect.anything());
+		expect(mocks.execSync).toHaveBeenCalledWith("pbcopy", expect.anything());
 		expect(osc52Writes()).toHaveLength(1);
 	});
 
 	test("darwin: pbcopy failure falls back to OSC 52", async () => {
-		mockedExecSync.mockImplementation(() => {
+		mocks.execSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
 		});
 
@@ -107,12 +125,12 @@ describe("copyToClipboard", () => {
 	});
 
 	test("win32: uses PowerShell Set-Clipboard for Unicode safety", async () => {
-		mockedPlatform.mockReturnValue("win32");
-		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+		mocks.platform.mockReturnValue("win32");
+		mocks.execSync.mockReturnValue(Buffer.alloc(0));
 
 		await copyToClipboard("héllo 世界");
 
-		expect(mockedExecSync).toHaveBeenCalledWith(
+		expect(mocks.execSync).toHaveBeenCalledWith(
 			'powershell -NoProfile -Command "Set-Clipboard -Value ([Console]::In.ReadToEnd())"',
 			expect.objectContaining({ input: "héllo 世界" }),
 		);
@@ -120,7 +138,7 @@ describe("copyToClipboard", () => {
 	});
 
 	test("does not emit oversized OSC 52 payloads", async () => {
-		mockedExecSync.mockImplementation(() => {
+		mocks.execSync.mockImplementation(() => {
 			throw new Error("pbcopy failed");
 		});
 

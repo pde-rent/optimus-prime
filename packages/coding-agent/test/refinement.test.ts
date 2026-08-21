@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import {
 	appendFileSync,
 	chmodSync,
@@ -15,19 +15,22 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { CustomEntry } from "../src/core/session-manager.js";
 
-const { completeSimpleMock } = vi.hoisted(() => ({
-	completeSimpleMock: vi.fn(),
-}));
+const completeSimpleMock = vi.fn();
 
-// Snapshot the real exports: `vi.mock` patches the live module namespace in place, so a
+// Snapshot the real exports: mock.module patches the live module namespace in place, so a
 // bare namespace reference would resolve to the mock and recurse forever.
 const actualEarendilWorksPiAi = { ...(await import("@earendil-works/pi-ai")) };
-vi.mock("@earendil-works/pi-ai", () => {
+mock.module("@earendil-works/pi-ai", () => {
 	const actual = actualEarendilWorksPiAi;
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
 	};
+});
+
+// Restore the real module so the mock does not leak into other test files in this process.
+afterAll(() => {
+	mock.module("@earendil-works/pi-ai", () => actualEarendilWorksPiAi);
 });
 
 import type {
