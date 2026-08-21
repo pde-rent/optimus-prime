@@ -9,6 +9,7 @@ import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverL
 
 const RECENT_MODELS_LIMIT = 20;
 export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
+export const DEFAULT_REPL_IDLE_TIMEOUT_MINUTES = 10;
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -158,6 +159,8 @@ export interface Settings {
 	/** Clamp on the level ceiling. Only ever lowers it; it cannot raise a level past its budget. */
 	graphMaxTokens?: number;
 	idleEvictionMinutes?: number | "off"; // global daemon policy; default: 90
+	/** Minutes a Bun REPL kernel may sit idle before it is disposed (snapshot-restored on next use). "off" keeps the kernel forever. default: 10 */
+	replIdleTimeoutMinutes?: number | "off";
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -893,6 +896,23 @@ export class SettingsManager {
 		}
 		this.globalSettings.idleEvictionMinutes = value;
 		this.markModified("idleEvictionMinutes");
+		this.save();
+	}
+
+	getReplIdleTimeoutMinutes(): number | "off" {
+		const value: unknown = this.settings.replIdleTimeoutMinutes;
+		if (value === "off" || value === "none") return "off";
+		return typeof value === "number" && Number.isFinite(value) && value > 0
+			? value
+			: DEFAULT_REPL_IDLE_TIMEOUT_MINUTES;
+	}
+
+	setReplIdleTimeoutMinutes(value: number | "off"): void {
+		if (value !== "off" && (!Number.isFinite(value) || value <= 0)) {
+			throw new Error("REPL idle timeout minutes must be a positive number or off");
+		}
+		this.globalSettings.replIdleTimeoutMinutes = value;
+		this.markModified("replIdleTimeoutMinutes");
 		this.save();
 	}
 

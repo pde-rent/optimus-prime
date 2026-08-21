@@ -9038,6 +9038,7 @@ export class AgentSession {
 			// startup on the old one's dispose (which flushes a final snapshot), so a
 			// reload can't restore from a snapshot the old kernel is still writing.
 			const previousDispose = this._replKernelProvisioner?.dispose();
+			const replIdleMinutes = this.settingsManager.getReplIdleTimeoutMinutes();
 			this._replKernelSnapshotDir = this.sessionManager.getSessionArtifactDir();
 			// Only surface the "revived from your previous session" notice on the first
 			// build (a genuine resume). A later rebuild (/reload) restores state silently
@@ -9050,6 +9051,7 @@ export class AgentSession {
 				snapshotDir: this._replKernelSnapshotDir,
 				shellPath: this.settingsManager.getShellPath(),
 				commandPrefix: this.settingsManager.getShellCommandPrefix(),
+				idleTimeoutMs: replIdleMinutes === "off" ? 0 : replIdleMinutes * 60_000,
 				readyGate: previousDispose,
 				onRestore: notifyRestore ? (restored) => this._onReplStateRestored(restored) : undefined,
 				onLateSentAgentMessage: (toolCallId, message) => this._recordLateReplSentAgentMessage(toolCallId, message),
@@ -9420,6 +9422,17 @@ export class AgentSession {
 	_contextTokensForCurrentMessages(): number | undefined {
 		const last = this._findLastAssistantMessage();
 		return last ? calculateContextTokens(last.usage) : undefined;
+	}
+
+	/** Prompt-side and completion-side tokens from the last assistant turn. */
+	_contextTokenSplitForCurrentMessages(): { tokensIn: number; tokensOut: number } | undefined {
+		const last = this._findLastAssistantMessage();
+		if (!last) return undefined;
+		const usage = last.usage;
+		const tokensIn = usage.input + usage.cacheRead + usage.cacheWrite;
+		const tokensOut = usage.output;
+		if (tokensIn === 0 && tokensOut === 0) return undefined;
+		return { tokensIn, tokensOut };
 	}
 
 	setCurrentRecap(recap: string | undefined): void {
@@ -10230,6 +10243,7 @@ export class AgentSession {
 					answerPreview,
 					toolUseCount: toolUseCount > 0 ? toolUseCount : undefined,
 					tokenCount: childSession?._contextTokensForCurrentMessages(),
+					...(childSession?._contextTokenSplitForCurrentMessages() ?? {}),
 					recap: childSession?.getCurrentRecap(),
 					sessionDir: childSessionDir,
 					activity,

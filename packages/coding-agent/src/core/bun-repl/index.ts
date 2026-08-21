@@ -327,6 +327,10 @@ export interface BunReplManagerOptions {
 	commandPrefix?: string;
 	/** Called when a cell's agent message arrives after that cell's result. */
 	onLateSentAgentMessage?: (correlationId: string, message: KernelSentAgentMessage) => void;
+	/** Called when a queued cell begins executing. Used by the provisioner to hold off idle reaping. */
+	onCellStart?: () => void;
+	/** Called when a queued cell settles (ok, error, abort, or runaway), after the caller's promise chain settles. */
+	onCellEnd?: () => void;
 }
 
 type ReplState = "idle" | "starting" | "running" | "shutdown";
@@ -639,6 +643,7 @@ export class BunReplManager {
 
 	execute(code: string, opts?: BunReplExecuteOptions): Promise<BunReplExecuteResult> {
 		const execPromise = this._executionQueue.then(async () => {
+			this._options.onCellStart?.();
 			const start = Date.now();
 
 			if (opts?.signal?.aborted) {
@@ -845,7 +850,9 @@ export class BunReplManager {
 			}
 		});
 
-		this._executionQueue = execPromise.catch(() => {});
+		// The finally keeps the queue chain intact while marking the kernel idle again once the
+		// cell settles, on every path (ok, error, abort, runaway).
+		this._executionQueue = execPromise.catch(() => {}).finally(() => this._options.onCellEnd?.());
 		return execPromise;
 	}
 
