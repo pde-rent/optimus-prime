@@ -266,7 +266,28 @@ function extractPatternNames(pattern: string): string[] {
  * whose whole tail (body) is the initializer.
  */
 function rewriteDeclaration(src: string): { out: string; names: string[] } {
-	const trimmed = src.trim();
+	// A declaration can be preceded by comments. The regexes below must see the code,
+	// so split leading comments off and re-emit them verbatim before the rewritten code.
+	const leadingComments: string[] = [];
+	let code = src.trimStart();
+	while (code.startsWith("//") || code.startsWith("/*")) {
+		if (code.startsWith("//")) {
+			const nl = code.indexOf("\n");
+			if (nl === -1) {
+				leadingComments.push(code);
+				code = "";
+				break;
+			}
+			leadingComments.push(code.slice(0, nl + 1));
+			code = code.slice(nl + 1).trimStart();
+		} else {
+			const end = code.indexOf("*/", 2);
+			if (end === -1) break;
+			leadingComments.push(code.slice(0, end + 2));
+			code = code.slice(end + 2).trimStart();
+		}
+	}
+	const trimmed = code.trim();
 	let m = /^(async\s+)?(const|let|var)\b/.exec(trimmed);
 	const names: string[] = [];
 	if (m) {
@@ -296,7 +317,7 @@ function rewriteDeclaration(src: string): { out: string; names: string[] } {
 				assigns.push(`(${pat} = ${init});`);
 			}
 		}
-		return { out: assigns.join("\n"), names };
+		return { out: leadingComments.join("") + assigns.join("\n"), names };
 	}
 
 	m = /^(async\s+)?class\s+([A-Za-z_$][\w$]*)/.exec(trimmed);
@@ -306,7 +327,7 @@ function rewriteDeclaration(src: string): { out: string; names: string[] } {
 		const afterName = trimmed.slice(m[1] ? m[1].length : 0).replace(/^class\s+/, "");
 		// afterName = "Name <tail>"; need "Name <tail>" for the anonymous-class name
 		const tail = afterName.slice(name.length);
-		return { out: `globalThis.${name} = class ${name}${tail}`, names: [name] };
+		return { out: leadingComments.join("") + `globalThis.${name} = class ${name}${tail}`, names: [name] };
 	}
 
 	m = /^(async\s+)?function\s+([A-Za-z_$][\w$]*)/.exec(trimmed);
@@ -317,7 +338,7 @@ function rewriteDeclaration(src: string): { out: string; names: string[] } {
 		const tail = trimmed.slice(tailStart);
 		const kw = isAsync ? "async function" : "function";
 		return {
-			out: `globalThis.${name} = ${kw} ${name}${tail}`,
+			out: leadingComments.join("") + `globalThis.${name} = ${kw} ${name}${tail}`,
 			names: [name],
 		};
 	}

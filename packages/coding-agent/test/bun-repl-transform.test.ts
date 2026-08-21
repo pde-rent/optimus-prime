@@ -203,3 +203,29 @@ describe("hasStaticImport", () => {
 		expect(hasStaticImport(src)).toBe(expected);
 	});
 });
+
+describe("transformTopLevel: declarations preceded by comments", () => {
+	it("rewrites a const preceded by a line comment", () => {
+		const out = code("// compute\nconst lines = report.split('\\n');\nlines");
+		expect(out).toContain("globalThis.lines = report.split('\\n');");
+		expect(out).toContain("// compute");
+	});
+
+	it("rewrites a const preceded by a block comment", () => {
+		const out = code("/* note */ const x = 1;");
+		expect(out).toContain("globalThis.x = 1;");
+		expect(out).toContain("/* note */");
+	});
+
+	it("rewrites a function preceded by a line comment", () => {
+		const out = code("// helper\nfunction f() {\n  return 1;\n}");
+		expect(out).toContain("globalThis.f = function f()");
+		expect(out).toContain("// helper");
+	});
+
+	it("keeps the declaration as the cell result boundary (not an expression)", () => {
+		const r = transformTopLevel("// c\nconst y = 2;\ny + 1;");
+		expect(r.lastExpression).toBe("y + 1");
+		expect(r.code).toContain("globalThis.y = 2;");
+	});
+});
