@@ -2,21 +2,27 @@ import type { TUI } from "../tui.js";
 import { Text } from "./text.js";
 
 export interface LoaderIndicatorOptions {
+	/** Animation frames. Custom frames are rendered verbatim. */
 	frames?: string[];
+	/** Deprecated: animation is driven by the TUI's shared ~125ms tick, not a per-loader interval. */
 	intervalMs?: number;
 }
 
-const DEFAULT_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const DEFAULT_INTERVAL_MS = 80;
+/**
+ * Braille spinner frames used by every animated indicator in the TUI.
+ * Surfaces that render status glyphs directly (rather than hosting a Loader)
+ * read these so motion stays consistent.
+ */
+export const SPINNER_FRAMES: readonly string[] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const DEFAULT_FRAMES = SPINNER_FRAMES;
 
 /**
  * Loader component that updates with an optional spinning animation.
  */
 export class Loader extends Text {
 	private frames = [...DEFAULT_FRAMES];
-	private intervalMs = DEFAULT_INTERVAL_MS;
 	private currentFrame = 0;
-	private intervalId: NodeJS.Timeout | null = null;
+	private unsubscribeTick: (() => void) | null = null;
 	private ui: TUI | null = null;
 	private renderIndicatorVerbatim = false;
 
@@ -42,9 +48,9 @@ export class Loader extends Text {
 	}
 
 	stop(): void {
-		if (this.intervalId) {
-			clearInterval(this.intervalId);
-			this.intervalId = null;
+		if (this.unsubscribeTick) {
+			this.unsubscribeTick();
+			this.unsubscribeTick = null;
 		}
 	}
 
@@ -56,20 +62,20 @@ export class Loader extends Text {
 	setIndicator(indicator?: LoaderIndicatorOptions): void {
 		this.renderIndicatorVerbatim = indicator !== undefined;
 		this.frames = indicator?.frames !== undefined ? [...indicator.frames] : [...DEFAULT_FRAMES];
-		this.intervalMs = indicator?.intervalMs && indicator.intervalMs > 0 ? indicator.intervalMs : DEFAULT_INTERVAL_MS;
 		this.currentFrame = 0;
 		this.start();
 	}
 
 	private restartAnimation(): void {
 		this.stop();
-		if (this.frames.length <= 1) {
+		if (this.frames.length <= 1 || !this.ui) {
 			return;
 		}
-		this.intervalId = setInterval(() => {
+		// One shared TUI ticker drives every animated component (~125ms per tick).
+		this.unsubscribeTick = this.ui.onAnimationTick(() => {
 			this.currentFrame = (this.currentFrame + 1) % this.frames.length;
 			this.updateDisplay();
-		}, this.intervalMs);
+		});
 	}
 
 	private updateDisplay(): void {

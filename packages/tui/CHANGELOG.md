@@ -1,7 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+- Exported `SPINNER_FRAMES` from the `Loader` module so non-component surfaces can reuse the canonical braille spinner.
 
+- Added a shared ~125ms animation ticker on `TUI` (`onAnimationTick`); `Loader` animates from it instead of running its own interval per spinner.
+- Added a same-instance fast path plus a content-keyed LRU memo to line reset normalization, so unchanged lines skip re-normalization on every frame.
+- Changed Kitty image bookkeeping from full-transcript scans to a sorted index updated incrementally at diff positions.
 - Consolidated duplicated render-cache triplets, ANSI padding, and key-matching branches across TUI components into shared helpers; no behavior change.
 - Added a (text,width) render cache to `TruncatedText` so repeated frames skip re-truncation and width measurement.
 

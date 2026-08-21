@@ -54,13 +54,20 @@ function createMode() {
 		currentFeatureHint: undefined,
 		featureHintEligibleAt: 0,
 		featureHintTimer: undefined,
-		featureHintAnimationTimer: undefined,
+		featureHintAnimationUnsubscribe: undefined,
 		featureHintComponent: undefined,
 		featureHintRunPending: false,
 		connectionQueue: { steering: [], followUp: [] },
 		compactionQueuedMessages: [],
 		options: { returnToAgentsView: true },
-		ui: { requestRender },
+		// Real-interval stub of the shared TUI animation ticker.
+		ui: {
+			requestRender,
+			onAnimationTick(callback: () => void): () => void {
+				const id = setInterval(callback, 125);
+				return () => clearInterval(id);
+			},
+		},
 	};
 	Object.setPrototypeOf(mode, InteractiveMode.prototype);
 	return { mode, statusContainer, featureHintContainer, loader, featureHintDeck, requestRender };

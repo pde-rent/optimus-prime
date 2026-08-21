@@ -27,13 +27,18 @@ import {
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
 
-function extractKittyImageIds(line: string): number[] {
+interface KittyImageLine {
+	line: number;
+	id: number;
+}
+
+function extractKittyImageId(line: string): number | undefined {
 	const sequenceStart = line.indexOf(KITTY_SEQUENCE_PREFIX);
-	if (sequenceStart === -1) return [];
+	if (sequenceStart === -1) return undefined;
 
 	const paramsStart = sequenceStart + KITTY_SEQUENCE_PREFIX.length;
 	const paramsEnd = line.indexOf(";", paramsStart);
-	if (paramsEnd === -1) return [];
+	if (paramsEnd === -1) return undefined;
 
 	const params = line.slice(paramsStart, paramsEnd);
 	for (const param of params.split(",")) {
@@ -41,10 +46,43 @@ function extractKittyImageIds(line: string): number[] {
 		if (key !== "i" || value === undefined) continue;
 		const id = Number(value);
 		if (Number.isInteger(id) && id > 0 && id <= 0xffffffff) {
-			return [id];
+			return id;
 		}
 	}
-	return [];
+	return undefined;
+}
+
+/**
+ * Bounded LRU memo for applyLineResets, keyed by raw rendered line content and
+ * storing the normalized line plus segment reset. normalizeTerminalOutput is
+ * pure, so entries stay valid across frames for identical line content.
+ */
+export class LineResetMemo {
+	private readonly cache = new Map<string, string>();
+	hits = 0;
+	misses = 0;
+
+	constructor(private readonly capacity = 4096) {}
+
+	get(raw: string): string | undefined {
+		const hit = this.cache.get(raw);
+		if (hit === undefined) {
+			this.misses++;
+			return undefined;
+		}
+		this.hits++;
+		this.cache.delete(raw);
+		this.cache.set(raw, hit);
+		return hit;
+	}
+
+	set(raw: string, normalized: string): void {
+		if (this.cache.size >= Math.max(1, this.capacity)) {
+			const oldest = this.cache.keys().next();
+			if (!oldest.done) this.cache.delete(oldest.value);
+		}
+		this.cache.set(raw, normalized);
+	}
 }
 
 /**
@@ -304,11 +342,16 @@ export class Container implements Component {
 export class TUI extends Container {
 	public terminal: Terminal;
 	private previousLines: string[] = [];
-	private previousKittyImageIds = new Set<number>();
+	/** Sorted-by-line index of Kitty images in previousLines. */
+	private kittyImages: KittyImageLine[] = [];
+	private lineResetMemo = new LineResetMemo();
 	private previousWidth = 0;
 	private previousHeight = 0;
 	private focusedComponent: Component | null = null;
 	private inputListeners = new Set<InputListener>();
+	private animationTicks = new Map<number, () => void>();
+	private animationTimer: NodeJS.Timeout | undefined;
+	private nextAnimationTickId = 0;
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
@@ -326,6 +369,7 @@ export class TUI extends Container {
 	private renderTimer: NodeJS.Timeout | undefined;
 	private lastRenderAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
+	private static readonly ANIMATION_TICK_INTERVAL_MS = 125;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
 	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
 	private showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1";
@@ -349,7 +393,7 @@ export class TUI extends Container {
 		viewportControls: boolean;
 		inlineState: {
 			previousLines: string[];
-			previousKittyImageIds: Set<number>;
+			kittyImages: KittyImageLine[];
 			previousWidth: number;
 			previousHeight: number;
 			cursorRow: number;
@@ -595,6 +639,31 @@ export class TUI extends Container {
 	removeInputListener(listener: InputListener): void {
 		this.inputListeners.delete(listener);
 	}
+	/**
+	 * Subscribe to the shared coarse animation ticker (~125ms). Periodic UI
+	 * animations (spinner, pulse, shimmer) all run off this one interval so a
+	 * busy transcript pays at most one timer-driven render per tick.
+	 * Returns an unsubscribe function; the interval stops with no subscribers.
+	 */
+	onAnimationTick(callback: () => void): () => void {
+		const id = ++this.nextAnimationTickId;
+		this.animationTicks.set(id, callback);
+		if (!this.animationTimer) {
+			this.animationTimer = setInterval(() => {
+				for (const tick of [...this.animationTicks.values()]) {
+					tick();
+				}
+			}, TUI.ANIMATION_TICK_INTERVAL_MS);
+			this.animationTimer.unref?.();
+		}
+		return () => {
+			this.animationTicks.delete(id);
+			if (this.animationTicks.size === 0 && this.animationTimer) {
+				clearInterval(this.animationTimer);
+				this.animationTimer = undefined;
+			}
+		};
+	}
 
 	private queryCellSize(): void {
 		// Only query if terminal supports images (cell size is only used for image rendering)
@@ -615,6 +684,11 @@ export class TUI extends Container {
 			clearTimeout(this.renderTimer);
 			this.renderTimer = undefined;
 		}
+		if (this.animationTimer) {
+			clearInterval(this.animationTimer);
+			this.animationTimer = undefined;
+		}
+		this.animationTicks.clear();
 		// Move cursor to the end of the content to prevent overwriting/artifacts on exit
 		if (!preserveAltScreen && this.previousLines.length > 0) {
 			const targetRow = this.previousLines.length; // Line after the last content
@@ -696,7 +770,7 @@ export class TUI extends Container {
 			viewportControls: options.viewportControls !== false,
 			inlineState: {
 				previousLines: this.previousLines,
-				previousKittyImageIds: this.previousKittyImageIds,
+				kittyImages: this.kittyImages,
 				previousWidth: this.previousWidth,
 				previousHeight: this.previousHeight,
 				cursorRow: this.cursorRow,
@@ -725,7 +799,7 @@ export class TUI extends Container {
 			this.terminal.leaveAltScreen();
 		}
 		this.previousLines = inlineState.previousLines;
-		this.previousKittyImageIds = inlineState.previousKittyImageIds;
+		this.kittyImages = inlineState.kittyImages;
 		this.previousWidth = inlineState.previousWidth;
 		this.previousHeight = inlineState.previousHeight;
 		this.cursorRow = inlineState.cursorRow;
@@ -1351,23 +1425,70 @@ export class TUI extends Container {
 
 	private applyLineResets(lines: string[]): string[] {
 		const reset = TUI.SEGMENT_RESET;
+		const previous = this.previousLines;
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
-			if (!isImageLine(line)) {
-				lines[i] = normalizeTerminalOutput(line) + reset;
+			// previousLines always holds post-reset lines, so a reference match means
+			// this exact string was already normalized on an earlier frame.
+			if (line === previous[i]) continue;
+			if (isImageLine(line)) continue;
+			let normalized = this.lineResetMemo.get(line);
+			if (normalized === undefined) {
+				normalized = normalizeTerminalOutput(line) + reset;
+				this.lineResetMemo.set(line, normalized);
 			}
+			lines[i] = normalized;
 		}
 		return lines;
 	}
 
-	private collectKittyImageIds(lines: string[]): Set<number> {
-		const ids = new Set<number>();
-		for (const line of lines) {
-			for (const id of extractKittyImageIds(line)) {
-				ids.add(id);
+	/** Full re-scan; only used on full-redraw paths that repaint the whole frame. */
+	private rebuildKittyImageIndex(lines: string[]): void {
+		const images: KittyImageLine[] = [];
+		for (let i = 0; i < lines.length; i++) {
+			const id = extractKittyImageId(lines[i]);
+			if (id !== undefined) images.push({ line: i, id });
+		}
+		this.kittyImages = images;
+	}
+
+	/**
+	 * Re-index only [changedFrom, changedTo]. The line diff guarantees every
+	 * position outside that window is identical between frames, so entries there
+	 * carry over unchanged.
+	 */
+	private updateKittyImageIndex(lines: string[], changedFrom: number, changedTo: number): void {
+		const first = this.lowerBoundKittyImage(changedFrom);
+		let last = first;
+		while (last < this.kittyImages.length && this.kittyImages[last].line <= changedTo) {
+			last++;
+		}
+		if (first < last) this.kittyImages.splice(first, last - first);
+
+		const from = Math.max(0, changedFrom);
+		const to = Math.min(changedTo, lines.length - 1);
+		const inserted: KittyImageLine[] = [];
+		for (let i = from; i <= to; i++) {
+			const id = extractKittyImageId(lines[i]);
+			if (id !== undefined) inserted.push({ line: i, id });
+		}
+		if (inserted.length > 0) {
+			this.kittyImages.splice(this.lowerBoundKittyImage(from), 0, ...inserted);
+		}
+	}
+
+	private lowerBoundKittyImage(line: number): number {
+		let lo = 0;
+		let hi = this.kittyImages.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >>> 1;
+			if (this.kittyImages[mid].line < line) {
+				lo = mid + 1;
+			} else {
+				hi = mid;
 			}
 		}
-		return ids;
+		return lo;
 	}
 
 	private deleteKittyImages(ids: Iterable<number>): string {
@@ -1378,25 +1499,14 @@ export class TUI extends Container {
 		return buffer;
 	}
 
-	private expandLastChangedForKittyImages(firstChanged: number, lastChanged: number): number {
-		let expandedLastChanged = lastChanged;
-		for (let i = firstChanged; i < this.previousLines.length; i++) {
-			if (extractKittyImageIds(this.previousLines[i]).length > 0) {
-				expandedLastChanged = Math.max(expandedLastChanged, i);
-			}
-		}
-		return expandedLastChanged;
-	}
-
 	private deleteChangedKittyImages(firstChanged: number, lastChanged: number): string {
 		if (firstChanged < 0 || lastChanged < firstChanged) return "";
 
 		const ids = new Set<number>();
-		const maxLine = Math.min(lastChanged, this.previousLines.length - 1);
-		for (let i = firstChanged; i <= maxLine; i++) {
-			for (const id of extractKittyImageIds(this.previousLines[i] ?? "")) {
-				ids.add(id);
-			}
+		for (let i = this.lowerBoundKittyImage(firstChanged); i < this.kittyImages.length; i++) {
+			const entry = this.kittyImages[i];
+			if (entry.line > lastChanged) break;
+			ids.add(entry.id);
 		}
 
 		return this.deleteKittyImages(ids);
@@ -1638,7 +1748,7 @@ export class TUI extends Container {
 				this.previousViewportTop = windowStart;
 				this.positionHardwareCursor(cursorPos, newLines.length);
 				this.previousLines = newLines;
-				this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+				this.rebuildKittyImageIndex(newLines);
 				this.previousWidth = width;
 				this.previousHeight = height;
 				return;
@@ -1669,7 +1779,7 @@ export class TUI extends Container {
 			this.previousViewportTop = Math.max(0, bufferLength - height);
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
-			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+			this.rebuildKittyImageIndex(newLines);
 			this.previousWidth = width;
 			this.previousHeight = height;
 		};
@@ -1737,7 +1847,12 @@ export class TUI extends Container {
 			lastChanged = newLines.length - 1;
 		}
 		if (firstChanged !== -1) {
-			lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
+			// Images at or below firstChanged must be repainted too. The sorted image
+			// index answers this from its last entry instead of scanning to the end.
+			const lastImage = this.kittyImages[this.kittyImages.length - 1];
+			if (lastImage && lastImage.line >= firstChanged && lastImage.line > lastChanged) {
+				lastChanged = lastImage.line;
+			}
 		}
 		const appendStart = appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
 
@@ -1789,7 +1904,7 @@ export class TUI extends Container {
 			}
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
-			this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+			this.updateKittyImageIndex(newLines, firstChanged, lastChanged);
 			this.previousWidth = width;
 			this.previousHeight = height;
 			this.previousViewportTop = prevViewportTop;
@@ -1954,7 +2069,7 @@ export class TUI extends Container {
 		this.positionHardwareCursor(cursorPos, newLines.length);
 
 		this.previousLines = newLines;
-		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+		this.updateKittyImageIndex(newLines, firstChanged, lastChanged);
 		this.previousWidth = width;
 		this.previousHeight = height;
 	}
