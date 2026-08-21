@@ -15,6 +15,7 @@
 import { hyperlink } from "@earendil-works/pi-tui";
 
 const TOGGLE_SCHEME = "pi-toggle://";
+const OPEN_AGENT_SCHEME = "pi-agent-open://";
 
 /**
  * Only fullscreen mouse mode routes clicks through the TUI. Everywhere else the
@@ -50,6 +51,22 @@ export function parseToggleTarget(url: string): string | null {
 	if (!url.startsWith(TOGGLE_SCHEME)) return null;
 	try {
 		return decodeURIComponent(url.slice(TOGGLE_SCHEME.length));
+	} catch {
+		return null;
+	}
+}
+
+/** Wrap a row so clicking anywhere on it opens the agent session behind targetId. */
+export function clickToOpenAgent(text: string, targetId: string): string {
+	if (!clickTargetsEnabled || targetId.length === 0) return text;
+	return hyperlink(text, OPEN_AGENT_SCHEME + encodeURIComponent(targetId));
+}
+
+/** Agent-open target id carried by a clicked URL, or null when the URL is not ours. */
+export function parseOpenAgentTarget(url: string): string | null {
+	if (!url.startsWith(OPEN_AGENT_SCHEME)) return null;
+	try {
+		return decodeURIComponent(url.slice(OPEN_AGENT_SCHEME.length));
 	} catch {
 		return null;
 	}

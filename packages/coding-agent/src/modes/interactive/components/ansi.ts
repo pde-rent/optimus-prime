@@ -1,8 +1,8 @@
 /**
  * Low-level ANSI line helpers shared by transcript and panel components.
+ * Width-aware padding lives in @earendil-works/pi-tui (padEndAnsi/padStartAnsi);
+ * only the helpers with no canonical home stay here.
  */
-
-import { visibleWidth } from "@earendil-works/pi-tui";
 
 export const ANSI_RESET = "\x1b[0m";
 
@@ -31,12 +31,4 @@ export function applyBackgroundAcrossResets(text: string, background: (text: str
 		.split(ANSI_RESET)
 		.map((segment) => background(segment))
 		.join(ANSI_RESET);
-}
-
-export function padEndAnsi(text: string, width: number): string {
-	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
-}
-
-export function padStartAnsi(text: string, width: number): string {
-	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
 }

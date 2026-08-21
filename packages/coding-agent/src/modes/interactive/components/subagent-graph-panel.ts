@@ -1,17 +1,21 @@
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { agentStatusIndicatorFor } from "../../agent-connection/agent-status.js";
+import { type Component, padEndAnsi } from "@earendil-works/pi-tui";
+import { agentDisplayStatus, isChildAgentActive } from "../../agent-connection/agent-status.js";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../../agent-connection/index.js";
-import { AGENT_ACTIVITY_LABELS, formatTokenCount } from "../agent-activity.js";
 import { theme } from "../theme/theme.js";
+import { getWorkingPulseFrame } from "../theme/working-icon.js";
+import { formatCell, formatTwoSidedRow } from "./row-format.js";
+import {
+	formatSubagentName,
+	formatSubagentTask,
+	formatSubagentTokens,
+	renderSubagentRow,
+	type SubagentRowModel,
+} from "./subagent-row.js";
 
-/** Children rendered before the overflow indicator takes over. Two lines each. */
-export const SUBAGENT_GRAPH_MAX_CHILDREN = 4;
+/** Children rendered before the overflow indicator takes over. One line each. */
+export const SUBAGENT_GRAPH_MAX_CHILDREN = 8;
 
 const GAP = 2;
-const MIN_NAME_CELL = 14;
-const _MAX_NAME_CELL = 34;
-/** Activity is the primary cell, so it claims width from the name before it shrinks. */
-const MIN_ACTIVITY_CELL = 16;
 /** The panel is told the root's id, never its name; see setChildren. */
 const ROOT_LABEL = "main";
 
@@ -30,10 +34,6 @@ export interface SubagentGraphTotals {
 	done: number;
 	errored: number;
 	tokens: number;
-}
-
-function isActive(child: AgentConnectionRlmChildAgentSnapshot): boolean {
-	return child.status === "running" || child.status === "queued" || child.activity !== undefined;
 }
 
 /** Bucket key for rows that hang directly off the current session. */
@@ -111,7 +111,7 @@ export function summarizeSubagentGraph(rows: readonly SubagentGraphRow[]): Subag
 		totals.total += 1;
 		totals.tokens += child.tokenCount ?? 0;
 		if (child.status === "error") totals.errored += 1;
-		else if (isActive(child)) totals.running += 1;
+		else if (isChildAgentActive(child)) totals.running += 1;
 		else if (child.status === "done") totals.done += 1;
 	}
 	return totals;
@@ -121,67 +121,26 @@ function firstLine(text: string | undefined): string {
 	return text?.split("\n", 1)[0]?.trim() ?? "";
 }
 
-/** "anthropic/claude-opus-4-1" renders as "claude-opus-4-1". */
-function shortModel(model: string | undefined): string | undefined {
-	if (!model) return undefined;
-	const id = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
-	return id || undefined;
-}
-
-function identityCell(child: AgentConnectionRlmChildAgentSnapshot): string {
-	const parts = [shortModel(child.model), child.effort].filter((part) => part !== undefined);
-	return parts.join(" · ");
-}
-
-function activityCell(child: AgentConnectionRlmChildAgentSnapshot): string {
-	const activity = child.activity;
-	if (activity) {
-		const label = AGENT_ACTIVITY_LABELS[activity.kind];
-		return activity.toolName ? `${label} ${activity.toolName}` : label;
-	}
+/** Task summary for a child row: recap, the error, or the prompt that spawned it. */
+function taskCell(child: AgentConnectionRlmChildAgentSnapshot): string {
 	if (child.status === "error") return firstLine(child.error) || "Failed";
-	if (child.status === "queued") return "Queued";
-	return firstLine(child.recap) || firstLine(child.answerPreview);
+	return firstLine(child.recap) || formatSubagentTask(child.label);
 }
 
-function elapsedCell(durationMs: number | undefined): string | undefined {
-	if (durationMs === undefined) return undefined;
-	const seconds = Math.max(0, Math.round(durationMs / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-	const hours = Math.floor(minutes / 60);
-	return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
-}
-
-function tokenCell(child: AgentConnectionRlmChildAgentSnapshot): string | undefined {
-	if (child.tokensIn !== undefined || child.tokensOut !== undefined) {
-		const parts = [
-			child.tokensIn ? `↓ ${formatTokenCount(child.tokensIn)}` : undefined,
-			child.tokensOut ? `↑ ${formatTokenCount(child.tokensOut)}` : undefined,
-		].filter((part) => part !== undefined);
-		if (parts.length > 0) return parts.join(" ");
-	}
-	return child.tokenCount ? `↓ ${formatTokenCount(child.tokenCount)}` : undefined;
-}
-
-function metricsCell(child: AgentConnectionRlmChildAgentSnapshot): string | undefined {
-	return (
-		[elapsedCell(child.durationMs), tokenCell(child)].filter((part) => part !== undefined).join(" · ") || undefined
-	);
-}
-
-// ponytail: local width-aware padding, adopt the canonical pair in packages/tui/src/utils.ts once it lands.
-function padEndAnsi(text: string, width: number): string {
-	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
-}
-
-function padStartAnsi(text: string, width: number): string {
-	return " ".repeat(Math.max(0, width - visibleWidth(text))) + text;
-}
-
-function _cellWidth(cells: readonly string[]): number {
-	return Math.max(0, ...cells.map((cell) => visibleWidth(cell)));
+function subagentRowModel(row: SubagentGraphRow): SubagentRowModel {
+	const { child } = row;
+	return {
+		// No session name: fall back to a short prompt excerpt, never the error text.
+		name: formatSubagentName(child.sessionName) || formatSubagentTask(child.label, 32),
+		task: taskCell(child),
+		status: agentDisplayStatus(child),
+		spinnerFrame: getWorkingPulseFrame(),
+		tokensIn: child.tokensIn,
+		tokensOut: child.tokensOut,
+		tokenCount: child.tokenCount,
+		durationMs: child.durationMs,
+		...(child.activeSessionId !== undefined ? { openTargetId: child.id } : {}),
+	};
 }
 
 /** Depth-first order puts a row's subtree right behind it, so the cap cuts a tail. */
@@ -190,41 +149,19 @@ function elidedDescendants(row: SubagentGraphRow, index: number, visibleCount: n
 }
 
 /**
- * Two lines per child, identical in content to the agents view rows: identity
- * and status on the first line, current work and spend on the second.
+ * One line per child: tree prefix + status icon + name + truncated task summary,
+ * with runtime and token spend right-aligned. Rows with a live runtime are
+ * click targets that open the session.
  */
-function childLines(row: SubagentGraphRow, hidden: number, width: number): string[] {
-	const { child } = row;
-	const indicator = agentStatusIndicatorFor(child);
-	const elided = hidden > 0 ? theme.fg("dim", ` (+${hidden})`) : "";
-	const glyph = theme.fg(indicator.color, indicator.glyph);
-
-	const identity = `${theme.fg("dim", row.prefix)}${glyph} ${child.label}${elided}`;
-	const detail = [identityCell(child), indicator.label].filter((part) => part !== undefined).join(" · ");
-	const detailWidth = Math.min(
-		Math.max(0, width - visibleWidth(identity) - GAP),
-		visibleWidth(detail) > 0 ? Math.max(0, width - MIN_NAME_CELL - GAP) : 0,
+function childLine(row: SubagentGraphRow, hidden: number, width: number): string {
+	return renderSubagentRow(
+		{
+			...subagentRowModel(row),
+			prefix: theme.fg("dim", row.prefix),
+			...(hidden > 0 ? { badge: ` (+${hidden})` } : {}),
+		},
+		width,
 	);
-	let line1 = padEndAnsi(truncateToWidth(identity, width, "…"), width);
-	if (detailWidth > 0) {
-		const right = padStartAnsi(theme.fg("dim", truncateToWidth(detail, detailWidth, "…")), detailWidth);
-		const trimmed = truncateToWidth(identity, width - detailWidth - GAP, "…");
-		line1 = padEndAnsi(trimmed, width - detailWidth - GAP) + right;
-		line1 = padEndAnsi(line1, width);
-	}
-
-	const work = activityCell(child);
-	const metrics = metricsCell(child) ?? "";
-	const indent = " ".repeat(visibleWidth(row.prefix) + 2);
-	const available = Math.max(0, width - indent.length);
-	const metricsWidth = metrics ? Math.min(visibleWidth(metrics), Math.max(0, available - MIN_ACTIVITY_CELL)) : 0;
-	let line2 = `${indent}${theme.fg("muted", truncateToWidth(work, available - metricsWidth - (metricsWidth ? GAP : 0), "…"))}`;
-	if (metricsWidth > 0) {
-		line2 =
-			padEndAnsi(line2, width - metricsWidth - GAP) +
-			padStartAnsi(theme.fg("dim", truncateToWidth(metrics, metricsWidth, "…")), metricsWidth);
-	}
-	return [padEndAnsi(line1, width), padEndAnsi(line2, width)];
 }
 
 export function formatSubagentGraph(
@@ -238,28 +175,19 @@ export function formatSubagentGraph(
 
 	const errors = totals.errored > 0 ? ` · ${totals.errored} error` : "";
 	const summary = `${totals.running}/${totals.total} running${errors}`;
-	const rootTokens = tokenCell({
-		...rows[0].child,
-		tokenCount: totals.tokens || undefined,
-		tokensIn: undefined,
-		tokensOut: undefined,
-	});
+	const rootTokens = formatSubagentTokens(undefined, undefined, totals.tokens || undefined);
 	const rootLine = `${theme.fg("accent", "●")} ${theme.bold(rootLabel)}`;
 	const rootDetail = [summary, rootTokens].filter((part) => part !== undefined && part !== "").join(" · ");
-	const rootDetailWidth = Math.min(visibleWidth(rootDetail), Math.max(0, width - visibleWidth(rootLine) - GAP));
-	const lines: string[] = [
-		padEndAnsi(truncateToWidth(rootLine, width - rootDetailWidth - GAP, "…"), width - rootDetailWidth - GAP) +
-			padStartAnsi(theme.fg("dim", truncateToWidth(rootDetail, rootDetailWidth, "…")), rootDetailWidth),
-	];
+	const lines: string[] = [formatTwoSidedRow(rootLine, theme.fg("dim", rootDetail), width, { gap: GAP })];
 
 	for (const [index, row] of visible.entries()) {
 		const hidden = elidedDescendants(row, index, visible.length);
-		lines.push(...childLines(row, hidden, width));
+		lines.push(childLine(row, hidden, width));
 	}
 
 	const hiddenCount = rows.length - visible.length;
 	if (hiddenCount > 0) {
-		lines.push(padEndAnsi(theme.fg("muted", truncateToWidth(`  … ${hiddenCount} more`, width, "…")), width));
+		lines.push(formatCell(theme.fg("muted", `  … ${hiddenCount} more`), width));
 	}
 	return lines.map((line) => padEndAnsi(line, width));
 }
@@ -276,7 +204,7 @@ export class SubagentGraphPanel implements Component {
 
 	setChildren(children: Iterable<AgentConnectionRlmChildAgentSnapshot>, rootId: string | undefined): void {
 		this.rows = buildSubagentGraphRows(children, rootId);
-		this.anyActive = this.rows.some((row) => isActive(row.child));
+		this.anyActive = this.rows.some((row) => isChildAgentActive(row.child));
 		// A cleared fan-out ends the override so the next one starts from auto.
 		if (this.rows.length === 0) this.override = undefined;
 	}
@@ -288,6 +216,11 @@ export class SubagentGraphPanel implements Component {
 	isVisible(): boolean {
 		if (this.rows.length === 0) return false;
 		return this.override ?? this.anyActive;
+	}
+
+	/** True while a visible row is running and the spinner needs ticks. */
+	isAnimating(): boolean {
+		return this.isVisible() && this.rows.some((row) => agentDisplayStatus(row.child) === "running");
 	}
 
 	/** Flip the current visibility; returns the new state. */

@@ -3,6 +3,7 @@ import {
 	Editor,
 	type EditorOptions,
 	type EditorTheme,
+	padEndAnsi,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -282,7 +283,7 @@ export class CustomEditor extends Editor {
 		const paddingX = this.getEffectivePaddingX(width);
 		const contentWidth = Math.max(1, width - paddingX * 2);
 		const line = `${" ".repeat(paddingX)}${truncateToWidth(content, contentWidth)}`;
-		const padded = line + " ".repeat(Math.max(0, width - visibleWidth(line)));
+		const padded = padEndAnsi(line, width);
 		const backgroundColor = this.backgroundColor;
 		if (!backgroundColor) {
 			return padded;

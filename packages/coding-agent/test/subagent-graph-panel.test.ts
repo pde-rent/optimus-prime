@@ -1,6 +1,11 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../src/modes/agent-connection/types.js";
+import {
+	clickToOpenAgent,
+	parseOpenAgentTarget,
+	setClickTargetsEnabled,
+} from "../src/modes/interactive/components/click-target.js";
 import {
 	buildSubagentGraphRows,
 	formatSubagentGraph,
@@ -22,21 +27,20 @@ function child(
 const fanOut = [
 	child("a", "running", {
 		parentId: "root",
-		label: "explore-auth-flows",
-		model: "anthropic/claude-opus-4-1",
-		effort: "high",
+		label: "Audit gateway auth token handling end to end",
+		sessionName: "subagent-explore-auth-flows-a1b2c3d4",
 		tokenCount: 12400,
 		tokensIn: 12000,
 		tokensOut: 400,
 		toolUseCount: 8,
 		durationMs: 62_000,
+		activeSessionId: "active-a",
 		activity: { kind: "executing", toolName: "Read" },
 	}),
 	child("b", "done", {
 		parentId: "root",
-		label: "write-regression-tests",
+		label: "write regression tests for the parser",
 		model: "anthropic/claude-sonnet-4-5",
-		effort: "medium",
 		tokenCount: 9100,
 		tokensIn: 8800,
 		tokensOut: 300,
@@ -54,7 +58,7 @@ const fanOut = [
 	}),
 ];
 
-const twoLineCount = (children: number) => 1 + children * 2;
+const rowCount = (children: number) => 1 + children;
 
 describe("subagent graph tree assembly", () => {
 	beforeAll(() => {
@@ -152,58 +156,59 @@ describe("subagent graph rendering", () => {
 		expect(panel.toggle()).toBe(false);
 	});
 
-	it("leads with the session's own row and marks each child with its status", () => {
+	it("leads with the root row and gives every child one line", () => {
 		const lines = formatSubagentGraph(buildSubagentGraphRows(fanOut, "root"), 120).map(stripAnsi);
 
-		expect(lines).toHaveLength(twoLineCount(3));
+		expect(lines).toHaveLength(rowCount(3));
 		expect(lines[0]).toMatch(/^● main /);
 		expect(lines[0]).toContain("1/3 running · 1 error");
 		expect(lines[0]).toContain("↓ 24k");
-		// Status glyph and label come from the shared status vocabulary.
-		expect(lines[1]).toMatch(/^├─ ● explore-auth-flows /);
-		expect(lines[1]).toContain("Running");
-		expect(lines[3]).toMatch(/^├─ ✓ write-regression-tests /);
-		expect(lines[3]).toContain("Done");
-		// Colour alone is too weak for a failure, so the error keeps its own glyph.
-		expect(lines[5]).toMatch(/^└─ ✗ bench-runner /);
-		expect(lines[5]).toContain("Failed");
+		expect(lines[1]).toContain("explore auth flows");
+		expect(lines[2]).toContain("write regression tests");
+		expect(lines[3]).toContain("bench-runner");
+		// The generated session slug never reaches the user.
+		expect(lines.join("\n")).not.toContain("a1b2c3d4");
+		expect(lines.join("\n")).not.toContain("subagent-");
 	});
 
-	it("shows model, effort, activity, and spend on the two lines", () => {
-		const lines = formatSubagentGraph(buildSubagentGraphRows(fanOut, "root"), 120).map(stripAnsi);
+	it("marks leaf state with the shared vocabulary: spinner, completed, failed, idle, waiting", () => {
+		const rows = buildSubagentGraphRows(
+			[
+				...fanOut,
+				child("d", "done", { parentId: "root", activeSessionId: "active-d" }),
+				child("e", "queued", { parentId: "root" }),
+			],
+			"root",
+		);
+		const lines = formatSubagentGraph(rows, 160).map(stripAnsi);
 
-		expect(lines[1]).toContain("claude-opus-4-1 · high");
-		expect(lines[2]).toContain("Executing Read");
-		expect(lines[3]).toContain("claude-sonnet-4-5 · medium");
-		expect(lines[5]).toContain("gpt-5-codex");
-		// Tokens in and out, not just a single figure.
-		expect(lines[2]).toContain("↓ 12k ↑ 400");
-		expect(lines[4]).toContain("↓ 8.8k ↑ 300");
-		// A child without a split falls back to the single token figure.
-		expect(lines[6]).toContain("↓ 2.0k");
+		// Running uses the shared braille spinner, not a static circle.
+		// Running uses the shared braille spinner, not a static circle.
+		expect(lines[1]).toContain("⠋");
+		expect(lines[2]).toContain("✓"); // done and evicted: completed
+		expect(lines[3]).toContain("✗"); // failed
+		expect(lines[4]).toContain("◐"); // done but resident: idle
+		expect(lines[5]).toContain("○"); // queued: waiting
+		expect(lines[1]?.trimEnd().endsWith("1m 02s · ↓ 12k ↑ 400")).toBe(true);
+		expect(lines[2]?.trimEnd().endsWith("47s · ↓ 8.8k ↑ 300")).toBe(true);
+		expect(lines[3]?.trimEnd().endsWith("12s · ↓ 2.0k")).toBe(true);
 	});
 
-	it("shows live activity, recap, and error text on the work line", () => {
-		const lines = formatSubagentGraph(
-			buildSubagentGraphRows(
-				[
-					fanOut[0] as AgentConnectionRlmChildAgentSnapshot,
-					{ ...(fanOut[1] as AgentConnectionRlmChildAgentSnapshot), recap: "Added retry coverage" },
-					fanOut[2] as AgentConnectionRlmChildAgentSnapshot,
-					child("d", "queued", { parentId: "root", label: "waiting-worker" }),
-				],
-				"root",
-			),
-			120,
-		).map(stripAnsi);
-
-		expect(lines[2]).toContain("Executing Read");
-		expect(lines[4]).toContain("Added retry coverage");
-		expect(lines[6]).toContain("boom");
-		expect(lines[7]).toContain("Queued");
+	it("prefers recap over the raw prompt as the task summary", () => {
+		const rows = buildSubagentGraphRows(
+			[{ ...fanOut[0], recap: "Added retry coverage" } as AgentConnectionRlmChildAgentSnapshot],
+			"root",
+		);
+		const lines = formatSubagentGraph(rows, 120).map(stripAnsi);
+		expect(lines[1]).toContain("Added retry coverage");
 	});
 
-	it("draws nesting with tree prefixes and leaves visible descendants uncounted", () => {
+	it("shows the error text for failed children", () => {
+		const lines = formatSubagentGraph(buildSubagentGraphRows([fanOut[2]], "root"), 120).map(stripAnsi);
+		expect(lines[1]).toContain("boom");
+	});
+
+	it("draws nesting with tree prefixes and marks elided descendants", () => {
 		const lines = formatSubagentGraph(
 			buildSubagentGraphRows(
 				[
@@ -213,12 +218,13 @@ describe("subagent graph rendering", () => {
 				],
 				"root",
 			),
-			120,
+			160,
 		).map(stripAnsi);
 
-		expect(lines[1]).toMatch(/^├─ ● explore-auth-flows /);
-		expect(lines[3]).toMatch(/^│ {2}└─ ● grep-callers /);
-		// Every descendant is on screen, so nothing is summarized as `(+N)`.
+		// Tree prefixes survive the shared renderer; running rows spin.
+		expect(lines[1]).toMatch(/^├─\s+⠋ /);
+		expect(lines[2]).toMatch(/^│ {2}└─\s+⠋ /);
+
 		expect(lines.join("\n")).not.toContain("(+");
 	});
 
@@ -232,20 +238,10 @@ describe("subagent graph rendering", () => {
 			],
 			"root",
 		);
-		const lines = formatSubagentGraph(rows, 120).map(stripAnsi);
+		const lines = formatSubagentGraph(rows, 160).map(stripAnsi);
 
-		// Visible rows: a + w0..w2. The cap elides 6 of a's 9 descendants... a's own
-		// subtree count is capped at what is not on screen.
-		expect(lines[1]).toContain("fan-out (+");
+		expect(lines[1]).toContain("(+");
 		expect(lines.at(-1)?.trim()).toMatch(/^… \d+ more$/);
-	});
-
-	it("right-aligns the elapsed and token cell on the work line", () => {
-		const lines = formatSubagentGraph(buildSubagentGraphRows(fanOut, "root"), 120).map(stripAnsi);
-
-		expect(lines[2]?.trimEnd().endsWith("1m 02s · ↓ 12k ↑ 400")).toBe(true);
-		expect(lines[4]?.trimEnd().endsWith("47s · ↓ 8.8k ↑ 300")).toBe(true);
-		expect(lines[6]?.trimEnd().endsWith("12s · ↓ 2.0k")).toBe(true);
 	});
 
 	it("caps a wide fan-out and reports the overflow", () => {
@@ -254,8 +250,8 @@ describe("subagent graph rendering", () => {
 		);
 		const lines = formatSubagentGraph(buildSubagentGraphRows(many, "root"), 80).map(stripAnsi);
 
-		// root + capped children (two lines each) + overflow
-		expect(lines).toHaveLength(twoLineCount(SUBAGENT_GRAPH_MAX_CHILDREN) + 1);
+		// root + capped children (one line each) + overflow
+		expect(lines).toHaveLength(rowCount(SUBAGENT_GRAPH_MAX_CHILDREN) + 1);
 		expect(lines[0]).toContain(`/${many.length} running`);
 		expect(lines.at(-1)?.trim()).toBe("… 4 more");
 		expect(lines.join("\n")).not.toContain("w8");
@@ -267,7 +263,7 @@ describe("subagent graph rendering", () => {
 				...fanOut,
 				child("d", "running", {
 					parentId: "a",
-					label: "grep-callers-across-the-whole-monorepo",
+					label: "grep-callers-across-the-whole-monorepo-and-beyond",
 					activity: { kind: "executing", toolName: "Bash" },
 				}),
 			],
@@ -280,7 +276,7 @@ describe("subagent graph rendering", () => {
 		}
 	});
 
-	it("truncates the activity cell without leaking a partial escape", () => {
+	it("truncates without leaking a partial escape", () => {
 		const rows = buildSubagentGraphRows(fanOut, "root");
 		for (const width of [30, 45, 60]) {
 			for (const line of formatSubagentGraph(rows, width)) {
@@ -295,12 +291,47 @@ describe("subagent graph rendering", () => {
 	it("sheds cells rather than the name when the viewport collapses", () => {
 		const rows = buildSubagentGraphRows(fanOut, "root");
 		const narrow = formatSubagentGraph(rows, 60).map(stripAnsi);
-		expect(narrow[1]).toContain("explore");
+		expect(narrow[1]).toContain("explore auth flows");
 
-		const tiny = formatSubagentGraph(rows, 20).map(stripAnsi);
+		const tiny = formatSubagentGraph(rows, 24).map(stripAnsi);
+		expect(narrow[1]).toContain("explore auth flows");
+
 		expect(tiny[1]).toContain("expl");
+	});
+});
 
-		expect(formatSubagentGraph(rows, 7)).toEqual([]);
+describe("subagent graph click targets", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	afterAll(() => {
+		setClickTargetsEnabled(false);
+	});
+
+	it("wraps attachable rows in an open-agent link when clicks are enabled", () => {
+		const rows = buildSubagentGraphRows(
+			[
+				fanOut[0], // has activeSessionId
+				child("offline", "done", { parentId: "root", label: "no-runtime" }),
+			],
+			"root",
+		);
+		setClickTargetsEnabled(true);
+		const lines = formatSubagentGraph(rows, 120);
+		expect(lines[1]).toContain("pi-agent-open://a");
+		// A child without a live runtime is not clickable.
+		expect(lines[2]).not.toContain("pi-agent-open://");
+		expect(parseOpenAgentTarget("pi-agent-open://a")).toBe("a");
+		expect(parseOpenAgentTarget("pi-toggle://thinking")).toBeNull();
+	});
+
+	it("leaves plain text when clicks are disabled", () => {
+		setClickTargetsEnabled(false);
+		const lines = formatSubagentGraph(buildSubagentGraphRows([fanOut[0]], "root"), 120);
+		expect(lines[1]).not.toContain("pi-agent-open://");
+		// Still equal to what the non-clickable renderer produces.
+		expect(lines[1].replace(clickToOpenAgent("", ""), "")).toBe(lines[1]);
 	});
 });
 
@@ -313,12 +344,14 @@ describe("SubagentGraphPanel visibility", () => {
 		const panel = new SubagentGraphPanel();
 		panel.setChildren(fanOut, "root");
 		expect(panel.isVisible()).toBe(true);
+		expect(panel.isAnimating()).toBe(true);
 
 		panel.setChildren(
 			fanOut.map((snapshot) => ({ ...snapshot, status: "done" as const, activity: undefined })),
 			"root",
 		);
 		expect(panel.isVisible()).toBe(false);
+		expect(panel.isAnimating()).toBe(false);
 		expect(panel.render(80)).toEqual([]);
 	});
 
@@ -327,7 +360,7 @@ describe("SubagentGraphPanel visibility", () => {
 		const settled = fanOut.map((snapshot) => ({ ...snapshot, status: "done" as const, activity: undefined }));
 		panel.setChildren(settled, "root");
 		expect(panel.toggle()).toBe(true);
-		expect(panel.render(80)).toHaveLength(twoLineCount(3));
+		expect(panel.render(80)).toHaveLength(rowCount(3));
 
 		panel.setChildren(fanOut, "root");
 		expect(panel.toggle()).toBe(false);

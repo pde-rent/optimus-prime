@@ -1,7 +1,6 @@
-import { type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { type Component, padEndAnsi, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { stripAnsi } from "../../../utils/ansi.js";
 import { theme } from "../theme/theme.js";
-import { padEndAnsi } from "./ansi.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
 
 export interface CollapsibleErrorOptions {

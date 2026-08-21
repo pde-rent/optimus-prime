@@ -7,10 +7,10 @@ import {
 	clippedFullscreenDockHeight,
 	type Focusable,
 	ProcessTerminal,
+	padEndAnsi,
 	setKeybindings,
 	TUI,
 	truncateToWidth,
-	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { APP_TITLE, appendRotatingLog, getAgentDir, getClientErrorLogPath, VERSION } from "../../config.js";
@@ -46,6 +46,13 @@ import {
 } from "../daemon/saved-session-catalog.js";
 import { CustomEditor } from "../interactive/components/custom-editor.js";
 import { keyText } from "../interactive/components/keybinding-hints.js";
+import { formatTwoSidedRow } from "../interactive/components/row-format.js";
+import {
+	formatSubagentName,
+	formatSubagentTask,
+	renderSubagentRow,
+	subagentStatusForSummary,
+} from "../interactive/components/subagent-row.js";
 import { BrandSplashHeader, InteractiveMode } from "../interactive/interactive-mode.js";
 import type { InteractiveModeUiServices } from "../interactive/interactive-mode-services.js";
 import { ClientPromptStashStore } from "../interactive/prompt-stash-state.js";
@@ -81,7 +88,6 @@ import {
 	getAgentsViewSummaryIdentity as getSummaryIdentity,
 	getUnifiedSessionAncestorSessionIds,
 	hasUnifiedSessionChildren,
-	isSubagentSummary,
 	migrateAgentsViewIdentitySet,
 	reconcileUnifiedSessions,
 	resolveAgentsViewLeftResult,
@@ -506,6 +512,14 @@ export async function runAgentsViewMode(options: AgentsViewModeOptions): Promise
 					persistentState.query = "";
 				}
 				persistentState.backSession = returnedSession;
+				// A clicked graph-panel row asked to land on that specific child.
+				if (interactiveResult.focusChildActiveSessionId !== undefined) {
+					persistentState.selectedRowIdentity = undefined;
+					persistentState.selectedSessionKey = {
+						sessionId: returnedSession.sessionId,
+						activeSessionId: interactiveResult.focusChildActiveSessionId,
+					};
+				}
 			} catch (error) {
 				// The session opened fine and then threw while running; label it as a
 				// runtime crash so it isn't mixed in with true open failures.
@@ -2524,62 +2538,44 @@ export class AgentsViewMode implements Component, Focusable {
 			const indent = "  ".repeat(row.depth);
 			const hint = row.hasSpawnCode ? theme.fg("dim", ` · ${keyText("app.agents.program")} show program`) : "";
 			const label = `${theme.fg("dim", `${row.expanded ? "▾" : "▸"} ${row.title}`)}${hint}`;
-			const line = padLine(truncateToWidth(`${indent}${label}`, width, ""), width);
+			const line = padEndAnsi(truncateToWidth(`${indent}${label}`, width, ""), width);
+			return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
+		}
+		// Live subagent rows share the chat graph panel's one-line roster renderer, so
+		// both surfaces read identically: status icon + name + task + spend.
+		if (row.kind === "subagent") {
+			const pendingKill = this.isPendingKillSubagentRow(row);
+			const age = formatSessionDuration(row.summary);
+			const line = renderSubagentRow(
+				{
+					prefix: "  ".repeat(row.depth),
+					name: pendingKill
+						? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
+						: formatSubagentName(row.summary.sessionName),
+					task: formatSubagentTask(row.summary.summary ?? row.summary.firstMessage),
+					status: subagentStatusForSummary(row.summary),
+					...(age.length > 0 ? { note: age } : {}),
+				},
+				width,
+			);
 			return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
 		}
 		const pendingDelete = row.kind === "agent" && this.isPendingDeleteRow(row);
-		const pendingKill = row.kind === "subagent" && this.isPendingKillSubagentRow(row);
 		const rawIcon = this.getRowIcon(row.section);
 		const icon = this.formatRowIcon(row.section, rawIcon);
 		const indent = "  ".repeat(row.depth);
 		const age = formatSessionDuration(row.summary);
 		const details = row.section === "inactive" ? `${row.summary.messageCount} · ${age}` : age;
-		const detailsWidth = row.section === "inactive" ? Math.max(10, visibleWidth(details)) : 10;
-		const heartbeatBadge = !pendingDelete && !pendingKill ? formatHeartbeatBadge(row.heartbeat) : "";
+		const heartbeatBadge = !pendingDelete ? formatHeartbeatBadge(row.heartbeat) : "";
 		const heartbeatCell = heartbeatBadge ? theme.fg("error", heartbeatBadge) : "";
-		const heartbeatWidth = visibleWidth(heartbeatBadge);
-		const titleWidth = Math.max(
-			0,
-			width -
-				visibleWidth(indent) -
-				visibleWidth(rawIcon) -
-				detailsWidth -
-				2 -
-				(heartbeatWidth > 0 ? heartbeatWidth + 1 : 0),
-		);
-		const title = pendingDelete
-			? this.getPendingDeleteTitle()
-			: pendingKill
-				? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
-				: styleRowTitle(row);
+		const title = pendingDelete ? this.getPendingDeleteTitle() : styleRowTitle(row);
 		// Keep stable model information ahead of the variable summary so narrow rows truncate the summary first.
-		const summaryText = !pendingDelete && !pendingKill ? row.summary.summary : undefined;
-		const modelLabel =
-			isSubagentSummary(row.summary) && !pendingDelete && !pendingKill && row.summary.model
-				? `${row.summary.model.provider}/${row.summary.model.id}${row.summary.thinkingLevel && row.summary.thinkingLevel !== "off" ? `:${row.summary.thinkingLevel}` : ""}`
-				: undefined;
-		const suffixes = [modelLabel, summaryText].filter(
-			(suffix): suffix is string => suffix !== undefined && suffix.length > 0,
-		);
+		const summaryText = !pendingDelete ? row.summary.summary : undefined;
+		const suffixes = [summaryText].filter((suffix): suffix is string => suffix !== undefined && suffix.length > 0);
 		const titleContent = suffixes.length > 0 ? `${title} ${theme.fg("dim", `· ${suffixes.join(" · ")}`)}` : title;
-		const titleCell = formatTableCell(titleContent, titleWidth);
-		const cells = [
-			icon,
-			pendingDelete || pendingKill ? theme.fg("error", titleCell) : titleCell,
-			formatRightTableCell(details, detailsWidth),
-		];
-		const base = `${indent}${cells[0]} ${heartbeatCell ? `${heartbeatCell} ` : ""}${cells[1]} ${cells[2]}`;
-		const line = padLine(truncateToWidth(base, width, ""), width);
+		const left = `${indent}${icon} ${heartbeatCell ? `${heartbeatCell} ` : ""}${titleContent}`;
+		const line = formatTwoSidedRow(left, details, width, { gap: 1, minRightWidth: 10, ellipsis: "" });
 		return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
-	}
-
-	// Spawn-code rows are read-only context. They render deemphasized — muted
-	// text on a panel background (applied in finalizeRenderedLine) so the program
-	// reads as one quiet segmented block rather than competing with agent rows.
-	private renderCodeRow(row: AgentsViewRow): string {
-		const indent = "  ".repeat(row.depth);
-		const body = theme.fg("muted", row.code || " ");
-		return `${CODE_ROW_MARKER}${indent}  ${body}`;
 	}
 
 	private finalizeRenderedLine(line: string, width: number): string {
@@ -2595,7 +2591,7 @@ export class AgentsViewMode implements Component, Focusable {
 		if (content.includes("\n") || content.includes("\r")) {
 			content = content.replace(/[\r\n]+/g, " ");
 		}
-		const padded = padLine(truncateToWidth(content, width), width);
+		const padded = padEndAnsi(truncateToWidth(content, width), width);
 		if (code) {
 			return theme.bg("toolPanelBg", padded);
 		}
@@ -2625,6 +2621,15 @@ export class AgentsViewMode implements Component, Focusable {
 		return this.pendingDeleteAgent?.stopped
 			? `stopped - ${deleteKey} again to remove`
 			: `${deleteKey} again to remove`;
+	}
+
+	// Spawn-code rows are read-only context. They render deemphasized — muted
+	// text on a panel background (applied in finalizeRenderedLine) so the program
+	// reads as one quiet segmented block rather than competing with agent rows.
+	private renderCodeRow(row: AgentsViewRow): string {
+		const indent = "  ".repeat(row.depth);
+		const body = theme.fg("muted", row.code || " ");
+		return `${CODE_ROW_MARKER}${indent}  ${body}`;
 	}
 
 	private renderPrompt(width: number): string[] {
@@ -2822,16 +2827,6 @@ function styleRowTitle(row: AgentsViewRow): string {
 	return row.title;
 }
 
-function formatTableCell(value: string, width: number): string {
-	const truncated = truncateToWidth(value, width, "");
-	return truncated + " ".repeat(Math.max(0, width - visibleWidth(truncated)));
-}
-
-function formatRightTableCell(value: string, width: number): string {
-	const truncated = truncateToWidth(value, width, "");
-	return " ".repeat(Math.max(0, width - visibleWidth(truncated))) + truncated;
-}
-
 function formatSessionDuration(summary: SessionSummary): string {
 	return formatAgentsViewRelativeTime(
 		summary.activeSessionId ? (summary.created ?? summary.modified) : (summary.modified ?? summary.created),
@@ -2911,8 +2906,4 @@ function formatError(prefix: string, error: unknown): string {
 function logClientError(prefix: string, error: unknown): void {
 	const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
 	appendRotatingLog(getClientErrorLogPath(), `[${new Date().toISOString()}] ${prefix}: ${detail}`);
-}
-
-function padLine(line: string, width: number): string {
-	return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
 }

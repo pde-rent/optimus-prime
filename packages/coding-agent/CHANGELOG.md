@@ -1,7 +1,16 @@
 # Changelog
 
 ## [Unreleased]
+- Changed the live subagent graph panel to one compact line per child: status icon, de-slugged agent name, truncated task summary, and right-aligned runtime plus tokens in/out; running children animate with the shared braille spinner.
+- Added click-to-open on subagent graph rows (fullscreen mouse mode): clicking a child leaves to the scoped agents view with that subagent selected.
+- Changed the agents view to render nested subagent rows through the same shared row renderer as the chat graph panel, so both surfaces read identically.
+- Extended the shared RLM child status vocabulary with waiting/idle/completed states and distinct glyphs and colors for each.
+- Removed duplicate width-aware padding helpers from the interactive components; `padEndAnsi`/`padStartAnsi` now come from `@earendil-works/pi-tui`.
 
+- Changed the loader spinner, working-icon pulse, and feature-hint shimmer to share one ~125ms TUI ticker instead of three separate timers, cutting timer-driven renders while the agent streams.
+- Stopped the feature-hint shimmer ticker when no hint is displayed.
+- Fixed pasted image file paths containing spaces (terminal drag-and-drop escaping or quoting) attaching as plain text instead of images.
+- Removed the `extract-zip` dependency (and 11 transitive packages): zip archives from fd/ripgrep downloads now extract with the system `unzip` command, with a clear error if it is missing.
 - Fixed deleted RLM subagents lingering in the agents view: deletion now removes the subagent session file and completed subagents can be deleted without an active parent.
 - Changed compaction to offload pre-compaction message entries from resident memory (usage and tree structure retained; full entries re-read from the session file on demand) and to stream full-file rewrites in bounded chunks instead of materializing one ~2x-file-size string.
 - Fixed REPL cells losing top-level declarations that were preceded by a comment; the next cell could not see them.

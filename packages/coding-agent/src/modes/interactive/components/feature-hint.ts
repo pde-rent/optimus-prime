@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, padEndAnsi, truncateToWidth } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
 
 const LABEL = "Hint:";
@@ -41,6 +41,6 @@ export class FeatureHintComponent implements Component {
 		const hint = theme.fg("muted", characters.slice(labelLength).join(""));
 		const line = `${" ".repeat(paddingX)}${label}${hint}`;
 
-		return [line + " ".repeat(Math.max(0, width - visibleWidth(line))), " ".repeat(width)];
+		return [padEndAnsi(line, width), " ".repeat(width)];
 	}
 }

@@ -1,4 +1,5 @@
 import { type Component, type Focusable, getKeybindings, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { isChildAgentActive } from "../../agent-connection/agent-status.js";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../../agent-connection/index.js";
 import { theme } from "../theme/theme.js";
 import { keyText } from "./keybinding-hints.js";
@@ -22,9 +23,7 @@ export function countDirectSubagentStatuses(
 		if (child.parentId !== parentId || child.status === "cancelled") continue;
 		total += 1;
 		const isRunning =
-			child.status === "running" ||
-			child.status === "queued" ||
-			child.activity !== undefined ||
+			isChildAgentActive(child) ||
 			(child.activeSessionId !== undefined && activeHeartbeatSessionIds.has(child.activeSessionId));
 		if (isRunning) {
 			running += 1;
