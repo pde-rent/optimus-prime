@@ -327,6 +327,8 @@ export interface BunReplManagerOptions {
 	commandPrefix?: string;
 	/** Called when a cell's agent message arrives after that cell's result. */
 	onLateSentAgentMessage?: (correlationId: string, message: KernelSentAgentMessage) => void;
+	/** Default per-cell execution timeout in ms; overridable per call via execute opts.timeout. */
+	defaultTimeoutMs?: number;
 	/** Called when a queued cell begins executing. Used by the provisioner to hold off idle reaping. */
 	onCellStart?: () => void;
 	/** Called when a queued cell settles (ok, error, abort, or runaway), after the caller's promise chain settles. */
@@ -721,7 +723,7 @@ export class BunReplManager {
 				};
 			});
 
-			const timeoutMs = opts?.timeout ?? 120_000;
+			const timeoutMs = opts?.timeout ?? this._options.defaultTimeoutMs ?? 120_000;
 			let runaway = false;
 			let settled = false;
 

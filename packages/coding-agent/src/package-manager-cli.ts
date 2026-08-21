@@ -68,6 +68,7 @@ import {
 } from "./modes/daemon/daemon-worker-protocol.js";
 import { color as chalk } from "./utils/ansi.js";
 import { shouldUseWindowsShell } from "./utils/child-process.js";
+import { errorMessage, isRecord } from "./utils/shared.js";
 import { getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.js";
 
 export type PackageCommand = "install" | "remove" | "update" | "list";
@@ -507,10 +508,6 @@ function daemonProbeMayHaveBusySessions(probe: RunningDaemonProbe): boolean {
 			(probe.busyClientOwnedSessionCount ?? 0) > 0 ||
 			probe.activeSessions.some(isSessionBusy))
 	);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isStringEnum(value: unknown, allowed: readonly string[]): boolean {
@@ -1026,7 +1023,7 @@ async function restoreDaemonUpdateRestartSession(
 		} catch (error: unknown) {
 			console.error(
 				chalk.yellow(
-					`Warning: could not record update completion in ${session.sessionFile}: ${formatUnknownError(error)}`,
+					`Warning: could not record update completion in ${session.sessionFile}: ${errorMessage(error)}`,
 				),
 			);
 		}
@@ -1128,7 +1125,7 @@ async function restoreDaemonUpdateRestart(
 					});
 				}
 			} catch (error: unknown) {
-				const message = formatUnknownError(error);
+				const message = errorMessage(error);
 				console.error(chalk.yellow(`Warning: could not restore ${session.sessionFile}: ${message}`));
 				failures.push({ sessionFile: session.sessionFile, message });
 			}
@@ -1154,10 +1151,6 @@ async function restoreDaemonUpdateRestart(
 		failed: manifest.sessions.length - restored,
 		failures,
 	};
-}
-
-function formatUnknownError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }
 
 function processIdentityFromDaemonHello(
@@ -1276,7 +1269,7 @@ export async function runDaemonUpdateRestartCoordinator(options: {
 				const daemonLacksPrepareCommand = isUnknownDaemonCommandError(error, "prepare_update_restart");
 				if (daemonProbeMayHaveBusySessions(daemonProbe) || !daemonLacksPrepareCommand) {
 					throw new Error(
-						`Could not prepare daemon sessions for automatic resume; the previous daemon is still running (${formatUnknownError(error)})`,
+						`Could not prepare daemon sessions for automatic resume; the previous daemon is still running (${errorMessage(error)})`,
 					);
 				}
 			}
@@ -1369,7 +1362,7 @@ export async function runDaemonUpdateRestartCoordinator(options: {
 					: "Restarted the daemon after the update",
 		});
 	} catch (error: unknown) {
-		statusWriter.update({ phase: "failed", message: formatUnknownError(error) });
+		statusWriter.update({ phase: "failed", message: errorMessage(error) });
 	} finally {
 		stopStatusHeartbeat();
 		connectedClient?.close();
@@ -1611,7 +1604,7 @@ export async function handlePackageCommand(args: string[]): Promise<boolean> {
 					} catch (error: unknown) {
 						console.error(
 							chalk.yellow(
-								`Warning: updated, but could not coordinate the daemon restart (${formatUnknownError(error)}).`,
+								`Warning: updated, but could not coordinate the daemon restart (${errorMessage(error)}).`,
 							),
 						);
 					}

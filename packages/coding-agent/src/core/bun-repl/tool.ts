@@ -12,6 +12,12 @@ const bunReplSchema = Type.Object({
 		description:
 			"JavaScript/TypeScript code to execute in the persistent REPL. Variables and imports persist across calls. Use %%bash for shell commands.",
 	}),
+	timeout: Type.Optional(
+		Type.Number({
+			description:
+				"Cell timeout in seconds. Use for cells that legitimately run long (large downloads, batch jobs); the default is the configured repl timeout (120s unless overridden in settings).",
+		}),
+	),
 });
 
 /** Told to the model when the REPL child was replaced mid-session. */
@@ -50,6 +56,8 @@ export function imageBlocksFromAttachments(attachments: readonly KernelAttachmen
 
 export interface BunReplToolOptions {
 	cwd?: string;
+	/** Default cell timeout in ms when the call does not pass one (settings: toolTimeouts.replMs). */
+	defaultTimeoutMs?: number;
 	env?: Record<string, string>;
 	hostHandlers?: Record<string, (payload: Record<string, unknown>) => Promise<Record<string, unknown>>>;
 	snapshotDir?: string;
@@ -69,6 +77,7 @@ export function createBunReplToolDefinition(
 		_options.provisioner ??
 		new BunReplProvisioner({
 			cwd: _options.cwd,
+			defaultTimeoutMs: _options.defaultTimeoutMs,
 			env: _options.env,
 			hostHandlers: _options.hostHandlers,
 			snapshotDir: _options.snapshotDir,
@@ -93,6 +102,7 @@ export function createBunReplToolDefinition(
 				const result = await manager.execute(code, {
 					signal,
 					correlationId: toolCallId,
+					timeout: params.timeout !== undefined && params.timeout > 0 ? params.timeout * 1000 : undefined,
 					// Stream output as it arrives so a long cell is not a blank wait.
 					onStream: (chunk) => onUpdate?.({ content: [{ type: "text", text: chunk }], details: { status: "ok" } }),
 				});

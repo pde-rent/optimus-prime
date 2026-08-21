@@ -145,6 +145,8 @@ export interface BashToolOptions {
 	commandPrefix?: string;
 	/** Optional explicit shell path from settings */
 	shellPath?: string;
+	/** Default timeout in seconds when the call does not pass one; 0 or omitted keeps no-default behavior. */
+	defaultTimeoutSeconds?: number;
 	/** Hook to adjust command, cwd, or env before execution */
 	spawnHook?: BashSpawnHook;
 }
@@ -274,6 +276,7 @@ export function createBashToolDefinition(
 	const ops = options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath });
 	const commandPrefix = options?.commandPrefix;
 	const spawnHook = options?.spawnHook;
+	const defaultTimeoutSeconds = options?.defaultTimeoutSeconds ?? 0;
 	const definition: ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> = {
 		name: "bash",
 		label: "bash",
@@ -282,12 +285,13 @@ export function createBashToolDefinition(
 		parameters: bashSchema,
 		async execute(
 			_toolCallId,
-			{ command, timeout }: { command: string; timeout?: number },
+			{ command, timeout: callTimeout }: { command: string; timeout?: number },
 			signal?: AbortSignal,
 			onUpdate?,
 			_ctx?,
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			const timeout = callTimeout ?? (defaultTimeoutSeconds > 0 ? defaultTimeoutSeconds : undefined);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			const output = new OutputAccumulator({ tempFilePrefix: "pi-bash" });
 			let updateTimer: NodeJS.Timeout | undefined;

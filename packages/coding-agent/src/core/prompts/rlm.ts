@@ -126,6 +126,7 @@ const VERIFICATION_PROMPT = [
 
 const REPL_CONTROL_PROMPT = [
 	"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
+	"All scripting, computing, data wrangling, and one-off parsing happens in this JS REPL - never assume `python3` or any other interpreter exists on the host; do not shell out to Python for tasks the REPL does natively (JSON/regex/text processing, stats, file inspection). Shell out only for real binaries the task needs.",
 	"",
 	"Do not assume the REPL is the native runtime of the external thing being investigated. A repository, package, service, dataset, paper, website, benchmark, or API may have its own environment and normal interface. Evaluate external systems through their own interface, then use the REPL to coordinate the process and analyze what comes back.",
 	"",

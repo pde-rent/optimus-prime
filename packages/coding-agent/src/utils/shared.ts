@@ -12,6 +12,31 @@ export function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * Compact elapsed-time label: s, m, h, d, w, and (when `maxUnit` is "year") y.
+ */
+export function formatElapsedDuration(seconds: number, maxUnit: "week" | "year" = "week"): string {
+	if (seconds < 60) {
+		return `${seconds}s`;
+	}
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) {
+		return `${minutes}m`;
+	}
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) {
+		return `${hours}h`;
+	}
+	const days = Math.floor(hours / 24);
+	if (days < 7) {
+		return `${days}d`;
+	}
+	const weeks = Math.floor(days / 7);
+	if (weeks < 52 || maxUnit === "week") {
+		return `${weeks}w`;
+	}
+	return `${Math.floor(weeks / 52)}y`;
+}
 export function formatTokenCount(count: number): string {
 	if (count >= 1_000_000) {
 		const m = count / 1_000_000;

@@ -96,7 +96,7 @@ import {
 	type IdleEvictionMinutes,
 	type SessionPassivationSnapshot,
 } from "../../core/session-action-store.js";
-import { deleteSessionArtifacts, deleteSessionFile } from "../../core/session-file-actions.js";
+import { deleteSessionFile } from "../../core/session-file-actions.js";
 import { acquireSessionLease, canonicalSessionPath, type SessionLease } from "../../core/session-lease.js";
 import {
 	getSessionArtifactPathForFile,
@@ -1028,7 +1028,7 @@ export class AgentDaemon {
 				createdAt: legacy.createdAt,
 			};
 		}
-		// Display tombstone first ("deleted deliberately, transcript retained"):
+		// Display tombstone first ("deleted deliberately"):
 		// a crash in between leaves a live ledger edge over a deleted display
 		// entry, healed by retrying the deletion; the reverse order could
 		// tombstone the ledger while the display file still claims the child
@@ -1054,18 +1054,21 @@ export class AgentDaemon {
 		// dual-write era it has no other writer to fall back on, so a failed
 		// append is a failed deletion.
 		await this.rlmSpawnLedger().appendDelete({ childId, child: entry.sessionFile, reason });
-		// Deletion boundary: transcript + display tombstone are the durable
-		// record and stay; the nested artifact dir is a runtime cache and goes.
+		// Deletion boundary: transcript and artifact dir are removed with the
+		// registry entry; only the ledger tombstone records that this child existed.
 		await this.deleteRlmSubagentArtifacts(childId, entry.sessionFile);
 	}
 
-	/** Best-effort artifact-dir removal: cache cleanup must never fail a deletion. */
+	/** Best-effort removal of a deleted subagent's session file and artifact dir. */
 	private async deleteRlmSubagentArtifacts(childId: string, childSessionFile: string): Promise<void> {
 		try {
-			await deleteSessionArtifacts(childSessionFile);
+			const result = await deleteSessionFile(childSessionFile);
+			if (!result.ok) {
+				this.log(`failed to delete session for removed RLM subagent ${childId}: ${result.error}`);
+			}
 		} catch (error) {
 			this.log(
-				`failed to remove artifact dir for deleted RLM subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
+				`failed to delete session for removed RLM subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	}

@@ -79,6 +79,8 @@ export interface BunReplProvisionerOptions {
 	onRestore?: (restore: { restoredNames: string[]; failed: string[] }) => void;
 	/** Called when a cell's agent message arrives after that cell's result. */
 	onLateSentAgentMessage?: BunReplManagerOptions["onLateSentAgentMessage"];
+	/** Default per-cell execution timeout in ms (see BunReplManagerOptions). */
+	defaultTimeoutMs?: number;
 	/**
 	 * Idle time before the kernel process is disposed (after a final snapshot); the next
 	 * use starts a fresh kernel that restores from the snapshot. 0 disables reaping.
@@ -220,6 +222,7 @@ export class BunReplProvisioner {
 			shellPath: this.options.shellPath,
 			commandPrefix: this.options.commandPrefix,
 			onLateSentAgentMessage: this.options.onLateSentAgentMessage,
+			defaultTimeoutMs: this.options.defaultTimeoutMs,
 			onCellStart: () => this.idleReap.touch(),
 			onCellEnd: () => this.idleReap.arm(),
 		};

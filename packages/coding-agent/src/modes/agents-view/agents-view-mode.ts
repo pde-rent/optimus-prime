@@ -182,8 +182,11 @@ type PendingDeleteAgent = {
 };
 type PendingKillSubagent = {
 	identity: string;
-	rootActiveSessionId: string;
-	childId: string;
+	/** Present when the subagent's root agent row is currently active. */
+	rootActiveSessionId?: string;
+	childId?: string;
+	/** The subagent's own persisted session file, used when no active parent exists. */
+	sessionFile?: string;
 };
 
 export async function resolveAgentsViewSessionUiServices(
@@ -1897,16 +1900,33 @@ export class AgentsViewMode implements Component, Focusable {
 		}
 		const childId = row.summary.rlmChildId;
 		const rootActiveSessionId = this.findSubagentRootRow(row)?.summary.activeSessionId;
-		if (!childId || !rootActiveSessionId) {
+		if ((!childId || !rootActiveSessionId) && !row.summary.sessionFile) {
 			this.setStatusMessage("Cannot stop subagent without its parent agent");
 			return;
 		}
-		this.pendingKillSubagent = { identity, rootActiveSessionId, childId };
+		this.pendingKillSubagent = { identity, rootActiveSessionId, childId, sessionFile: row.summary.sessionFile };
 		this.showDeleteConfirmation();
 	}
 
 	private async killSubagent(pending: PendingKillSubagent, currentRow: AgentsViewRow): Promise<void> {
 		const running = currentRow.section === "running";
+		if (!running && (!pending.rootActiveSessionId || !pending.childId) && pending.sessionFile) {
+			try {
+				const result = await deleteDaemonSavedSession(
+					this.requireClient(),
+					this.getSavedSessionCatalogContext(),
+					pending.sessionFile,
+				);
+				this.setStatusMessage(
+					result.ok ? "Subagent deleted" : `Failed to delete subagent: ${result.error ?? "Unknown error"}`,
+					{ tone: result.ok ? undefined : ("error" as const) },
+				);
+			} catch (error) {
+				this.setStatusMessage(formatError("Failed to delete subagent", error));
+			}
+			await this.refreshSessions();
+			return;
+		}
 		const client = this.requireClient();
 		this.setStatusMessage(running ? "Stopping subagent..." : "Deleting subagent...");
 		try {
@@ -1914,8 +1934,8 @@ export class AgentsViewMode implements Component, Focusable {
 				const data = requireDaemonData(
 					await client.request({
 						type: "delete_rlm_subagent",
-						activeSessionId: pending.rootActiveSessionId,
-						childId: pending.childId,
+						activeSessionId: pending.rootActiveSessionId ?? "",
+						childId: pending.childId ?? "",
 					}),
 				);
 				const deleted = isRecord(data) && data.deleted === true;
@@ -1932,8 +1952,8 @@ export class AgentsViewMode implements Component, Focusable {
 				const data = requireDaemonData(
 					await client.request({
 						type: "cancel_rlm_child",
-						activeSessionId: pending.rootActiveSessionId,
-						childId: pending.childId,
+						activeSessionId: pending.rootActiveSessionId ?? "",
+						childId: pending.childId ?? "",
 					}),
 				);
 				const cancelled = isRecord(data) && data.cancelled === true;
