@@ -153,7 +153,45 @@ const OWNED_WORKER_DISCONNECT_GRACE_MS = 30_000;
 const IDLE_EVICTION_MAX_SWEEP_INTERVAL_MS = 5 * 60_000;
 const IDLE_EVICTION_MIN_SWEEP_INTERVAL_MS = 60_000;
 const IDLE_EVICTION_DRAIN_TIMEOUT_MS = 5_000;
-const CHILD_PASSIVATION_PER_WORKER_CAP = 2;
+const CHILD_PASSIVATION_MIN_PER_SWEEP = 4;
+const CHILD_PASSIVATION_MAX_PER_SWEEP = 32;
+// Finished children are dead weight once idle and their artifacts stay fully
+// readable on disk, so they retire on a shorter clock than whole-worker
+// eviction - including when whole-worker eviction is "off".
+const CHILD_PASSIVATION_IDLE_MINUTES = 30;
+
+/**
+ * Scale the per-sweep passivation budget with the resident child population:
+ * half per sweep drains a large finished subtree in O(log n) sweeps instead of
+ * two sessions per sweep. The floor keeps small trees fast; the ceiling bounds
+ * one sweep's concurrent closeSession work inside the request timeout.
+ */
+export function childPassivationCap(residentChildren: number): number {
+	const scaled = Math.ceil(residentChildren / 2);
+	return Math.min(CHILD_PASSIVATION_MAX_PER_SWEEP, Math.max(CHILD_PASSIVATION_MIN_PER_SWEEP, scaled));
+}
+
+/** Children retire at the user threshold or the retirement floor, whichever is sooner. */
+export function childPassivationIdleMinutes(idleEvictionMinutes: IdleEvictionMinutes): number {
+	if (idleEvictionMinutes === "off") return CHILD_PASSIVATION_IDLE_MINUTES;
+	return Math.min(idleEvictionMinutes, CHILD_PASSIVATION_IDLE_MINUTES);
+}
+
+/** Resident RLM children only: passive rows are already disk-only. */
+function residentRlmChildCount(worker: ResidentWorker): number {
+	let count = 0;
+	for (const summary of worker.summaries.values()) {
+		if (
+			summary.runtimeKind === "subagent" &&
+			summary.rlmChildId !== undefined &&
+			summary.activeSessionId !== undefined
+		) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
 const SUPERVISOR_CONFIG_FILE_NAME = "supervisor-config";
 const WORKER_STARTUP_GATE_FD = 3;
 
@@ -701,7 +739,9 @@ export class DaemonSupervisor {
 		await this.settingsManager.reload();
 		if (this.shuttingDown || this.updateRestartPhase !== undefined) return;
 		const idleEvictionMinutes = this.settingsManager.getIdleEvictionMinutes();
-		if (idleEvictionMinutes === "off") return;
+		// Whole-worker eviction honors "off"; child retirement never fully stops -
+		// a passive child keeps its on-disk session artifacts, so only the
+		// in-memory copy is dropped.
 
 		const refreshed = new Set<ResidentWorker>();
 		await Promise.all(
@@ -727,9 +767,9 @@ export class DaemonSupervisor {
 						const response = await worker.client?.requestWorker(
 							{
 								type: "worker_passivate_idle_children",
-								idleEvictionMinutes,
+								idleEvictionMinutes: childPassivationIdleMinutes(idleEvictionMinutes),
 								now,
-								limit: CHILD_PASSIVATION_PER_WORKER_CAP,
+								limit: childPassivationCap(residentRlmChildCount(worker)),
 							},
 							30_000,
 						);

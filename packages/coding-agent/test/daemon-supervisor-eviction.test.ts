@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { success } from "../src/modes/daemon/daemon-protocol.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
-import { DaemonSupervisor, idleEvictionSweepIntervalMs } from "../src/modes/daemon/daemon-supervisor.js";
+import {
+	childPassivationCap,
+	childPassivationIdleMinutes,
+	DaemonSupervisor,
+	idleEvictionSweepIntervalMs,
+} from "../src/modes/daemon/daemon-supervisor.js";
 
 interface WorkerFixture {
 	descriptor: {
@@ -185,14 +190,94 @@ describe("daemon supervisor whole-tree eviction", () => {
 		expect(active.client?.requestWorker).toHaveBeenCalledWith(
 			{
 				type: "worker_passivate_idle_children",
-				idleEvictionMinutes: 90,
+				idleEvictionMinutes: 30,
 				now,
-				limit: 2,
+				limit: 4,
 			},
 			30_000,
 		);
 		expect(whollyIdle.client?.requestWorker).not.toHaveBeenCalled();
 		expect(supervisor.stopWorker).toHaveBeenCalledWith(whollyIdle, true);
+	});
+
+	it("scales the passivation cap with resident children and clamps it", () => {
+		expect(childPassivationCap(0)).toBe(4);
+		expect(childPassivationCap(1)).toBe(4);
+		expect(childPassivationCap(9)).toBe(5);
+		expect(childPassivationCap(64)).toBe(32);
+		expect(childPassivationCap(1000)).toBe(32);
+	});
+
+	it("retires children at the user threshold clamped to the retirement floor", () => {
+		expect(childPassivationIdleMinutes("off")).toBe(30);
+		expect(childPassivationIdleMinutes(90)).toBe(30);
+		expect(childPassivationIdleMinutes(10)).toBe(10);
+	});
+
+	it("sizes the passivation cap from resident children only, ignoring passive rows", async () => {
+		const now = Date.parse("2026-08-01T12:00:00.000Z");
+		const supervisor = makeSupervisor();
+		const passiveRows = Array.from({ length: 40 }, (_, index) =>
+			makeSummary(`passive-${index}`, now, {
+				activeSessionId: undefined,
+				runtimeKind: "subagent",
+				rlmChildId: `passive-child-${index}`,
+			}),
+		);
+		const active = makeWorker("active", [
+			makeSummary("active-root", now, { isSessionActive: true }),
+			makeSummary("resident-child", now, { runtimeKind: "subagent", parentActiveSessionId: "active-root" }),
+			...passiveRows,
+		]);
+		active.client!.requestWorker.mockResolvedValue({
+			type: "response",
+			command: "worker_passivate_idle_children",
+			success: true,
+			data: { count: 0 },
+		});
+		supervisor.workers.set("active", active);
+
+		await supervisor.runIdleEvictionSweep(now);
+
+		expect(active.client?.requestWorker).toHaveBeenCalledWith(
+			{
+				type: "worker_passivate_idle_children",
+				idleEvictionMinutes: 30,
+				now,
+				limit: 4,
+			},
+			30_000,
+		);
+		expect(supervisor.stopWorker).not.toHaveBeenCalled();
+	});
+
+	it("still retires finished children when whole-worker eviction is off", async () => {
+		const now = Date.parse("2026-08-01T12:00:00.000Z");
+		const supervisor = makeSupervisor("off");
+		const active = makeWorker("active", [
+			makeSummary("active-root", now, { isSessionActive: true }),
+			makeSummary("finished-child", now, { runtimeKind: "subagent", parentActiveSessionId: "active-root" }),
+		]);
+		active.client!.requestWorker.mockResolvedValue({
+			type: "response",
+			command: "worker_passivate_idle_children",
+			success: true,
+			data: { count: 1 },
+		});
+		supervisor.workers.set("active", active);
+
+		await supervisor.runIdleEvictionSweep(now);
+
+		expect(active.client?.requestWorker).toHaveBeenCalledWith(
+			{
+				type: "worker_passivate_idle_children",
+				idleEvictionMinutes: 30,
+				now,
+				limit: 4,
+			},
+			30_000,
+		);
+		expect(supervisor.stopWorker).not.toHaveBeenCalled();
 	});
 
 	it("does not fence unrelated mutations while child passivation is in flight", async () => {
@@ -251,7 +336,7 @@ describe("daemon supervisor whole-tree eviction", () => {
 		expect(supervisor.workers.has("active-heartbeat")).toBe(true);
 	});
 
-	it("honors off after reloading settings at sweep time", async () => {
+	it("honors off for whole-worker eviction but still refreshes workers", async () => {
 		const now = Date.parse("2026-08-01T12:00:00.000Z");
 		const supervisor = makeSupervisor("off");
 		const idle = makeWorker("idle", [makeSummary("idle-root", now)]);
@@ -260,7 +345,9 @@ describe("daemon supervisor whole-tree eviction", () => {
 		await supervisor.runIdleEvictionSweep(now);
 
 		expect(supervisor.stopWorker).not.toHaveBeenCalled();
-		expect(idle.client?.request).not.toHaveBeenCalled();
+		// The sweep still refreshes and offers child retirement (list + passivation +
+		// post-passivation refresh); only whole-worker eviction is disabled.
+		expect(idle.client?.request).toHaveBeenCalled();
 	});
 
 	it("awaits an in-flight eviction sweep before shutdown tears down workers", async () => {
