@@ -3,6 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentAutonomousStatus } from "../src/core/autonomous.js";
 import type { SessionShutdownEvent } from "../src/index.js";
+import { createAssistantMessage as createBaseAssistantMessage } from "./test-helpers.js";
 
 const output = { write: vi.fn(), flush: vi.fn(async () => {}) };
 
@@ -65,35 +66,23 @@ type FakeRuntimeHost = {
 	setRebindSession: ReturnType<typeof vi.fn>;
 };
 
-function createAssistantMessage(options?: {
+const createAssistantMessage = (options?: {
 	text?: string;
 	stopReason?: AssistantMessage["stopReason"];
 	errorMessage?: string;
-}): AssistantMessage {
-	return {
-		role: "assistant",
-		content: options?.text ? [{ type: "text", text: options.text }] : [],
+}): AssistantMessage =>
+	createBaseAssistantMessage({
 		api: "openai-responses",
 		provider: "openai",
 		model: "gpt-4o-mini",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: options?.stopReason ?? "stop",
-		errorMessage: options?.errorMessage,
-		timestamp: Date.now(),
-	};
-}
+		...options,
+	});
 
 function createRuntimeHost(
 	assistantMessage: AgentMessage | AgentMessage[],
 	autonomousStatus: AgentAutonomousStatus = {
 		enabled: false,
+		noProgressTurns: 0,
 		continuationsUsed: 0,
 		turnsUsed: 0,
 		tokensUsed: 0,
@@ -367,6 +356,7 @@ describe("runPrintMode", () => {
 	it("stops host-driven gate retries once gate maxRetries is exhausted", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "still failing" }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 1,
 			turnsUsed: 2,
 			tokensUsed: 100,
@@ -399,6 +389,7 @@ describe("runPrintMode", () => {
 	it("refreshes autonomous gates after host-driven gate retries", async () => {
 		const failingStatus: AgentAutonomousStatus = {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 0,
 			turnsUsed: 1,
 			tokensUsed: 100,
@@ -415,6 +406,7 @@ describe("runPrintMode", () => {
 		};
 		const passingStatus: AgentAutonomousStatus = {
 			...failingStatus,
+			noProgressTurns: 0,
 			continuationsUsed: 1,
 			turnsUsed: 2,
 			tokensUsed: 200,
@@ -443,6 +435,7 @@ describe("runPrintMode", () => {
 		const statuses: AgentAutonomousStatus[] = [
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 2,
 				tokensUsed: 100,
@@ -459,6 +452,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 3,
 				tokensUsed: 200,
@@ -475,6 +469,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 4,
 				tokensUsed: 300,
@@ -491,6 +486,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 5,
 				tokensUsed: 400,
@@ -533,6 +529,7 @@ describe("runPrintMode", () => {
 		const statuses: AgentAutonomousStatus[] = [
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 0,
 				turnsUsed: 1,
 				tokensUsed: 100,
@@ -549,6 +546,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 2,
 				tokensUsed: 200,
@@ -590,6 +588,7 @@ describe("runPrintMode", () => {
 	it("does not issue host-driven gate prompts once maxContinuations is reached", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "still failing" }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 3,
 			turnsUsed: 2,
 			tokensUsed: 100,
@@ -622,6 +621,7 @@ describe("runPrintMode", () => {
 	it("returns non-zero when autonomous gates are still failing", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "still failing" }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 999,
 			turnsUsed: 92,
 			tokensUsed: 215_535,
@@ -652,6 +652,7 @@ describe("runPrintMode", () => {
 	it("reports the exact autonomous limit that stopped a still-failing gate", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "still failing" }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 34,
 			turnsUsed: 92,
 			tokensUsed: 2_000_000,
@@ -680,6 +681,7 @@ describe("runPrintMode", () => {
 	it("returns non-zero when ungated autonomous runs stop at a limit", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "I still need more work." }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 3,
 			turnsUsed: 4,
 			tokensUsed: 100,
@@ -704,6 +706,7 @@ describe("runPrintMode", () => {
 		const statuses: AgentAutonomousStatus[] = [
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 2,
 				tokensUsed: 100,
@@ -720,6 +723,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 2,
 				turnsUsed: 3,
 				tokensUsed: 200,
@@ -736,6 +740,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 2,
 				turnsUsed: 4,
 				tokensUsed: 250,
@@ -790,6 +795,7 @@ describe("runPrintMode", () => {
 	it("continues prompting when gate attempts do not advance but autonomous usage does", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "still failing" }), {
 			enabled: true,
+			noProgressTurns: 0,
 			continuationsUsed: 1,
 			turnsUsed: 2,
 			tokensUsed: 100,
@@ -808,6 +814,7 @@ describe("runPrintMode", () => {
 		const statuses: AgentAutonomousStatus[] = [
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 1,
 				turnsUsed: 2,
 				tokensUsed: 100,
@@ -819,6 +826,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 2,
 				turnsUsed: 3,
 				tokensUsed: 150,
@@ -835,6 +843,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 3,
 				turnsUsed: 4,
 				tokensUsed: 150,
@@ -851,6 +860,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 10,
 				turnsUsed: 5,
 				tokensUsed: 150,
@@ -888,6 +898,7 @@ describe("runPrintMode", () => {
 		const statuses: AgentAutonomousStatus[] = [
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 7,
 				turnsUsed: 8,
 				tokensUsed: 100,
@@ -904,6 +915,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 8,
 				turnsUsed: 9,
 				tokensUsed: 100,
@@ -920,6 +932,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 9,
 				turnsUsed: 10,
 				tokensUsed: 100,
@@ -936,6 +949,7 @@ describe("runPrintMode", () => {
 			},
 			{
 				enabled: true,
+				noProgressTurns: 0,
 				continuationsUsed: 10,
 				turnsUsed: 11,
 				tokensUsed: 100,

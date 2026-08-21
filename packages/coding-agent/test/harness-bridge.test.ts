@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import {
@@ -10,6 +9,7 @@ import {
 	handleHarnessHostRequest,
 	loadHarnessState,
 } from "../src/core/refinement/index.js";
+import { cleanupTempDirs, makeTempDir } from "./test-helpers.js";
 
 /**
  * Read a cell's result as data.
@@ -21,16 +21,8 @@ function jsonResult(result: string | undefined): unknown {
 	return JSON.parse(JSON.parse(result ?? '"null"') as string);
 }
 
-const tempDirs: string[] = [];
-
-function makeTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "pi-harness-bridge-"));
-	tempDirs.push(dir);
-	return dir;
-}
-
 afterAll(() => {
-	for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+	cleanupTempDirs();
 });
 
 /** Real host handlers over a temp store, wired the way agent-session wires them. */

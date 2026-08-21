@@ -5,36 +5,19 @@ import { KeybindingsManager } from "../src/core/keybindings.js";
 import { AssistantMessageComponent, thinkingRecap } from "../src/modes/interactive/components/assistant-message.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createAssistantMessage } from "./test-helpers.js";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
-function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
-	return {
-		role: "assistant",
-		content,
-		api: "openai-responses",
-		provider: "openai",
-		model: "gpt-4o-mini",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
-
 describe("AssistantMessageComponent", () => {
 	test("adds OSC 133 zone markers to assistant messages without tool calls", () => {
 		initTheme("dark");
 
-		const component = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "hello" }]));
+		const component = new AssistantMessageComponent(
+			createAssistantMessage({ content: [{ type: "text", text: "hello" }] }),
+		);
 		const lines = component.render(40);
 
 		expect(lines).not.toHaveLength(0);
@@ -46,11 +29,11 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const malformedContent = [null, { type: "text", text: "hello" }] as unknown as AssistantMessage["content"];
-		const component = new AssistantMessageComponent(createAssistantMessage(malformedContent));
+		const component = new AssistantMessageComponent(createAssistantMessage({ content: malformedContent }));
 		expect(stripAnsi(component.render(40).join("\n"))).toContain("hello");
 
 		const updatedContent = [null, { type: "text", text: "hello again" }] as unknown as AssistantMessage["content"];
-		component.updateContent(createAssistantMessage(updatedContent));
+		component.updateContent(createAssistantMessage({ content: updatedContent }));
 		expect(stripAnsi(component.render(40).join("\n"))).toContain("hello again");
 	});
 
@@ -58,10 +41,17 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const component = new AssistantMessageComponent(
-			createAssistantMessage([
-				{ type: "text", text: "calling tool" },
-				{ type: "toolCall", id: "tool-1", name: "repl", arguments: { code: "await Bun.file('file.txt').text()" } },
-			]),
+			createAssistantMessage({
+				content: [
+					{ type: "text", text: "calling tool" },
+					{
+						type: "toolCall",
+						id: "tool-1",
+						name: "repl",
+						arguments: { code: "await Bun.file('file.txt').text()" },
+					},
+				],
+			}),
 		);
 		const rendered = component.render(60).join("\n");
 
@@ -74,9 +64,11 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const message = {
-			...createAssistantMessage([
-				{ type: "toolCall" as const, id: "tool-1", name: "repl", arguments: { code: "while True: pass" } },
-			]),
+			...createAssistantMessage({
+				content: [
+					{ type: "toolCall" as const, id: "tool-1", name: "repl", arguments: { code: "while True: pass" } },
+				],
+			}),
 			stopReason: "aborted" as const,
 			errorMessage: "Operation aborted",
 		};
@@ -89,7 +81,7 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const message = {
-			...createAssistantMessage([]),
+			...createAssistantMessage({ content: [] }),
 			stopReason: "error" as const,
 			errorMessage: [
 				"Provider request failed",
@@ -109,7 +101,7 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const message = {
-			...createAssistantMessage([]),
+			...createAssistantMessage({ content: [] }),
 			stopReason: "error" as const,
 			errorMessage: "401 status code (no body)\n\nRun /login to update credentials.",
 		};
@@ -126,7 +118,7 @@ describe("AssistantMessageComponent", () => {
 		initTheme("dark");
 
 		const message = {
-			...createAssistantMessage([]),
+			...createAssistantMessage({ content: [] }),
 			stopReason: "error" as const,
 			errorMessage: [
 				"Provider request failed",
@@ -163,7 +155,7 @@ describe("AssistantMessageComponent streaming identity", () => {
 		let text = "";
 		for (let offset = 0; offset < corpus.length; offset += 5) {
 			text += corpus.slice(offset, offset + 5);
-			const message = createAssistantMessage([{ type: "text", text }]);
+			const message = createAssistantMessage({ content: [{ type: "text", text }] });
 			component.updateContent(message);
 			expectIdentity(component, message);
 		}
@@ -190,7 +182,7 @@ describe("AssistantMessageComponent streaming identity", () => {
 			],
 		];
 		for (const content of steps) {
-			const message = createAssistantMessage(content);
+			const message = createAssistantMessage({ content: content });
 			component.updateContent(message);
 			expectIdentity(component, message);
 		}
@@ -203,10 +195,10 @@ describe("AssistantMessageComponent streaming identity", () => {
 			{ stopReason: "error" as const, errorMessage: "Provider exploded" },
 		]) {
 			const component = new AssistantMessageComponent();
-			component.updateContent(createAssistantMessage([{ type: "text", text: "Partial out" }]));
+			component.updateContent(createAssistantMessage({ content: [{ type: "text", text: "Partial out" }] }));
 			component.render(90);
 			const message = {
-				...createAssistantMessage([{ type: "text", text: "Partial output" }]),
+				...createAssistantMessage({ content: [{ type: "text", text: "Partial output" }] }),
 				...final,
 			};
 			component.updateContent(message);
@@ -229,10 +221,12 @@ describe("AssistantMessageComponent streaming identity", () => {
 			"",
 			"More detail.",
 		].join("\n");
-		const message = createAssistantMessage([
-			{ type: "thinking", thinking },
-			{ type: "text", text: "Answer." },
-		]);
+		const message = createAssistantMessage({
+			content: [
+				{ type: "thinking", thinking },
+				{ type: "text", text: "Answer." },
+			],
+		});
 		const rendered = stripAnsi(new AssistantMessageComponent(message, true).render(120).join("\n"));
 
 		expect(rendered).toContain("Thinking... · Deciding the approach (Ctrl+T to expand)");
@@ -254,14 +248,16 @@ describe("AssistantMessageComponent streaming identity", () => {
 		// to the next structure's (recap "X" plus a real text block), so the
 		// rebuild that renders the new text block would be skipped.
 		const component = new AssistantMessageComponent(undefined, true);
-		component.updateContent(createAssistantMessage([{ type: "thinking", thinking: "X|1:text:1" }]));
+		component.updateContent(createAssistantMessage({ content: [{ type: "thinking", thinking: "X|1:text:1" }] }));
 		component.render(120);
 
 		component.updateContent(
-			createAssistantMessage([
-				{ type: "thinking", thinking: "X" },
-				{ type: "text", text: "Visible answer." },
-			]),
+			createAssistantMessage({
+				content: [
+					{ type: "thinking", thinking: "X" },
+					{ type: "text", text: "Visible answer." },
+				],
+			}),
 		);
 		const rendered = stripAnsi(component.render(120).join("\n"));
 
@@ -273,7 +269,7 @@ describe("AssistantMessageComponent streaming identity", () => {
 		setKeybindings(new KeybindingsManager());
 
 		const thinking = `**${"A deliberately verbose reasoning summary header that keeps going ".repeat(3).trim()}**`;
-		const message = createAssistantMessage([{ type: "thinking", thinking }]);
+		const message = createAssistantMessage({ content: [{ type: "thinking", thinking }] });
 		const lines = new AssistantMessageComponent(message, true)
 			.render(60)
 			.map((line) => stripAnsi(line))
@@ -291,7 +287,7 @@ describe("AssistantMessageComponent streaming identity", () => {
 			{ type: "thinking", thinking: "Deep thoughts here." },
 			{ type: "text", text: "Visible answer." },
 		];
-		const message = createAssistantMessage(content);
+		const message = createAssistantMessage({ content: content });
 		component.updateContent(message);
 		component.render(90);
 
@@ -314,7 +310,7 @@ describe("AssistantMessageComponent streaming identity", () => {
 		const widths = [40, 90, 60];
 		for (let offset = 0, i = 0; offset < corpus.length; offset += 8, i++) {
 			text += corpus.slice(offset, offset + 8);
-			const message = createAssistantMessage([{ type: "text", text }]);
+			const message = createAssistantMessage({ content: [{ type: "text", text }] });
 			component.updateContent(message);
 			expectIdentity(component, message, widths[i % widths.length]);
 		}

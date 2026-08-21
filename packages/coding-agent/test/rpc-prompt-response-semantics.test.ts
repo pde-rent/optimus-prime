@@ -11,6 +11,7 @@ import {
 	type Model,
 } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
+import { createAssistantMessage } from "./test-helpers.js";
 
 const rpcIo = {
 	outputLines: [] as string[],
@@ -68,26 +69,6 @@ class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMe
 			},
 		);
 	}
-}
-
-function createAssistantMessage(text: string): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
-		usage: {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
 }
 
 type ParsedOutputLine = Record<string, unknown>;

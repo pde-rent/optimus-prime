@@ -26,6 +26,7 @@ import {
 	type SessionMessageEntry,
 	type ThinkingLevelChangeEntry,
 } from "../src/core/session-manager.js";
+import { createAssistantMessage as createBaseAssistantMessage } from "./test-helpers.js";
 
 // ============================================================================
 // Test fixtures
@@ -54,18 +55,12 @@ function createUserMessage(text: string): AgentMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
 }
 
-function createAssistantMessage(text: string, usage?: Usage): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
+const createAssistantMessage = (text: string, usage?: Usage): AssistantMessage =>
+	createBaseAssistantMessage({
+		text,
 		usage: usage || createMockUsage(100, 50),
-		stopReason: "stop",
-		timestamp: Date.now(),
-		api: "anthropic-messages",
-		provider: "anthropic",
 		model: "claude-sonnet-4-5",
-	};
-}
+	});
 
 let entryCounter = 0;
 let lastId: string | null = null;

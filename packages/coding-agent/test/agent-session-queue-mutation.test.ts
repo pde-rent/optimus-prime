@@ -18,6 +18,7 @@ import { ModelRegistry } from "../src/core/model-registry.js";
 import type { QueuedMessageMutation } from "../src/core/session-action-store.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
+import { createAssistantMessage } from "./test-helpers.js";
 import { createTestResourceLoader } from "./utilities.js";
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -33,20 +34,7 @@ class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMe
 	}
 }
 
-const zeroUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-
-function createAssistantMessage(text: string): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "mock",
-		usage: { ...zeroUsage, totalTokens: 0, cost: zeroUsage },
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
+const _zeroUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 
 describe("AgentSession queue mutation", () => {
 	let session: AgentSession;

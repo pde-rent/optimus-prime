@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
 import {
@@ -12,20 +11,11 @@ import {
 	SESSION_LEASES_ENABLED_ENV,
 	SessionAlreadyActiveError,
 } from "../src/core/session-lease.js";
-
-const tempDirs: string[] = [];
+import { cleanupTempDirs, makeTempDir as createTempDir } from "./test-helpers.js";
 
 afterEach(() => {
-	for (const directory of tempDirs.splice(0)) {
-		rmSync(directory, { recursive: true, force: true });
-	}
+	cleanupTempDirs();
 });
-
-function createTempDir(): string {
-	const directory = mkdtempSync(join(tmpdir(), "prime-session-lease-test-"));
-	tempDirs.push(directory);
-	return directory;
-}
 
 function enabledEnvironment(owner: string): NodeJS.ProcessEnv {
 	return {

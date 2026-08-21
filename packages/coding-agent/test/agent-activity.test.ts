@@ -1,26 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AssistantMessage, AssistantMessageEvent, UserMessage } from "@earendil-works/pi-ai";
 import { AgentActivityTracker, formatTokenCount } from "../src/modes/interactive/agent-activity.js";
-
-function createAssistantMessage(outputTokens = 0): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "test-model",
-		usage: {
-			input: 0,
-			output: outputTokens,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: outputTokens,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		},
-		stopReason: "stop",
-		timestamp: 0,
-	};
-}
+import { createAssistantMessage } from "./test-helpers.js";
 
 function createUserMessage(): UserMessage {
 	return { role: "user", content: "hello", timestamp: 0 };
@@ -56,7 +37,7 @@ describe("AgentActivityTracker", () => {
 
 	test("uses streamed usage tokens when the provider reports them", () => {
 		const tracker = new AgentActivityTracker();
-		const message = createAssistantMessage(1234);
+		const message = createAssistantMessage({ outputTokens: 1234 });
 		tracker.handleEvent({ type: "message_start", message });
 		tracker.handleEvent(update(message, { type: "text_delta", contentIndex: 0, delta: "hi", partial: message }));
 		expect(tracker.getStatus().tokens).toBe(1234);
@@ -64,7 +45,7 @@ describe("AgentActivityTracker", () => {
 
 	test("falls back to a character estimate when usage is not streamed", () => {
 		const tracker = new AgentActivityTracker();
-		const message = createAssistantMessage(0);
+		const message = createAssistantMessage({ outputTokens: 0 });
 		tracker.handleEvent({ type: "message_start", message });
 		tracker.handleEvent(
 			update(message, { type: "text_delta", contentIndex: 0, delta: "a".repeat(40), partial: message }),
@@ -74,7 +55,7 @@ describe("AgentActivityTracker", () => {
 
 	test("updates live from the character estimate when streamed usage is stale", () => {
 		const tracker = new AgentActivityTracker();
-		const message = createAssistantMessage(1);
+		const message = createAssistantMessage({ outputTokens: 1 });
 		tracker.handleEvent({ type: "message_start", message });
 		tracker.handleEvent(
 			update(message, { type: "text_delta", contentIndex: 0, delta: "a".repeat(400), partial: message }),
@@ -84,19 +65,19 @@ describe("AgentActivityTracker", () => {
 
 	test("never decreases when authoritative usage arrives at message end", () => {
 		const tracker = new AgentActivityTracker();
-		const message = createAssistantMessage(0);
+		const message = createAssistantMessage({ outputTokens: 0 });
 		tracker.handleEvent({ type: "message_start", message });
 		tracker.handleEvent(
 			update(message, { type: "text_delta", contentIndex: 0, delta: "a".repeat(400), partial: message }),
 		);
 		expect(tracker.getStatus().tokens).toBe(100);
-		tracker.handleEvent({ type: "message_end", message: createAssistantMessage(80) });
+		tracker.handleEvent({ type: "message_end", message: createAssistantMessage({ outputTokens: 80 }) });
 		expect(tracker.getStatus().tokens).toBe(100);
 	});
 
 	test("accumulates tokens across turns and flips direction while executing tools", () => {
 		const tracker = new AgentActivityTracker();
-		const first = createAssistantMessage(500);
+		const first = createAssistantMessage({ outputTokens: 500 });
 		tracker.handleEvent({ type: "message_start", message: first });
 		tracker.handleEvent(update(first, { type: "toolcall_delta", contentIndex: 0, delta: "code", partial: first }));
 		tracker.handleEvent({ type: "message_end", message: first });
@@ -114,7 +95,7 @@ describe("AgentActivityTracker", () => {
 		});
 		expect(tracker.getStatus().activity).toBe("waiting");
 
-		const second = createAssistantMessage(250);
+		const second = createAssistantMessage({ outputTokens: 250 });
 		tracker.handleEvent({ type: "message_start", message: second });
 		tracker.handleEvent(update(second, { type: "text_delta", contentIndex: 0, delta: "done", partial: second }));
 		expect(tracker.getStatus().tokens).toBe(750);
@@ -144,7 +125,7 @@ describe("AgentActivityTracker", () => {
 
 	test("resets token count on the next user message", () => {
 		const tracker = new AgentActivityTracker();
-		const message = createAssistantMessage(500);
+		const message = createAssistantMessage({ outputTokens: 500 });
 		tracker.handleEvent({ type: "message_start", message });
 		tracker.handleEvent({ type: "message_end", message });
 		expect(tracker.getStatus().tokens).toBe(500);

@@ -1,21 +1,13 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getBundledSkillsDir } from "../src/config.js";
 import { BunReplManager } from "../src/core/bun-repl/index.js";
 import { getJsSkillRuntimeInfo, loadSkillsFromDir } from "../src/core/skills.js";
-
-const tempDirs: string[] = [];
-
-function makeTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "pi-skill-preload-"));
-	tempDirs.push(dir);
-	return dir;
-}
+import { cleanupTempDirs, makeTempDir } from "./test-helpers.js";
 
 afterAll(() => {
-	for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+	cleanupTempDirs();
 });
 
 /** The env the host hands the REPL child, built the same way agent-session does. */

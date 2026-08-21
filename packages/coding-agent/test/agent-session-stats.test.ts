@@ -6,6 +6,7 @@ import { AuthStorage } from "../src/core/auth-storage.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
+import { createAssistantMessage as createBaseAssistantMessage } from "./test-helpers.js";
 import { createTestResourceLoader } from "./utilities.js";
 
 const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -27,18 +28,15 @@ function createUsage(totalTokens: number): Usage {
 	};
 }
 
-function createAssistantMessage(text: string, totalTokens: number, timestamp: number): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
+const createAssistantMessage = (text: string, totalTokens: number, timestamp: number): AssistantMessage =>
+	createBaseAssistantMessage({
+		text,
 		api: model.api,
 		provider: model.provider,
 		model: model.id,
 		usage: createUsage(totalTokens),
-		stopReason: "stop",
 		timestamp,
-	};
-}
+	});
 
 function createUserMessage(text: string, timestamp: number) {
 	return {

@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, getModel, type Usage } from "@earendil-works/pi-ai";
@@ -14,6 +13,7 @@ import { addAssistantUsage, cloneUsage, emptyUsage } from "../src/core/usage.js"
 import { formatContextTree } from "../src/modes/interactive/components/context-tree-format.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { cleanupTempDirs, createAssistantMessage as createBaseAssistantMessage, makeTempDir } from "./test-helpers.js";
 import { createTestResourceLoader } from "./utilities.js";
 
 const model = getModel("anthropic", "claude-sonnet-4-5")!;
@@ -39,18 +39,8 @@ function createUsage(input: number, output: number, cost: number): Usage {
 	};
 }
 
-function createAssistantMessage(text: string, usage: Usage): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: model.api,
-		provider: model.provider,
-		model: model.id,
-		usage,
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
-}
+const createAssistantMessage = (text: string, usage: Usage): AssistantMessage =>
+	createBaseAssistantMessage({ text, usage, api: model.api, provider: model.provider, model: model.id });
 
 function createUserMessage(text: string) {
 	return {
@@ -81,19 +71,8 @@ function writeChildSession(
 
 const resolveContextWindow = () => 200000;
 
-let tempDirs: string[] = [];
-
-function makeTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "context-tree-test-"));
-	tempDirs.push(dir);
-	return dir;
-}
-
 afterEach(() => {
-	for (const dir of tempDirs) {
-		rmSync(dir, { recursive: true, force: true });
-	}
-	tempDirs = [];
+	cleanupTempDirs();
 });
 
 describe("loadContextTreeChildrenFromDisk", () => {

@@ -1,22 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalizePath, getCwdRelativePath, isLocalPath } from "../src/utils/paths.js";
-
-let tempDir: string;
+import { cleanupTempDirs, makeTempDir as createTempDir } from "./test-helpers.js";
 
 afterEach(() => {
-	if (tempDir) {
-		rmSync(tempDir, { recursive: true, force: true });
-		tempDir = "";
-	}
+	cleanupTempDirs();
 });
-
-function createTempDir(): string {
-	tempDir = mkdtempSync(join(tmpdir(), "pi-paths-"));
-	return tempDir;
-}
 
 describe("canonicalizePath", () => {
 	it("returns the real path for a regular file", () => {

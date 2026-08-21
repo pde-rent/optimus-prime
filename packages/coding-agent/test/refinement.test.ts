@@ -1,15 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, mock, vi } from "bun:test";
-import {
-	appendFileSync,
-	chmodSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, chmodSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
@@ -40,6 +30,7 @@ import type {
 	RefinementProposal,
 	RefinementResult,
 } from "../src/core/refinement/index.js";
+import { cleanupTempDirs, makeTempDir } from "./test-helpers.js";
 
 const {
 	appendGlobalRefinement,
@@ -61,23 +52,13 @@ const {
 	saveHarnessState,
 } = await import("../src/core/refinement/index.js");
 
-let tempDir: string | undefined;
-
 beforeEach(() => {
 	completeSimpleMock.mockReset();
 });
 
 afterEach(() => {
-	if (tempDir) {
-		rmSync(tempDir, { recursive: true, force: true });
-		tempDir = undefined;
-	}
+	cleanupTempDirs();
 });
-
-function makeTempDir(): string {
-	tempDir = mkdtempSync(join(tmpdir(), "optimus-refinement-test-"));
-	return tempDir;
-}
 
 const kinds = ["prompt", "memory", "skill", "subagent"] as const satisfies readonly RefinementKind[];
 const skillReference = {

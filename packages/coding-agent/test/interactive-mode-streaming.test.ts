@@ -9,8 +9,9 @@ import type { ToolExecutionComponent } from "../src/modes/interactive/components
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createAssistantMessage } from "./test-helpers.js";
 
-const EMPTY_USAGE: Usage = {
+const _EMPTY_USAGE: Usage = {
 	input: 0,
 	output: 0,
 	cacheRead: 0,
@@ -108,19 +109,6 @@ function createFakeInteractiveModeThis(): HandleEventThis {
 	};
 	Object.setPrototypeOf(fakeThis, InteractiveMode.prototype);
 	return fakeThis;
-}
-
-function createAssistantMessage(text: string): AssistantMessage {
-	return {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: "test-api",
-		provider: "test-provider",
-		model: "test-model",
-		usage: EMPTY_USAGE,
-		stopReason: "stop",
-		timestamp: Date.now(),
-	};
 }
 
 function renderChat(container: Container): string {
