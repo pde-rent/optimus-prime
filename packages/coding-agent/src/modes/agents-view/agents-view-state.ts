@@ -989,8 +989,11 @@ function getSessionStatusLabel(summary: SessionSummary, hasActiveHeartbeat = sum
 	if (hasActiveHeartbeat) {
 		return "heartbeat active";
 	}
-	if (summary.runtimeKind === "subagent" && summary.repliedSinceTask) {
-		return "replied";
+	if (summary.runtimeKind === "subagent") {
+		// Subagents use the shared status vocabulary (agent-status.ts): a child
+		// that finished its task is done, never "needs input".
+		if (summary.taskState === "completed") return "done";
+		if (summary.repliedSinceTask) return "replied";
 	}
 	if (summary.activity === "working") {
 		return "classifying";
