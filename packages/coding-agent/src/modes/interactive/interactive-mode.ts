@@ -3928,6 +3928,9 @@ export class InteractiveMode {
 				if (!customEditor.onPasteImage) {
 					customEditor.onPasteImage = () => this.defaultEditor.onPasteImage?.();
 				}
+				if (!customEditor.onPasteText) {
+					customEditor.onPasteText = (text: string) => this.handlePastedPaths(text);
+				}
 				if (!customEditor.onMoveBelowPrompt) {
 					customEditor.onMoveBelowPrompt = () => this.defaultEditor.onMoveBelowPrompt?.();
 				}
@@ -4141,6 +4144,7 @@ export class InteractiveMode {
 		this.defaultEditor.onPasteImage = () => {
 			this.handleClipboardImagePaste();
 		};
+		this.defaultEditor.onPasteText = (text) => this.handlePastedPaths(text);
 	}
 
 	private snapshotPromptStashFrom(editor: EditorComponent, text: string): PromptStash {
@@ -4307,37 +4311,101 @@ export class InteractiveMode {
 		try {
 			const image = await readClipboardImage();
 			if (!image) {
+				this.showStatus("No image on the clipboard");
 				return;
 			}
-
-			// Resize down to the inline image size limit, mirroring the CLI @file
-			// path, so large screenshots don't exceed provider limits. Fall back to
-			// the raw bytes if resizing is unavailable.
-			const raw: ImageContent = {
-				type: "image",
-				data: Buffer.from(image.bytes).toString("base64"),
-				mimeType: image.mimeType,
-			};
-			const resized = await resizeImage(raw);
-			const attachment: ImageContent = resized
-				? { type: "image", data: resized.data, mimeType: resized.mimeType }
-				: raw;
-
-			// Register the image and insert a visible marker. The image is attached to
-			// the prompt as multimodal content rather than written to disk, so a vision
-			// model receives it directly.
-			const markerId = this.nextImageMarkerId++;
-			this.rememberPastedImage(markerId, attachment);
-			this.editor.insertTextAtCursor?.(formatImageMarker(markerId));
-			this.ui.requestRender();
-
-			const model = this.getCurrentModel();
-			if (model && !model.input.includes("image")) {
-				this.showStatus("Current model does not support images; the attachment will be omitted.");
-			}
-		} catch {
-			// Silently ignore clipboard errors (may not have permission, etc.)
+			await this.attachImageContent(image.bytes, image.mimeType);
+		} catch (error) {
+			// Clipboard reads can fail on missing permissions; say so instead of
+			// swallowing the attempt, which read as a dead key.
+			this.showStatus(`Clipboard paste failed: ${error instanceof Error ? error.message : "unknown error"}`);
 		}
+	}
+
+	/**
+	 * Attach raw image bytes as a pasted-image marker at the cursor. Shared by the
+	 * clipboard keybinding and pasted file paths.
+	 */
+	private async attachImageContent(bytes: Uint8Array, mimeType: string): Promise<void> {
+		// Resize down to the inline image size limit, mirroring the CLI @file
+		// path, so large screenshots don't exceed provider limits. Fall back to
+		// the raw bytes if resizing is unavailable.
+		const raw: ImageContent = {
+			type: "image",
+			data: Buffer.from(bytes).toString("base64"),
+			mimeType,
+		};
+		const resized = await resizeImage(raw);
+		const attachment: ImageContent = resized
+			? { type: "image", data: resized.data, mimeType: resized.mimeType }
+			: raw;
+
+		// Register the image and insert a visible marker. The image is attached to
+		// the prompt as multimodal content rather than written to disk, so a vision
+		// model receives it directly.
+		const markerId = this.nextImageMarkerId++;
+		this.rememberPastedImage(markerId, attachment);
+		this.editor.insertTextAtCursor?.(formatImageMarker(markerId));
+		this.ui.requestRender();
+
+		const model = this.getCurrentModel();
+		if (model && !model.input.includes("image")) {
+			this.showStatus("Current model does not support images; the attachment will be omitted.");
+		}
+	}
+
+	/**
+	 * A bracketed paste whose every token is an existing image path (or file://
+	 * URL) attaches the files instead of inserting their paths as text. Returns
+	 * false for anything else so normal text pastes are untouched.
+	 */
+	private handlePastedPaths(text: string): boolean {
+		const tokens = text
+			.split(/\s+/)
+			.map((token) => token.trim())
+			.filter(Boolean);
+		if (tokens.length === 0 || tokens.length > 8) return false;
+		const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+		const paths: string[] = [];
+		for (const token of tokens) {
+			let candidate = token.replace(/^["']|["']$/g, "");
+			if (candidate.startsWith("file://")) {
+				try {
+					candidate = decodeURIComponent(new URL(candidate).pathname);
+				} catch {
+					return false;
+				}
+			}
+			if (!candidate.startsWith("/") || !imageExtensions.some((ext) => candidate.toLowerCase().endsWith(ext))) {
+				return false;
+			}
+			paths.push(candidate);
+		}
+		void (async () => {
+			let attached = 0;
+			for (const path of paths) {
+				const file = Bun.file(path);
+				if (!(await file.exists())) {
+					this.showStatus(`Paste skipped ${path}: not a readable file`);
+					continue;
+				}
+				const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+				const mimeTypes: Record<string, string> = {
+					".png": "image/png",
+					".jpg": "image/jpeg",
+					".jpeg": "image/jpeg",
+					".webp": "image/webp",
+					".gif": "image/gif",
+				};
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				await this.attachImageContent(bytes, mimeTypes[ext] ?? "application/octet-stream");
+				attached += 1;
+			}
+			if (attached > 0 && paths.length !== attached) {
+				this.showStatus(`Attached ${attached} of ${paths.length} images`);
+			}
+		})();
+		return true;
 	}
 
 	/**

@@ -31,6 +31,16 @@ export class CustomEditor extends Editor {
 	public onEscape?: () => void;
 	public onCtrlD?: () => void;
 	public onPasteImage?: () => void;
+	/**
+	 * Called with bracketed-paste text before it enters the buffer. Return true
+	 * when the paste was consumed (e.g. converted into image attachments).
+	 */
+	public onPasteText?: (text: string) => boolean;
+
+	protected override handlePaste(pastedText: string): void {
+		if (this.onPasteText?.(pastedText)) return;
+		super.handlePaste(pastedText);
+	}
 	public onMoveBelowPrompt?: () => boolean;
 	public onAgentsBack?: () => boolean;
 	/** When set, the returned line is rendered inside the top of the editor box. */

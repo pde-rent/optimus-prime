@@ -1192,7 +1192,7 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
-	private handlePaste(pastedText: string): void {
+	protected handlePaste(pastedText: string): void {
 		this.cancelAutocomplete();
 		this.historyIndex = -1; // Exit history browsing mode
 		this.lastAction = null;
