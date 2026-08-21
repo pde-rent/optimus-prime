@@ -6,8 +6,11 @@ import {
 	appendFileSync,
 	chmodSync,
 	chownSync,
+	closeSync,
 	existsSync,
+	fstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
@@ -15,6 +18,7 @@ import {
 	rmSync,
 	statSync,
 	writeFileSync,
+	writeSync,
 } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
@@ -1113,6 +1117,8 @@ export class SessionManager {
 	private cwd: string;
 	private persist: boolean;
 	private flushed: boolean = false;
+	private fileEnsured = false;
+	private hasAssistantEntry = false;
 	private fileEntries: FileEntry[] = [];
 	private byId: Map<string, SessionEntry> = new Map();
 	private labelsById: Map<string, string> = new Map();
@@ -1150,6 +1156,7 @@ export class SessionManager {
 		this.sessionFile = resolve(sessionFile);
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = preloadedEntries ?? loadEntriesFromFile(this.sessionFile);
+			this.fileEnsured = true;
 
 			// If file was empty or corrupted (no valid header), truncate and start fresh
 			// to avoid appending messages without a session header (which breaks the session)
@@ -1159,6 +1166,7 @@ export class SessionManager {
 				this.sessionFile = explicitPath;
 				this._rewriteFile();
 				this.flushed = true;
+				this.fileEnsured = true;
 				return;
 			}
 
@@ -1232,6 +1240,8 @@ export class SessionManager {
 		this.labelTimestampsById.clear();
 		this.leafId = null;
 		this.flushed = false;
+		this.fileEnsured = false;
+		this.hasAssistantEntry = false;
 
 		if (this.persist) {
 			this.sessionFile = sessionFile;
@@ -1244,10 +1254,14 @@ export class SessionManager {
 		this.labelsById.clear();
 		this.labelTimestampsById.clear();
 		this.leafId = null;
+		this.hasAssistantEntry = false;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
 			this.byId.set(entry.id, entry);
 			this.leafId = entry.id;
+			if (entry.type === "message" && entry.message.role === "assistant") {
+				this.hasAssistantEntry = true;
+			}
 			if (entry.type === "label") {
 				if (entry.label) {
 					this.labelsById.set(entry.targetId, entry.label);
@@ -1346,8 +1360,10 @@ export class SessionManager {
 			git,
 		};
 		this.fileEntries = [header, ...this.getEntries()];
+		this.hasAssistantEntry = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		this._rewriteFile();
 		this.flushed = true;
+		this.fileEnsured = true;
 		return this.sessionFile;
 	}
 
@@ -1364,28 +1380,55 @@ export class SessionManager {
 	 */
 	flushNow(): void {
 		if (!this.persist || !this.sessionFile) return;
-		if (this.flushed && existsSync(this.sessionFile)) return;
+		if (this.flushed && this.fileEnsured) return;
 		this._rewriteFile();
 		this.flushed = true;
+		this.fileEnsured = true;
 	}
 
 	_persist(entry: SessionEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
-		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		const shouldPersistWithoutAssistant = entry.type === "session_state" || entry.type === "session_info";
-		if (!hasAssistant && !shouldPersistWithoutAssistant) {
+		if (!this.hasAssistantEntry && !shouldPersistWithoutAssistant) {
 			this.flushed = false;
 			return;
 		}
 
-		if (!this.flushed || !existsSync(this.sessionFile)) {
+		if (!this.flushed || !this.fileEnsured) {
 			this._rewriteFile();
 			this.flushed = true;
+			this.fileEnsured = true;
 		} else {
-			mkdirSync(dirname(this.sessionFile), { recursive: true });
-			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+			try {
+				this._appendToSessionFile(entry);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				// The file or its directory vanished underneath us; recover once by
+				// rebuilding the file from in-memory entries, then fail if that fails.
+				mkdirSync(dirname(this.sessionFile), { recursive: true });
+				this._rewriteFile();
+				this.flushed = true;
+				this.fileEnsured = true;
+			}
 			this._notifyPersistListeners();
+		}
+	}
+
+	/**
+	 * Append one JSONL line to the session file. Opens with "r+" so a vanished
+	 * file surfaces as ENOENT (append's default "a" flag would silently recreate
+	 * a headerless file); avoids existsSync/mkdirSync on every append.
+	 */
+	private _appendToSessionFile(entry: SessionEntry): void {
+		const sessionFile = this.sessionFile;
+		if (!sessionFile) return;
+		const line = `${JSON.stringify(entry)}\n`;
+		const fd = openSync(sessionFile, "r+");
+		try {
+			writeSync(fd, line, fstatSync(fd).size);
+		} finally {
+			closeSync(fd);
 		}
 	}
 
@@ -1393,6 +1436,9 @@ export class SessionManager {
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			this.hasAssistantEntry = true;
+		}
 		this._persist(entry);
 	}
 
@@ -1927,12 +1973,13 @@ export class SessionManager {
 			// first assistant response, matching the newSession() contract
 			// and avoiding the duplicate-header bug when _persist()'s
 			// no-assistant guard later resets flushed to false.
-			const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-			if (hasAssistant) {
+			if (this.hasAssistantEntry) {
 				this._rewriteFile();
 				this.flushed = true;
+				this.fileEnsured = true;
 			} else {
 				this.flushed = false;
+				this.fileEnsured = false;
 			}
 
 			return newSessionFile;
