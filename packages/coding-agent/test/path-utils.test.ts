@@ -16,11 +16,15 @@ describe("path-utils", () => {
 			expect(result).not.toContain("~/");
 		});
 
-		it("should normalize Unicode spaces", () => {
-			// Non-breaking space (U+00A0) should become regular space
+		it("should preserve Unicode spaces verbatim", () => {
+			// Normalizing unicode spaces corrupted real paths: macOS screenshot
+			// names contain a narrow no-break space (U+202F) before AM/PM, and
+			// rewriting it to a plain space made the file unresolvable.
 			const withNBSP = "file\u00A0name.txt";
-			const result = expandPath(withNBSP);
-			expect(result).toBe("file name.txt");
+			expect(expandPath(withNBSP)).toBe(withNBSP);
+
+			const screenshot = "Screenshot 2026-08-21 at 5.30.46\u202FPM.png";
+			expect(expandPath(screenshot)).toBe(screenshot);
 		});
 	});
 

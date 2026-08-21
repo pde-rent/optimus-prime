@@ -25,21 +25,14 @@ import type {
 	ToolDefinition,
 } from "./types.js";
 
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
-function normalizeUnicodeSpaces(str: string): string {
-	return str.replace(UNICODE_SPACES, " ");
-}
-
 function expandPath(p: string): string {
-	const normalized = normalizeUnicodeSpaces(p);
-	if (normalized.startsWith("~/")) {
-		return path.join(os.homedir(), normalized.slice(2));
+	if (p.startsWith("~/")) {
+		return path.join(os.homedir(), p.slice(2));
 	}
-	if (normalized.startsWith("~")) {
-		return path.join(os.homedir(), normalized.slice(1));
+	if (p.startsWith("~")) {
+		return path.join(os.homedir(), p.slice(1));
 	}
-	return normalized;
+	return p;
 }
 
 function resolvePath(extPath: string, cwd: string): string {
