@@ -1,7 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+- Wired the `toolTimeouts` settings into the live tools: sessions now pass `toolTimeouts.replMs` to the REPL kernel as the default cell timeout and `toolTimeouts.bashSeconds` to the bash tool as the default command timeout (both still overridable per call; bash stays default-off when unset). The rlm prompt now tells agents to size explicit timeouts for long-running tasks instead of leaning on these defaults.
 - Changed the "zai" provider display name to "Z.ai (GLM Coding Plan)" so the login menu shows what the credentials are for.
+- Added five native file tools (`grep`, `find`, `sed`, `wc`, `ln`) that run entirely in-process with no shell spawn, so they behave identically on Windows: regex search over a file or tree with gitignore/node_modules/.git skipping and binary sniffing, name/type/size/mtime entry lookup with a case-insensitive option, one-substitution stream-editing with a mandatory dry-run diff before `apply:true`, wc-style line/word/byte totals, and symlink/hardlink creation through the same mutation queue as `edit`/`write_file`.
 - Hardened MCP OAuth: a set-but-empty credential env var now counts as a missing credential instead of sending the variable name; stored MCP OAuth tokens are bound to the endpoint (and RFC 9728 resource) they were issued for, so a retargeted server can no longer replay them; credential removal and `/mcp logout` are disk-verified before reporting success; and MCP OAuth discovery now follows path-scoped protected-resource metadata with authorization-server indirection and issuer validation.
 - Fixed model searches ranking stronger matches ahead of weaker signed-in matches while preferring signed-in providers for equivalent results ([#539](https://github.com/PrimeIntellect-ai/prime-agent/pull/539) by [@eliebak](https://github.com/eliebak)).
 - Added SuperGrok login: the "grok" provider appears in /login as "Grok (SuperGrok)" with device-flow OAuth, and defaults to grok-4.6.
