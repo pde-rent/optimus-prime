@@ -121,7 +121,8 @@ export function createSedToolDefinition(cwd: string): ToolDefinition<typeof sedS
 		label: "sed",
 		description:
 			'Stream-edit a file with one s/pattern/replacement/[flags] substitution. Default (apply:false) is a dry-run returning the unified diff; pass apply:true only after reviewing it to write the change. Deliberately narrower than GNU sed: no line addressing, no scripts, one substitution per call - prefer edit for targeted multi-line changes. Zero matches leave the file untouched and answer without a diff. Failures report the exact problem: "Invalid sed expression: <expression>. <reason>.", "Could not read file: <path>. Error code: <code>.", "Could not write file: <path>. Error code: <code>."',
-		promptSnippet: "Dry-run or apply one s/pattern/replacement substitution on a file",
+		promptSnippet:
+			"Substitute in a file via s/pattern/replacement; dry-run diff by default; not for multi-file edits - use grep+edit",
 		parameters: sedSchema,
 		kind: "edit",
 		read_only: false,

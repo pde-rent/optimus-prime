@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { type ModelOutputModality } from "../src/types.js";
 import { getAnthropicCacheCosts } from "../src/cache-pricing.js";
 import { getOpenRouterReasoningCapabilities } from "../src/openrouter-reasoning.js";
 import {
@@ -57,6 +58,20 @@ interface ModelsDevModel {
 	};
 	provider?: {
 		npm?: string;
+	};
+}
+
+/** Map models.dev modalities to our Model input/output fields. Unknown output = undefined (= capable of anything). */
+function modelModalities(m: ModelsDevModel): {
+	input: ("text" | "image")[];
+	output?: ModelOutputModality[];
+} {
+	const outputFilter = (value: string): value is ModelOutputModality =>
+		value === "text" || value === "image" || value === "audio" || value === "video";
+	const output = m.modalities?.output?.filter(outputFilter);
+	return {
+		input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+		...(output && output.length > 0 ? { output } : {}),
 	};
 }
 
@@ -1020,7 +1035,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "anthropic",
 					baseUrl: "https://api.anthropic.com",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1053,7 +1068,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "google",
 					baseUrl: "https://generativelanguage.googleapis.com/v1beta",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1079,7 +1094,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "openai",
 					baseUrl: "https://api.openai.com/v1",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1105,7 +1120,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "groq",
 					baseUrl: "https://api.groq.com/openai/v1",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1131,7 +1146,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "cerebras",
 					baseUrl: "https://api.cerebras.ai/v1",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1157,7 +1172,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "cloudflare-workers-ai",
 					baseUrl: CLOUDFLARE_WORKERS_AI_BASE_URL,
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1212,7 +1227,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "cloudflare-ai-gateway",
 					baseUrl,
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1239,7 +1254,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "xai",
 					baseUrl: "https://api.x.ai/v1",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1297,7 +1312,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "mistral",
 					baseUrl: "https://api.mistral.ai",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1323,7 +1338,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "huggingface",
 					baseUrl: "https://router.huggingface.co/v1",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1353,7 +1368,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					// Fireworks Anthropic-compatible API - SDK appends /v1/messages
 					baseUrl: "https://api.fireworks.ai/inference",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1437,7 +1452,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: variant.provider,
 					baseUrl,
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1479,7 +1494,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "github-copilot",
 					baseUrl: "https://api.individual.githubcopilot.com",
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1524,7 +1539,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						// MiniMax's Anthropic-compatible API - SDK appends /v1/messages
 						baseUrl,
 						reasoning: m.reasoning === true,
-						input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+						...modelModalities(m),
 						cost: {
 							input: m.cost?.input || 0,
 							output: m.cost?.output || 0,
@@ -1564,7 +1579,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					baseUrl: "https://api.kimi.com/coding",
 					headers: { ...KIMI_STATIC_HEADERS },
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1604,7 +1619,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider,
 					baseUrl,
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1653,7 +1668,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider,
 					baseUrl,
 					reasoning: m.reasoning === true,
-					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					...modelModalities(m),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -1691,7 +1706,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						provider,
 						baseUrl,
 						reasoning: m.reasoning === true,
-						input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+						...modelModalities(m),
 						cost: {
 							input: m.cost?.input || 0,
 							output: m.cost?.output || 0,
@@ -2333,65 +2348,7 @@ async function generateModels() {
 	}
 
 	// Generate TypeScript file
-	let output = `// This file is auto-generated by scripts/generate-models.ts
-// Do not edit manually - run 'bun run generate-models' to update
-
-import type { Model } from "./types.js";
-
-export const MODELS = {
-`;
-
-	// Generate provider sections (sorted for deterministic output)
-	const sortedProviderIds = Object.keys(providers).sort();
-	for (const providerId of sortedProviderIds) {
-		const models = providers[providerId];
-		output += `\t${JSON.stringify(providerId)}: {\n`;
-
-		const sortedModelIds = Object.keys(models).sort();
-		for (const modelId of sortedModelIds) {
-			const model = models[modelId];
-			output += `\t\t"${model.id}": {\n`;
-			output += `\t\t\tid: "${model.id}",\n`;
-			output += `\t\t\tname: "${model.name}",\n`;
-			output += `\t\t\tapi: "${model.api}",\n`;
-			output += `\t\t\tprovider: "${model.provider}",\n`;
-			if (model.baseUrl !== undefined) {
-				output += `\t\t\tbaseUrl: "${model.baseUrl}",\n`;
-			}
-			if (model.headers) {
-				output += `\t\t\theaders: ${JSON.stringify(model.headers)},\n`;
-			}
-			if (model.compat) {
-				output += `			compat: ${JSON.stringify(model.compat)},
-`;
-			}
-			output += `\t\t\treasoning: ${model.reasoning},\n`;
-			if (model.thinkingLevelMap) {
-				output += `\t\t\tthinkingLevelMap: ${JSON.stringify(model.thinkingLevelMap)},\n`;
-			}
-			output += `\t\t\tinput: [${model.input.map(i => `"${i}"`).join(", ")}],\n`;
-			output += `\t\t\tcost: {\n`;
-			output += `\t\t\t\tinput: ${model.cost.input},\n`;
-			output += `\t\t\t\toutput: ${model.cost.output},\n`;
-			output += `\t\t\t\tcacheRead: ${model.cost.cacheRead},\n`;
-			output += `\t\t\t\tcacheWrite: ${model.cost.cacheWrite},\n`;
-			output += `\t\t\t},\n`;
-			output += `\t\t\tcontextWindow: ${model.contextWindow},\n`;
-			output += `\t\t\tmaxTokens: ${model.maxTokens},\n`;
-			if (model.featured) {
-				output += `\t\t\tfeatured: true,\n`;
-			}
-			output += `\t\t} satisfies Model<"${model.api}">,\n`;
-		}
-
-		output += `\t},\n`;
-	}
-
-	output += `} as const;
-`;
-
-	// Write file
-	writeFileSync(join(packageRoot, "src/models.generated.ts"), output);
+	writeFileSync(join(packageRoot, "src/models.generated.ts"), renderGeneratedFile(providers));
 	console.log("Generated src/models.generated.ts");
 
 	// Print statistics
@@ -2406,6 +2363,159 @@ export const MODELS = {
 		console.log(`  ${provider}: ${Object.keys(models).length} models`);
 	}
 }
+type GeneratedProviders = Record<string, Record<string, Model<any>>>;
 
-// Run the generator
-generateModels().catch(console.error);
+function majorityValue(values: string[]): string {
+	const counts = new Map<string, number>();
+	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+	let best = "";
+	let bestCount = 0;
+	for (const [value, count] of counts) {
+		if (count > bestCount || (count === bestCount && value < best)) {
+			best = value;
+			bestCount = count;
+		}
+	}
+	return best;
+}
+
+function encodeInputModalities(input: ("text" | "image")[]): 0 | 1 {
+	if (input.length === 1 && input[0] === "text") return 0;
+	if (input.length === 2 && input[0] === "text" && input[1] === "image") return 1;
+	throw new Error(`Unsupported input modalities: ${JSON.stringify(input)}`);
+}
+
+/**
+ * Renders `src/models.generated.ts` in compact form: fields shared by a provider (api, baseUrl,
+ * compat) are hoisted to the provider level, each model becomes a one-line record of its
+ * non-default fields, and compat/headers/thinkingLevelMap values used more than once become
+ * top-level constants. `expandModels` in `src/models-compact.ts` reconstructs the full
+ * `Model` objects from this shape.
+ */
+export function renderGeneratedFile(providers: GeneratedProviders): string {
+	const sortedProviderIds = Object.keys(providers).sort();
+	const sortedModelIds = new Map(sortedProviderIds.map((p) => [p, Object.keys(providers[p]).sort()]));
+
+	// Provider-level defaults: the most common value among the provider's models.
+	const defaults = new Map(
+		sortedProviderIds.map((providerId) => {
+			const models = Object.values(providers[providerId]);
+			const api = majorityValue(models.map((model) => model.api));
+			const baseUrl = majorityValue(models.map((model) => String(model.baseUrl)));
+			const compat = majorityValue(models.map((model) => JSON.stringify(model.compat ?? null)));
+			return [
+				providerId,
+				{
+					api,
+					baseUrl: baseUrl === "undefined" ? undefined : baseUrl,
+					compat: compat === "null" ? null : compat,
+				},
+			] as const;
+		}),
+	);
+
+	// Count shared values; values used more than once become top-level constants. Insertion
+	// order follows emission order, so constant numbering is deterministic.
+	const compatCounts = new Map<string, number>();
+	const headerCounts = new Map<string, number>();
+	const tlmCounts = new Map<string, number>();
+	const bump = (counts: Map<string, number>, json: string) => counts.set(json, (counts.get(json) ?? 0) + 1);
+	for (const providerId of sortedProviderIds) {
+		const d = defaults.get(providerId)!;
+		if (d.compat !== null) bump(compatCounts, d.compat);
+		for (const modelId of sortedModelIds.get(providerId)!) {
+			const model = providers[providerId][modelId];
+			if ((model.compat ? JSON.stringify(model.compat) : null) !== d.compat) {
+				bump(compatCounts, JSON.stringify(model.compat ?? null));
+			}
+			if (model.headers) bump(headerCounts, JSON.stringify(model.headers));
+			if (model.thinkingLevelMap) bump(tlmCounts, JSON.stringify(model.thinkingLevelMap));
+		}
+	}
+	const nameConstants = (counts: Map<string, number>, prefix: string) => {
+		const names = new Map<string, string>();
+		let index = 0;
+		for (const [json, count] of counts) {
+			if (count > 1) names.set(json, `${prefix}${index++}`);
+		}
+		return names;
+	};
+	const compatNames = nameConstants(compatCounts, "C");
+	const headerNames = nameConstants(headerCounts, "H");
+	const tlmNames = nameConstants(tlmCounts, "T");
+	const constRef = (names: Map<string, string>, value: object): string => {
+		const json = JSON.stringify(value);
+		return names.get(json) ?? json;
+	};
+
+	let output = "// This file is auto-generated by scripts/generate-models.ts\n// Do not edit manually - run 'bun run generate-models' to update\n\nimport { expandModels";
+	const typeImports: string[] = [];
+	if (compatCounts.size > 0) typeImports.push("type CompatData");
+	if (tlmCounts.size > 0) typeImports.push("type ThinkingLevelMapData");
+	if (typeImports.length > 0) output += `, ${typeImports.join(", ")}`;
+	output += " } from \"./models-compact.js\";\n\n";
+
+	for (const [json, name] of compatNames) {
+		output += `const ${name} = ${json} satisfies CompatData;\n`;
+	}
+	for (const [json, name] of tlmNames) {
+		output += `const ${name} = ${json} satisfies ThinkingLevelMapData;\n`;
+	}
+	for (const [json, name] of headerNames) {
+		output += `const ${name} = ${json} satisfies Record<string, string>;\n`;
+	}
+	if (compatNames.size + tlmNames.size + headerNames.size > 0) output += "\n";
+
+	output += "const DATA = {\n";
+	for (const providerId of sortedProviderIds) {
+		const d = defaults.get(providerId)!;
+		output += `\t${JSON.stringify(providerId)}: {\n`;
+		output += `\t\tapi: ${JSON.stringify(d.api)},\n`;
+		if (d.baseUrl !== undefined) {
+			output += `\t\tbaseUrl: ${JSON.stringify(d.baseUrl)},\n`;
+		}
+		if (d.compat !== null) {
+			output += `\t\tcompat: ${constRef(compatNames, JSON.parse(d.compat))} satisfies CompatData,\n`;
+		}
+		output += "\t\tm: {\n";
+		for (const modelId of sortedModelIds.get(providerId)!) {
+			const model = providers[providerId][modelId];
+			if (model.baseUrl === undefined && d.baseUrl !== undefined) {
+				throw new Error(`Model ${providerId}/${modelId} has no baseUrl but the provider default exists`);
+			}
+			const parts = [
+				JSON.stringify(model.name),
+				String(model.reasoning),
+				String(encodeInputModalities(model.input)),
+				String(model.contextWindow),
+				String(model.maxTokens),
+			];
+			const cost = model.cost;
+			if (cost.input !== 0 || cost.output !== 0 || cost.cacheRead !== 0 || cost.cacheWrite !== 0) {
+				parts.push(`[${cost.input}, ${cost.output}, ${cost.cacheRead}, ${cost.cacheWrite}]`);
+			}
+			const overrides: string[] = [];
+			if (model.api !== d.api) overrides.push(`a: ${JSON.stringify(model.api)}`);
+			if (model.baseUrl !== undefined && String(model.baseUrl) !== d.baseUrl) {
+				overrides.push(`u: ${JSON.stringify(model.baseUrl)}`);
+			}
+			if (model.headers) overrides.push(`h: ${constRef(headerNames, model.headers)}`);
+			if ((model.compat ? JSON.stringify(model.compat) : null) !== d.compat) {
+				overrides.push(`c: ${model.compat ? constRef(compatNames, model.compat) : "null"}`);
+			}
+			if (model.thinkingLevelMap) overrides.push(`t: ${constRef(tlmNames, model.thinkingLevelMap)}`);
+			if (model.featured) overrides.push("f: 1");
+			if (overrides.length > 0) parts.push(`{ ${overrides.join(", ")} }`);
+			output += `\t\t\t${JSON.stringify(modelId)}: [${parts.join(", ")}],\n`;
+		}
+		output += "\t\t},\n";
+		output += "\t},\n";
+	}
+	output += "} as const;\n\nexport const MODELS = expandModels(DATA);\n";
+	return output;
+}
+
+// Run the generator when executed directly (not when imported for renderGeneratedFile).
+if (import.meta.main) {
+	generateModels().catch(console.error);
+}

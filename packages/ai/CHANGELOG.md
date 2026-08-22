@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added output modality metadata to Model (text/image/audio/video) mapped from models.dev catalogs; unknown means capable of anything.
 - Added NVIDIA NIM, Alibaba Qwen Coding Plan (intl + China), Zhipu GLM Coding Plan (China), Tencent Coding Plan, SiliconFlow, and Together AI providers with models.dev-generated catalogs.
 - Added the "cursor" provider for Cursor subscribers: Connect JSON streaming against api2.cursor.sh with PKCE browser OAuth login, `CURSOR_ACCESS_TOKEN` bypass, Cursor client headers (checksum, session id, request id), and an incremental Connect envelope parser for text and tool-call deltas.
 - Added the "grok" provider for paid SuperGrok subscribers: xAI CLI proxy (Responses API) with OAuth device-flow login via auth.x.ai, `XAI_OAUTH_TOKEN` raw-token bypass, required proxy client headers, and payload sanitization to avoid 422s.

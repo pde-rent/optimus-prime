@@ -1,5 +1,6 @@
 ---
 name: web3
+summary: Chain RPC + wallet balances - use for ANY EVM/Solana call instead of curl/cast
 description: Chain RPC, wallet balances and DeFi analytics for EVM, Solana and Tron. One binding, nested - `web3.rpc` is JSON-RPC 2.0 to any node with live endpoint discovery and transparent failover (`.call`, `.batch` for N calls in ONE round trip, `.pick`, `.endpoints`, `.tron` REST, exact BigInt unit helpers); `web3.portfolio.balances(addr)` -> priced token rows sorted by `valueUsd`; `web3.defi` -> DefiLlama TVL and GeckoTerminal DEX volume, by chain or protocol, history opt-in. Failures -> `{error, status?}`; bad args throw TypeError.
 ---
 

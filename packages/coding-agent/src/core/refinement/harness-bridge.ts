@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import {
+	consolidateHarnessMemories,
+	consolidationRefinementEvent,
+	DEFAULT_CONTENT_SIMILARITY_THRESHOLD,
+	DEFAULT_TITLE_SIMILARITY_THRESHOLD,
+} from "./consolidation.js";
 import { type HarnessMemorySearchResult, searchHarnessMemories } from "./memory-search.js";
 import {
 	applyRefinementProposal,
@@ -6,6 +12,7 @@ import {
 	type HarnessScope,
 	type HarnessState,
 	loadHarnessState,
+	memoryBudgetCap,
 	mergeHarnessStates,
 	type RefinementAction,
 	type RefinementKind,
@@ -42,6 +49,7 @@ export const HARNESS_HOST_REQUEST_TYPES: readonly string[] = [
 		`harness.delete_${suffix}`,
 	]),
 	"harness.record_refinement",
+	"harness.consolidate_memories",
 	"harness.search_memory",
 	"harness.get_memory",
 	"harness.overview",
@@ -139,6 +147,15 @@ function optionalRecord(
 	return value as Record<string, unknown>;
 }
 
+function optionalNumber(payload: Record<string, unknown>, key: string, type: string): number | undefined {
+	const value = payload[key];
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`${type} ${key} must be a finite number when provided`);
+	}
+	return value;
+}
+
 function resolveScope(payload: Record<string, unknown>, type: string, ctx: HarnessBridgeContext) {
 	const flag = payload.global;
 	if (flag !== undefined && typeof flag !== "boolean") {
@@ -170,6 +187,7 @@ function entrySummary(entry: HarnessEntry): Record<string, unknown> {
 		path: entry.path,
 		version: entry.version,
 		updated_at: entry.updated_at,
+		last_used_at: entry.last_used_at ?? "",
 	};
 }
 
@@ -238,10 +256,11 @@ function applySingleEdit(
 		},
 		{ id: `harness-${randomUUID()}`, scope },
 	);
-	// applyRefinementProposal records a refinement event for every proposal. A single
-	// CRUD call is not a refinement, so drop it here; record_refinement is the explicit
-	// way to log one.
-	state.refinements.pop();
+	// applyRefinementProposal records a refinement event for every proposal, and a
+	// memory-budget enforcement may have appended its own eviction event after it.
+	// Drop only this call's event by id -- record_refinement is the explicit way to
+	// log one, and evictions must survive.
+	state.refinements = state.refinements.filter((event) => event.id !== result.id);
 
 	const applied = result.appliedEdits[0];
 	if (!applied?.applied) {
@@ -330,6 +349,61 @@ function resolveTopK(payload: Record<string, unknown>, type: string): number {
 	return Math.min(10, Math.max(1, Math.round(numeric)));
 }
 
+/**
+ * Usage tracking (schema 2): every entry returned by a search has its hit_count
+ * incremented and last_used_at stamped in its owning store. Search stays read-only
+ * semantically -- a failed or empty search writes nothing.
+ */
+function trackSearchUsage(results: readonly HarnessMemorySearchResult[], ctx: HarnessBridgeContext): void {
+	if (results.length === 0) return;
+	const usedAt = new Date().toISOString();
+	const dirty = new Map<string, HarnessState>();
+	for (const hit of results) {
+		const dir = hit.scope === "global" ? ctx.globalDir : ctx.localDir;
+		if (!dir) continue;
+		const state = dirty.get(dir) ?? loadHarnessState(dir, hit.scope);
+		dirty.set(dir, state);
+		const entry = state.entries.memory[hit.id];
+		if (!entry) continue;
+		entry.hit_count = (entry.hit_count ?? 0) + 1;
+		entry.last_used_at = usedAt;
+	}
+	for (const [dir, state] of dirty) {
+		saveHarnessState(dir, state);
+		ctx.onStateChanged?.();
+	}
+}
+
+/** Run the consolidation pass over one store's memories. */
+function consolidateMemories(payload: Record<string, unknown>, ctx: HarnessBridgeContext): Record<string, unknown> {
+	const type = "harness.consolidate_memories";
+	const { scope, dir } = resolveScope(payload, type, ctx);
+	const dryRun = payload.dry_run === true;
+	const titleThreshold = optionalNumber(payload, "title_threshold", type) ?? DEFAULT_TITLE_SIMILARITY_THRESHOLD;
+	const contentThreshold = optionalNumber(payload, "content_threshold", type) ?? DEFAULT_CONTENT_SIMILARITY_THRESHOLD;
+
+	const state = loadHarnessState(dir, scope);
+	const result = consolidateHarnessMemories(state, { titleThreshold, contentThreshold });
+	const response: Record<string, unknown> = {
+		scope,
+		dry_run: dryRun,
+		memory_count: Object.keys(result.state.entries.memory).length,
+		caps: { local: memoryBudgetCap(undefined, "local"), global: memoryBudgetCap(undefined, "global") },
+		merged: result.merged,
+		deleted: result.deleted,
+	};
+	if (dryRun || (result.merged.length === 0 && result.deleted.length === 0)) {
+		return response;
+	}
+	const event = consolidationRefinementEvent(result, `consolidation-${randomUUID()}`);
+	if (event) {
+		result.state.refinements.push(event);
+	}
+	response.harness_state_path = saveHarnessState(dir, result.state);
+	ctx.onStateChanged?.();
+	return response;
+}
+
 function searchMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContext): HarnessSearchMemoryResponse {
 	const type = "harness.search_memory";
 	const rawQuery = payload.query;
@@ -360,6 +434,7 @@ function searchMemory(payload: Record<string, unknown>, ctx: HarnessBridgeContex
 	if (verbose) {
 		response.total_matches_before_collapse = found.totalMatchesBeforeCollapse;
 	}
+	trackSearchUsage(found.results, ctx);
 	// Retrieval is the only path to a memory's contents and nothing retrieves
 	// automatically, so an empty result must say whether the store is empty or the
 	// wording missed. Sent only on a miss: on a hit it is noise the model pays for.
@@ -485,6 +560,9 @@ export function handleHarnessHostRequest(
 	}
 	if (type === "harness.record_refinement") {
 		return recordRefinement(payload, ctx);
+	}
+	if (type === "harness.consolidate_memories") {
+		return consolidateMemories(payload, ctx);
 	}
 	if (type === "harness.search_memory") {
 		return searchMemory(payload, ctx) as unknown as Record<string, unknown>;

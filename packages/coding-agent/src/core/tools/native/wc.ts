@@ -68,7 +68,7 @@ export function createWcToolDefinition(
 		label: "wc",
 		description:
 			'Count lines, words and bytes for one file or every regular file under a directory tree, without spawning a shell. Use it for size overviews ("how large is src/", "which files are biggest"); do not use it to inspect content or to count node_modules, .git or gitignored paths - they are skipped. Output is wc-style "lines words bytes path" rows plus a TOTAL row, capped at 2000 lines / 50KB with a truncation notice. A missing path fails with "Could not search path: <path>. Error code: <code>."',
-		promptSnippet: "Count lines, words and bytes across a file or tree",
+		promptSnippet: "Count lines, words and bytes across a file or tree; not for reading content - use read_file",
 		parameters: wcSchema,
 		executionMode: "parallel",
 		kind: "search",

@@ -159,4 +159,28 @@ describe("ModelRegistry dynamic model discovery", () => {
 		expect(grok[0]!.api).toBe("grok-responses");
 		expect(grok[0]!.baseUrl).toBe("https://cli-chat-proxy.grok.com/v1");
 	});
+
+	test("discovery maps architecture modalities when present and omits output when absent", async () => {
+		authStorage.set("nous", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("nous", async () =>
+			openAIListResponse([
+				{
+					id: "gemini-image-pro",
+					name: "Gemini Image Pro",
+					context_length: 1000000,
+					architecture: { input_modalities: ["text", "image"], output_modalities: ["text", "image"] },
+				},
+				{ id: "plain-text", name: "Plain Text", context_length: 128000 },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+		const nous = modelsFor(registry, "nous");
+		const imageModel = nous.find((m) => m.id === "gemini-image-pro");
+		expect(imageModel?.input).toEqual(["text", "image"]);
+		expect(imageModel?.output).toEqual(["text", "image"]);
+		const plain = nous.find((m) => m.id === "plain-text");
+		expect(plain?.input).toEqual(["text"]);
+		expect(plain?.output).toBeUndefined();
+	});
 });

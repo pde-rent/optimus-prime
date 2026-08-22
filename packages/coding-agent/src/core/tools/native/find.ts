@@ -97,7 +97,7 @@ export function createFindToolDefinition(
 		label: "find",
 		description:
 			'Find files and directories by name glob, type, size or modification time, without spawning a shell. Use it to locate entries whose exact path you do not know; do not use it to inspect contents (grep or read_file) or to search node_modules, .git or gitignored paths - they are skipped. Output is one relative forward-slash path per line under the given root, capped at 2000 lines / 50KB with a truncation notice. Failures report the exact problem: "Could not search path: <path>. Error code: <code>." for a missing root, or "Invalid find filter: <value>. Expected ISO 8601." for a bad timestamp.',
-		promptSnippet: "Find files and directories by name, type, size or mtime",
+		promptSnippet: "Find files and directories by name, type, size or mtime; prefer over bash find",
 		parameters: findSchema,
 		executionMode: "parallel",
 		kind: "search",

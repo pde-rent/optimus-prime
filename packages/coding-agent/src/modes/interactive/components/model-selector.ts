@@ -467,7 +467,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.listContainer.addChild(
 				new MenuRow({
 					primary: item.id,
-					secondary: item.provider,
+					secondary: item.model.output?.some((m) => m !== "text")
+						? `${item.provider} · ${item.model.output.filter((m) => m !== "text").join("+")} out`
+						: item.provider,
 					meta,
 					selected: isSelected,
 				}),

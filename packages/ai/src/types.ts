@@ -444,6 +444,8 @@ export interface VercelGatewayRouting {
 }
 
 // Model interface for the unified model system
+export type ModelOutputModality = "text" | "image" | "audio" | "video";
+
 export interface Model<TApi extends Api> {
 	id: string;
 	name: string;
@@ -457,6 +459,8 @@ export interface Model<TApi extends Api> {
 	 */
 	thinkingLevelMap?: ThinkingLevelMap;
 	input: ("text" | "image")[];
+	/** Output modalities the model can generate. Undefined = unknown; treat as capable of anything. */
+	output?: ModelOutputModality[];
 	cost: {
 		input: number; // $/million tokens
 		output: number; // $/million tokens

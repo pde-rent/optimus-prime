@@ -154,7 +154,7 @@ function splitCjkRuns(token: string): string[] {
 }
 
 /** Tokenizer without plural expansion; the surface form the writer actually typed. */
-function tokenizeBase(value: string): string[] {
+export function tokenizeBase(value: string): string[] {
 	const normalized = fold(value).replace(ACRONYM_BOUNDARY, "$1 $2").replace(CASE_BOUNDARY, "$1 $2").toLowerCase();
 	const tokens: string[] = [];
 	for (const raw of normalized.split(NON_ALPHANUMERIC)) {

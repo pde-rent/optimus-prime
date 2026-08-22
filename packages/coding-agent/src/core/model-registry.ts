@@ -14,6 +14,7 @@ import {
 	getProviders,
 	type KnownProvider,
 	type Model,
+	type ModelOutputModality,
 	type OAuthProviderInterface,
 	type OpenAICompletionsCompat,
 	type OpenAIResponsesCompat,
@@ -145,6 +146,11 @@ const ModelDefinitionSchema = Type.Object({
 	reasoning: Type.Optional(Type.Boolean()),
 	thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
 	input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
+	output: Type.Optional(
+		Type.Array(
+			Type.Union([Type.Literal("text"), Type.Literal("image"), Type.Literal("audio"), Type.Literal("video")]),
+		),
+	),
 	cost: Type.Optional(
 		Type.Object({
 			input: Type.Number(),
@@ -164,6 +170,11 @@ const ModelOverrideSchema = Type.Object({
 	reasoning: Type.Optional(Type.Boolean()),
 	thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
 	input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
+	output: Type.Optional(
+		Type.Array(
+			Type.Union([Type.Literal("text"), Type.Literal("image"), Type.Literal("audio"), Type.Literal("video")]),
+		),
+	),
 	cost: Type.Optional(
 		Type.Object({
 			input: Type.Optional(Type.Number()),
@@ -322,6 +333,8 @@ function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<A
 	if (override.thinkingLevelMap !== undefined) {
 		result.thinkingLevelMap = { ...model.thinkingLevelMap, ...override.thinkingLevelMap };
 	}
+	if (override.output !== undefined) result.output = override.output as ModelOutputModality[];
+
 	if (override.input !== undefined) result.input = override.input as ("text" | "image")[];
 	if (override.contextWindow !== undefined) result.contextWindow = override.contextWindow;
 	if (override.maxTokens !== undefined) result.maxTokens = override.maxTokens;
@@ -491,6 +504,14 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 			typeof topProvider.max_completion_tokens === "number" && topProvider.max_completion_tokens > 0
 				? topProvider.max_completion_tokens
 				: 16384;
+		const architecture = isRecord(entry.architecture) ? entry.architecture : {};
+		const inputModalities = Array.isArray(architecture.input_modalities) ? architecture.input_modalities : [];
+		const outputModalities = Array.isArray(architecture.output_modalities)
+			? architecture.output_modalities.filter(
+					(value): value is ModelOutputModality =>
+						value === "text" || value === "image" || value === "audio" || value === "video",
+				)
+			: [];
 		return [
 			{
 				id: entry.id,
@@ -499,7 +520,8 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 				provider,
 				baseUrl: source.baseUrl,
 				reasoning: supportedParameters.includes("reasoning"),
-				input: ["text"],
+				input: inputModalities.includes("image") ? ["text", "image"] : ["text"],
+				...(outputModalities.length > 0 ? { output: outputModalities } : {}),
 				cost: {
 					input: costPerMTok(pricing.prompt),
 					output: costPerMTok(pricing.completion),

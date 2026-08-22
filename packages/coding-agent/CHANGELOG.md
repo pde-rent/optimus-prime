@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added output modality metadata to the model picker: models discovered from OpenRouter-shaped catalogs carry input/output modalities, and image/audio/video-capable models are labeled in the list.
 - WIP: Added a minimal pure-TypeScript Git client foundation under `src/core/git/` (zero dependencies beyond `node:zlib`/`node:crypto`/`node:fs`, no process spawning): loose object read/write with SHA-1 addressing, packfile `.idx` v2 + `.pack` reader with OFS/REF-delta resolution, refs (loose + packed-refs + HEAD), index v2 parse/write, git-config INI, and a `GitRepository` facade with commit plumbing and a HEAD-vs-index-vs-worktree status matrix; cross-verified against real `git` (`cat-file`/`fsck`/`ls-files`/`status`) in `test/git-client.test.ts`.
 - Added seven built-in providers: NVIDIA NIM, Alibaba Qwen Coding Plan (intl + China), Zhipu GLM Coding Plan (China), Tencent Coding Plan, SiliconFlow, and Together AI, each with API-key login and generated model catalogs.
 - Added a token-hygiene digest for noisy bash commands: when a truncated command matches `npm`/`pnpm`/`yarn`/`bun install|i|add`, `git status`, or `kubectl describe`, the tool prepends a one-line `[digest]` header (exit code, total lines/bytes, plus parsed package counts, branch state, or pod identity) parsed from the output head and tail, so the summary survives tail truncation. The output accumulator now retains the first 4KB of output for this parsing.

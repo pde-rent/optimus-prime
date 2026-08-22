@@ -68,7 +68,7 @@ export function createGrepToolDefinition(
 		name: "grep",
 		label: "grep",
 		description: `Search file contents with a regular expression across one file or a directory tree, without spawning a shell. Use it to locate text, symbols or TODOs when you do not know the file; do not use it to read a known file (read_file) or to search node_modules, .git or gitignored paths - they are skipped. Output is "relative/path:line:text" per match (context lines use "-"), each match line capped at ${GREP_MAX_LINE_LENGTH} chars, whole output capped at 2000 lines / 50KB with a truncation notice. A regex that does not compile fails with "Invalid grep pattern: <pattern>. <reason>."; a missing path fails with "Could not search path: <path>. Error code: <code>."`,
-		promptSnippet: "Regex search over a file or directory tree",
+		promptSnippet: "Regex search over a file or directory tree; prefer over bash grep - pure TS, gitignore-aware",
 		parameters: grepSchema,
 		executionMode: "parallel",
 		kind: "search",

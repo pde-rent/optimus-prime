@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -14,6 +15,12 @@ export const REFINEMENT_CUSTOM_TYPE = "optimus.refinement";
 export const REFINE_SKILL_NAME = "refine";
 const HARNESS_STATE_DIR_NAME = "harness";
 const REFINEMENT_HISTORY_FILE_NAME = "refinements.jsonl";
+/**
+ * Store schema version. Version 2 adds per-entry usage tracking (hit_count,
+ * last_used_at); loading a version-1 store is backward compatible -- missing
+ * fields are defaulted in and the file migrates to the current version on save.
+ */
+const HARNESS_SCHEMA_VERSION = 2;
 const DEFAULT_OVERVIEW_ENTRY_LIMIT = 6;
 const DEFAULT_OVERVIEW_CONTENT_LIMIT = 180;
 
@@ -35,6 +42,12 @@ export interface HarnessEntry {
 	created_at: string;
 	updated_at: string;
 	version: number;
+	/**
+	 * Storage-side usage governance (schema 2). Absent in older stores and read back
+	 * with defaults: an entry never searched for has hit_count 0 and no last_used_at.
+	 */
+	hit_count?: number;
+	last_used_at?: string;
 }
 
 export interface HarnessRefinementEvent {
@@ -200,7 +213,7 @@ function now(): string {
 
 function emptyHarnessState(): HarnessState {
 	return {
-		schema: 1,
+		schema: HARNESS_SCHEMA_VERSION,
 		entries: {
 			prompt: {},
 			memory: {},
@@ -359,7 +372,13 @@ export function loadHarnessState(
 	}
 	const parsed = read.value as Partial<HarnessState>;
 	const state = emptyHarnessState();
-	state.schema = typeof parsed.schema === "number" ? parsed.schema : 1;
+	// A version-1 store loads with defaults for the fields it predates and migrates
+	// to the current version on the next save. A future schema we do not know is
+	// preserved rather than downgraded.
+	state.schema =
+		typeof parsed.schema === "number" && parsed.schema > HARNESS_SCHEMA_VERSION
+			? parsed.schema
+			: HARNESS_SCHEMA_VERSION;
 	for (const kind of Object.keys(state.entries) as RefinementKind[]) {
 		const records = parsed.entries?.[kind];
 		if (records && typeof records === "object") {
@@ -382,6 +401,8 @@ export function loadHarnessState(
 					created_at: typeof entry.created_at === "string" ? entry.created_at : "",
 					updated_at: typeof entry.updated_at === "string" ? entry.updated_at : "",
 					version: typeof entry.version === "number" && Number.isFinite(entry.version) ? entry.version : 1,
+					hit_count: typeof entry.hit_count === "number" && Number.isFinite(entry.hit_count) ? entry.hit_count : 0,
+					last_used_at: typeof entry.last_used_at === "string" ? entry.last_used_at : "",
 					scope: normalizeHarnessScope(entry.scope, scope),
 					reference: objectRecord(entry.reference) ?? {},
 					arguments: objectRecord(entry.arguments) ?? {},
@@ -806,10 +827,85 @@ function validateEdit(edit: RefinementEdit, computedId?: string): string | undef
 	return undefined;
 }
 
+/**
+ * Per-scope memory count caps. Applied after every refinement/CRUD apply so an
+ * unbounded refine loop cannot grow the store without bound.
+ */
+export interface MemoryBudget {
+	local?: number;
+	global?: number;
+}
+
+export const DEFAULT_MEMORY_BUDGET: Required<MemoryBudget> = { local: 200, global: 500 };
+
+export function memoryBudgetCap(budget: MemoryBudget | undefined, scope: HarnessScope): number {
+	return budget?.[scope] ?? DEFAULT_MEMORY_BUDGET[scope];
+}
+
+/**
+ * Eviction value order, lowest value first: never-used entries go before used ones,
+ * then the stalest last_used_at, then the longest content as the token-cost tiebreak.
+ */
+function memoryEvictionOrder(left: HarnessEntry, right: HarnessEntry): number {
+	// An entry never searched for has no last_used_at; its creation time stands in,
+	// so a freshly written memory is not the first eviction target.
+	const leftUsedAt = left.last_used_at || left.created_at || "";
+	const rightUsedAt = right.last_used_at || right.created_at || "";
+	return (
+		(left.hit_count ?? 0) - (right.hit_count ?? 0) ||
+		leftUsedAt.localeCompare(rightUsedAt) ||
+		right.content.length - left.content.length ||
+		left.id.localeCompare(right.id)
+	);
+}
+
+/**
+ * Enforce the memory budget on a single-store state, deleting lowest-value memories
+ * while any scope group is over its cap. Logs one refinement event describing the
+ * evictions so they are visible in history and rollbackable context. Returns the
+ * evicted ids.
+ */
+export function enforceMemoryBudget(state: HarnessState, budget?: MemoryBudget): string[] {
+	const byScope = new Map<HarnessScope, HarnessEntry[]>();
+	for (const entry of Object.values(state.entries.memory)) {
+		const scope = entry.scope ?? "local";
+		const bucket = byScope.get(scope);
+		if (bucket) bucket.push(entry);
+		else byScope.set(scope, [entry]);
+	}
+	const evicted: string[] = [];
+	for (const [scope, entries] of byScope) {
+		const cap = memoryBudgetCap(budget, scope);
+		if (entries.length <= cap) continue;
+		for (const entry of [...entries].sort(memoryEvictionOrder).slice(0, entries.length - cap)) {
+			delete state.entries.memory[entry.id];
+			evicted.push(entry.id);
+		}
+	}
+	if (evicted.length > 0) {
+		state.refinements.push({
+			id: `budget-${randomUUID()}`,
+			trigger: "memory budget enforcement",
+			changes: evicted.map((id) => `delete memory:${id}`),
+			evidence: `memory count exceeded the configured cap`,
+			outcome: `evicted ${evicted.length} lowest-value memor${evicted.length === 1 ? "y" : "ies"}`,
+			created_at: now(),
+		});
+	}
+	return evicted;
+}
+
 export function applyRefinementProposal(
 	state: HarnessState,
 	proposal: RefinementProposal,
-	options: { id: string; rollbackOf?: string; scope?: HarnessScope; baselineState?: HarnessState },
+	options: {
+		id: string;
+		rollbackOf?: string;
+		scope?: HarnessScope;
+		baselineState?: HarnessState;
+		/** Memory caps overriding DEFAULT_MEMORY_BUDGET for this apply. */
+		maxMemories?: MemoryBudget;
+	},
 ): RefinementResult {
 	const appliedEdits: AppliedRefinementEdit[] = [];
 	const proposalModifiedKeys = new Set<string>();
@@ -875,6 +971,8 @@ export function applyRefinementProposal(
 			created_at: createdAt,
 			updated_at: now(),
 			version,
+			hit_count: before?.hit_count ?? 0,
+			last_used_at: before?.last_used_at ?? "",
 		};
 		records[id] = after;
 		proposalModifiedKeys.add(entryKey);
@@ -890,6 +988,9 @@ export function applyRefinementProposal(
 		outcome: proposal.expectedOutcome,
 		created_at: now(),
 	});
+	// Budget runs after the edits and their event are recorded: an apply that pushes
+	// the store over its cap sheds the evictions in the same save.
+	enforceMemoryBudget(state, options.maxMemories);
 
 	return {
 		id: options.id,
