@@ -138,6 +138,8 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 	"",
+	"For long-running tasks (builds, downloads, batch jobs), pass an explicit timeout parameter sized to the task instead of relying on defaults; the toolTimeouts.bashSeconds and toolTimeouts.replMs settings set those defaults.",
+	"",
 	// Earns its bytes by deleting far more of them: without it a model retypes a table or a
 	// chart it already rendered, at hundreds of output tokens and a real chance of mangling it.
 	"Inject REPL values into your answer instead of retyping them: `{{repl:name}}` is replaced at send time by that variable's rendered text (a `df` frame's table, a `chart` string). Put it alone on a line inside a fence for block output; inside `code` spans, and anywhere else inside a fence, it stays literal. An unresolvable name becomes a visible `[repl:name unavailable: ...]` marker and is reported back to you.",

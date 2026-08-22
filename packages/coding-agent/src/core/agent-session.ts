@@ -9155,10 +9155,12 @@ export class AgentSession {
 					getSkills: () => this._resourceLoader.getSkills().skills,
 				},
 				repl: {
+					defaultTimeoutMs: this.settingsManager.getToolTimeoutReplMs(),
 					provisioner: this._replKernelProvisioner,
 					cwd: this._cwd,
 					env: this._rlmKernelEnv(),
 				},
+				bash: { defaultTimeoutSeconds: this.settingsManager.getToolTimeoutBashSeconds() },
 			});
 		}
 
