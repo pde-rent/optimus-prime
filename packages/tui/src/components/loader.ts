@@ -15,6 +15,7 @@ export interface LoaderIndicatorOptions {
  */
 export const SPINNER_FRAMES: readonly string[] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const DEFAULT_FRAMES = SPINNER_FRAMES;
+const DEFAULT_FALLBACK_TICK_MS = 125;
 
 /**
  * Loader component that updates with an optional spinning animation.
@@ -23,6 +24,7 @@ export class Loader extends Text {
 	private frames = [...DEFAULT_FRAMES];
 	private currentFrame = 0;
 	private unsubscribeTick: (() => void) | null = null;
+	private ownInterval: ReturnType<typeof setInterval> | null = null;
 	private ui: TUI | null = null;
 	private renderIndicatorVerbatim = false;
 
@@ -52,6 +54,10 @@ export class Loader extends Text {
 			this.unsubscribeTick();
 			this.unsubscribeTick = null;
 		}
+		if (this.ownInterval) {
+			clearInterval(this.ownInterval);
+			this.ownInterval = null;
+		}
 	}
 
 	setMessage(message: string): void {
@@ -71,11 +77,22 @@ export class Loader extends Text {
 		if (this.frames.length <= 1 || !this.ui) {
 			return;
 		}
-		// One shared TUI ticker drives every animated component (~125ms per tick).
-		this.unsubscribeTick = this.ui.onAnimationTick(() => {
+		// Prefer the shared TUI ticker (~125ms per tick, one interval for every
+		// animated component). Hosts that do not provide onAnimationTick - test
+		// stubs and embedders - fall back to a private interval so construction
+		// cannot throw and animation still runs.
+		const tick = (this.ui as { onAnimationTick?: (cb: () => void) => () => void }).onAnimationTick?.bind(this.ui);
+		if (tick) {
+			this.unsubscribeTick = tick(() => {
+				this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+				this.updateDisplay();
+			});
+			return;
+		}
+		this.ownInterval = setInterval(() => {
 			this.currentFrame = (this.currentFrame + 1) % this.frames.length;
 			this.updateDisplay();
-		});
+		}, DEFAULT_FALLBACK_TICK_MS);
 	}
 
 	private updateDisplay(): void {
