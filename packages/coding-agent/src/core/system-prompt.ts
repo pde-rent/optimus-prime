@@ -12,6 +12,8 @@ import {
 import { formatHarnessStateForPrompt, type HarnessState, REFINE_SKILL_NAME } from "./refinement/index.js";
 import { formatSkillsForPrompt, getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 
+const NATIVE_FILE_TOOLS = ["grep", "find", "sed", "wc", "ln"] as const;
+
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
@@ -176,7 +178,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 
 	// Append skills section only when the model has a way to inspect skill files.
-	const hasFileAccess = tools.includes("repl") || tools.includes("bash") || tools.includes("skill");
+	const hasFileAccess =
+		tools.includes("repl") ||
+		tools.includes("bash") ||
+		tools.includes("skill") ||
+		NATIVE_FILE_TOOLS.some((tool) => tools.includes(tool));
 	if (hasFileAccess && skills.length > 0) {
 		prompt += formatSkillsForPrompt(skills);
 	}
