@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CustomMessage } from "./messages.js";
+import { HEARTBEAT_PROMPT_CUSTOM_TYPE } from "./messages.js";
 import { canonicalSessionPath } from "./session-lease.js";
 import type { HostRequestHandler } from "./tools/repl-types.js";
 
@@ -436,6 +437,15 @@ export function isAgentSessionMessage(message: AgentMessage): message is AgentSe
 		details !== null &&
 		typeof (details as { id?: unknown }).id === "string" &&
 		typeof (details as { message?: unknown }).message === "string"
+	);
+}
+
+// A message that starts a new agent run (prompt-turn boundary).
+export function startsAgentRun(message: AgentMessage): boolean {
+	return (
+		message.role === "user" ||
+		isAgentSessionMessage(message) ||
+		(message.role === "custom" && message.customType === HEARTBEAT_PROMPT_CUSTOM_TYPE)
 	);
 }
 

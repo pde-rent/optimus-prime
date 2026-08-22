@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
 	Agent,
 	type AgentContext,
+	AgentContinueError,
 	type AgentEvent,
 	type AgentMessage,
 	type AgentState,
@@ -57,6 +58,7 @@ import {
 	isAgentSessionMessage,
 	normalizeAgentSessionMessage,
 	parseAgentSessionMessagePromptId,
+	startsAgentRun,
 } from "./agent-messages.js";
 import {
 	AGENT_OBSERVE_SKILL_NAME,
@@ -851,6 +853,15 @@ function createAgentMessageDeferred(): AgentMessageDeferred {
 	return deferred;
 }
 
+/** One-shot settlement for a scheduled post-compaction continuation; a settled failure is never re-exposed to later waiters. */
+interface PostCompactionContinuationSettlement extends AgentMessageDeferred {
+	settled: boolean;
+}
+
+function createPostCompactionContinuationSettlement(): PostCompactionContinuationSettlement {
+	return { ...createAgentMessageDeferred(), settled: false };
+}
+
 export interface ModelCycleResult {
 	model: Model<any>;
 	thinkingLevel: ThinkingLevel;
@@ -1114,6 +1125,7 @@ export class AgentSession {
 	private _pendingNextTurnMessages: CustomMessage[] = [];
 
 	private _goalState: GoalState = emptyGoalState();
+	private _goalContinuationAwaitsRlmWork = false;
 	private _goalAccountingStartedAt: number | undefined = undefined;
 	private _goalAccountedAssistantMessages = new WeakSet<AssistantMessage>();
 	private _goalAbortInProgress = false;
@@ -1267,6 +1279,7 @@ export class AgentSession {
 	private _turnIntervalAutoRefinePending = false;
 	private _postCompactionContinuationScheduled = false;
 	private _postCompactionContinuationTimer: ReturnType<typeof setTimeout> | undefined;
+	private _postCompactionContinuationSettlement: PostCompactionContinuationSettlement | undefined;
 	private _postCompactionContinuationMessages: AgentMessage[] = [];
 	private _scheduledPostCompactionContinuationMessages: AgentMessage[] = [];
 	private _queuedAutonomousThresholdContinuations = new WeakMap<AssistantMessage, AgentMessage>();
@@ -1806,6 +1819,7 @@ export class AgentSession {
 	}
 
 	private _clearQueuedGoalContexts(): void {
+		this._goalContinuationAwaitsRlmWork = false;
 		this._pendingNextTurnMessages = this._pendingNextTurnMessages.filter(
 			(message) => message.customType !== GOAL_CONTEXT_CUSTOM_TYPE,
 		);
@@ -1837,6 +1851,7 @@ export class AgentSession {
 			updatedAt: now,
 		};
 		this._goalAccountingStartedAt = now;
+		this._goalContinuationAwaitsRlmWork = false;
 		this._setGoalState(goal);
 		return this._goalState;
 	}
@@ -2094,6 +2109,48 @@ export class AgentSession {
 				contextTools.push(replTool);
 				context.tools = contextTools;
 			}
+		}
+	}
+
+	private _hasUnsettledRlmQuiescenceWork(): boolean {
+		for (const run of this._activeRlmChildRuns.values()) {
+			if (!run.settled) return true;
+		}
+		return false;
+	}
+
+	private _maybeResumeGoalContinuationAfterRlmWork(): void {
+		if (!this._goalContinuationAwaitsRlmWork) return;
+		if (this._disposed || this._disposing || this._hasUnsettledRlmQuiescenceWork()) return;
+		if (this._goalState.status !== "active" || !this._goalState.objective) {
+			this._goalContinuationAwaitsRlmWork = false;
+			return;
+		}
+		// Keep the deferral while admission is paused or the pump is suspended
+		// (post-abort); the pause release and resumeQueuedWork retry.
+		if (this._queuedWorkPauses.size > 0 || this._sessionInputPumpSuspended) return;
+		const goalBeforeResume = this._goalState;
+		try {
+			this._ensureGoalRuntimeActive();
+			this._setGoalState({
+				...this._goalState,
+				continuationsUsed: this._goalState.continuationsUsed + 1,
+				lastReason: undefined,
+				lastError: undefined,
+			});
+			const message = createGoalContextMessage(this._goalState, "continuation");
+			const normalized = normalizeMessageContent(message.content);
+			// No front: a settling child's terminal notice must be read first.
+			this._admitSessionInput(
+				this._createPreparedTurnAction("followUp", normalized.text, normalized.images, {
+					message,
+					resumeIfIdle: true,
+				}),
+			);
+			this._goalContinuationAwaitsRlmWork = false;
+		} catch {
+			// Admission can race a new pause; roll back so the retry re-counts.
+			this._setGoalState(goalBeforeResume);
 		}
 	}
 
@@ -3293,6 +3350,13 @@ export class AgentSession {
 		if (signal?.aborted || this._goalState.status !== "active" || !this._goalState.objective) {
 			return [];
 		}
+		// Delegating and ending the turn is correct behavior; hold the continuation
+		// until descendants settle instead of re-prompting a waiting parent.
+		if (this._hasUnsettledRlmQuiescenceWork()) {
+			this._goalContinuationAwaitsRlmWork = true;
+			return [];
+		}
+		this._goalContinuationAwaitsRlmWork = false;
 		try {
 			this._ensureGoalRuntimeActive(context.context);
 			const nextGoal = {
@@ -3580,7 +3644,7 @@ export class AgentSession {
 			}
 		}
 
-		if (event.type === "message_start" && this._isPromptTurnStartMessage(event.message)) {
+		if (event.type === "message_start" && startsAgentRun(event.message)) {
 			this._overflowRecovery = "idle";
 		}
 
@@ -3709,14 +3773,6 @@ export class AgentSession {
 				}
 			}
 		}
-	}
-
-	private _isPromptTurnStartMessage(message: AgentMessage): boolean {
-		return (
-			message.role === "user" ||
-			isAgentSessionMessage(message) ||
-			(message.role === "custom" && message.customType === HEARTBEAT_PROMPT_CUSTOM_TYPE)
-		);
 	}
 
 	private _resolveRetry(): void {
@@ -6516,6 +6572,7 @@ export class AgentSession {
 				released = true;
 				this._queuedWorkPauses.delete(token);
 				this._notifySessionInputCheckpointChange();
+				this._maybeResumeGoalContinuationAfterRlmWork();
 				this._scheduleSessionInputPump();
 			},
 		};
@@ -6606,6 +6663,7 @@ export class AgentSession {
 	resumeQueuedWork(): boolean {
 		this._sessionInputPumpSuspended = false;
 		this._notifySessionInputCheckpointChange();
+		this._maybeResumeGoalContinuationAfterRlmWork();
 		this._scheduleSessionInputPump();
 		return this._hasSelectableSessionInput();
 	}
@@ -6615,6 +6673,16 @@ export class AgentSession {
 			const pump = this._sessionInputPump;
 			await pump;
 			if (pump === this._sessionInputPump && !this._sessionInputPumpRequested) return;
+		}
+	}
+
+	/** Waits out any owned post-compaction continuation and rejects when one cannot start; {@link waitForIdle} never rejects. */
+	async waitForHeadlessIdle(): Promise<void> {
+		while (true) {
+			await this.waitForIdle();
+			const postCompactionContinuation = this._postCompactionContinuationSettlement?.promise;
+			if (!postCompactionContinuation) return;
+			await postCompactionContinuation;
 		}
 	}
 
@@ -7672,12 +7740,24 @@ export class AgentSession {
 		return this._rlmDepth === 0 && this._localHarnessStateDir() !== undefined;
 	}
 
+	private _settlePostCompactionContinue(error?: Error): void {
+		if (!error && (this._postCompactionContinuationScheduled || this._postCompactionContinuationTimer)) return;
+		const settlement = this._postCompactionContinuationSettlement;
+		if (!settlement || settlement.settled) return;
+		settlement.settled = true;
+		this._postCompactionContinuationSettlement = undefined;
+		if (error) settlement.reject(error);
+		else settlement.resolve();
+	}
+
 	private _cancelPostCompactionContinue(): void {
 		if (this._postCompactionContinuationTimer) {
 			clearTimeout(this._postCompactionContinuationTimer);
 			this._postCompactionContinuationTimer = undefined;
 		}
 		this._postCompactionContinuationScheduled = false;
+		this._scheduledPostCompactionContinuationMessages = [];
+		this._settlePostCompactionContinue();
 		this._scheduledPostCompactionContinuationMessages = [];
 	}
 
@@ -7775,11 +7855,16 @@ export class AgentSession {
 		if (this._postCompactionContinuationScheduled) {
 			return;
 		}
+		if (!this._postCompactionContinuationSettlement || this._postCompactionContinuationSettlement.settled) {
+			this._postCompactionContinuationSettlement = createPostCompactionContinuationSettlement();
+		}
 		this._postCompactionContinuationScheduled = true;
 		this._scheduledPostCompactionContinuationMessages = [...this._postCompactionContinuationMessages];
 		this._postCompactionContinuationTimer = setTimeout(() => {
 			this._postCompactionContinuationTimer = undefined;
-			void this._runScheduledPostCompactionContinue();
+			void this._runScheduledPostCompactionContinue()
+				.catch(() => undefined)
+				.finally(() => this._settlePostCompactionContinue());
 		}, 100);
 	}
 
@@ -7829,9 +7914,12 @@ export class AgentSession {
 			await this.agent.continue();
 			this._forgetConsumedPostCompactionContinuations(continuationMessages);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			if (message.includes("already processing")) {
+			const code = error instanceof AgentContinueError ? error.code : undefined;
+			if (code === "busy") {
 				this._schedulePostCompactionContinue();
+			} else if (code !== "nothing-to-continue") {
+				// "nothing-to-continue" means the turn already completed; anything else must reject headless idle waiters.
+				this._settlePostCompactionContinue(this._asError(error));
 			}
 		}
 	}
@@ -9905,6 +9993,7 @@ export class AgentSession {
 			run.unsubscribe = undefined;
 			run.session = undefined;
 		}
+		this._maybeResumeGoalContinuationAfterRlmWork();
 	}
 
 	private _emitRlmSubagentRemoval(subagent: RlmSubagentRegistryEntry): void {
@@ -10529,6 +10618,7 @@ export class AgentSession {
 					}
 				}
 				run.settled = true;
+				this._maybeResumeGoalContinuationAfterRlmWork();
 			}
 		})().catch(() => undefined);
 

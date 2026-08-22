@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordOrphanProcessState } from "../orphan-process-journal.js";
 import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";
 import type {
 	BunReplExecuteRequest,
@@ -441,6 +442,10 @@ export class BunReplManager {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 
+		// Journal the kernel like detached shell children so supervisor recovery can
+		// reap a kernel wedged after its owner hard-died (stdin EOF only helps a live parent).
+		if (child.pid) recordOrphanProcessState(child.pid, true);
+
 		trackLiveManager(this);
 
 		this._child = child;
@@ -453,6 +458,8 @@ export class BunReplManager {
 		// the old child is SIGKILLed and respawned; the old process's async `exit` event
 		// must not clobber the new child's state.
 		child.on("exit", (code, sig) => {
+			// The exit event fires exactly once per child, including restart-replaced ones.
+			if (child.pid) recordOrphanProcessState(child.pid, false);
 			if (this._child !== child) return;
 			this._state = "shutdown";
 			this._child = null;
