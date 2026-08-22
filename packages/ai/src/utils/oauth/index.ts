@@ -15,6 +15,7 @@ export {
 	normalizeDomain,
 	refreshGitHubCopilotToken,
 } from "./github-copilot.js";
+export { grokOAuthProvider, loginGrok, refreshGrokToken } from "./grok.js";
 export { loginOpenAICodex, openaiCodexOAuthProvider, refreshOpenAICodexToken } from "./openai-codex.js";
 export {
 	loginOpenCode,
@@ -27,6 +28,7 @@ export * from "./types.js";
 
 import { anthropicOAuthProvider } from "./anthropic.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
+import { grokOAuthProvider } from "./grok.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
 import { opencodeGoOAuthProvider, opencodeOAuthProvider } from "./opencode.js";
 import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProviderInterface } from "./types.js";
@@ -34,6 +36,7 @@ import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProvide
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	anthropicOAuthProvider,
 	githubCopilotOAuthProvider,
+	grokOAuthProvider,
 	openaiCodexOAuthProvider,
 	opencodeOAuthProvider,
 	opencodeGoOAuthProvider,

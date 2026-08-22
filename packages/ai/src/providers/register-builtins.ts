@@ -105,6 +105,11 @@ export const { stream: streamAzureOpenAIResponses, streamSimple: streamSimpleAzu
 	},
 );
 
+export const { stream: streamGrok, streamSimple: streamSimpleGrok } = lazyProvider("grok-responses", async () => {
+	const module = await import("./grok.js");
+	return { stream: module.streamGrok, streamSimple: module.streamSimpleGrok };
+});
+
 export const { stream: streamGoogle, streamSimple: streamSimpleGoogle } = lazyProvider(
 	"google-generative-ai",
 	async () => {
@@ -175,6 +180,7 @@ const REGISTER_BUILTIN_APIS: readonly (() => void)[] = [
 			stream: streamOpenAICodexResponses,
 			streamSimple: streamSimpleOpenAICodexResponses,
 		}),
+	() => registerApiProvider({ api: "grok-responses", stream: streamGrok, streamSimple: streamSimpleGrok }),
 	() => registerApiProvider({ api: "google-generative-ai", stream: streamGoogle, streamSimple: streamSimpleGoogle }),
 ];
 

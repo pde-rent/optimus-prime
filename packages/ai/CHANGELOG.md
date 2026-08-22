@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added the "grok" provider for paid SuperGrok subscribers: xAI CLI proxy (Responses API) with OAuth device-flow login via auth.x.ai, `XAI_OAUTH_TOKEN` raw-token bypass, required proxy client headers, and payload sanitization to avoid 422s.
 - Added the "nous" provider (Nous Research Hermes Portal): OpenAI-compatible endpoint with `NOUS_API_KEY` auth and models generated from its public catalog.
 - Added OpenCode Zen and OpenCode Go OAuth device-flow login, accepted alongside `OPENCODE_API_KEY`.
 - Added an overflow pattern for OpenRouter credit-tier prompt token limit errors (HTTP 402 "Prompt tokens limit exceeded") so sessions auto-compact instead of failing.

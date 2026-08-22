@@ -7,6 +7,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	deepseek: "DeepSeek",
 	fireworks: "Fireworks",
 	google: "Google Gemini",
+	grok: "Grok (SuperGrok)",
 	groq: "Groq",
 	huggingface: "Hugging Face",
 	"kimi-coding": "Kimi For Coding",

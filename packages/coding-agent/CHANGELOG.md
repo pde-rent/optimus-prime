@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added SuperGrok login: the "grok" provider appears in /login as "Grok (SuperGrok)" with device-flow OAuth, and defaults to grok-4.6.
 - Fixed image paste on macOS: terminals turn Cmd+V into an empty bracketed paste when the clipboard holds only an image, and the editor dropped empty pastes before the clipboard-image handler could run; empty pastes now trigger the attach (with a visible "Attached image from clipboard" / failure status), and `alt+v` is a second default binding for `app.clipboard.pasteImage` since macOS terminals consume Cmd+V.
 - Added live model discovery for the /model picker: fresh catalogs are fetched from configured providers (openrouter, opencode, nous), merged over the static list with a 5-minute TTL, and cached on disk as a fallback when a fetch fails.
 - Added `provider:<name>` filtering to the model picker search box.

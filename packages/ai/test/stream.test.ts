@@ -587,6 +587,12 @@ describe("Generate E2E Tests", () => {
 			cases: [text(), toolCall(), streaming()],
 		},
 		{
+			name: "Grok Provider (grok-4.6 via SuperGrok CLI proxy)",
+			skipIf: !process.env.XAI_OAUTH_TOKEN,
+			model: () => getModel("grok", "grok-4.6"),
+			cases: [text(), streaming()],
+		},
+		{
 			name: "Vercel AI Gateway Provider (google/gemini-2.5-flash via Anthropic Messages)",
 			skipIf: !process.env.AI_GATEWAY_API_KEY,
 			model: () => getModel("vercel-ai-gateway", "google/gemini-2.5-flash"),

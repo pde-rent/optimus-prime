@@ -7,6 +7,7 @@ export type { AzureOpenAIResponsesOptions } from "./providers/azure-openai-respo
 export * from "./providers/faux.js";
 export type { GoogleOptions } from "./providers/google.js";
 export type { GoogleThinkingLevel } from "./providers/google-shared.js";
+export type { GrokStreamOptions } from "./providers/grok.js";
 export type { MistralOptions } from "./providers/mistral.js";
 export type {
 	OpenAICodexResponsesOptions,

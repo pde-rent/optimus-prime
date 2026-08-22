@@ -871,6 +871,40 @@ async function fetchNousModels(): Promise<Model<any>[]> {
 	}
 }
 
+// SuperGrok subscribers reach xAI through the CLI chat proxy; the catalog is
+// seeded statically because the live /v1/models endpoint requires OAuth.
+function fetchGrokModels(): Model<any>[] {
+	const GROK_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
+	const seed = [
+		{ id: "grok-composer-2.5-fast", name: "Grok Composer 2.5 Fast", contextWindow: 200_000, reasoning: false },
+		{ id: "grok-build", name: "Grok Build", contextWindow: 500_000, reasoning: false },
+		{ id: "grok-4.6", name: "Grok 4.6", contextWindow: 500_000, reasoning: true },
+		{ id: "grok-4.5", name: "Grok 4.5", contextWindow: 500_000, reasoning: true },
+		{ id: "grok-4.3", name: "Grok 4.3", contextWindow: 1_000_000, reasoning: true },
+		{ id: "grok-4.20-0309-reasoning", name: "Grok 4.20 (0309 Reasoning)", contextWindow: 2_000_000, reasoning: true },
+		{ id: "grok-4.20-0309-non-reasoning", name: "Grok 4.20 (0309 Non-Reasoning)", contextWindow: 2_000_000, reasoning: false },
+		{ id: "grok-4.20-multi-agent-0309", name: "Grok 4.20 Multi-Agent (0309)", contextWindow: 2_000_000, reasoning: true },
+	];
+
+	return seed.map((model) => ({
+		id: model.id,
+		name: model.name,
+		api: "grok-responses",
+		baseUrl: GROK_BASE_URL,
+		provider: "grok",
+		reasoning: model.reasoning,
+		input: ["text"],
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		},
+		contextWindow: model.contextWindow,
+		maxTokens: 16384,
+	}));
+}
+
 async function fetchAiGatewayModels(): Promise<Model<any>[]> {
 	try {
 		console.log("Fetching models from Vercel AI Gateway API...");
@@ -2179,6 +2213,8 @@ async function generateModels() {
 
 	const nousModels = await fetchNousModels();
 	allModels.push(...nousModels);
+
+	allModels.push(...fetchGrokModels());
 
 	const primeInferenceModels = await fetchPrimeInferenceModels();
 	allModels.push(...primeInferenceModels);

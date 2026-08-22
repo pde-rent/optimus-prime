@@ -22,6 +22,7 @@ export type KnownProvider =
 	| "openai-codex"
 	| "deepseek"
 	| "github-copilot"
+	| "grok"
 	| "xai"
 	| "groq"
 	| "cerebras"
