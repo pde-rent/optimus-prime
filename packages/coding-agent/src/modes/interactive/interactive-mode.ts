@@ -3948,7 +3948,7 @@ export class InteractiveMode {
 					customEditor.onPasteImage = () => this.defaultEditor.onPasteImage?.();
 				}
 				if (!customEditor.onPasteText) {
-					customEditor.onPasteText = (text: string) => this.handlePastedPaths(text);
+					customEditor.onPasteText = (text: string) => this.handlePastedText(text);
 				}
 				if (!customEditor.onMoveBelowPrompt) {
 					customEditor.onMoveBelowPrompt = () => this.defaultEditor.onMoveBelowPrompt?.();
@@ -4163,7 +4163,7 @@ export class InteractiveMode {
 		this.defaultEditor.onPasteImage = () => {
 			this.handleClipboardImagePaste();
 		};
-		this.defaultEditor.onPasteText = (text) => this.handlePastedPaths(text);
+		this.defaultEditor.onPasteText = (text) => this.handlePastedText(text);
 	}
 
 	private snapshotPromptStashFrom(editor: EditorComponent, text: string): PromptStash {
@@ -4334,6 +4334,12 @@ export class InteractiveMode {
 				return;
 			}
 			await this.attachImageContent(image.bytes, image.mimeType);
+			// Confirm the attach; skip when attachImageContent already showed the
+			// more important unsupported-model warning.
+			const model = this.getCurrentModel();
+			if (!model || model.input.includes("image")) {
+				this.showStatus("Attached image from clipboard");
+			}
 		} catch (error) {
 			// Clipboard reads can fail on missing permissions; say so instead of
 			// swallowing the attempt, which read as a dead key.
@@ -4371,6 +4377,19 @@ export class InteractiveMode {
 		if (model && !model.input.includes("image")) {
 			this.showStatus("Current model does not support images; the attachment will be omitted.");
 		}
+	}
+
+	/**
+	 * Route bracketed-paste text before it enters the buffer. An empty paste is
+	 * what macOS terminals send for Cmd+V when the clipboard holds only an image
+	 * (they have no text to insert), so treat it as a clipboard-image attempt.
+	 */
+	private handlePastedText(text: string): boolean {
+		if (text.trim().length === 0) {
+			void this.handleClipboardImagePaste();
+			return true;
+		}
+		return this.handlePastedPaths(text);
 	}
 
 	/**
