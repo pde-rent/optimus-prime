@@ -124,6 +124,11 @@ export class PackReader {
 		return this.count;
 	}
 
+	/** Every sha stored in this pack, in index order. */
+	objectIds(): string[] {
+		return this.shas.slice();
+	}
+
 	/** SHA-1 of the full pack content as recorded in its trailer. */
 	packChecksum(): string {
 		return bytesToHex(this.pack.subarray(this.pack.length - 20));

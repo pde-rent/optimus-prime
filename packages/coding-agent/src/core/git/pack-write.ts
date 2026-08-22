@@ -111,8 +111,11 @@ function chunkStarts(data: Uint8Array): number[] {
  */
 export function createDelta(source: Uint8Array, target: Uint8Array): Uint8Array {
 	const buckets = new Map<number, number[]>();
-	for (const start of chunkStarts(source)) {
-		const key = fnv1a(source, start, Math.min(source.length, start + 64));
+	const sourceStarts = chunkStarts(source);
+	for (let c = 0; c < sourceStarts.length; c++) {
+		const start = sourceStarts[c];
+		const chunkEnd = c + 1 < sourceStarts.length ? sourceStarts[c + 1] : source.length;
+		const key = fnv1a(source, start, Math.min(chunkEnd, start + 64));
 		const list = buckets.get(key);
 		if (list) list.push(start);
 		else buckets.set(key, [start]);
@@ -157,9 +160,21 @@ export function createDelta(source: Uint8Array, target: Uint8Array): Uint8Array 
 		}
 	};
 
+	// Walk target chunks with an explicit cursor: a copy may span several
+	// chunks, so chunk starts before the cursor are already emitted.
 	const targetStarts = chunkStarts(target);
+	let cursor = 0;
 	for (let c = 0; c < targetStarts.length; c++) {
 		const at = targetStarts[c];
+		if (at < cursor) {
+			// A previous copy may cover chunks fully or partially.
+			const coveredTo = c + 1 < targetStarts.length ? targetStarts[c + 1] : target.length;
+			if (coveredTo <= cursor) continue; // fully covered
+			pendingFrom = cursor; // partially covered: only the tail still needs emitting
+			pendingTo = coveredTo;
+			cursor = coveredTo;
+			continue;
+		}
 		const chunkEnd = c + 1 < targetStarts.length ? targetStarts[c + 1] : target.length;
 		const best = { pos: -1, len: 0 };
 		const candidates = buckets.get(fnv1a(target, at, Math.min(chunkEnd, at + 64)));
@@ -177,10 +192,17 @@ export function createDelta(source: Uint8Array, target: Uint8Array): Uint8Array 
 		if (best.len >= MIN_COPY) {
 			flushInserts();
 			emitCopy(best.pos, best.len);
+			cursor = at + best.len;
 		} else {
-			if (pendingFrom < 0) pendingFrom = at;
+			cursor = at;
+		}
+		// Whatever remains of this chunk (a short copy leaves a tail) is
+		// unmatched target text and becomes pending insert bytes.
+		if (cursor < chunkEnd) {
+			if (pendingFrom < 0) pendingFrom = cursor;
 			pendingTo = chunkEnd;
 		}
+		cursor = Math.max(cursor, chunkEnd);
 	}
 	flushInserts();
 
@@ -261,7 +283,13 @@ export function buildPackBuffer(objects: PackableObject[], options: BuildPackOpt
 		if (candidate) {
 			typeNumber = 6; // ofs-delta; the base is always already emitted
 			entryParts.push(encodeSizeHeader(6, candidate.delta.length));
-			const base = entries.findLast((p) => p.sha === candidate.sha);
+			let base: PackEntryInfo | undefined;
+			for (let i = entries.length - 1; i >= 0; i--) {
+				if (entries[i].sha === candidate.sha) {
+					base = entries[i];
+					break;
+				}
+			}
 			if (!base) throw new Error(`delta base ${candidate.sha} not yet emitted`);
 			entryParts.push(encodeOfsOffset(start - base.offset));
 			entryParts.push(deflateSync(candidate.delta));
@@ -362,13 +390,13 @@ export function scanPack(pack: Uint8Array): { entries: ScannedEntry[]; objects: 
 			shift += 7;
 		}
 		let object: RawObject;
+		let dataStart = at2;
 		if (typeNumber >= 1 && typeNumber <= 4) {
 			const body = inflateSync(pack.subarray(at2));
 			if (body.length !== size) throw new Error(`pack entry at ${entryOffset}: inflated size mismatch`);
 			object = { type: PACK_TYPE_NAMES[typeNumber], body };
 		} else if (typeNumber === 6 || typeNumber === 7) {
-			let base: RawObject;
-			let deltaStart = at2;
+			let base: RawObject | undefined;
 			if (typeNumber === 6) {
 				byte = pack[at2++];
 				let distance = byte & 0x7f;
@@ -376,23 +404,22 @@ export function scanPack(pack: Uint8Array): { entries: ScannedEntry[]; objects: 
 					byte = pack[at2++];
 					distance = ((distance + 1) << 7) | (byte & 0x7f);
 				}
-				deltaStart = at2;
-				base = byOffset.get(entryOffset - distance);
+				dataStart = at2;
+				base = byOffset.get(entryOffset - distance) ?? undefined;
 				if (!base) throw new Error(`ofs-delta base at ${entryOffset - distance} not found before entry`);
 			} else {
 				const baseSha = bytesToHex(pack.subarray(at2, at2 + 20));
-				deltaStart = at2 + 20;
+				dataStart = at2 + 20;
 				base = objects.get(baseSha);
 				if (!base) throw new Error(`ref-delta base ${baseSha} not in pack (thin packs unsupported)`);
 			}
-			const delta = inflateSync(pack.subarray(deltaStart));
+			const delta = inflateSync(pack.subarray(dataStart));
 			object = { type: base.type, body: applyDelta(delta, base.body) };
 		} else {
 			throw new Error(`unknown pack object type ${typeNumber} at ${entryOffset}`);
 		}
 		const sha = hashRawObject(object.type, object.body);
-		const compressedLength = compressedEntryLength(pack, at2);
-		const end = deltaStart === at2 ? at2 + compressedLength : deltaStart + compressedLength;
+		const end = dataStart + compressedEntryLength(pack, dataStart);
 		entries.push({ sha, offset: entryOffset, typeNumber, crc32: crc32(pack, entryOffset, end) });
 		objects.set(sha, object);
 		byOffset.set(entryOffset, object);

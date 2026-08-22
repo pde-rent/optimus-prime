@@ -48,7 +48,7 @@ export function withLock<T>(targetPath: string, fn: () => T): T {
 				unlinkSync(lockPath); // crashed writer; take over
 				continue;
 			}
-			Bun.sleepSync(LOCK_RETRY_MS);
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
 			throw new LockBusyError(lockPath);
 		}
 		try {

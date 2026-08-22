@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { GitConfig } from "./config.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage, GitIndex } from "./index.js";
+import { writeFileLocked } from "./lock.js";
 import type { GitObjectType, GitTreeEntry, RawObject } from "./objects.js";
 import {
 	hashRawObject,
@@ -119,6 +120,28 @@ export class GitRepository {
 		return this.readObject(sha) !== null;
 	}
 
+	/** All object ids in the store (loose + packed), optionally filtered. */
+	listObjectIds(filter?: (id: string) => boolean): string[] {
+		const ids: string[] = [];
+		const objectsDir = join(this.gitDir, "objects");
+		for (const bucket of listDirs(objectsDir)) {
+			if (!/^[0-9a-f]{2}$/.test(bucket)) continue;
+			for (const rest of readdirSync(join(objectsDir, bucket))) {
+				if (/^[0-9a-f]{38}$/.test(rest)) ids.push(bucket + rest);
+			}
+		}
+		if (this.packReaders === null) this.packReaders = this.loadPacks();
+		for (const reader of this.packReaders) {
+			ids.push(...reader.objectIds());
+		}
+		return filter === undefined ? ids : ids.filter(filter);
+	}
+
+	/** Drop cached pack readers so freshly written/fetched packs become visible (used by network ops). */
+	refreshObjectStore(): void {
+		this.packReaders = null;
+	}
+
 	private loadPacks(): PackReader[] {
 		const packDir = join(this.gitDir, "objects", "pack");
 		if (!existsSync(packDir)) return [];
@@ -166,7 +189,7 @@ export class GitRepository {
 	}
 
 	saveIndex(index: GitIndex): void {
-		writeFileSync(join(this.gitDir, "index"), index.write());
+		writeFileLocked(join(this.gitDir, "index"), index.write());
 	}
 
 	/** Build an index entry from a worktree file's stat data plus an already-computed blob sha. */
@@ -394,6 +417,14 @@ function compareTreeEntries(a: GitTreeEntry, b: GitTreeEntry): number {
 function assertSafeIndexPath(path: string): void {
 	if (path.length < 1 || path.startsWith("/") || path.split("/").includes("..")) {
 		throw new Error(`unsafe index path: ${path}`);
+	}
+}
+
+function listDirs(dir: string): string[] {
+	try {
+		return readdirSync(dir);
+	} catch {
+		return [];
 	}
 }
 
