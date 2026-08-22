@@ -155,6 +155,7 @@ describe("buildRlmPrompt", () => {
 				'Your training has a cutoff; this session does not. Never assert today\'s date, the current version of anything, recent events, or that a library still behaves as you remember — check with `websearch` instead. Treat "current", "latest" and "today" in a task as instructions to look, not to recall. Low confidence is itself a reason to search: one search costs less than one confident wrong answer.',
 				"",
 				"The `repl` tool is a persistent JavaScript/TypeScript REPL (Bun): a long-lived control environment for reasoning, context management, state, tool orchestration, and recursive subcalls. Use it to keep intermediate variables, inspect and transform outputs, write small helper functions, and preserve useful state across turns or compaction.",
+				"All scripting, computing, data wrangling, and one-off parsing happens in this JS REPL - never assume `python3` or any other interpreter exists on the host; do not shell out to Python for tasks the REPL does natively (JSON/regex/text processing, stats, file inspection). Shell out only for real binaries the task needs.",
 				"",
 				"Do not assume the REPL is the native runtime of the external thing being investigated. A repository, package, service, dataset, paper, website, benchmark, or API may have its own environment and normal interface. Evaluate external systems through their own interface, then use the REPL to coordinate the process and analyze what comes back.",
 				"",
@@ -162,7 +163,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Important: do not install dependencies into the REPL just to make an external project import or run there. If a project import, test, script, CLI, or dependency check is needed, run it through that project's own environment and normal command interface (its documented commands, `bun run ...`, `uv run ...`, the project's own interpreter, from the repo root). Treat failures from that native environment as the relevant result.",
 				"",
-				"Read and write files with the synchronous globals `read` and `write` — no `await` needed. `const head = read('pkg/file.ts', { from: 1, to: 80 })` returns that 1-based inclusive line slice as raw text, so slice a large file instead of pulling all of it into context; `write('out/report.md', text)` creates parent directories, replaces atomically, and returns `{ path, bytes }`. Use `read` to consume content as a value and `edit.src` when the next step is an edit. Assign read and search results to named variables so you can slice, filter, and act on them without re-reading.",
+				"Read and write files with the synchronous globals `read` and `write` — no `await` needed. `const head = read('pkg/file.ts', { from: 1, to: 80 })` returns that 1-based inclusive line slice as raw text, so slice a large file instead of pulling all of it into context; `write('out/report.md', text)` creates parent directories, replaces atomically, and returns `{ path, bytes }`. Use `read` to consume content as a value and `edit.src` when the next step is an edit. Assign read and search results to named variables so you can slice, filter, and act on them without re-reading. For plain reads and writes of whole files, prefer the `read_file` and `write_file` tools instead: they are visible in the TUI and writes render reviewable diffs. Keep the `read`/`write` globals for computed or generated content and batch operations.",
 				"",
 				"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 				"",
@@ -178,6 +179,7 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await rlm('sub-task', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped and a level the policy will not grant comes back as `effort_refused` with the child left inheriting, raise only after observed failure, and lower once a task proves trivial.",
 				"Recursion depth is dynamic too: `await rlm.get_max_depth()` reports the current limit, your depth, and the ceiling; `await rlm.set_max_depth(n)` raises it only after an observed failure and never past the ceiling. A raise rebuilds the system prompt, so set it before spawning a subtree rather than mid-run.",
+				"Context budget is dynamic as well: `await rlm.get_context_budget()` reports the effective context budget, compaction trigger point, and the model window; `await rlm.set_context_budget({ maxContextTokens?, compactAtTokens? })` adjusts them for this session only. Values are hard-capped by the model window and the change is refused when dynamic context is disabled.",
 				"",
 				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 				"",
@@ -988,9 +990,8 @@ describe("buildSystemPrompt", () => {
 
 		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
 		expect(prompt).toContain("<available_skills>");
-		// No binding: a markdown skill is read, not called.
-		expect(prompt).toContain("- websearch: websearch description");
-		expect(prompt).toContain("Files: /skills/{name}/SKILL.md");
+		// No binding: a markdown skill is loaded, not called.
+		expect(prompt).toContain("- websearch (/skills/websearch/SKILL.md): websearch description");
 	});
 
 	test("JS skills are preloaded into the REPL and included in skill metadata", () => {
@@ -1003,7 +1004,7 @@ describe("buildSystemPrompt", () => {
 
 		// The binding is stated once, in the <available_skills> roster.
 		expect(prompt).not.toContain("Installed skills (preloaded REPL bindings)");
-		expect(prompt).toContain("- web-search [web_search]: web-search description");
+		expect(prompt).toContain("- web-search [web_search] (/skills/web-search/SKILL.md): web-search description");
 		expect(prompt.match(/web_search/g)).toHaveLength(1);
 	});
 

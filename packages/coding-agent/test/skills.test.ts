@@ -234,9 +234,9 @@ describe("skills", () => {
 				expect(diagnostics).toHaveLength(0);
 
 				const roster = formatSkillsForPrompt(skills);
-				expect(roster).toContain("- with-summary: Short routing line.");
+				expect(roster).toContain(`- with-summary (${join(root, "with-summary", "SKILL.md")}): Short routing line.`);
 				// Degrades to the first sentence for a third-party skill that declares none.
-				expect(roster).toContain("- no-summary: Long contract text.");
+				expect(roster).toContain(`- no-summary (${join(root, "no-summary", "SKILL.md")}): Long contract text.`);
 			} finally {
 				rmSync(root, { recursive: true, force: true });
 			}
@@ -325,7 +325,7 @@ describe("skills", () => {
 			expect(result).toBe("");
 		});
 
-		it("should render one line per skill under a shared path template", () => {
+		it("should render one line per skill carrying its own absolute SKILL.md path", () => {
 			const skills: Skill[] = [
 				createTestSkill({
 					name: "test-skill",
@@ -339,8 +339,44 @@ describe("skills", () => {
 
 			expect(result).toContain("<available_skills>");
 			expect(result).toContain("</available_skills>");
-			expect(result).toContain("Files: /path/to/{name}/SKILL.md");
-			expect(result).toContain("- test-skill: A test skill.");
+			expect(result).toContain("- test-skill (/path/to/test-skill/SKILL.md): A test skill.");
+		});
+
+		it("should give every entry its own resolved path and keep no Files: templates", () => {
+			const skills: Skill[] = [
+				createTestSkill({
+					name: "skill-one",
+					description: "First.",
+					filePath: "/root/one/skill-one/SKILL.md",
+					baseDir: "/root/one/skill-one",
+				}),
+				createTestSkill({
+					name: "skill-two",
+					description: "Second.",
+					filePath: "/root/two/skill-two/SKILL.md",
+					baseDir: "/root/two/skill-two",
+				}),
+				createTestSkill({
+					name: "loose",
+					description: "Loose.",
+					filePath: "/elsewhere/loose.md",
+					baseDir: "/elsewhere",
+				}),
+			];
+
+			const result = formatSkillsForPrompt(skills);
+			const entries = result.split("\n").filter((line) => line.startsWith("- "));
+
+			// Every entry carries an absolute SKILL.md path inline: zero path reasoning left
+			// to the reader.
+			expect(entries).toHaveLength(3);
+			for (const entry of entries) {
+				expect(entry).toMatch(/^- [a-z0-9-]+( \[[a-z0-9_]+\])? \(\/[^)]+\): .+$/);
+			}
+			expect(entries.filter((entry) => entry.includes("/root/one/skill-one/SKILL.md"))).toHaveLength(1);
+			expect(entries.filter((entry) => entry.includes("/root/two/skill-two/SKILL.md"))).toHaveLength(1);
+			// The grouped-template format is gone for good: nothing to mis-expand.
+			expect(result).not.toContain("Files:");
 		});
 
 		it("should name the REPL binding inline for JS-backed skills", () => {
@@ -358,7 +394,9 @@ describe("skills", () => {
 				}),
 			];
 
-			expect(formatSkillsForPrompt(skills)).toContain("- js-skill [js_skill]: A JS skill.");
+			expect(formatSkillsForPrompt(skills)).toContain(
+				"- js-skill [js_skill] (/path/to/js-skill/SKILL.md): A JS skill.",
+			);
 		});
 
 		it("should include intro text before the roster", () => {
@@ -376,8 +414,9 @@ describe("skills", () => {
 			const introText = result.substring(0, rosterStart);
 
 			expect(introText).toContain("Skills are specialized instructions for specific tasks");
-			expect(introText).toContain("read that skill's SKILL.md with the repl tool");
-			expect(introText).toContain("`name [binding]: summary`");
+			expect(introText).toContain("prefer the skill tool");
+			expect(introText).toContain("read_file on the listed path is the fallback");
+			expect(introText).toContain("`name [binding] (path/to/SKILL.md): summary`");
 		});
 
 		// Tier 2 has no dedicated call: the route out of a summary is the same `read` the
@@ -401,9 +440,8 @@ describe("skills", () => {
 			const result = formatSkillsForPrompt(skills);
 
 			// Name, binding and path all survive the tiering: nothing is undiscoverable.
-			expect(result).toContain("- test-skill [test_skill]: A test skill.");
-			expect(result).toContain("Files: /path/to/{name}/SKILL.md");
-			expect(result).toContain("read that skill's SKILL.md");
+			expect(result).toContain("- test-skill [test_skill] (/path/to/test-skill/SKILL.md): A test skill.");
+			expect(result).toContain("prefer the skill tool");
 			expect(result).toContain("`Object.keys(<binding>)`");
 			// The deferred half must not leak back in.
 			expect(result).not.toContain("much longer contract");
@@ -423,9 +461,10 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills, { mode: "full" });
 
-			expect(result).toContain(`- test-skill: ${description}`);
-			expect(result).toContain("Read a skill's SKILL.md with the repl tool when the task matches its description");
-			expect(result).toContain("`name [binding]: description`");
+			expect(result).toContain(`- test-skill (/path/to/test-skill/SKILL.md): ${description}`);
+			expect(result).toContain("Load a skill with the skill tool when the task matches its description");
+			expect(result).toContain("read_file on the listed path is the fallback");
+			expect(result).toContain("`name [binding] (path/to/SKILL.md): description`");
 			expect(result).not.toContain("Ignored in full mode.");
 		});
 
@@ -441,8 +480,8 @@ describe("skills", () => {
 					}),
 				])
 					.split("\n")
-					.find((candidate) => candidate.startsWith("- s: "));
-				return line!.slice("- s: ".length);
+					.find((candidate) => candidate.startsWith("- s (/r/s/SKILL.md): "));
+				return line!.slice("- s (/r/s/SKILL.md): ".length);
 			};
 
 			it("should fall back to the first sentence when no summary is declared", () => {
@@ -512,14 +551,16 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills);
 
-			expect(result).toContain('- quote-skill: A skill with <angles> & "quotes" and an apostrophe.');
+			expect(result).toContain(
+				'- quote-skill (/path/to/quote-skill/SKILL.md): A skill with <angles> & "quotes" and an apostrophe.',
+			);
 			expect(result).not.toContain("&amp;");
 			expect(result).not.toContain("&quot;");
 			expect(result).not.toContain("&apos;");
 			expect(result).not.toContain("<skill>");
 			expect(result).not.toContain("<description>");
-			// One path for both skills, not one each.
-			expect(result.match(/\/path\/to\//g)).toHaveLength(1);
+			// Each entry states its own path; nothing beyond that.
+			expect(result.match(/\/path\/to\//g)).toHaveLength(2);
 		});
 
 		const make = (count: number, description: string): Skill[] =>
@@ -541,7 +582,9 @@ describe("skills", () => {
 				(formatSkillsForPrompt(make(17, description)).length - formatSkillsForPrompt(make(1, description)).length) /
 				16;
 
-			expect(marginal).toBeLessThanOrEqual(description.length + 20);
+			// The prefix is name + binding + inline absolute path + summary cap; the test
+			// paths are ~24 chars, so the ceiling carries them explicitly.
+			expect(marginal).toBeLessThanOrEqual(description.length + 20 + 30);
 		});
 
 		// The second half of the same argument. Above, a line costs a description; here, a
@@ -576,7 +619,7 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills);
 
-			expect(result).toContain("- folded-skill: First clause second clause.");
+			expect(result).toContain("- folded-skill (/path/to/folded-skill/SKILL.md): First clause second clause.");
 			expect(result.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(1);
 		});
 
@@ -600,10 +643,10 @@ describe("skills", () => {
 			const lines = result.split("\n");
 
 			expect(result).toContain("- loose-skill (/path/to/loose.md): A loose skill.");
-			// Path-carrying entries precede the template line that would otherwise claim them.
-			expect(lines.findIndex((line) => line.startsWith("- loose-skill"))).toBeLessThan(
-				lines.findIndex((line) => line.startsWith("Files: ")),
-			);
+			// Sorted by root directory, then by name within a root.
+			const dirSkill = lines.findIndex((line) => line.startsWith("- dir-skill"));
+			const loose = lines.findIndex((line) => line.startsWith("- loose-skill"));
+			expect(loose).toBeLessThan(dirSkill);
 		});
 
 		it("should format multiple skills", () => {
@@ -624,11 +667,8 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills);
 
-			expect(result).toContain("- skill-one: First skill.");
-			expect(result).toContain("- skill-two: Second skill.");
-			// One template line per root directory.
-			expect(result).toContain("Files: /path/one/{name}/SKILL.md");
-			expect(result).toContain("Files: /path/two/{name}/SKILL.md");
+			expect(result).toContain("- skill-one (/path/one/skill-one/SKILL.md): First skill.");
+			expect(result).toContain("- skill-two (/path/two/skill-two/SKILL.md): Second skill.");
 		});
 
 		it("should exclude skills with disableModelInvocation from prompt", () => {
@@ -650,7 +690,7 @@ describe("skills", () => {
 
 			const result = formatSkillsForPrompt(skills);
 
-			expect(result).toContain("- visible-skill:");
+			expect(result).toContain("- visible-skill (/path/visible-skill/SKILL.md):");
 			expect(result).not.toContain("hidden-skill");
 			expect(result.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(1);
 		});

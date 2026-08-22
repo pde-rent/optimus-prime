@@ -20,3 +20,14 @@ export function parseSkillBlock(text: string): ParsedSkillBlock | null {
 		userMessage: match[4]?.trim() || undefined,
 	};
 }
+
+/**
+ * Canonical envelope for injected skill content.
+ *
+ * Shared by /skill:name slash-command expansion and the skill tool so both render
+ * identically, and so parseSkillBlock can always read back what injection produced.
+ * `location` is absolute and `baseDir` names where relative references resolve.
+ */
+export function buildSkillBlock(skill: { name: string; filePath: string; baseDir: string }, body: string): string {
+	return `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+}

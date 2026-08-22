@@ -397,7 +397,7 @@ export interface ToolRenderContext<TState = any, TArgs = any> {
 	isError: boolean;
 }
 
-export type ReplayBuiltInToolName = "bash" | "edit";
+export type ReplayBuiltInToolName = "bash" | "edit" | "read_file" | "write_file";
 
 /**
  * Tool definition for registerTool().
@@ -419,6 +419,11 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	renderShell?: "default" | "self";
 	/** Replay renderer to use for removed built-ins in saved transcripts. */
 	replayBuiltInToolName?: ReplayBuiltInToolName;
+
+	/** Machine-readable tool class so permission systems and TUI grouping can drive off it instead of hard-coded tool names. */
+	kind?: string;
+	/** True when the tool cannot mutate state; permission flows may skip confirmation. */
+	read_only?: boolean;
 
 	/** Optional compatibility shim to prepare raw tool call arguments before schema validation. Must return an object conforming to TParams. */
 	prepareArguments?: (args: unknown) => Static<TParams>;

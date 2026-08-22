@@ -476,48 +476,35 @@ export function formatSkillsForPrompt(skills: Skill[], options?: { mode?: SkillR
 		return "";
 	}
 
-	// Grouped by skills root so a path is stated once per directory: every skill file is
-	// `<root>/<name>/SKILL.md`, which made 16 absolute paths cost more than 16 descriptions'
-	// worth of structure. A skill whose path does not follow that shape carries its own.
-	const groups = new Map<string, string[]>();
-	for (const skill of visibleSkills) {
-		const skillDir = dirname(skill.filePath);
-		const root =
-			basename(skill.filePath) === "SKILL.md" && basename(skillDir) === skill.name ? dirname(skillDir) : "";
-		const binding = skill.kind === "js" ? ` [${skill.js.importName}]` : "";
-		const location = root ? "" : ` (${skill.filePath})`;
-		// A folded or multi-line YAML description would otherwise break one-line-per-skill.
-		const text = mode === "full" ? collapse(skill.description) : summarizeSkillForPrompt(skill);
-		const entry = `- ${skill.name}${binding}${location}: ${text}`;
-		const group = groups.get(root);
-		if (group) group.push(entry);
-		else groups.set(root, [entry]);
-	}
+	// Every entry carries its own resolved absolute SKILL.md path. The previous format
+	// grouped entries under a per-root `Files: <root>/{name}/SKILL.md` template, which
+	// priced ~1KB cheaper on the bundled set but forced the reader to expand the template
+	// itself -- a step models get wrong, and each miss costs a find plus a retry to load
+	// one skill. One-step resolution wins; the bytes are the accepted cost.
+	const lines = visibleSkills
+		.map((skill, index) => ({ skill, root: dirname(skill.filePath), index }))
+		.sort((a, b) => (a.root === b.root ? a.index - b.index : a.root < b.root ? -1 : 1))
+		.map(({ skill }) => {
+			const binding = skill.kind === "js" ? ` [${skill.js.importName}]` : "";
+			// A folded or multi-line YAML description would otherwise break one-line-per-skill.
+			const text = mode === "full" ? collapse(skill.description) : summarizeSkillForPrompt(skill);
+			return `- ${skill.name}${binding} (${skill.filePath}): ${text}`;
+		});
 
 	// The route out of Tier 1 is stated here rather than assumed: an entry the model
 	// cannot expand is worse than no entry, because it reads as the whole contract.
 	const intro =
 		mode === "full"
 			? [
-					"\n\nSkills are specialized instructions for specific tasks. Read a skill's SKILL.md with the repl tool when the task matches its description, and resolve relative paths inside it against that skill's directory.",
-					"Entries are `name [binding]: description`; a binding is preloaded into the persistent JavaScript REPL and callable directly.",
+					"\n\nSkills are specialized instructions for specific tasks. Load a skill with the skill tool when the task matches its description; read_file on the listed path is the fallback. Resolve relative paths inside a SKILL.md against that skill's directory.",
+					"Entries are `name [binding] (path/to/SKILL.md): description`; a binding is preloaded into the persistent JavaScript REPL and callable directly.",
 				]
 			: [
-					"\n\nSkills are specialized instructions for specific tasks. Each entry is a routing summary, not the contract: read that skill's SKILL.md with the repl tool before using it, and resolve relative paths inside it against that skill's directory.",
-					"Entries are `name [binding]: summary`, and `…` marks an abridged line. A binding is preloaded into the persistent JavaScript REPL and callable directly, but its call signature lives in the SKILL.md — read that, or `Object.keys(<binding>)`, before the first call.",
+					"\n\nSkills are specialized instructions for specific tasks. Each entry is a routing summary, not the contract: prefer the skill tool to load a skill before using it; read_file on the listed path is the fallback. Resolve relative paths inside a SKILL.md against that skill's directory.",
+					"Entries are `name [binding] (path/to/SKILL.md): summary`, and `…` marks an abridged line. A binding is preloaded into the persistent JavaScript REPL and callable directly, but its call signature lives in the SKILL.md — read that, or `Object.keys(<binding>)`, before the first call.",
 				];
-	const lines = [...intro, "", "<available_skills>"];
-	// Entries carrying their own path go first, so no `Files:` template line can claim them.
-	lines.push(...(groups.get("") ?? []));
-	for (const [root, entries] of groups) {
-		if (!root) continue;
-		lines.push(`Files: ${join(root, "{name}", "SKILL.md")}`);
-		lines.push(...entries);
-	}
 
-	lines.push("</available_skills>");
-
-	return lines.join("\n");
+	return [...intro, "", "<available_skills>", ...lines, "</available_skills>"].join("\n");
 }
 
 export interface LoadSkillsOptions {

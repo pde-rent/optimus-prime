@@ -18,7 +18,19 @@ import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { time } from "./timings.js";
-import { createBashTool, createEditTool, withFileMutationQueue } from "./tools/index.js";
+import {
+	createBashTool,
+	createEditTool,
+	createReadFileTool,
+	createSkillTool,
+	createSkillToolDefinition,
+	createWriteFileTool,
+	type SkillOperations,
+	type SkillToolDetails,
+	type SkillToolInput,
+	type SkillToolOptions,
+	withFileMutationQueue,
+} from "./tools/index.js";
 
 export interface CreateAgentSessionOptions extends AgentSessionCreationOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -99,9 +111,20 @@ export type {
 export type { PromptTemplate } from "./prompt-templates.js";
 export type { CreateRlmSubagentRuntimeOptions, RlmSubagentRuntime, SubagentRuntimeHost } from "./rlm-runtime.js";
 export type { Skill } from "./skills.js";
-export type { Tool } from "./tools/index.js";
 
-export { createBashTool, createEditTool, withFileMutationQueue };
+export {
+	createBashTool,
+	createEditTool,
+	createReadFileTool,
+	createSkillTool,
+	createSkillToolDefinition,
+	createWriteFileTool,
+	type SkillOperations,
+	type SkillToolDetails,
+	type SkillToolInput,
+	type SkillToolOptions,
+	withFileMutationQueue,
+};
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();

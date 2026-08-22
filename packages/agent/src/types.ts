@@ -391,6 +391,10 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	 * If omitted, the default execution mode applies.
 	 */
 	executionMode?: ToolExecutionMode;
+	/** Machine-readable tool class so permission systems and TUI grouping can drive off it instead of hard-coded tool names. */
+	kind?: string;
+	/** True when the tool cannot mutate state; permission flows may skip confirmation. */
+	read_only?: boolean;
 }
 
 /** Context snapshot passed to the low-level agent loop and tool hooks. */
