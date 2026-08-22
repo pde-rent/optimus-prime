@@ -82,8 +82,8 @@ describe("agents view state", () => {
 				makeSummary({ runtimeKind: "subagent", rlmDepth: 3, activity: "working", isSessionActive: true }),
 			),
 		).toBe("running");
-		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", messageCount: 2 }))).toBe("idle");
-		expect(classifyAgentsViewSession(makeSummary({ runtimeKind: "subagent", activity: "idle" }))).toBe("idle");
+		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", messageCount: 2 }))).toBe("done");
+		expect(classifyAgentsViewSession(makeSummary({ runtimeKind: "subagent", activity: "idle" }))).toBe("done");
 		expect(
 			classifyAgentsViewSession(
 				makeSummary({
@@ -95,7 +95,7 @@ describe("agents view state", () => {
 					hasActiveHeartbeat: true,
 				}),
 			),
-		).toBe("inactive");
+		).toBe("done");
 	});
 
 	test("places all non-busy resident sessions in Idle", () => {
@@ -104,9 +104,9 @@ describe("agents view state", () => {
 			classifyAgentsViewSession(makeSummary({ isStreaming: true, activity: "working", taskState: "completed" })),
 		).toBe("running");
 		// Secondary completion verdicts do not create extra sections.
-		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: "needs_input" }))).toBe("idle");
-		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: "completed" }))).toBe("idle");
-		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: undefined }))).toBe("idle");
+		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: "needs_input" }))).toBe("done");
+		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: "completed" }))).toBe("done");
+		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: undefined }))).toBe("done");
 	});
 
 	test("active heartbeats make sessions Running regardless of current activity", () => {
@@ -151,7 +151,7 @@ describe("agents view state", () => {
 	test("defaults an idle session with no verdict to needs-input", () => {
 		// A slow, failed, or absent classification never lingers in Working; only
 		// an explicit completed verdict moves an idle session out of needs-input.
-		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: undefined }))).toBe("idle");
+		expect(classifyAgentsViewSession(makeSummary({ activity: "idle", taskState: undefined }))).toBe("done");
 	});
 
 	test("sorts rows by section and creation time", () => {
@@ -190,7 +190,7 @@ describe("agents view state", () => {
 		]);
 
 		expect(rows.map((row) => row.title)).toEqual(["newer working", "older working", "heartbeat", "completed"]);
-		expect(rows.map((row) => row.section)).toEqual(["running", "running", "running", "idle"]);
+		expect(rows.map((row) => row.section)).toEqual(["running", "running", "running", "done"]);
 	});
 
 	test("keeps row order stable when activity and modification times and daemon input order change", () => {
@@ -276,7 +276,7 @@ describe("agents view state", () => {
 			"middle",
 			"created-newest",
 		]);
-		expect(rows.map((row) => row.section)).toEqual(["running", "idle", "idle", "idle"]);
+		expect(rows.map((row) => row.section)).toEqual(["running", "done", "done", "done"]);
 	});
 
 	test("summarizes subagents on their parent and omits subagent rows", () => {
@@ -955,7 +955,7 @@ describe("agents view state", () => {
 		});
 
 		const [record] = reconcileUnifiedSessions([daemon], [saved]);
-		expect(record).toMatchObject({ daemon, saved, identity: "file:/tmp/sessions/merged.jsonl", section: "idle" });
+		expect(record).toMatchObject({ daemon, saved, identity: "file:/tmp/sessions/merged.jsonl", section: "done" });
 		expect(record?.searchableText).toContain("uniquely searchable transcript");
 		expect(record?.searchableText).toContain("lunar regression");
 		expect(buildAgentsViewRows([record!])[0]).toMatchObject({
@@ -1086,14 +1086,15 @@ describe("agents view state", () => {
 			parentActiveSessionId: "parent",
 			spawnCode: "run_subagent()",
 		});
-		const [inactive] = reconcileUnifiedSessions([], [saved]);
+		const nowMs = Date.parse("2026-01-01T12:00:00Z");
+		const [inactive] = reconcileUnifiedSessions([], [saved], [], nowMs);
 		const [live] = reconcileUnifiedSessions([parent, child], []);
-		const enrichedRecords = reconcileUnifiedSessions([parent, child], [saved]);
+		const enrichedRecords = reconcileUnifiedSessions([parent, child], [saved], [], nowMs);
 		const enriched = enrichedRecords.find((record) => record.daemon?.sessionId === parent.sessionId);
 		const expanded = buildAgentsViewRows(enrichedRecords, new Set([live!.identity]), new Set([live!.identity]));
 
-		expect(inactive).toMatchObject({ identity: "file:/tmp/saved.jsonl", section: "inactive" });
-		expect(enriched).toMatchObject({ identity: live?.identity, section: "idle", saved });
+		expect(inactive).toMatchObject({ identity: "file:/tmp/saved.jsonl", section: "done" });
+		expect(enriched).toMatchObject({ identity: live?.identity, section: "done", saved });
 		expect(enriched?.identityAliases).toContain("file:/tmp/saved.jsonl");
 		expect(expanded.map((row) => row.kind)).toContain("subagent-code");
 		expect(expanded.some((row) => row.kind === "subagent" && row.summary.sessionId === "child-session")).toBe(true);
@@ -1504,6 +1505,7 @@ describe("agents view state", () => {
 				parentSessionId: "root-session",
 				rlmDepth: 1,
 			});
+			const nowMs = Date.parse("2026-01-03T00:00:00Z");
 			const records = reconcileUnifiedSessions(
 				[root, registryChild],
 				[
@@ -1515,6 +1517,8 @@ describe("agents view state", () => {
 						rlmDepth: 1,
 					}),
 				],
+				[],
+				nowMs,
 			);
 			const scope = { sessionId: "root-session", activeSessionId: "root-active" };
 			const scoped = scopeToSessionSubtree(records, scope);
@@ -1527,7 +1531,9 @@ describe("agents view state", () => {
 				"saved-child",
 			]);
 			expect(rows).toHaveLength(2);
-			expect(rows.every((row) => row.kind === "agent" && row.depth === 0 && row.section === "inactive")).toBe(true);
+			expect(rows.every((row) => row.kind === "agent" && row.depth === 0)).toBe(true);
+			// The registry child ended (Done); the saved-only child is past the archive horizon.
+			expect(rows.map((row) => row.section)).toEqual(["done", "archive"]);
 			expect(rows.find((row) => row.summary.sessionId === "registry-child")?.summary).toMatchObject({
 				parentSessionId: "root-session",
 				rlmDepth: 1,

@@ -4,8 +4,10 @@ import type { ToolDefinition, ToolRenderContext, ToolRenderResultOptions } from 
 import { createBashToolDefinition } from "../../../core/tools/bash.js";
 import { createEditToolDefinition } from "../../../core/tools/edit.js";
 import { createAllToolDefinitions } from "../../../core/tools/index.js";
+import { createReadFileToolDefinition } from "../../../core/tools/read-file.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import type { KernelSentAgentMessage } from "../../../core/tools/repl-types.js";
+import { createWriteFileToolDefinition } from "../../../core/tools/write-file.js";
 import type { AgentConnectionToolDefinition } from "../../agent-connection/index.js";
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
@@ -62,6 +64,14 @@ function createReplayBuiltInToolDefinition(
 		}
 		case "edit": {
 			const builtInDefinition = createEditToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "read_file": {
+			const builtInDefinition = createReadFileToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "write_file": {
+			const builtInDefinition = createWriteFileToolDefinition(cwd);
 			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
 		}
 		default:

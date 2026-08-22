@@ -159,7 +159,7 @@ describe("AgentsViewMode", () => {
 				},
 				{
 					kind: "agent",
-					section: "idle",
+					section: "done",
 					summary: summary({ id: "root-active", activeSessionId: "root-active", sessionId: "root-session" }),
 					selectable: true,
 					identity: "root-row",
@@ -199,7 +199,7 @@ describe("AgentsViewMode", () => {
 
 		// The child finishes during confirmation. The second keypress must use the
 		// current row state rather than the original running state.
-		self.rows[0]!.section = "inactive";
+		self.rows[0]!.section = "done";
 		await invoke("handleDeleteSelected", self);
 		expect(request).toHaveBeenCalledWith({
 			type: "delete_rlm_subagent",
@@ -242,7 +242,7 @@ describe("AgentsViewMode", () => {
 			"killSubagent",
 			self,
 			{ identity: "child-row", rootActiveSessionId: "root-active", childId: "passive-child" },
-			{ section: "inactive" },
+			{ section: "done" },
 		);
 		expect(request).toHaveBeenCalledWith({
 			type: "cancel_rlm_child",

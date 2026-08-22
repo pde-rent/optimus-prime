@@ -26,8 +26,10 @@ import {
 } from "../../core/slash-commands.js";
 import { canonicalizePath } from "../../utils/paths.js";
 import { ensureTool } from "../../utils/tools-manager.js";
+import { agentStatusIndicator } from "../agent-connection/agent-status.js";
 import { DaemonAgentConnection } from "../agent-connection/daemon-agent-connection.js";
 import type { AgentConnectionHeartbeat, AgentConnectionSavedSessionInfo } from "../agent-connection/types.js";
+import { countRowsBySection, groupBySection, sectionTitle } from "../agents-tree/agent-tree-model.js";
 import { DaemonClient, getDaemonSocketCloseReason } from "../daemon/daemon-client.js";
 import {
 	collectDaemonClientEnv,
@@ -76,7 +78,6 @@ import {
 	type AgentsViewRow,
 	type AgentsViewScopeFrame,
 	type AgentsViewScopeKey,
-	type AgentsViewSection,
 	type AgentsViewSelectionKey,
 	buildAgentsViewRows,
 	buildUnifiedSessionIndex,
@@ -86,7 +87,9 @@ import {
 	getAgentsViewSelectionKey,
 	getAgentsViewSessionTitle,
 	getAgentsViewSummaryIdentity as getSummaryIdentity,
+	getTimestamp,
 	getUnifiedSessionAncestorSessionIds,
+	hasSpawnCode,
 	hasUnifiedSessionChildren,
 	migrateAgentsViewIdentitySet,
 	reconcileUnifiedSessions,
@@ -94,7 +97,6 @@ import {
 	resolveAgentsViewScopeFrames,
 	resolveAgentsViewSelectionState,
 	scopeToSessionSubtree,
-	sectionTitle,
 	shouldApplyScopeResolution,
 	shouldShowAgentsViewSession,
 	summaryForUnifiedRecord,
@@ -114,8 +116,6 @@ const STATUS_MESSAGE_DURATION_MS = 4500;
 const SEARCH_PROMPT_PLACEHOLDER = "Search sessions";
 const REPLY_PROMPT_FALLBACK_PLACEHOLDER = "Write a reply to this agent";
 const RESUME_PROMPT_PLACEHOLDER = "Write a prompt to resume this session";
-const COMPLETED_ROW_ICON = "✓";
-const NEEDS_INPUT_ROW_ICON = "●";
 const SELECTED_ROW_MARKER = "\0agents-view-selected-row\0";
 const CODE_ROW_MARKER = "\0agents-view-code-row\0";
 
@@ -1427,7 +1427,7 @@ export class AgentsViewMode implements Component, Focusable {
 			if (row.kind === "subagent-summary") {
 				return row.hasSpawnCode === true;
 			}
-			if (row.kind === "subagent" && rowHasSpawnCode(row)) {
+			if (row.kind === "subagent" && hasSpawnCode(row.summary)) {
 				return true;
 			}
 		}
@@ -1514,7 +1514,7 @@ export class AgentsViewMode implements Component, Focusable {
 		if (!summary.activeSessionId && !summary.sessionFile) {
 			return;
 		}
-		if (this.pendingDeleteAgent?.identity === getSelectedRowIdentity(selectedRow)) {
+		if (this.pendingDeleteAgent?.identity === selectedRow?.identity) {
 			return;
 		}
 		const key = summary.activeSessionId ?? summary.id;
@@ -2006,7 +2006,7 @@ export class AgentsViewMode implements Component, Focusable {
 			this.showDeleteConfirmation();
 			return;
 		}
-		if (!isRunningSessionSummary(row.summary)) {
+		if (row.summary.activity !== "working") {
 			this.pendingDeleteAgent = {
 				identity,
 				activeSessionId,
@@ -2341,7 +2341,7 @@ export class AgentsViewMode implements Component, Focusable {
 		this.selectionAnchorPending = false;
 		const row = this.rows[this.selectedIndex];
 		this.selectedActiveSessionId = row?.selectable ? (row.summary.activeSessionId ?? row.summary.id) : undefined;
-		this.selectedRowIdentity = getSelectedRowIdentity(row);
+		this.selectedRowIdentity = row?.identity;
 		this.selectedSessionKey = row?.selectable ? getAgentsViewSelectionKey(row.summary) : undefined;
 		this.persistentState.selectedRowIdentity = this.selectedRowIdentity;
 		this.persistentState.selectedSessionKey = this.selectedSessionKey;
@@ -2473,8 +2473,9 @@ export class AgentsViewMode implements Component, Focusable {
 	}
 
 	private getAgentCountsText(): string {
-		const counts = countRowsBySection(this.rows);
-		return `${counts.running} running, ${counts.idle} idle, ${counts.inactive} inactive`;
+		const agents = this.rows.filter((row) => row.kind === "agent");
+		const counts = countRowsBySection(agents, (row) => row.section);
+		return `${counts.running} running, ${counts.done} done (${counts.failed} failed), ${counts.archive} archived`;
 	}
 
 	private renderSessionRows(width: number, maxRows: number): string[] {
@@ -2513,7 +2514,7 @@ export class AgentsViewMode implements Component, Focusable {
 				return "";
 			}
 			if (item.type === "heading") {
-				return theme.bold(sectionTitle(item.section));
+				return theme.bold(item.title);
 			}
 			if (item.type === "empty") {
 				return theme.fg("dim", "  No agents");
@@ -2548,7 +2549,7 @@ export class AgentsViewMode implements Component, Focusable {
 			const age = formatSessionDuration(row.summary);
 			const line = renderSubagentRow(
 				{
-					prefix: "  ".repeat(row.depth),
+					prefix: `${"  ".repeat(row.depth)} `,
 					name: pendingKill
 						? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
 						: formatSubagentName(row.summary.sessionName),
@@ -2561,11 +2562,10 @@ export class AgentsViewMode implements Component, Focusable {
 			return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
 		}
 		const pendingDelete = row.kind === "agent" && this.isPendingDeleteRow(row);
-		const rawIcon = this.getRowIcon(row.section);
-		const icon = this.formatRowIcon(row.section, rawIcon);
+		const icon = this.agentRowIcon(row);
 		const indent = "  ".repeat(row.depth);
 		const age = formatSessionDuration(row.summary);
-		const details = row.section === "inactive" ? `${row.summary.messageCount} · ${age}` : age;
+		const details = row.record?.saved ? `${row.summary.messageCount} · ${age}` : age;
 		const heartbeatBadge = !pendingDelete ? formatHeartbeatBadge(row.heartbeat) : "";
 		const heartbeatCell = heartbeatBadge ? theme.fg("error", heartbeatBadge) : "";
 		const title = pendingDelete ? this.getPendingDeleteTitle() : styleRowTitle(row);
@@ -2669,12 +2669,12 @@ export class AgentsViewMode implements Component, Focusable {
 				: `${keyText("tui.select.confirm")} open`,
 			selectedSummary ? undefined : `${keyText("app.agents.open")} open`,
 			selectedAgent
-				? `${keyText("app.agents.reply")} ${selectedRow?.section === "inactive" ? "resume" : "reply"}`
+				? `${keyText("app.agents.reply")} ${selectedRow?.summary.activeSessionId ? "reply" : "resume"}`
 				: undefined,
 			`${keyText("app.agents.new")} new`,
 			selectedAgent ? `${keyText("app.agents.rename")} rename` : undefined,
 			selectedAgent
-				? `${keyText("app.agents.delete")} ${selectedRow?.section === "inactive" ? "delete" : "stop/deactivate"}`
+				? `${keyText("app.agents.delete")} ${selectedRow?.section === "running" ? "stop/deactivate" : "delete"}`
 				: undefined,
 			selectedSubagent
 				? `${keyText("app.agents.delete")} ${selectedRow.section === "running" ? "stop" : "delete"}`
@@ -2720,99 +2720,45 @@ export class AgentsViewMode implements Component, Focusable {
 		return this.rows[this.selectedIndex]?.summary.cwd ?? this.options.uiServices.getInitialCwd();
 	}
 
-	private getRowIcon(section: AgentsViewSection): string {
-		switch (section) {
-			case "running":
-				return workingIconFrame(this.workingIconFrame);
-			case "idle":
-				return NEEDS_INPUT_ROW_ICON;
-			case "inactive":
-				return COMPLETED_ROW_ICON;
-			default: {
-				const _exhaustive: never = section;
-				return _exhaustive;
-			}
+	// Status glyphs come from the shared agent-status vocabulary so an agents-view
+	// row reads like a graph-panel row: spinner while Running, indicator otherwise.
+	private agentRowIcon(row: AgentsViewRow): string {
+		if (row.section === "running") {
+			return theme.bold(workingIconFrame(this.workingIconFrame));
 		}
-	}
-
-	private formatRowIcon(section: AgentsViewSection, icon: string): string {
-		switch (section) {
-			case "running":
-				return theme.bold(icon);
-			case "idle":
-				return theme.fg("warning", icon);
-			case "inactive":
-				return theme.fg("dim", icon);
-			default: {
-				const _exhaustive: never = section;
-				return _exhaustive;
-			}
+		if (row.section === "archive") {
+			return theme.fg("dim", agentStatusIndicator("completed").glyph);
 		}
+		const indicator = agentStatusIndicator(row.section === "failed" ? "error" : "completed");
+		return theme.fg(indicator.color, indicator.glyph);
 	}
 }
 
 type DisplayItem =
 	| { type: "spacer" }
-	| { type: "heading"; section: AgentsViewSection }
-	| { type: "empty"; section: AgentsViewSection }
+	| { type: "heading"; title: string }
+	| { type: "empty" }
 	| { type: "row"; row: AgentsViewRow };
 
+// Nested rows (subagent summaries and expanded subagents) always render in
+// their top-level agent's section block, regardless of their own section.
 function buildDisplayItems(rows: readonly AgentsViewRow[]): DisplayItem[] {
 	const items: DisplayItem[] = [];
-	const sections: AgentsViewSection[] = ["running", "idle", "inactive"];
-	for (const [index, section] of sections.entries()) {
+	const blocks = groupBySection(rows, (row, current) => (row.depth === 0 ? row.section : (current ?? row.section)));
+	for (const [index, block] of blocks.entries()) {
 		if (index > 0) {
 			items.push({ type: "spacer" });
 		}
-		items.push({ type: "heading", section });
-		const sectionRows = getDisplayRowsForSection(rows, section);
-		if (sectionRows.length === 0) {
-			items.push({ type: "empty", section });
+		items.push({ type: "heading", title: block.title });
+		if (block.rows.length === 0) {
+			items.push({ type: "empty" });
 			continue;
 		}
-		for (const row of sectionRows) {
+		for (const row of block.rows) {
 			items.push({ type: "row", row });
 		}
 	}
 	return items;
-}
-
-// Nested rows (subagent summaries and expanded subagents) always render in
-// their top-level agent's section block, regardless of their own section.
-function getDisplayRowsForSection(rows: readonly AgentsViewRow[], section: AgentsViewSection): AgentsViewRow[] {
-	const result: AgentsViewRow[] = [];
-	let include = false;
-	for (const row of rows) {
-		if (row.depth === 0) {
-			include = row.section === section;
-		}
-		if (include) {
-			result.push(row);
-		}
-	}
-	return result;
-}
-
-function countRowsBySection(rows: readonly AgentsViewRow[]): Record<AgentsViewSection, number> {
-	const agents = rows.filter((row) => row.kind === "agent");
-	return {
-		running: agents.filter((row) => row.section === "running").length,
-		idle: agents.filter((row) => row.section === "idle").length,
-		inactive: agents.filter((row) => row.section === "inactive").length,
-	};
-}
-
-function getSelectedRowIdentity(row: AgentsViewRow | undefined): string | undefined {
-	return row?.identity;
-}
-
-function rowHasSpawnCode(row: AgentsViewRow): boolean {
-	const code = row.summary.spawnCode;
-	return typeof code === "string" && code.trim().length > 0;
-}
-
-function isRunningSessionSummary(summary: SessionSummary): boolean {
-	return summary.activity === "working";
 }
 
 // Explicit session names read bold so they stand out from fallback titles
@@ -2834,7 +2780,7 @@ function formatSessionDuration(summary: SessionSummary): string {
 }
 
 export function formatAgentsViewRelativeTime(value: string | undefined, now: number = Date.now()): string {
-	const timestamp = parseSessionTimestamp(value);
+	const timestamp = getTimestamp(value);
 	if (!timestamp) {
 		return "";
 	}
@@ -2852,14 +2798,6 @@ export function formatAgentsViewRelativeTime(value: string | undefined, now: num
 	}
 	const days = Math.floor(hours / 24);
 	return `${days}d`;
-}
-
-function parseSessionTimestamp(value: string | undefined): number | undefined {
-	if (!value) {
-		return undefined;
-	}
-	const timestamp = Date.parse(value);
-	return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
 function requireDaemonData(response: DaemonResponse): unknown {

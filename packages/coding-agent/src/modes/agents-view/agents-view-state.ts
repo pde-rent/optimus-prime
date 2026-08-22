@@ -1,26 +1,38 @@
-import { basename, resolve } from "node:path";
-import { canonicalizePath } from "../../utils/paths.js";
+import { basename } from "node:path";
 import type { AgentConnectionHeartbeat, AgentConnectionSavedSessionInfo } from "../agent-connection/index.js";
-import { classifySessionRosterStatus, type SessionSummary } from "../daemon/daemon-session-list.js";
+import {
+	type AgentsViewSection,
+	type AgentTreePosition,
+	ARCHIVE_AFTER_MS,
+	assembleAgentTree,
+	canonicalSessionPath,
+	getAgentsViewSummaryIdentity,
+	getSummaryKeys,
+	nodesFromUnifiedRecords,
+	savedIdentityAliases,
+	sectionRank,
+	summaryIdentityAliases,
+	summaryParentKeys,
+	type UnifiedSessionHeartbeat,
+	type UnifiedSessionRecord,
+	unifiedRecordParentKeys,
+} from "../agents-tree/agent-tree-model.js";
+import { isSessionSummaryBusy, type SessionSummary } from "../daemon/daemon-session-list.js";
 
-export type AgentsViewSection = "running" | "idle" | "inactive";
-
-export interface UnifiedSessionHeartbeat {
-	activeCount: number;
-	nextRunAt?: string;
-}
-
-export interface UnifiedSessionRecord {
-	daemon?: SessionSummary;
-	saved?: AgentConnectionSavedSessionInfo;
-	/** Stable UI key, chosen using canonical path, session id, then active id. */
-	identity: string;
-	/** Alternate keys used to restore selection while a session is persisted or reattached. */
-	identityAliases: readonly string[];
-	section: AgentsViewSection;
-	searchableText: string;
-	heartbeat?: UnifiedSessionHeartbeat;
-}
+export {
+	AGENTS_VIEW_SECTIONS,
+	type AgentsViewSection,
+	ARCHIVE_AFTER_MS,
+	canonicalSessionPath,
+	countRowsBySection,
+	getAgentsViewSummaryIdentity,
+	getSummaryKeys,
+	groupBySection,
+	sectionRank,
+	sectionTitle,
+	type UnifiedSessionHeartbeat,
+	type UnifiedSessionRecord,
+} from "../agents-tree/agent-tree-model.js";
 
 export interface AgentsViewScopeKey {
 	sessionId: string;
@@ -89,18 +101,36 @@ export interface AgentsViewRow {
 	heartbeat?: UnifiedSessionHeartbeat;
 }
 
+/**
+ * Client-side section classification. The daemon roster's legacy running|idle|
+ * inactive status is only a hint; residency, activity, and the additive
+ * lastError signal decide the display section here.
+ */
 export function classifyAgentsViewSession(summary: SessionSummary): AgentsViewSection {
-	return classifySessionRosterStatus(summary);
+	if (!summary.activeSessionId) {
+		// Ended: the transcript stays revivable, so it reads as Done unless it failed.
+		return summary.lastError ? "failed" : "done";
+	}
+	if (summary.hasActiveHeartbeat || summary.activity === "working" || isSessionSummaryBusy(summary)) {
+		return "running";
+	}
+	if (summary.lastError) return "failed";
+	return "done";
 }
 
-export function classifyUnifiedSession(record: Pick<UnifiedSessionRecord, "daemon" | "heartbeat">): AgentsViewSection {
-	if (!record.daemon) {
-		return "inactive";
+export function classifyUnifiedSession(
+	record: Pick<UnifiedSessionRecord, "daemon" | "saved" | "heartbeat">,
+	nowMs: number = Date.now(),
+): AgentsViewSection {
+	const { daemon, saved } = record;
+	if (!daemon) {
+		// Saved-only: revivable transcript; past the archive horizon it leaves Done.
+		return (saved?.modified.getTime() ?? 0) < nowMs - ARCHIVE_AFTER_MS ? "archive" : "done";
 	}
 	if ((record.heartbeat?.activeCount ?? 0) > 0) {
 		return "running";
 	}
-	return classifyAgentsViewSession(record.daemon);
+	return classifyAgentsViewSession(daemon);
 }
 
 // Live sessions only; drafts and archived stay out.
@@ -109,42 +139,6 @@ export function shouldShowAgentsViewSession(summary: SessionSummary, manuallyIna
 		return false;
 	}
 	return summary.lifecycle === "live" && (summary.workerState === undefined || summary.workerState === "ready");
-}
-
-export function sectionTitle(section: AgentsViewSection): string {
-	switch (section) {
-		case "running":
-			return "Running";
-		case "idle":
-			return "Idle";
-		case "inactive":
-			return "Inactive";
-		default: {
-			const _exhaustive: never = section;
-			return _exhaustive;
-		}
-	}
-}
-
-function canonicalSessionPath(path: string): string {
-	return resolve(canonicalizePath(path));
-}
-
-function fileIdentity(path: string): string {
-	return `file:${canonicalSessionPath(path)}`;
-}
-
-function summaryIdentityAliases(summary: SessionSummary): string[] {
-	return [
-		summary.sessionFile ? fileIdentity(summary.sessionFile) : undefined,
-		`session:${summary.sessionId}`,
-		summary.activeSessionId ? `active:${summary.activeSessionId}` : undefined,
-		`active:${summary.id}`,
-	].filter((identity): identity is string => identity !== undefined);
-}
-
-function savedIdentityAliases(saved: AgentConnectionSavedSessionInfo): string[] {
-	return [fileIdentity(saved.path), `session:${saved.id}`];
 }
 
 function createUnifiedSearchableText(
@@ -181,6 +175,7 @@ export function reconcileUnifiedSessions(
 	daemonSummaries: readonly SessionSummary[],
 	savedSessions: readonly AgentConnectionSavedSessionInfo[],
 	heartbeats: readonly AgentConnectionHeartbeat[] = [],
+	nowMs: number = Date.now(),
 ): UnifiedSessionRecord[] {
 	const heartbeatByActiveId = aggregateSessionHeartbeats(daemonSummaries, heartbeats);
 	const records: UnifiedSessionRecord[] = [];
@@ -195,7 +190,7 @@ export function reconcileUnifiedSessions(
 			daemon: heartbeat && !daemon.hasActiveHeartbeat ? { ...daemon, hasActiveHeartbeat: true } : daemon,
 			identity: aliases[0]!,
 			identityAliases: aliases,
-			section: "idle",
+			section: "done",
 			searchableText: "",
 			...(heartbeat ? { heartbeat } : {}),
 		};
@@ -219,12 +214,15 @@ export function reconcileUnifiedSessions(
 			saved,
 			identity: aliases[0]!,
 			identityAliases: aliases,
-			section: "inactive",
+			section: "done",
 			searchableText: createUnifiedSearchableText(undefined, saved),
 		};
 		records.push(inactive);
 		for (const alias of aliases) recordByAlias.set(alias, inactive);
 	}
+	// Sections are derived client-side per refresh; the roster status on the
+	// wire is a legacy hint only.
+	for (const record of records) record.section = classifyUnifiedSession(record, nowMs);
 	return records;
 }
 
@@ -417,11 +415,11 @@ export function buildUnifiedSessionIndex(records: readonly UnifiedSessionRecord[
 		for (const key of record.identityAliases) byKey.set(key, record);
 	}
 	const childrenByParent = new Map<UnifiedSessionRecord, UnifiedSessionRecord[]>();
-	for (const record of records) {
-		const parent = findParentRecord(record, byKey);
-		if (!parent || parent === record) continue;
+	for (const position of nodesFromUnifiedRecords(records)) {
+		if (!position.parent) continue;
+		const parent = position.parent.node;
 		const children = childrenByParent.get(parent) ?? [];
-		children.push(record);
+		children.push(position.node);
 		childrenByParent.set(parent, children);
 	}
 	return { byKey, childrenByParent };
@@ -460,9 +458,7 @@ function findParentRecord(
 	record: UnifiedSessionRecord,
 	byKey: ReadonlyMap<string, UnifiedSessionRecord>,
 ): UnifiedSessionRecord | undefined {
-	const daemonKeys = record.daemon ? getParentKeys(record.daemon) : [];
-	const savedKey = record.saved?.parentSessionPath ? fileIdentity(record.saved.parentSessionPath) : undefined;
-	for (const key of savedKey ? [...daemonKeys, savedKey] : daemonKeys) {
+	for (const key of unifiedRecordParentKeys(record)) {
 		const parent = byKey.get(key);
 		if (parent) return parent;
 	}
@@ -531,29 +527,11 @@ function findParentSummary(
 	summary: SessionSummary,
 	byKey: ReadonlyMap<string, SessionSummary>,
 ): SessionSummary | undefined {
-	for (const key of getParentKeys(summary)) {
+	for (const key of summaryParentKeys(summary)) {
 		const parent = byKey.get(key);
 		if (parent) return parent;
 	}
 	return undefined;
-}
-
-function getParentKeys(summary: SessionSummary): string[] {
-	return [
-		summary.parentActiveSessionId ? `active:${summary.parentActiveSessionId}` : undefined,
-		summary.parentSessionId ? `session:${summary.parentSessionId}` : undefined,
-		summary.parentSessionPath ? fileIdentity(summary.parentSessionPath) : undefined,
-	].filter((key): key is string => key !== undefined);
-}
-
-export function getAgentsViewSummaryIdentity(summary: SessionSummary): string {
-	if (summary.sessionFile) {
-		return fileIdentity(summary.sessionFile);
-	}
-	if (summary.activeSessionId) {
-		return `active:${summary.activeSessionId}`;
-	}
-	return `session:${summary.sessionId}`;
 }
 
 export interface AgentsViewSelectionKey {
@@ -644,8 +622,8 @@ export function buildAgentsViewRows(
 		scopeRoot ? (scopeRoot.record?.identityAliases ?? getSummaryKeys(scopeRoot.summary)) : [],
 	);
 	const isDirectScopeChild = (summary: SessionSummary): boolean =>
-		scopeRoot !== undefined && getParentKeys(summary).some((key) => scopeRootKeys.has(key));
-	const baseRows = inputs.map(
+		scopeRoot !== undefined && summaryParentKeys(summary).some((key) => scopeRootKeys.has(key));
+	const baseRows: MutableAgentsViewRow[] = inputs.map(
 		({ summary, record }): MutableAgentsViewRow => ({
 			kind: isSubagentSummary(summary) && !isDirectScopeChild(summary) ? "subagent" : "agent",
 			section: record?.section ?? classifyAgentsViewSession(summary),
@@ -661,38 +639,27 @@ export function buildAgentsViewRows(
 		}),
 	);
 	const rowsByKey = buildRowKeyMap(baseRows);
-	const childrenByParent = new Map<MutableAgentsViewRow, MutableAgentsViewRow[]>();
-	const parentByChild = new Map<MutableAgentsViewRow, MutableAgentsViewRow>();
-	const nestedRows = new Set<MutableAgentsViewRow>();
+	const positionByRow = new Map<MutableAgentsViewRow, AgentTreePosition<MutableAgentsViewRow>>();
+	const positions = assembleAgentTree(baseRows, {
+		idOf: (row) => row.identity,
+		parentIdOf: (row) => {
+			// Only subagent rows nest; a child that arrives before its parent stays
+			// reachable as a root until the parent record appears.
+			if (row.kind !== "subagent") return undefined;
+			return findParentRow(row.summary, rowsByKey)?.identity;
+		},
+		compare: compareAgentsViewRows,
+		prepare: (linked) => prepareSubtreeState(linked),
+	});
+	for (const position of positions) positionByRow.set(position.node, position);
 
-	for (const row of baseRows) {
-		if (row.kind !== "subagent") {
-			continue;
-		}
-		const parent = findParentRow(row.summary, rowsByKey);
-		if (!parent || parent === row) {
-			// Saved catalogs stream progressively, so a child can arrive before its
-			// parent. Keep it reachable as a root until the parent record appears.
-			row.kind = "agent";
-			continue;
-		}
-		nestedRows.add(row);
-		parentByChild.set(row, parent);
-		if (row.section === "running") {
-			parent.runningSubagentCount += 1;
-		}
-		const siblings = childrenByParent.get(parent) ?? [];
-		siblings.push(row);
-		childrenByParent.set(parent, siblings);
-	}
-	propagateHeartbeatStateToAncestors(baseRows, parentByChild);
-
-	const roots = baseRows.filter((row) => !nestedRows.has(row));
 	const flattened: AgentsViewRow[] = [];
-	const emit = (row: MutableAgentsViewRow, depth: number): void => {
+	const emit = (position: AgentTreePosition<MutableAgentsViewRow>, depth: number): void => {
+		const row = position.node;
+		row.kind = position.parent === undefined ? "agent" : "subagent";
 		row.depth = depth;
 		flattened.push(row);
-		const children = childrenByParent.get(row) ?? [];
+		const children = position.children.map((child) => child.node);
 		if (children.length === 0) {
 			return;
 		}
@@ -703,46 +670,56 @@ export function buildAgentsViewRows(
 			return;
 		}
 		const showProgram = programShownParents.has(row.identity);
-		const groups = groupChildrenBySpawnCode(children.sort(compareAgentsViewRows));
+		const groups = groupChildrenBySpawnCode(children);
 		for (const [groupIndex, group] of groups.entries()) {
 			if (showProgram && group.spawnCode) {
-				for (const codeRow of buildSpawnCodeRows(row, group.spawnCode, depth + 1, groupIndex)) {
-					flattened.push(codeRow);
-				}
+				flattened.push(...buildSpawnCodeRows(row, group.spawnCode, depth + 1, groupIndex));
 			}
 			for (const child of group.children) {
 				child.parentIdentity = row.identity;
-				emit(child, depth + 1);
+				emit(positionByRow.get(child)!, depth + 1);
 			}
 		}
 	};
-	const scopedRootRow = scopeRoot ? baseRows.find((row) => row.summary === scopeRoot.summary) : undefined;
-	const visibleRoots = scopedRootRow ? roots.filter((row) => row !== scopedRootRow) : roots;
-	for (const root of visibleRoots.sort(compareAgentsViewRows)) {
-		emit(root, 0);
+	for (const root of positions) {
+		// The scoped root itself is the chat being revisited; only its subtree shows.
+		if (root.parent === undefined && root.node.summary !== scopeRoot?.summary) {
+			emit(root, 0);
+		}
 	}
 	return flattened;
+}
+
+/**
+ * Subtree state that must land before rows are ordered and grouped: running
+ * child counts read pre-promotion sections, then heartbeat activity promotes
+ * every ancestor to Running so parents never misfile under finished children.
+ */
+function prepareSubtreeState(positions: readonly AgentTreePosition<MutableAgentsViewRow>[]): void {
+	for (const position of positions) {
+		if (position.parent !== undefined && position.node.section === "running") {
+			position.parent.node.runningSubagentCount += 1;
+		}
+	}
+	promoteHeartbeatStateToAncestors(positions);
 }
 
 function isUnifiedSessionRecord(value: SessionSummary | UnifiedSessionRecord): value is UnifiedSessionRecord {
 	return "identityAliases" in value;
 }
 
-function propagateHeartbeatStateToAncestors(
-	rows: readonly MutableAgentsViewRow[],
-	parentByChild: ReadonlyMap<MutableAgentsViewRow, MutableAgentsViewRow>,
-): void {
-	for (const row of rows) {
-		if (!row.summary.hasActiveHeartbeat) {
+function promoteHeartbeatStateToAncestors(positions: readonly AgentTreePosition<MutableAgentsViewRow>[]): void {
+	for (const position of positions) {
+		if (!position.node.summary.hasActiveHeartbeat) {
 			continue;
 		}
-		const visited = new Set<MutableAgentsViewRow>([row]);
-		let ancestor = parentByChild.get(row);
+		const visited = new Set<AgentTreePosition<MutableAgentsViewRow>>([position]);
+		let ancestor = position.parent;
 		while (ancestor && !visited.has(ancestor)) {
 			visited.add(ancestor);
-			ancestor.section = "running";
-			ancestor.statusLabel = getSessionStatusLabel(ancestor.summary, true);
-			ancestor = parentByChild.get(ancestor);
+			ancestor.node.section = "running";
+			ancestor.node.statusLabel = getSessionStatusLabel(ancestor.node.summary, true);
+			ancestor = ancestor.parent;
 		}
 	}
 }
@@ -788,7 +765,7 @@ function createSubagentSummaryRow(
 	};
 }
 
-function hasSpawnCode(summary: SessionSummary): boolean {
+export function hasSpawnCode(summary: SessionSummary): boolean {
 	return typeof summary.spawnCode === "string" && summary.spawnCode.trim().length > 0;
 }
 
@@ -882,19 +859,11 @@ function buildRowKeyMap(rows: readonly MutableAgentsViewRow[]): Map<string, Muta
 	return rowsByKey;
 }
 
-function getSummaryKeys(summary: SessionSummary): string[] {
-	return [
-		`active:${summary.activeSessionId ?? summary.id}`,
-		`session:${summary.sessionId}`,
-		summary.sessionFile ? fileIdentity(summary.sessionFile) : undefined,
-	].filter((key): key is string => key !== undefined);
-}
-
 function findParentRow(
 	summary: SessionSummary,
 	rowsByKey: ReadonlyMap<string, MutableAgentsViewRow>,
 ): MutableAgentsViewRow | undefined {
-	for (const key of getParentKeys(summary)) {
+	for (const key of summaryParentKeys(summary)) {
 		const row = rowsByKey.get(key);
 		if (row) return row;
 	}
@@ -916,22 +885,7 @@ export function isSubagentSummary(summary: SessionSummary): boolean {
 	);
 }
 
-function sectionRank(section: AgentsViewSection): number {
-	switch (section) {
-		case "running":
-			return 0;
-		case "idle":
-			return 1;
-		case "inactive":
-			return 2;
-		default: {
-			const _exhaustive: never = section;
-			return _exhaustive;
-		}
-	}
-}
-
-function getTimestamp(value: string | undefined): number {
+export function getTimestamp(value: string | undefined): number {
 	if (!value) {
 		return 0;
 	}

@@ -422,8 +422,8 @@ describe("#502 unified session view regressions", () => {
 			actionModeSearchQuery: "needle",
 			editor: { getText: () => "action editor text" },
 			scopedRecords: [
-				{ identity: "match", identityAliases: [], section: "idle", searchableText: "needle session" },
-				{ identity: "other", identityAliases: [], section: "idle", searchableText: "other session" },
+				{ identity: "match", identityAliases: [], section: "done", searchableText: "needle session" },
+				{ identity: "other", identityAliases: [], section: "done", searchableText: "other session" },
 			],
 		};
 
@@ -435,7 +435,7 @@ describe("#502 unified session view regressions", () => {
 	test("inactive rows give message count and age their full responsive cell", () => {
 		const inactive = {
 			kind: "agent" as const,
-			section: "inactive" as const,
+			section: "archive" as const,
 			summary: {
 				...summary("archived"),
 				activeSessionId: undefined,
@@ -445,19 +445,21 @@ describe("#502 unified session view regressions", () => {
 			},
 			title: "archived",
 			subtitle: "",
-			statusLabel: "inactive",
+			statusLabel: "archived",
 			depth: 0,
 			selectable: true,
 			runningSubagentCount: 0,
 			identity: "archived",
+			record: {
+				saved: { path: "/tmp/archived.jsonl", modified: new Date(), created: new Date() },
+			},
 		};
 		const harness = {
 			rows: [inactive],
 			selectedIndex: 0,
 			isPendingDeleteRow: () => false,
 			isPendingKillSubagentRow: () => false,
-			getRowIcon: () => "x",
-			formatRowIcon: (_section: string, icon: string) => icon,
+			agentRowIcon: () => "x",
 		};
 
 		const rendered = stripAnsi(
@@ -476,7 +478,7 @@ describe("#502 unified session view regressions", () => {
 			// Direct children in a scoped Agents View render as agent rows while
 			// retaining their persisted subagent runtime kind.
 			kind: "agent" as const,
-			section: "idle" as const,
+			section: "done" as const,
 			summary: {
 				...summary("effort-child"),
 				runtimeKind: "subagent" as const,
@@ -486,7 +488,7 @@ describe("#502 unified session view regressions", () => {
 			} as SessionSummary,
 			title: "Inspect agents view",
 			subtitle: "",
-			statusLabel: "idle",
+			statusLabel: "done",
 			depth: 1,
 			selectable: true,
 			runningSubagentCount: 0,
@@ -498,8 +500,7 @@ describe("#502 unified session view regressions", () => {
 			selectedIndex: -1,
 			isPendingDeleteRow: () => false,
 			isPendingKillSubagentRow: () => false,
-			getRowIcon: () => "·",
-			formatRowIcon: (_section: string, icon: string) => icon,
+			agentRowIcon: () => "·",
 		};
 		const render = (width: number) =>
 			stripAnsi(
