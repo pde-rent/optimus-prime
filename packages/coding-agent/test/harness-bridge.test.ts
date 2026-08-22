@@ -215,7 +215,7 @@ describe("harness host handlers", () => {
 		).toThrow(/global must be a boolean/);
 	});
 
-	it("reads memories without touching the store", () => {
+	it("search stamps usage into the owning stores; get_memory stays read-only", () => {
 		const ctx = makeContext();
 		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content: "auth uses jwt" }, ctx);
 		handleHarnessHostRequest(
@@ -227,12 +227,23 @@ describe("harness host handlers", () => {
 		const globalBefore = readFileSync(getHarnessStatePath(ctx.globalDir));
 		const rebuildsBefore = ctx.rebuilds;
 
-		handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx);
 		handleHarnessHostRequest("harness.get_memory", { id: "auth_flow" }, ctx);
 
 		expect(readFileSync(getHarnessStatePath(ctx.localDir!)).equals(localBefore)).toBe(true);
 		expect(readFileSync(getHarnessStatePath(ctx.globalDir)).equals(globalBefore)).toBe(true);
 		expect(ctx.rebuilds).toBe(rebuildsBefore);
+
+		handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx);
+
+		// Usage tracking is a write: every entry that landed in results has its
+		// hit_count/last_used_at stamped in its own scope's store.
+		const localAfter = loadHarnessState(ctx.localDir!, "local");
+		expect(localAfter.entries.memory.auth_flow.hit_count).toBe(1);
+		expect(localAfter.entries.memory.auth_flow.last_used_at).not.toBe("");
+		const globalAfter = loadHarnessState(ctx.globalDir, "global");
+		expect(globalAfter.entries.memory.auth_policy.hit_count).toBe(1);
+		expect(globalAfter.entries.memory.auth_policy.last_used_at).not.toBe("");
+		expect(ctx.rebuilds).toBeGreaterThan(rebuildsBefore);
 	});
 
 	it("requires a non-blank query string", () => {

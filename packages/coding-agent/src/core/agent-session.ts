@@ -195,6 +195,8 @@ import {
 	appendGlobalRefinement,
 	handleHarnessHostRequest as applyHarnessHostRequest,
 	applyRefinementProposal,
+	consolidateHarnessMemories,
+	consolidationRefinementEvent,
 	getGlobalHarnessStateDir,
 	getLocalHarnessStateDir,
 	getRefinementHistory,
@@ -2490,6 +2492,7 @@ export class AgentSession {
 			}
 			await this._runSerializedRefine({
 				instructions: autoRefineInstructions(reason, review),
+				autoRefine: true,
 			});
 			if (this._disposed || this._disposing || branchVersion !== this._autoRefineBranchVersion) {
 				return;
@@ -2632,7 +2635,7 @@ export class AgentSession {
 	 * plan ("plan") and apply that exact plan without re-planning.
 	 */
 	private async _runBackgroundPlan(
-		options: { instructions?: string; rollbackId?: string; global?: boolean },
+		options: { instructions?: string; rollbackId?: string; global?: boolean; autoRefine?: boolean },
 		refineAbort: AbortController,
 		branchVersion: number,
 		skipReview = false,
@@ -2657,6 +2660,7 @@ export class AgentSession {
 				}
 				planOptions = {
 					instructions: autoRefineInstructions("turn_interval", review),
+					autoRefine: true,
 				};
 			}
 			// For explicit refine.run (skipReview=true), plan directly with
@@ -2700,6 +2704,7 @@ export class AgentSession {
 		instructions?: string;
 		rollbackId?: string;
 		global?: boolean;
+		autoRefine?: boolean;
 	}): Promise<void> {
 		if (this._disposed || this._disposing) {
 			return;
@@ -8088,6 +8093,7 @@ export class AgentSession {
 		try {
 			await this.refine({
 				instructions: autoRefineInstructions(reason, review),
+				autoRefine: true,
 			});
 			this._pendingAutoRefineReview = undefined;
 			this._turnIntervalAutoRefinePending = false;
@@ -8158,6 +8164,8 @@ export class AgentSession {
 			instructions?: string;
 			rollbackId?: string;
 			global?: boolean;
+			/** Set by the auto-refine callers; enables the post-apply consolidation pass. */
+			autoRefine?: boolean;
 		} = {},
 		internal: { skipAbort?: boolean } = {},
 	): Promise<RefinementResult> {
@@ -8350,7 +8358,7 @@ export class AgentSession {
 	 */
 	private async _applyRefine(
 		plan: RefinementPlan,
-		options: { instructions?: string; rollbackId?: string; global?: boolean },
+		options: { instructions?: string; rollbackId?: string; global?: boolean; autoRefine?: boolean },
 		refineAbort: AbortController,
 	): Promise<RefinementResult> {
 		if (this._disposed) {
@@ -8411,7 +8419,19 @@ export class AgentSession {
 				scope: targetScope,
 				baselineState: plan.baselineState,
 			});
-			result.harnessStatePath = saveHarnessState(targetHarnessStateDir, state);
+			// Auto-refine consolidation pass: after edits apply, before persist. A
+			// rollback replays inverse edits, so it never consolidates -- merging there
+			// would corrupt what a later rollback restores.
+			let stateToPersist = state;
+			if (options.autoRefine && !plan.rollbackOf) {
+				const consolidation = consolidateHarnessMemories(state);
+				const event = consolidationRefinementEvent(consolidation, `${plan.id}-consolidation`);
+				if (event) {
+					consolidation.state.refinements.push(event);
+				}
+				stateToPersist = consolidation.state;
+			}
+			result.harnessStatePath = saveHarnessState(targetHarnessStateDir, stateToPersist);
 			if (targetScope === "global") {
 				appendGlobalRefinement(globalHarnessStateDir, result);
 			}

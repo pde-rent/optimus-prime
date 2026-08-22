@@ -175,6 +175,7 @@ const harnessObj = {
 	update_prompt_note: (options?: HarnessOptions) => harnessRequest("harness.update_prompt_note", options),
 	delete_prompt_note: (options?: HarnessOptions) => harnessRequest("harness.delete_prompt_note", options),
 	record_refinement: (options?: HarnessOptions) => harnessRequest("harness.record_refinement", options),
+	consolidate_memories: (options?: HarnessOptions) => harnessRequest("harness.consolidate_memories", options),
 	overview: (options?: HarnessOptions) => harnessRequest("harness.overview", options),
 };
 
