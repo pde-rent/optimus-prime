@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
+import { access as fsAccess, readFile as fsReadFile, stat as fsStat } from "fs/promises";
 import type { ToolDefinition } from "../extensions/types.js";
+import { getMutationQueueKey, onFileMutation } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
@@ -55,11 +58,14 @@ export interface ReadFileOperations {
 	readFile: (absolutePath: string) => Promise<Buffer>;
 	/** Check if file is readable (throw if not) */
 	access: (absolutePath: string) => Promise<void>;
+	/** Stat the file; when absent, the unchanged short-circuit is disabled */
+	stat?: (absolutePath: string) => Promise<Stats>;
 }
 
 const defaultReadFileOperations: ReadFileOperations = {
 	readFile: (path) => fsReadFile(path),
 	access: (path) => fsAccess(path, constants.R_OK),
+	stat: (path) => fsStat(path),
 };
 
 export interface ReadFileToolOptions {
@@ -76,15 +82,32 @@ export interface ReadFileToolResult {
 	details: ReadFileToolDetails;
 }
 
+interface UnchangedReadState {
+	mtimeMs: number;
+	size: number;
+	contentHash: string;
+	windowKey: string;
+	startLine: number;
+	endLine: number;
+	totalLines: number;
+}
+
+function buildWindowKey(input: ReadFileToolInput): string {
+	return `${input.offset ?? 1}:${input.limit ?? "all"}:${input.lineNumbers ? 1 : 0}`;
+}
+
 export function createReadFileToolDefinition(
 	cwd: string,
 	options?: ReadFileToolOptions,
 ): ToolDefinition<typeof readFileSchema, ReadFileToolDetails> {
 	const ops = options?.operations ?? defaultReadFileOperations;
+	// Per-definition (per session) read-state used by the unchanged short-circuit.
+	const lastReads = new Map<string, UnchangedReadState>();
+	onFileMutation((key) => lastReads.delete(key));
 	const definition: ToolDefinition<typeof readFileSchema, ReadFileToolDetails> = {
 		name: "read_file",
 		label: "read_file",
-		description: `Read a text file, or one line range of one. Use for whole-file and multi-line reads; do not read a whole file just to make a small targeted change — go straight to the edit tool. Binary files are not supported; inspect them with bash. Output is capped at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}, whichever hits first, and never splits a line; a truncated or paged read appends "[Showing lines X-Y of Z ...]" stating exactly what was returned. Missing or unreadable paths fail with "Could not read file: <path>. Error code: <code>."; an empty file returns "(empty file)".`,
+		description: `Read a text file, or one line range of one. Use for whole-file and multi-line reads; do not read a whole file just to make a small targeted change — go straight to the edit tool. Binary files are not supported; inspect them with bash. Output is capped at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}, whichever hits first, and never splits a line; a truncated or paged read appends "[Showing lines X-Y of Z ...]" stating exactly what was returned. Re-reading an unmodified file with the same range returns a one-line unchanged notice instead of the content. Missing or unreadable paths fail with "Could not read file: <path>. Error code: <code>."; an empty file returns "(empty file)".`,
 		promptSnippet: "Read a text file or a line range of one, with optional line numbers",
 		parameters: readFileSchema,
 		async execute(
@@ -108,11 +131,42 @@ export function createReadFileToolDefinition(
 				throw new Error(`Could not read file: ${input.path}. ${errorMessage}.`);
 			}
 
-			const buffer = await ops.readFile(absolutePath);
+			const [buffer, stats] = await Promise.all([ops.readFile(absolutePath), ops.stat?.(absolutePath)]);
 			const rawContent = buffer.toString("utf-8");
 			const lines = rawContent.split("\n");
 			const totalLines = lines.length;
 			const totalBytes = buffer.byteLength;
+
+			const windowKey = buildWindowKey(input);
+			const contentHash = createHash("sha256").update(buffer).digest("hex");
+
+			if (stats) {
+				const key = getMutationQueueKey(absolutePath);
+				const previous = lastReads.get(key);
+				if (
+					previous &&
+					previous.mtimeMs === stats.mtimeMs &&
+					previous.size === stats.size &&
+					previous.contentHash === contentHash &&
+					previous.windowKey === windowKey
+				) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `[file unchanged since your last read: lines ${previous.startLine}-${previous.endLine} of ${previous.totalLines}]`,
+							},
+						],
+						details: {
+							totalBytes,
+							totalLines,
+							startLine: previous.startLine,
+							endLine: previous.endLine,
+							truncated: false,
+						},
+					};
+				}
+			}
 
 			const startLine = Math.max(1, Math.min(input.offset ?? 1, totalLines + 1));
 			const selected = lines.slice(
@@ -142,6 +196,18 @@ export function createReadFileToolDefinition(
 			} else if (startLine > 1 || (input.limit !== undefined && selected.length < totalLines - (startLine - 1))) {
 				const endLine = startLine + selected.length - 1;
 				text += `\n\n[Showing lines ${startLine}-${endLine} of ${totalLines}.]`;
+			}
+
+			if (stats) {
+				lastReads.set(getMutationQueueKey(absolutePath), {
+					mtimeMs: stats.mtimeMs,
+					size: stats.size,
+					contentHash,
+					windowKey,
+					startLine,
+					endLine: startLine + truncation.outputLines - 1,
+					totalLines,
+				});
 			}
 
 			return {

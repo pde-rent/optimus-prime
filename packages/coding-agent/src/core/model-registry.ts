@@ -440,6 +440,12 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		authenticated: true,
 	},
 
+	nvidia: {
+		url: "https://integrate.api.nvidia.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://integrate.api.nvidia.com/v1",
+	},
+
 	nous: {
 		url: "https://inference-api.nousresearch.com/v1/models",
 		api: "openai-completions",

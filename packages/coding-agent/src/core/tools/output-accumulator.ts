@@ -14,6 +14,8 @@ export interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
 	tempFilePrefix?: string;
+	/** Bytes of output head retained for digest parsing (default: 4096) */
+	maxHeadBytes?: number;
 }
 
 export interface OutputSnapshot {
@@ -35,17 +37,19 @@ function byteLength(text: string): number {
  * Incrementally tracks streaming output with bounded memory.
  *
  * Appends decode chunks with a streaming UTF-8 decoder, keeps only a decoded
- * tail for display snapshots, and opens a temp file when the full output needs
- * to be preserved.
+ * tail (plus a small head) for display snapshots, and opens a temp file when
+ * the full output needs to be preserved.
  */
 export class OutputAccumulator {
 	private readonly maxLines: number;
 	private readonly maxBytes: number;
 	private readonly maxRollingBytes: number;
+	private readonly maxHeadBytes: number;
 	private readonly tempFilePrefix: string;
 	private readonly decoder = new TextDecoder();
 
 	private rawChunks: Buffer[] = [];
+	private headText = "";
 	private tailText = "";
 	private tailBytes = 0;
 	private tailStartsAtLineBoundary = true;
@@ -62,6 +66,7 @@ export class OutputAccumulator {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
 		this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
 		this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
+		this.maxHeadBytes = options.maxHeadBytes ?? 4096;
 		this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
 	}
 
@@ -145,14 +150,24 @@ export class OutputAccumulator {
 		});
 	}
 
+	getHeadText(): string {
+		return this.headText;
+	}
+
 	getLastLineBytes(): number {
 		return this.currentLineBytes;
+	}
+
+	private appendHead(text: string): void {
+		if (this.headText.length >= this.maxHeadBytes) return;
+		this.headText = (this.headText + text).slice(0, this.maxHeadBytes);
 	}
 
 	private appendDecodedText(text: string): void {
 		if (text.length === 0) {
 			return;
 		}
+		this.appendHead(text);
 
 		const bytes = byteLength(text);
 		this.totalDecodedBytes += bytes;

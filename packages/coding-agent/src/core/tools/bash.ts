@@ -16,6 +16,7 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
+import { buildBashDigest } from "./bash-digest.js";
 import { previewBashCommand } from "./code-preview.js";
 import { OutputAccumulator } from "./output-accumulator.js";
 import { getTextOutput, invalidArgText, str } from "./render-utils.js";
@@ -352,7 +353,11 @@ export function createBashToolDefinition(
 				return snapshot;
 			};
 
-			const formatOutput = (snapshot: Awaited<ReturnType<typeof finishOutput>>, emptyText = "(no output)") => {
+			const formatOutput = (
+				snapshot: Awaited<ReturnType<typeof finishOutput>>,
+				emptyText = "(no output)",
+				exitCode: number | null = null,
+			) => {
 				const truncation = snapshot.truncation;
 				let text = snapshot.content || emptyText;
 				let details: BashToolDetails | undefined;
@@ -368,6 +373,17 @@ export function createBashToolDefinition(
 					} else {
 						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
 					}
+				}
+				const digest = buildBashDigest({
+					command: spawnContext.command,
+					outputHead: output.getHeadText(),
+					outputTail: snapshot.content,
+					totalLines: truncation.totalLines,
+					totalBytes: truncation.totalBytes,
+					exitCode,
+				});
+				if (digest) {
+					text = `${digest}\n\n${text}`;
 				}
 				return { text, details };
 			};
@@ -386,7 +402,7 @@ export function createBashToolDefinition(
 					exitCode = result.exitCode;
 				} catch (err) {
 					const snapshot = await finishOutput();
-					const { text } = formatOutput(snapshot, "");
+					const { text } = formatOutput(snapshot, "", null);
 					if (err instanceof Error && err.message === "aborted") {
 						throw new Error(appendStatus(text, "Command aborted"));
 					}
@@ -398,7 +414,7 @@ export function createBashToolDefinition(
 				}
 
 				const snapshot = await finishOutput();
-				const { text: outputText, details } = formatOutput(snapshot);
+				const { text: outputText, details } = formatOutput(snapshot, "(no output)", exitCode);
 				if (exitCode !== 0 && exitCode !== null) {
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}
