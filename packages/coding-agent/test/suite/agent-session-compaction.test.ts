@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { appendFileSync } from "node:fs";
-import type { AgentMessage, ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
+import { AgentContinueError, type AgentMessage, type ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage, type Model, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../../src/core/session-manager.js";
 import { createHarness, getMessageText } from "./harness.js";
@@ -861,7 +861,7 @@ describe("AgentSession compaction characterization", () => {
 		];
 		const continueSpy = vi
 			.spyOn(harness.session.agent, "continue")
-			.mockRejectedValueOnce(new Error("already processing"));
+			.mockRejectedValueOnce(new AgentContinueError("busy", "already processing"));
 
 		sessionInternals._schedulePostCompactionContinue();
 		// First attempt fires on a real setTimeout(100) and fails; the retry is rescheduled.

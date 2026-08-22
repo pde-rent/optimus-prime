@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn, vi } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { AgentContinueError, type AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -297,7 +297,9 @@ describe("AgentSession queue characterization", () => {
 		harnesses.push(harness);
 		const internals = harness.session as unknown as AutoRefineInternals;
 		const continueAgent = spyOn(harness.session.agent, "continue")
-			.mockRejectedValueOnce(new Error("Agent is already processing. Wait for completion before continuing."))
+			.mockRejectedValueOnce(
+				new AgentContinueError("busy", "Agent is already processing. Wait for completion before continuing."),
+			)
 			.mockResolvedValueOnce();
 
 		try {

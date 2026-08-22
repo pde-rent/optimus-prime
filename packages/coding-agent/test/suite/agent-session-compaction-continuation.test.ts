@@ -159,6 +159,46 @@ describe("compaction continuation", () => {
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
 
+	// A continuation that cannot start must not settle headless idle as a clean finish.
+	it("rejects headless idle waiters when a continuation cannot start", async () => {
+		const harness = await createTrackedHarness(harnesses, {
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+		});
+		const sessionInternals = harness.session as unknown as {
+			_schedulePostCompactionContinue(): void;
+		};
+		const continueSpy = vi
+			.spyOn(harness.session.agent, "continue")
+			.mockRejectedValueOnce(new Error("continuation failed"));
+
+		sessionInternals._schedulePostCompactionContinue();
+		const idle = harness.session.waitForHeadlessIdle();
+		const rejectedIdle = expect(idle).rejects.toThrow("continuation failed");
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
+
+		await rejectedIdle;
+	});
+
+	// The settled failure is one-shot: later waiters see a clean idle, never the stale error.
+	it("does not expose a failed continuation to later headless idle waiters", async () => {
+		const harness = await createTrackedHarness(harnesses, {
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+		});
+		const sessionInternals = harness.session as unknown as {
+			_schedulePostCompactionContinue(): void;
+		};
+		const continueSpy = vi
+			.spyOn(harness.session.agent, "continue")
+			.mockRejectedValueOnce(new Error("continuation failed"));
+
+		sessionInternals._schedulePostCompactionContinue();
+		await waitFor(() => expect(continueSpy).toHaveBeenCalledTimes(1));
+
+		await expect(harness.session.waitForHeadlessIdle()).resolves.toBeUndefined();
+	});
+
 	// BUG B (end-to-end): unlike the tests above, the threshold compaction here SUCCEEDS.
 	it("e2e: an active goal keeps continuing after a successful threshold compaction", async () => {
 		const sessionRef: { current?: AgentSession } = {};
