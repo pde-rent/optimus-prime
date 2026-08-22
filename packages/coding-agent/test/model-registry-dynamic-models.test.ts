@@ -25,6 +25,8 @@ describe("ModelRegistry dynamic model discovery", () => {
 	afterEach(() => {
 		setDynamicModelsFetcher("openrouter", undefined);
 		setDynamicModelsFetcher("nous", undefined);
+		setDynamicModelsFetcher("grok", undefined);
+
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
 		}
@@ -140,5 +142,21 @@ describe("ModelRegistry dynamic model discovery", () => {
 		const nous = modelsFor(registry, "nous");
 		expect(nous.map((m) => m.id)).toEqual(["deepconf-mini"]);
 		expect(nous[0]!.baseUrl).toBe("https://inference-api.nousresearch.com/v1");
+	});
+
+	test("authenticated discovery replaces static entries for grok when auth is configured", async () => {
+		authStorage.set("grok", { type: "api_key", key: "xai-test-token" });
+		setDynamicModelsFetcher("grok", async () =>
+			openAIListResponse([
+				{ id: "grok-4.7", name: "Grok 4.7", context_length: 500000 },
+				{ id: "grok-build-0.2", name: "Grok Build 0.2", context_length: 500000 },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+		const grok = modelsFor(registry, "grok");
+		expect(grok.map((m) => m.id)).toEqual(["grok-4.7", "grok-build-0.2"]);
+		expect(grok[0]!.api).toBe("grok-responses");
+		expect(grok[0]!.baseUrl).toBe("https://cli-chat-proxy.grok.com/v1");
 	});
 });

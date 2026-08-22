@@ -417,9 +417,11 @@ interface DynamicModelSource {
 	url: string;
 	api: Api;
 	baseUrl: string;
+	/** Set when the discovery endpoint requires provider credentials; headers are resolved from configured auth. */
+	authenticated?: boolean;
 }
 
-/** Providers whose catalog is refreshed live from a public OpenAI-shaped /models endpoint. */
+/** Providers whose catalog is refreshed live from an OpenAI-shaped /models endpoint. */
 const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 	openrouter: {
 		url: "https://openrouter.ai/api/v1/models",
@@ -431,6 +433,13 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		api: "openai-completions",
 		baseUrl: "https://opencode.ai/zen/v1",
 	},
+	grok: {
+		url: "https://cli-chat-proxy.grok.com/v1/models",
+		api: "grok-responses",
+		baseUrl: "https://cli-chat-proxy.grok.com/v1",
+		authenticated: true,
+	},
+
 	nous: {
 		url: "https://inference-api.nousresearch.com/v1/models",
 		api: "openai-completions",
@@ -890,13 +899,27 @@ export class ModelRegistry {
 			if (fetcher) {
 				payload = await fetcher();
 			} else {
-				const response = await fetch(source.url, { signal: AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS) });
+				const requestInit: RequestInit = { signal: AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS) };
+				if (source.authenticated) {
+					const seedModel = this.models.find((model) => model.provider === provider);
+					const auth = seedModel ? await this.getApiKeyAndHeaders(seedModel) : undefined;
+					if (!auth?.ok || (!auth.apiKey && !auth.headers)) {
+						throw new Error(`${provider} model discovery requires configured auth`);
+					}
+					requestInit.headers = {
+						...(auth.apiKey ? { Authorization: `Bearer ${auth.apiKey}` } : {}),
+						...auth.headers,
+					};
+				}
+				const response = await fetch(source.url, requestInit);
 				if (!response.ok) {
 					throw new Error(`${provider} model discovery failed with HTTP ${response.status}`);
 				}
 				payload = await response.json();
 			}
+
 			const models = parseDynamicModelList(payload, provider, source);
+
 			if (models.length === 0) {
 				throw new Error(`Provider ${provider} returned an empty model list`);
 			}

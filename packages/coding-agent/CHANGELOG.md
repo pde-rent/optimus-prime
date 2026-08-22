@@ -1,9 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+- Hardened MCP OAuth: a set-but-empty credential env var now counts as a missing credential instead of sending the variable name; stored MCP OAuth tokens are bound to the endpoint (and RFC 9728 resource) they were issued for, so a retargeted server can no longer replay them; credential removal and `/mcp logout` are disk-verified before reporting success; and MCP OAuth discovery now follows path-scoped protected-resource metadata with authorization-server indirection and issuer validation.
+- Fixed model searches ranking stronger matches ahead of weaker signed-in matches while preferring signed-in providers for equivalent results ([#539](https://github.com/PrimeIntellect-ai/prime-agent/pull/539) by [@eliebak](https://github.com/eliebak)).
 - Added SuperGrok login: the "grok" provider appears in /login as "Grok (SuperGrok)" with device-flow OAuth, and defaults to grok-4.6.
 - Fixed image paste on macOS: terminals turn Cmd+V into an empty bracketed paste when the clipboard holds only an image, and the editor dropped empty pastes before the clipboard-image handler could run; empty pastes now trigger the attach (with a visible "Attached image from clipboard" / failure status), and `alt+v` is a second default binding for `app.clipboard.pasteImage` since macOS terminals consume Cmd+V.
-- Added live model discovery for the /model picker: fresh catalogs are fetched from configured providers (openrouter, opencode, nous), merged over the static list with a 5-minute TTL, and cached on disk as a fallback when a fetch fails.
+- Added live model discovery for the /model picker: fresh catalogs are fetched from configured providers (openrouter, opencode, nous, grok), merged over the static list with a 5-minute TTL, and cached on disk as a fallback when a fetch fails.
 - Added `provider:<name>` filtering to the model picker search box.
 - Added a built-in `skill` tool that loads one installed skill's SKILL.md by name in a single step, wrapped in the same envelope as /skill: expansion; unknown names fail listing every available skill.
 - Changed the skill roster in the system prompt to carry each skill's resolved absolute SKILL.md path inline (entries are `name [binding] (path): summary`), replacing the per-root `Files:` path template that models had to expand themselves; the roster intro now says to prefer the skill tool with read_file as the fallback.
