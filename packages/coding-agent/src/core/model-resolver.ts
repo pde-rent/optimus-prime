@@ -45,6 +45,13 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"cloudflare-ai-gateway": "workers-ai/@cf/moonshotai/kimi-k2.6",
 	xiaomi: "mimo-v2.5-pro",
 	"xiaomi-token-plan-cn": "mimo-v2.5-pro",
+	nvidia: "abacusai/dracarys-llama-3.1-70b-instruct",
+	"alibaba-coding-plan": "MiniMax-M2.5",
+	"alibaba-coding-plan-cn": "MiniMax-M2.5",
+	"zhipuai-coding-plan": "glm-4.6v",
+	"tencent-coding-plan": "glm-5",
+	siliconflow: "ByteDance-Seed/Seed-OSS-36B-Instruct",
+	togetherai: "MiniMaxAI/MiniMax-M2.5",
 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
