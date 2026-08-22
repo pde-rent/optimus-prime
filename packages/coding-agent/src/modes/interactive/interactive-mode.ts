@@ -128,7 +128,6 @@ import { copyToClipboard } from "../../utils/clipboard.js";
 import { readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { resizeImage } from "../../utils/image-resize.js";
-import { getCwdRelativePath } from "../../utils/paths.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool, ensureToolWithStatus, formatMissingRipgrepMessage } from "../../utils/tools-manager.js";
 import { checkForNewPiVersion } from "../../utils/version-check.js";
@@ -199,7 +198,7 @@ import { ExtensionSelectorComponent } from "./components/extension-selector.js";
 import { FeatureHintComponent } from "./components/feature-hint.js";
 import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
-import { formatKeyText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
+import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import type { AuthSelectorProvider } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SelectModalComponent } from "./components/select-modal.js";
@@ -223,6 +222,52 @@ import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
 import { FeatureHintDeck } from "./feature-hints.js";
+import { buildHotkeysGuide, buildShortcutGuide } from "./guides.js";
+import {
+	formatGoalDetailSuffix,
+	formatGoalStatus,
+	goalAnnouncementSnapshot,
+	type GoalAnnouncementSnapshot,
+} from "./goal-tray.js";
+import {
+	getPayloadBoolean,
+	getPayloadNumber,
+	getPayloadNotifyType,
+	getPayloadString,
+	getPayloadStringArray,
+	getPayloadWidgetPlacement,
+	getPayloadWorkingIndicatorOptions,
+} from "./extension-payload.js";
+import {
+	HEARTBEAT_ARGUMENT_COMPLETIONS,
+	HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS,
+	heartbeatLegacyPromptToleranceMs,
+	HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS,
+	isLikelyHeartbeatPromptTimestamp,
+	isTextOnlyUserMessage,
+} from "./heartbeat-support.js";
+import { BrandSplashHeader, truncatePathMiddle } from "./brand-splash.js";
+import { formatSplashCwd } from "./path-formatting.js";
+import { formatQueuedMessagePreview, styleQueuedMessagePreview } from "./queue-preview.js";
+import { initialRenderMessages, omitOrphanToolResults } from "./transcript-render.js";
+import {
+	buildUpdateChildArgs,
+	buildUpdateRelaunchArgs,
+	resolveInteractiveUpdateDaemonSocketPath,
+	updateArgsIncludeSelf,
+} from "./update-relaunch.js";
+
+export { BrandSplashHeader } from "./brand-splash.js";
+export type { BrandSplashHeaderOptions, BrandSplashMetadataLine } from "./brand-splash.js";
+export { truncatePathMiddle } from "./brand-splash.js";
+export { formatSplashCwd } from "./path-formatting.js";
+export { formatQueuedMessagePreview, styleQueuedMessagePreview } from "./queue-preview.js";
+export {
+	buildUpdateChildArgs,
+	buildUpdateRelaunchArgs,
+	resolveInteractiveUpdateDaemonSocketPath,
+	updateArgsIncludeSelf,
+} from "./update-relaunch.js";
 import { scopeHeartbeatsToSession } from "./heartbeat-scope.js";
 import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionCellColor, playIgnitionSound } from "./ignition.js";
 import {
@@ -242,6 +287,17 @@ import { type OnboardingStartupState, shouldRunOnboarding } from "./onboarding.j
 import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
 import { QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
+import {
+	buildScopeGroups,
+	formatContextPath,
+	formatDiagnostics,
+	formatDisplayPath,
+	formatExtensionDisplayPath,
+	formatScopeGroups,
+	getCompactExtensionLabels,
+	getCompactPathLabel,
+	getShortPath,
+} from "./source-labels.js";
 import {
 	fgAnsiFor,
 	getAvailableThemes,
@@ -271,8 +327,7 @@ interface PendingToolCallRenderInput {
 	arguments: ToolCall["arguments"];
 }
 
-const HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS = 15_000;
-const HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS = 120_000;
+
 const MODEL_CATALOG_REFRESH_TTL_MS = 60_000;
 const FEATURE_HINT_DELAY_MS = 5_000;
 
@@ -288,28 +343,7 @@ export function getRandomStartHint(random = Math.random): (typeof START_HINTS)[n
 	return START_HINTS[Math.floor(random() * START_HINTS.length)] ?? START_HINTS[0];
 }
 
-function isLabeledQueuedPreview(message: string): boolean {
-	return (
-		message.startsWith(`${HEARTBEAT_PROMPT_PREVIEW_LABEL}: `) ||
-		message.startsWith(`${GOAL_CONTEXT_PREVIEW_LABEL}: `) ||
-		message.startsWith(`${AGENT_MESSAGE_RECEIVED_PREVIEW_LABEL}: `)
-	);
-}
 
-export function formatQueuedMessagePreview(message: string, label: "Steering" | "Follow-up"): string {
-	return isLabeledQueuedPreview(message) ? message : `${label}: ${message}`;
-}
-
-export function styleQueuedMessagePreview(
-	message: string,
-	label: "Steering" | "Follow-up",
-	isRecognizedSlashCommand: (name: string) => boolean,
-): string {
-	const preview = formatQueuedMessagePreview(message, label);
-	if (!isLeadingSlashCommand(message, isRecognizedSlashCommand)) return theme.fg("dim", preview);
-	const prefix = preview.slice(0, preview.length - message.length);
-	return `${theme.fg("dim", prefix)}${styleSlashCommandText(message, (rest) => theme.fg("dim", rest))}`;
-}
 
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
@@ -357,18 +391,7 @@ class ExpandableText extends Text implements Expandable {
 	}
 }
 
-export function formatSplashCwd(cwd: string): string {
-	const normalized = cwd.replace(/\\/g, "/");
-	const home = os.homedir().replace(/\\/g, "/");
-	if (home && normalized === home) {
-		return "~";
-	}
-	if (home && normalized.startsWith(`${home}/`)) {
-		return `~${normalized.slice(home.length)}`;
-	}
 
-	return normalized;
-}
 
 function mergeSubagentSnapshot(
 	previous: AgentConnectionRlmChildAgentSnapshot,
@@ -389,261 +412,17 @@ function mergeSubagentSnapshot(
 	};
 }
 
-export function truncatePathMiddle(value: string, width: number): string {
-	if (visibleWidth(value) <= width) {
-		return value;
-	}
-	if (width <= 1) {
-		return truncateToWidth(value, width, "");
-	}
 
-	const ellipsis = "…";
-	const normalized = value.replace(/\\/g, "/");
-	const prefix = normalized.startsWith("~/") ? "~/" : normalized.startsWith("/") ? "/" : "";
-	const body = prefix ? normalized.slice(prefix.length) : normalized;
-	const parts = body.split("/").filter((part) => part.length > 0);
-	const last = parts.pop() ?? "";
-	const previous = parts.pop();
-	const suffix = previous ? `${previous}/${last}` : last;
-	const candidate = `${prefix}${ellipsis}/${suffix}`;
-	if (visibleWidth(candidate) <= width) {
-		return candidate;
-	}
-
-	return truncateToWidth(candidate, width);
-}
-
-export interface BrandSplashMetadataLine {
-	label: string;
-	value: string;
-}
-
-export interface BrandSplashHeaderOptions {
-	logo?: string;
-	topPadding?: boolean;
-	getExtraMetadata?: () => readonly BrandSplashMetadataLine[];
-	getHideStartHint?: () => boolean;
-	getStartHint?: () => string;
-	/** Milliseconds since ignition began, or undefined once it is over. */
-	getIgnitionElapsedMs?: () => number | undefined;
-}
-
-/** Blank columns between the art's ink and the metadata text. */
-const META_BLOCK_GUTTER = 1;
-
-export class BrandSplashHeader implements Component {
-	private readonly logoRaw: string[];
-	private readonly logoCanvasWidth: number;
-	private readonly gutter = 4;
-	private readonly labelWidth = 9;
-	/** Overlay geometry is measured against OPTIMUS_LOGO; custom marks keep the right-hand meta column. */
-	private readonly overlayMeta: boolean;
-
-	constructor(
-		private readonly version: string,
-		private readonly getModelId: () => string | undefined,
-		private readonly getCwd: () => string,
-		private readonly verboseInstructions?: string,
-		private readonly options: BrandSplashHeaderOptions = {},
-	) {
-		const logo = options.logo ?? OPTIMUS_LOGO;
-		this.overlayMeta = logo === OPTIMUS_LOGO;
-		this.logoRaw = logo.split("\n");
-		this.logoCanvasWidth = this.logoRaw.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-	}
-
-	invalidate(): void {
-		// Render output is derived from current theme/session state.
-	}
-
-	/**
-	 * Meta block painted over the bottom-right of OPTIMUS_LOGO. Lines are padded
-	 * to a shared `width` so the overlay clears one aligned rectangle instead of
-	 * leaving art fragments beside the shorter rows.
-	 */
-	private overlayMetaBlock(extraMetadata: readonly BrandSplashMetadataLine[]): { lines: string[]; width: number } {
-		const brand = "Optimus Prime";
-		const entries = [
-			{ label: "version", value: `v${this.version}` },
-			{ label: "model", value: this.getModelId() ?? "—" },
-			{ label: "cwd", value: formatSplashCwd(this.getCwd()) },
-			...extraMetadata,
-		].slice(0, OPTIMUS_LOGO_META_MAX_ROWS - 1);
-		const labelWidth = entries.reduce((max, entry) => Math.max(max, visibleWidth(entry.label)), 0) + 1;
-		// One column stays blank between the art ink and the block.
-		const valueWidth = Math.max(1, this.logoCanvasWidth - 1 - labelWidth);
-		const rows = entries.map((entry) => ({
-			label: entry.label.padEnd(labelWidth),
-			value:
-				entry.label === "cwd"
-					? truncatePathMiddle(entry.value, valueWidth)
-					: truncateToWidth(entry.value, valueWidth),
-		}));
-		const textWidth = rows.reduce(
-			(max, row) => Math.max(max, labelWidth + visibleWidth(row.value)),
-			visibleWidth(brand),
-		);
-		// One column of the block is blank so the text does not sit flush against the art's ink, and
-		// the block is one row taller than its text so the brand line has clear space above it.
-		const width = textWidth + META_BLOCK_GUTTER;
-		const gutter = " ".repeat(META_BLOCK_GUTTER);
-		const pad = (text: string) => " ".repeat(Math.max(0, width - META_BLOCK_GUTTER - visibleWidth(text)));
-		return {
-			width,
-			lines: [
-				" ".repeat(width),
-				gutter + theme.fg("text", brand) + pad(brand),
-				...rows.map(
-					(row) => gutter + theme.fg("dim", row.label) + theme.fg("muted", row.value) + pad(row.label + row.value),
-				),
-			],
-		};
-	}
-
-	/**
-	 * Theme colour normally; the ignition colour on the handful of cells the eyes and their beams
-	 * cover. Painted per cell rather than per row, so the rest of the mark is untouched.
-	 */
-	private paintArt(line: string, row: number): string {
-		const elapsed = this.options.getIgnitionElapsedMs?.();
-		if (elapsed === undefined) return theme.fg("text", line);
-		const cells = [...line];
-		let painted = "";
-		let lit = false;
-		for (let col = 0; col < cells.length; col++) {
-			const color = ignitionCellColor(row, col, elapsed);
-			if (!color) {
-				painted += cells[col];
-				continue;
-			}
-			lit = true;
-			painted += `${fgAnsiFor(color, theme.colorMode)}${cells[col]}\x1b[39m`;
-		}
-		// Wrapping an already-coloured string in the theme colour would reset the eyes back to it at
-		// the first escape, so a lit row is emitted as-is and only unlit rows take the theme colour.
-		return lit ? painted : theme.fg("text", line);
-	}
-
-	render(width: number): string[] {
-		const safeWidth = Math.max(1, width);
-		const paddingX = safeWidth > 1 ? 1 : 0;
-		const contentWidth = Math.max(1, safeWidth - paddingX * 2);
-		const frame = (content: string) => {
-			const clamped = truncateToWidth(content, contentWidth, "");
-			return " ".repeat(paddingX) + clamped + " ".repeat(Math.max(0, safeWidth - paddingX - visibleWidth(clamped)));
-		};
-		if (this.overlayMeta) {
-			const block = this.overlayMetaBlock(this.options.getExtraMetadata?.() ?? []);
-			const blockStart = Math.max(0, this.logoCanvasWidth - block.width);
-			const firstBlockRow = Math.max(0, this.logoRaw.length - block.lines.length);
-			// Art keeps everything left of the block minus one blank gutter column.
-			const artEnd = Math.max(0, blockStart - 1);
-			const lines = this.options.topPadding ? ["", ""] : [];
-			lines.push(
-				...this.logoRaw.map((line, index) => {
-					const meta = block.lines[index - firstBlockRow];
-					if (meta === undefined) {
-						return frame(this.paintArt(line, index));
-					}
-					// Trailing blanks are trimmed from the art, so pad before slicing.
-					const padded = line + " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line)));
-					const art = truncateToWidth(padded, artEnd, "");
-					return frame(theme.fg("text", art) + " ".repeat(blockStart - artEnd) + meta);
-				}),
-			);
-			if (!(this.options.getHideStartHint?.() ?? false)) {
-				lines.push(frame(""));
-				lines.push(frame(theme.fg("dim", this.options.getStartHint?.() ?? "type to search sessions")));
-			}
-			this.appendVerboseInstructions(lines, frame, safeWidth, contentWidth);
-			return lines;
-		}
-		const metaWidth = contentWidth - this.logoCanvasWidth - this.gutter;
-		const showMeta = metaWidth >= this.labelWidth + 8;
-		const valueWidth = Math.max(1, metaWidth - this.labelWidth);
-		const labelled = (label: string, value: string) => {
-			const displayValue =
-				label === "cwd" ? truncatePathMiddle(value, valueWidth) : truncateToWidth(value, valueWidth);
-			return theme.fg("dim", label.padEnd(this.labelWidth)) + theme.fg("muted", displayValue);
-		};
-		const extraMetadata = this.options.getExtraMetadata?.() ?? [];
-		const hideStartHint = this.options.getHideStartHint?.() ?? false;
-		const startHint = this.options.getStartHint?.() ?? "type to search sessions";
-		const metaLines = showMeta
-			? [
-					labelled("version", `v${this.version}`),
-					labelled("model", this.getModelId() ?? "—"),
-					labelled("cwd", formatSplashCwd(this.getCwd())),
-					...extraMetadata.map((line) => labelled(line.label, line.value)),
-					...(hideStartHint ? [] : ["", theme.fg("dim", startHint)]),
-				]
-			: [];
-		const metaStart = Math.max(0, Math.floor((this.logoRaw.length - metaLines.length) / 2));
-		const lines = this.options.topPadding ? ["", ""] : [];
-		lines.push(
-			...this.logoRaw.map((line, index) => {
-				const colored = theme.fg("text", line);
-				const meta = index >= metaStart && index < metaStart + metaLines.length ? metaLines[index - metaStart] : "";
-				const padding = showMeta
-					? " ".repeat(Math.max(0, this.logoCanvasWidth - visibleWidth(line) + this.gutter))
-					: "";
-				return frame(colored + padding + meta);
-			}),
-		);
-
-		this.appendVerboseInstructions(lines, frame, safeWidth, contentWidth);
-
-		return lines;
-	}
-
-	private appendVerboseInstructions(
-		lines: string[],
-		frame: (content: string) => string,
-		safeWidth: number,
-		contentWidth: number,
-	): void {
-		if (!this.verboseInstructions) {
-			return;
-		}
-		lines.push(" ".repeat(safeWidth));
-		for (const instruction of this.verboseInstructions.split("\n")) {
-			lines.push(frame(truncateToWidth(instruction, contentWidth)));
-		}
-	}
-}
 
 type StartupPromptBarrierOutcome = "admitted" | "retained" | "lifecycle-cancelled";
 
-type GoalAnnouncementSnapshot = {
-	goalId?: string;
-	status: GoalState["status"];
-	objective?: string;
-	lastReason?: string;
-	lastError?: string;
-};
 
 type ModelFallbackWarningAction = "show" | "suppress";
 
 /** Matches the width auth-flows uses, so the same component looks the same everywhere. */
 const EXTENSION_SELECTOR_WIDTH = 76;
 
-const HEARTBEAT_ARGUMENT_COMPLETIONS: AutocompleteItem[] = [
-	{
-		value: "every ",
-		label: "every <duration> <instruction>",
-		description: "Set an interval, then add an instruction: /heartbeat every 10s Scan the logs",
-	},
-	{
-		value: "--steer ",
-		label: "--steer <instruction>",
-		description: "Deliver by interrupting the current turn (default)",
-	},
-	{
-		value: "--follow-up ",
-		label: "--follow-up <instruction>",
-		description: "Deliver as a follow-up after the current turn finishes",
-	},
-];
+
 
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 
@@ -651,96 +430,9 @@ const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 // inline limit before storing, so this holds many recent pastes; the oldest are
 // evicted past the cap to keep a long session bounded.
 const MAX_PASTED_IMAGE_BYTES = 64 * 1024 * 1024;
-const INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT = 400;
+export const INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT = 400;
 
-function initialRenderMessages(messages: AgentMessage[]): AgentMessage[] {
-	if (messages.length <= INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT) {
-		return messages;
-	}
-	const toolCallMessages = new Map<string, { index: number; message: Extract<AgentMessage, { role: "assistant" }> }>();
-	for (const [index, message] of messages.entries()) {
-		if (message.role !== "assistant") {
-			continue;
-		}
-		for (const content of message.content) {
-			if (content.type === "toolCall") {
-				toolCallMessages.set(content.id, { index, message });
-			}
-		}
-	}
 
-	const initialStartIndex = messages.length - INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT;
-	for (let startIndex = initialStartIndex; startIndex < messages.length; startIndex++) {
-		const visibleMessages = messages.slice(startIndex);
-		const visibleToolCallIds = new Set<string>();
-		for (const message of visibleMessages) {
-			if (message.role !== "assistant") {
-				continue;
-			}
-			for (const content of message.content) {
-				if (content.type === "toolCall") {
-					visibleToolCallIds.add(content.id);
-				}
-			}
-		}
-
-		const requiredToolCallIdsByMessage = new Map<
-			number,
-			{ message: Extract<AgentMessage, { role: "assistant" }>; toolCallIds: Set<string> }
-		>();
-		for (const message of visibleMessages) {
-			if (message.role !== "toolResult" || visibleToolCallIds.has(message.toolCallId)) {
-				continue;
-			}
-			const toolCallMessage = toolCallMessages.get(message.toolCallId);
-			if (!toolCallMessage || toolCallMessage.index >= startIndex) {
-				continue;
-			}
-			const requiredMessage = requiredToolCallIdsByMessage.get(toolCallMessage.index) ?? {
-				message: toolCallMessage.message,
-				toolCallIds: new Set<string>(),
-			};
-			requiredMessage.toolCallIds.add(message.toolCallId);
-			requiredToolCallIdsByMessage.set(toolCallMessage.index, requiredMessage);
-		}
-
-		if (visibleMessages.length + requiredToolCallIdsByMessage.size > INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT) {
-			continue;
-		}
-
-		const requiredToolCallMessages = [...requiredToolCallIdsByMessage.entries()]
-			.sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
-			.map(([, { message, toolCallIds }]) => ({
-				...message,
-				content: message.content.filter((content) => content.type !== "toolCall" || toolCallIds.has(content.id)),
-			}));
-		return omitOrphanToolResults([...requiredToolCallMessages, ...visibleMessages]);
-	}
-
-	return [];
-}
-
-function omitOrphanToolResults(messages: AgentMessage[]): AgentMessage[] {
-	const renderedToolCallIds = new Set<string>();
-	const renderableMessages: AgentMessage[] = [];
-	for (const message of messages) {
-		if (message.role === "assistant") {
-			for (const content of message.content) {
-				if (content.type === "toolCall") {
-					renderedToolCallIds.add(content.id);
-				}
-			}
-			renderableMessages.push(message);
-		} else if (message.role === "toolResult") {
-			if (renderedToolCallIds.has(message.toolCallId)) {
-				renderableMessages.push(message);
-			}
-		} else {
-			renderableMessages.push(message);
-		}
-	}
-	return renderableMessages;
-}
 
 function isDeadTerminalError(error: unknown): boolean {
 	if (!error || typeof error !== "object" || !("code" in error)) {
@@ -750,119 +442,9 @@ function isDeadTerminalError(error: unknown): boolean {
 	return code !== undefined && DEAD_TERMINAL_ERROR_CODES.has(code);
 }
 
-function getPayloadString(payload: Record<string, unknown>, key: string): string | undefined {
-	const value = payload[key];
-	return typeof value === "string" ? value : undefined;
-}
 
-function getPayloadNumber(payload: Record<string, unknown>, key: string): number | undefined {
-	const value = payload[key];
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
-function getPayloadBoolean(payload: Record<string, unknown>, key: string): boolean | undefined {
-	const value = payload[key];
-	return typeof value === "boolean" ? value : undefined;
-}
 
-function getPayloadStringArray(payload: Record<string, unknown>, key: string): string[] | undefined {
-	const value = payload[key];
-	if (value === undefined) {
-		return undefined;
-	}
-	return Array.isArray(value) && value.every((item): item is string => typeof item === "string") ? value : undefined;
-}
-
-function getPayloadNotifyType(payload: Record<string, unknown>, key: string): "info" | "warning" | "error" | undefined {
-	const value = payload[key];
-	return value === "info" || value === "warning" || value === "error" ? value : undefined;
-}
-
-function getPayloadWidgetPlacement(
-	payload: Record<string, unknown>,
-	key: string,
-): "aboveEditor" | "belowEditor" | undefined {
-	const value = payload[key];
-	return value === "aboveEditor" || value === "belowEditor" ? value : undefined;
-}
-
-function getPayloadWorkingIndicatorOptions(
-	payload: Record<string, unknown>,
-	key: string,
-): LoaderIndicatorOptions | undefined {
-	const value = payload[key];
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return undefined;
-	}
-	const optionsPayload = value as Record<string, unknown>;
-	const frames = getPayloadStringArray(optionsPayload, "frames");
-	const intervalMs = getPayloadNumber(optionsPayload, "intervalMs");
-	return {
-		...(frames === undefined ? {} : { frames }),
-		...(intervalMs === undefined ? {} : { intervalMs }),
-	};
-}
-
-export function updateArgsIncludeSelf(args: readonly string[]): boolean {
-	let selfFlag = false;
-	let extensionsOnlyFlag = false;
-	let positional: string | undefined;
-	for (let index = 0; index < args.length; index++) {
-		const arg = args[index];
-		if (arg === "--self") {
-			selfFlag = true;
-		} else if (arg === "--extensions") {
-			extensionsOnlyFlag = true;
-		} else if (arg === "--extension") {
-			extensionsOnlyFlag = true;
-			index++;
-		} else if (arg === "--daemon-socket") {
-			index++;
-		} else if (arg && !arg.startsWith("-") && positional === undefined) {
-			positional = arg;
-		}
-	}
-	if (selfFlag) {
-		return true;
-	}
-	if (extensionsOnlyFlag) {
-		return false;
-	}
-	if (!positional) {
-		return true;
-	}
-	const normalized = positional.toLowerCase();
-	return normalized === "self" || normalized === "pi" || normalized === APP_NAME.toLowerCase();
-}
-
-function argsIncludeSessionSelection(args: readonly string[]): boolean {
-	for (const arg of args) {
-		if (arg === "--resume" || arg === "-r" || arg === "--continue" || arg === "-c" || arg === "--fork") {
-			return true;
-		}
-	}
-	return false;
-}
-
-export function buildUpdateRelaunchArgs(args: readonly string[], sessionFile: string | undefined): string[] {
-	const relaunchArgs = [...args];
-	if (sessionFile && !argsIncludeSessionSelection(relaunchArgs)) {
-		relaunchArgs.push("--resume", sessionFile);
-	}
-	return relaunchArgs;
-}
-
-export function buildUpdateChildArgs(args: readonly string[], daemonSocketPath: string): string[] {
-	return args.includes("--daemon-socket") ? [...args] : [...args, "--daemon-socket", daemonSocketPath];
-}
-
-export function resolveInteractiveUpdateDaemonSocketPath(
-	args: readonly string[],
-	activeDaemonSocketPath: string,
-): string {
-	const socketFlagIndex = args.indexOf("--daemon-socket");
-	return socketFlagIndex === -1 ? activeDaemonSocketPath : (args[socketFlagIndex + 1] ?? activeDaemonSocketPath);
-}
 
 export interface InteractiveInitialPrompt {
 	text: string;
@@ -1838,379 +1420,49 @@ export class InteractiveMode {
 	}
 
 	private formatDisplayPath(p: string): string {
-		const home = os.homedir();
-		let result = p;
-
-		// Replace home directory with ~
-		if (result.startsWith(home)) {
-			result = `~${result.slice(home.length)}`;
-		}
-
-		return result;
+		return formatDisplayPath(p);
 	}
 
 	private formatExtensionDisplayPath(path: string): string {
-		let result = this.formatDisplayPath(path);
-		result = result.replace(/\/index\.ts$/, "").replace(/\/index\.js$/, "");
-		return result;
+		return formatExtensionDisplayPath(path);
 	}
 
 	private formatContextPath(p: string): string {
-		const cwd = path.resolve(this.getCurrentCwd());
-		const absolutePath = path.isAbsolute(p) ? path.resolve(p) : path.resolve(cwd, p);
-		const relativePath = getCwdRelativePath(absolutePath, cwd);
-		if (relativePath !== undefined) {
-			return relativePath;
-		}
-
-		return this.formatDisplayPath(absolutePath);
+		return formatContextPath(p, this.getCurrentCwd());
 	}
 
 	private getStartupExpansionState(): boolean {
 		return this.options.verbose || this.toolOutputExpanded;
 	}
 
-	private getShortPath(fullPath: string, sourceInfo?: AgentConnectionSourceInfo): string {
-		const baseDir = sourceInfo?.baseDir;
-		if (baseDir && this.isPackageSource(sourceInfo)) {
-			const relativePath = path.relative(path.resolve(baseDir), path.resolve(fullPath));
-			if (
-				relativePath &&
-				relativePath !== "." &&
-				!relativePath.startsWith("..") &&
-				!relativePath.startsWith(`..${path.sep}`) &&
-				!path.isAbsolute(relativePath)
-			) {
-				return relativePath.replace(/\\/g, "/");
-			}
-		}
-
-		const source = sourceInfo?.source ?? "";
-		const npmMatch = fullPath.match(/node_modules\/(@?[^/]+(?:\/[^/]+)?)\/(.*)/);
-		if (npmMatch && source.startsWith("npm:")) {
-			return npmMatch[2];
-		}
-
-		const gitMatch = fullPath.match(/git\/[^/]+\/[^/]+\/(.*)/);
-		if (gitMatch && source.startsWith("git:")) {
-			return gitMatch[1];
-		}
-
-		return this.formatDisplayPath(fullPath);
+	private getShortPath(fullPath: string, sourceInfo?: AgentConnectionSourceInfo) {
+		return getShortPath(fullPath, sourceInfo);
 	}
 
-	private getCompactPathLabel(resourcePath: string, sourceInfo?: AgentConnectionSourceInfo): string {
-		const shortPath = this.getShortPath(resourcePath, sourceInfo);
-		const normalizedPath = shortPath.replace(/\\/g, "/");
-		const segments = normalizedPath.split("/").filter((segment) => segment.length > 0 && segment !== "~");
-		if (segments.length > 0) {
-			return segments[segments.length - 1]!;
-		}
-		return shortPath;
+	private getCompactPathLabel(resourcePath: string, sourceInfo?: AgentConnectionSourceInfo) {
+		return getCompactPathLabel(resourcePath, sourceInfo);
 	}
 
-	private getCompactPackageSourceLabel(sourceInfo?: AgentConnectionSourceInfo): string {
-		const source = sourceInfo?.source ?? "";
-		if (source.startsWith("npm:")) {
-			return source.slice("npm:".length) || source;
-		}
-
-		const gitSource = parseGitUrl(source);
-		if (gitSource) {
-			return gitSource.path || source;
-		}
-
-		return source;
+	private getCompactExtensionLabels(extensions: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>) {
+		return getCompactExtensionLabels(extensions);
 	}
 
-	private getCompactExtensionLabel(resourcePath: string, sourceInfo?: AgentConnectionSourceInfo): string {
-		if (!this.isPackageSource(sourceInfo)) {
-			return this.getCompactPathLabel(resourcePath, sourceInfo);
-		}
-
-		const sourceLabel = this.getCompactPackageSourceLabel(sourceInfo);
-		if (!sourceLabel) {
-			return this.getCompactPathLabel(resourcePath, sourceInfo);
-		}
-
-		const shortPath = this.getShortPath(resourcePath, sourceInfo).replace(/\\/g, "/");
-		const packagePath = shortPath.startsWith("extensions/") ? shortPath.slice("extensions/".length) : shortPath;
-		const parsedPath = path.posix.parse(packagePath);
-
-		if (parsedPath.name === "index") {
-			return !parsedPath.dir || parsedPath.dir === "." ? sourceLabel : `${sourceLabel}:${parsedPath.dir}`;
-		}
-
-		return `${sourceLabel}:${packagePath}`;
-	}
-
-	private getCompactDisplayPathSegments(resourcePath: string): string[] {
-		return this.formatDisplayPath(resourcePath)
-			.replace(/\\/g, "/")
-			.split("/")
-			.filter((segment) => segment.length > 0 && segment !== "~");
-	}
-
-	private getCompactNonPackageExtensionLabel(
-		resourcePath: string,
-		index: number,
-		allPaths: Array<{ path: string; segments: string[] }>,
-	): string {
-		const segments = allPaths[index]?.segments;
-		if (!segments || segments.length === 0) {
-			return this.getCompactPathLabel(resourcePath);
-		}
-
-		for (let segmentCount = 1; segmentCount <= segments.length; segmentCount += 1) {
-			const candidate = segments.slice(-segmentCount).join("/");
-			const isUnique = allPaths.every((item, itemIndex) => {
-				if (itemIndex === index) {
-					return true;
-				}
-				return item.segments.slice(-segmentCount).join("/") !== candidate;
-			});
-
-			if (isUnique) {
-				return candidate;
-			}
-		}
-
-		return segments.join("/");
-	}
-
-	private getCompactExtensionLabels(
-		extensions: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>,
-	): string[] {
-		const nonPackageExtensions = extensions
-			.map((extension) => {
-				const segments = this.getCompactDisplayPathSegments(extension.path);
-				const lastSegment = segments[segments.length - 1];
-				if (segments.length > 1 && (lastSegment === "index.ts" || lastSegment === "index.js")) {
-					segments.pop();
-				}
-				return {
-					path: extension.path,
-					sourceInfo: extension.sourceInfo,
-					segments,
-				};
-			})
-			.filter((extension) => !this.isPackageSource(extension.sourceInfo));
-
-		return extensions.map((extension) => {
-			if (this.isPackageSource(extension.sourceInfo)) {
-				return this.getCompactExtensionLabel(extension.path, extension.sourceInfo);
-			}
-
-			const nonPackageIndex = nonPackageExtensions.findIndex((item) => item.path === extension.path);
-			if (nonPackageIndex === -1) {
-				return this.getCompactPathLabel(extension.path, extension.sourceInfo);
-			}
-
-			return this.getCompactNonPackageExtensionLabel(extension.path, nonPackageIndex, nonPackageExtensions);
-		});
-	}
-
-	private getDisplaySourceInfo(sourceInfo?: AgentConnectionSourceInfo): {
-		label: string;
-		scopeLabel?: string;
-		color: "accent" | "muted";
-	} {
-		const source = sourceInfo?.source ?? "local";
-		const scope = sourceInfo?.scope ?? "project";
-		if (source === "local") {
-			if (scope === "user") {
-				return { label: "user", color: "muted" };
-			}
-			if (scope === "project") {
-				return { label: "project", color: "muted" };
-			}
-			if (scope === "temporary") {
-				return { label: "path", scopeLabel: "temp", color: "muted" };
-			}
-			return { label: "path", color: "muted" };
-		}
-
-		if (source === "cli") {
-			return { label: "path", scopeLabel: scope === "temporary" ? "temp" : undefined, color: "muted" };
-		}
-
-		const scopeLabel =
-			scope === "user" ? "user" : scope === "project" ? "project" : scope === "temporary" ? "temp" : undefined;
-		return { label: source, scopeLabel, color: "accent" };
-	}
-
-	private getScopeGroup(sourceInfo?: AgentConnectionSourceInfo): "user" | "project" | "path" {
-		const source = sourceInfo?.source ?? "local";
-		const scope = sourceInfo?.scope ?? "project";
-		if (source === "cli" || scope === "temporary") return "path";
-		if (scope === "user") return "user";
-		if (scope === "project") return "project";
-		return "path";
-	}
-
-	private isPackageSource(sourceInfo?: AgentConnectionSourceInfo): boolean {
-		const source = sourceInfo?.source ?? "";
-		return source.startsWith("npm:") || source.startsWith("git:");
-	}
-
-	private buildScopeGroups(items: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>): Array<{
-		scope: "user" | "project" | "path";
-		paths: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>;
-		packages: Map<string, Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>>;
-	}> {
-		const groups: Record<
-			"user" | "project" | "path",
-			{
-				scope: "user" | "project" | "path";
-				paths: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>;
-				packages: Map<string, Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>>;
-			}
-		> = {
-			user: { scope: "user", paths: [], packages: new Map() },
-			project: { scope: "project", paths: [], packages: new Map() },
-			path: { scope: "path", paths: [], packages: new Map() },
-		};
-
-		for (const item of items) {
-			const groupKey = this.getScopeGroup(item.sourceInfo);
-			const group = groups[groupKey];
-			const source = item.sourceInfo?.source ?? "local";
-
-			if (this.isPackageSource(item.sourceInfo)) {
-				const list = group.packages.get(source) ?? [];
-				list.push(item);
-				group.packages.set(source, list);
-			} else {
-				group.paths.push(item);
-			}
-		}
-
-		return [groups.project, groups.user, groups.path].filter(
-			(group) => group.paths.length > 0 || group.packages.size > 0,
-		);
+	private buildScopeGroups(items: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>) {
+		return buildScopeGroups(items);
 	}
 
 	private formatScopeGroups(
-		groups: Array<{
-			scope: "user" | "project" | "path";
-			paths: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>;
-			packages: Map<string, Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>>;
-		}>,
-		options: {
-			formatPath: (item: { path: string; sourceInfo?: AgentConnectionSourceInfo }) => string;
-			formatPackagePath: (item: { path: string; sourceInfo?: AgentConnectionSourceInfo }, source: string) => string;
-		},
-	): string {
-		const lines: string[] = [];
-
-		for (const group of groups) {
-			lines.push(`  ${theme.fg("accent", group.scope)}`);
-
-			const sortedPaths = [...group.paths].sort((a, b) => a.path.localeCompare(b.path));
-			for (const item of sortedPaths) {
-				lines.push(theme.fg("dim", `    ${options.formatPath(item)}`));
-			}
-
-			const sortedPackages = Array.from(group.packages.entries()).sort(([a], [b]) => a.localeCompare(b));
-			for (const [source, items] of sortedPackages) {
-				lines.push(`    ${theme.fg("mdLink", source)}`);
-				const sortedPackagePaths = [...items].sort((a, b) => a.path.localeCompare(b.path));
-				for (const item of sortedPackagePaths) {
-					lines.push(theme.fg("dim", `      ${options.formatPackagePath(item, source)}`));
-				}
-			}
-		}
-
-		return lines.join("\n");
-	}
-
-	private findSourceInfoForPath(
-		p: string,
-		sourceInfos: Map<string, AgentConnectionSourceInfo>,
-	): AgentConnectionSourceInfo | undefined {
-		const exact = sourceInfos.get(p);
-		if (exact) return exact;
-
-		let current = p;
-		while (current.includes("/")) {
-			current = current.substring(0, current.lastIndexOf("/"));
-			const parent = sourceInfos.get(current);
-			if (parent) return parent;
-		}
-
-		return undefined;
-	}
-
-	private formatPathWithSource(p: string, sourceInfo?: AgentConnectionSourceInfo): string {
-		if (sourceInfo) {
-			const shortPath = this.getShortPath(p, sourceInfo);
-			const { label, scopeLabel } = this.getDisplaySourceInfo(sourceInfo);
-			const labelText = scopeLabel ? `${label} (${scopeLabel})` : label;
-			return `${labelText} ${shortPath}`;
-		}
-		return this.formatDisplayPath(p);
+		groups: Parameters<typeof formatScopeGroups>[0],
+		options: Parameters<typeof formatScopeGroups>[1],
+	) {
+		return formatScopeGroups(groups, options);
 	}
 
 	private formatDiagnostics(
 		diagnostics: readonly AgentConnectionResourceDiagnostic[],
 		sourceInfos: Map<string, AgentConnectionSourceInfo>,
-	): string {
-		const lines: string[] = [];
-
-		// Group collision diagnostics by name
-		const collisions = new Map<string, AgentConnectionResourceDiagnostic[]>();
-		const otherDiagnostics: AgentConnectionResourceDiagnostic[] = [];
-
-		for (const d of diagnostics) {
-			if (d.type === "collision" && d.collision) {
-				const list = collisions.get(d.collision.name) ?? [];
-				list.push(d);
-				collisions.set(d.collision.name, list);
-			} else {
-				otherDiagnostics.push(d);
-			}
-		}
-
-		// Format collision diagnostics grouped by name
-		for (const [name, collisionList] of collisions) {
-			const first = collisionList[0]?.collision;
-			if (!first) continue;
-			lines.push(theme.fg("warning", `  "${name}" collision:`));
-			lines.push(
-				theme.fg(
-					"dim",
-					`    ${theme.fg("success", "✓")} ${this.formatPathWithSource(first.winnerPath, this.findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
-				),
-			);
-			for (const d of collisionList) {
-				if (d.collision) {
-					lines.push(
-						theme.fg(
-							"dim",
-							`    ${theme.fg("warning", "✗")} ${this.formatPathWithSource(d.collision.loserPath, this.findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
-						),
-					);
-				}
-			}
-		}
-
-		const formatMessageLines = (diagnostic: AgentConnectionResourceDiagnostic, indent: number): string[] => {
-			const color = diagnostic.type === "error" ? "error" : "warning";
-			const prefix = " ".repeat(indent);
-			return diagnostic.message.split("\n").map((line) => theme.fg(color, `${prefix}${line}`));
-		};
-
-		for (const d of otherDiagnostics) {
-			if (d.path) {
-				const formattedPath = this.formatPathWithSource(d.path, this.findSourceInfoForPath(d.path, sourceInfos));
-				lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${formattedPath}`));
-				lines.push(...formatMessageLines(d, 4));
-			} else {
-				lines.push(...formatMessageLines(d, 2));
-			}
-		}
-
-		return lines.join("\n");
+	) {
+		return formatDiagnostics(diagnostics, sourceInfos);
 	}
 
 	private showLoadedResources(options?: {
@@ -4122,6 +3374,15 @@ export class InteractiveMode {
 
 	private setupKeyHandlers(): void {
 		this.defaultEditor.getHeaderLine = () => this.getQueueSelectionHeader();
+		// Plain up/down browse queued messages whenever any pend (alt+up/alt+down
+		// keep working too). Without this, up recalled editor history showing the
+		// same text and Enter re-submitted it as a new message - a duplicate.
+		this.defaultEditor.onHistoryRecallIntercept = (direction) => {
+			if (this.getAllQueuedMessages().steering.length + this.getAllQueuedMessages().followUp.length === 0)
+				return false;
+			this.browseQueueSelection(direction);
+			return true;
+		};
 		// Set up handlers on defaultEditor - they use this.editor for text access
 		// so they work correctly regardless of which editor is active
 		this.defaultEditor.onEscape = () => {
@@ -5882,13 +5143,7 @@ export class InteractiveMode {
 	}
 
 	private goalAnnouncementSnapshot(goal: GoalState): GoalAnnouncementSnapshot {
-		return {
-			goalId: goal.goalId,
-			status: goal.status,
-			objective: goal.objective,
-			lastReason: goal.lastReason,
-			lastError: goal.lastError,
-		};
+		return goalAnnouncementSnapshot(goal);
 	}
 
 	private shouldAnnounceGoalUpdate(goal: GoalState): boolean {
@@ -5923,50 +5178,11 @@ export class InteractiveMode {
 	}
 
 	private formatGoalStatus(goal: GoalState): string {
-		const usage = formatGoalUsage(goal);
-		const usageText = usage ? ` (${usage})` : "";
-		switch (goal.status) {
-			case "idle":
-				return "No active goal";
-			case "active":
-				return goal.objective
-					? `Goal${this.formatGoalDetailSuffix(goal.objective, visibleWidth("Goal"))}`
-					: "Pursuing goal";
-			case "paused":
-				return goal.lastReason
-					? `Goal paused${this.formatGoalDetailSuffix(goal.lastReason, visibleWidth("Goal paused"))}`
-					: "Goal paused (/goal resume)";
-			case "budget_limited":
-				if (goal.lastReason) {
-					const prefix = `Goal budget limited${usageText}`;
-					return prefix + this.formatGoalDetailSuffix(goal.lastReason, visibleWidth(prefix));
-				}
-				return `Goal budget limited${usageText}`;
-			case "complete":
-				return goal.lastReason
-					? `Goal complete${this.formatGoalDetailSuffix(goal.lastReason, visibleWidth("Goal complete"))}`
-					: "Goal complete";
-			case "error":
-				return goal.lastError
-					? `Goal error${this.formatGoalDetailSuffix(goal.lastError, visibleWidth("Goal error"))}`
-					: "Goal error";
-			default: {
-				const _exhaustive: never = goal.status;
-				return _exhaustive;
-			}
-		}
+		return formatGoalStatus(goal, this.ui.terminal.columns);
 	}
 
 	private formatGoalDetailSuffix(value: string | undefined, prefixWidth: number): string {
-		const detail = value?.replace(/\s+/g, " ").trim();
-		if (!detail) {
-			return "";
-		}
-		const availableWidth = Math.min(120, Math.max(1, this.ui.terminal.columns - prefixWidth - 2));
-		if (availableWidth < 8) {
-			return "";
-		}
-		return `: ${truncateToWidth(detail, availableWidth)}`;
+		return formatGoalDetailSuffix(value, prefixWidth, this.ui.terminal.columns);
 	}
 
 	private seedSubagentSummary(children: readonly AgentConnectionRlmChildAgentSnapshot[] | undefined): void {
@@ -6255,35 +5471,15 @@ export class InteractiveMode {
 	}
 
 	private isTextOnlyUserMessage(message: Message): boolean {
-		if (message.role !== "user") {
-			return false;
-		}
-		if (typeof message.content === "string") {
-			return true;
-		}
-		return message.content.every((content) => content.type === "text");
+		return isTextOnlyUserMessage(message);
 	}
 
 	private isLikelyHeartbeatPromptTimestamp(job: AgentCronJob, timestamp: number): boolean {
-		const directRunTimes = [job.lastRunAt, job.nextRunAt]
-			.map((value) => (value ? Date.parse(value) : Number.NaN))
-			.filter((value) => Number.isFinite(value));
-		const tolerance = this.heartbeatLegacyPromptToleranceMs(job);
-		if (directRunTimes.some((runAt) => Math.abs(timestamp - runAt) <= tolerance)) {
-			return true;
-		}
-		return false;
+		return isLikelyHeartbeatPromptTimestamp(job, timestamp);
 	}
 
 	private heartbeatLegacyPromptToleranceMs(job: AgentCronJob): number {
-		const intervalMs = job.schedule.intervalMs;
-		if (!intervalMs || intervalMs <= 0) {
-			return HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS;
-		}
-		return Math.min(
-			HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS,
-			Math.max(HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS, intervalMs / 3),
-		);
+		return heartbeatLegacyPromptToleranceMs(job);
 	}
 
 	/**
@@ -9698,157 +8894,15 @@ export class InteractiveMode {
 	}
 
 	private getShortcutGuide(): string {
-		const tab = keyText("tui.input.tab");
-		const newLine = keyText("tui.input.newLine");
-		const clearInput = keyText("app.input.clear");
-		const shortcutsKey = keyText("app.shortcuts");
-		const selectModel = keyText("app.model.select");
-		const expandTools = keyText("app.tools.expand");
-		const expandMessages = keyText("app.messages.expand");
-		const expandEdits = keyText("app.edits.expand");
-		const toggleThinking = keyText("app.thinking.toggle");
-		const externalEditor = keyText("app.editor.external");
-		const promptStash = keyText("app.prompt.stash");
-		const pasteImage = keyText("app.clipboard.pasteImage");
-
-		return `
-**Prompt**
-\`!\` shell mode · \`/\` commands · \`@\` file paths
-\`${tab}\` complete paths · \`${newLine}\` new line
-\`${clearInput}\` interrupt · press twice to rewind or clear the prompt
-
-**Controls**
-\`${selectModel}\` select model · \`/effort\` set reasoning · \`${expandTools}\` tool output
-\`${expandMessages}\` agent messages · \`${expandEdits}\` edit diffs · \`${toggleThinking}\` thinking blocks · \`${promptStash}\` stash prompt · \`${externalEditor}\` edit in \`$EDITOR\`
-\`${pasteImage}\` paste image
-
-**Help**
-${shortcutsKey ? `\`${shortcutsKey}\` quick shortcuts · ` : ""}\`/hotkeys\` full reference
-`;
+		return buildShortcutGuide();
 	}
 
 	private getHotkeysGuide(): string {
-		const cursorUp = keyText("tui.editor.cursorUp");
-		const cursorDown = keyText("tui.editor.cursorDown");
-		const cursorLeft = keyText("tui.editor.cursorLeft");
-		const cursorRight = keyText("tui.editor.cursorRight");
-		const cursorWordLeft = keyText("tui.editor.cursorWordLeft");
-		const cursorWordRight = keyText("tui.editor.cursorWordRight");
-		const cursorLineStart = keyText("tui.editor.cursorLineStart");
-		const cursorLineEnd = keyText("tui.editor.cursorLineEnd");
-		const jumpForward = keyText("tui.editor.jumpForward");
-		const jumpBackward = keyText("tui.editor.jumpBackward");
-		const pageUp = keyText("tui.editor.pageUp");
-		const pageDown = keyText("tui.editor.pageDown");
-		const submit = keyText("tui.input.submit");
-		const newLine = keyText("tui.input.newLine");
-		const deleteWordBackward = keyText("tui.editor.deleteWordBackward");
-		const deleteWordForward = keyText("tui.editor.deleteWordForward");
-		const deleteToLineStart = keyText("tui.editor.deleteToLineStart");
-		const deleteToLineEnd = keyText("tui.editor.deleteToLineEnd");
-		const yank = keyText("tui.editor.yank");
-		const yankPop = keyText("tui.editor.yankPop");
-		const undo = keyText("tui.editor.undo");
-		const tab = keyText("tui.input.tab");
-		const clear = keyText("app.clear");
-		const clearInput = keyText("app.input.clear");
-		const interrupt = keyText("app.interrupt");
-		const shortcutsKey = keyText("app.shortcuts");
-		const exit = keyText("app.exit");
-		const selectModel = keyText("app.model.select");
-		const expandTools = keyText("app.tools.expand");
-		const expandMessages = keyText("app.messages.expand");
-		const expandEdits = keyText("app.edits.expand");
-		const toggleThinking = keyText("app.thinking.toggle");
-		const focusSubagents = keyText("app.subagents.focus");
-		const toggleSubagentGraph = keyText("app.subagents.graph");
-		const manageHeartbeats = keyText("app.heartbeats.open");
-		const externalEditor = keyText("app.editor.external");
-		const promptStash = keyText("app.prompt.stash");
-		const followUp = keyText("app.message.followUp");
-		const browseQueue = keyText("app.message.navigateOlder");
-		const reorderQueue = `${keyText("app.message.moveEarlier")} / ${keyText("app.message.moveLater")}`;
-		const pasteImage = keyText("app.clipboard.pasteImage");
-		const viewportPageUp = keyText("tui.viewport.pageUp");
-		const viewportPageDown = keyText("tui.viewport.pageDown");
-		const viewportTop = keyText("tui.viewport.top");
-		const viewportFollow = keyText("tui.viewport.follow");
-
-		let hotkeys = `
-**Navigation**
-| Key | Action |
-|-----|--------|
-| \`${cursorUp}\` / \`${cursorDown}\` / \`${cursorLeft}\` / \`${cursorRight}\` | Move cursor / browse history (Up when empty) |
-| \`${cursorWordLeft}\` / \`${cursorWordRight}\` | Move by word |
-| \`${cursorLineStart}\` | Start of line |
-| \`${cursorLineEnd}\` | End of line |
-| \`${jumpForward}\` | Jump forward to character |
-| \`${jumpBackward}\` | Jump backward to character |
-| \`${pageUp}\` / \`${pageDown}\` | Scroll by page |
-
-**Editing**
-| Key | Action |
-|-----|--------|
-| \`${submit}\` | Send message |
-| \`${newLine}\` | New line${process.platform === "win32" ? " (Ctrl+Enter on Windows Terminal)" : ""} |
-| \`${deleteWordBackward}\` | Delete word backwards |
-| \`${deleteWordForward}\` | Delete word forwards |
-| \`${deleteToLineStart}\` | Delete to start of line |
-| \`${deleteToLineEnd}\` | Delete to end of line |
-| \`${yank}\` | Paste the most-recently-deleted text |
-| \`${yankPop}\` | Cycle through the deleted text after pasting |
-| \`${undo}\` | Undo |
-
-**Other**
-| Key | Action |
-|-----|--------|
-| \`${tab}\` | Path completion / accept autocomplete |
-| \`${clearInput}\` | Clear input / cancel autocomplete |
-| \`${clear}\` | Interrupt current operation (first) / exit (second) |
-${interrupt ? `| \`${interrupt}\` | Interrupt current operation |\n` : ""}${shortcutsKey ? `| \`${shortcutsKey}\` | Show quick shortcuts |\n` : ""}| \`${exit}\` | Exit (when editor is empty) |
-| \`${selectModel}\` | Open model selector |
-| \`${expandTools}\` | Toggle tool output expansion |
-| \`${expandMessages}\` | Toggle agent message expansion |
-| \`${expandEdits}\` | Toggle edit diff expansion |
-| \`${toggleThinking}\` | Toggle thinking block visibility |
-| \`${focusSubagents}\` | Focus the subagent summary / open the scoped agents view |
-| \`${toggleSubagentGraph}\` | Toggle the live subagent graph |
-| \`${manageHeartbeats}\` | Manage heartbeats |
-| \`${externalEditor}\` | Edit message in external editor |
-| \`${promptStash}\` | Stash or restore draft prompt |
-| \`${followUp}\` | Queue follow-up message |
-| \`${browseQueue}\` | Browse and edit queued messages |
-| \`${reorderQueue}\` | Reorder the selected queued message |
-| \`${pasteImage}\` | Paste image from clipboard |
-| \`/\` | Slash commands |
-
-**Fullscreen mode (\`/fullscreen\`)**
-| Key | Action |
-|-----|--------|
-| \`${viewportPageUp}\` / \`${viewportPageDown}\` | Scroll transcript by page |
-| \`${viewportTop}\` | Scroll to top |
-| \`${viewportFollow}\` | Scroll to bottom and follow output |
-| mouse wheel | Scroll transcript |
-| mouse drag | Select and copy text |
-| mouse click on link | Open link in browser |
-`;
-
-		const shortcuts = this.bindLocalSessionExtensions
-			? this.getLocalSessionHost().getExtensionRunner().getShortcuts(this.keybindings.getEffectiveConfig())
-			: undefined;
-		if (shortcuts && shortcuts.size > 0) {
-			hotkeys += `
-**Extensions**
-| Key | Action |
-|-----|--------|
-`;
-			for (const [key, shortcut] of shortcuts) {
-				const description = shortcut.description ?? shortcut.extensionPath;
-				hotkeys += `| \`${formatKeyText(key)}\` | ${description} |\n`;
-			}
-		}
-
-		return hotkeys;
+		return buildHotkeysGuide(
+			this.bindLocalSessionExtensions
+				? this.getLocalSessionHost().getExtensionRunner().getShortcuts(this.keybindings.getEffectiveConfig())
+				: undefined,
+		);
 	}
 
 	private showShortcutGuide(): void {
