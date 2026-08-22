@@ -4,6 +4,11 @@ import type { ToolDefinition, ToolRenderContext, ToolRenderResultOptions } from 
 import { createBashToolDefinition } from "../../../core/tools/bash.js";
 import { createEditToolDefinition } from "../../../core/tools/edit.js";
 import { createAllToolDefinitions } from "../../../core/tools/index.js";
+import { createFindToolDefinition } from "../../../core/tools/native/find.js";
+import { createGrepToolDefinition } from "../../../core/tools/native/grep.js";
+import { createLnToolDefinition } from "../../../core/tools/native/ln.js";
+import { createSedToolDefinition } from "../../../core/tools/native/sed.js";
+import { createWcToolDefinition } from "../../../core/tools/native/wc.js";
 import { createReadFileToolDefinition } from "../../../core/tools/read-file.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import type { KernelSentAgentMessage } from "../../../core/tools/repl-types.js";
@@ -72,6 +77,26 @@ function createReplayBuiltInToolDefinition(
 		}
 		case "write_file": {
 			const builtInDefinition = createWriteFileToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "grep": {
+			const builtInDefinition = createGrepToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "find": {
+			const builtInDefinition = createFindToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "sed": {
+			const builtInDefinition = createSedToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "wc": {
+			const builtInDefinition = createWcToolDefinition(cwd);
+			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
+		}
+		case "ln": {
+			const builtInDefinition = createLnToolDefinition(cwd);
 			return matchesBuiltInReplayMetadata(toolName, toolDefinition) ? builtInDefinition : undefined;
 		}
 		default:

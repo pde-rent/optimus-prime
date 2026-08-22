@@ -397,7 +397,16 @@ export interface ToolRenderContext<TState = any, TArgs = any> {
 	isError: boolean;
 }
 
-export type ReplayBuiltInToolName = "bash" | "edit" | "read_file" | "write_file";
+export type ReplayBuiltInToolName =
+	| "bash"
+	| "edit"
+	| "read_file"
+	| "write_file"
+	| "grep"
+	| "find"
+	| "sed"
+	| "wc"
+	| "ln";
 
 /**
  * Tool definition for registerTool().

@@ -26,6 +26,38 @@ export {
 } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
 export {
+	createFindTool,
+	createFindToolDefinition,
+	type FindToolDetails,
+	type FindToolInput,
+} from "./native/find.js";
+export {
+	createGrepTool,
+	createGrepToolDefinition,
+	type GrepToolDetails,
+	type GrepToolInput,
+} from "./native/grep.js";
+export {
+	createLnTool,
+	createLnToolDefinition,
+	type LnToolDetails,
+	type LnToolInput,
+} from "./native/ln.js";
+export {
+	createSedTool,
+	createSedToolDefinition,
+	parseSubstitution,
+	type SedToolDetails,
+	type SedToolInput,
+} from "./native/sed.js";
+export { walkFiles, walkTree } from "./native/walk.js";
+export {
+	createWcTool,
+	createWcToolDefinition,
+	type WcToolDetails,
+	type WcToolInput,
+} from "./native/wc.js";
+export {
 	createReadFileTool,
 	createReadFileToolDefinition,
 	type ReadFileOperations,
@@ -64,28 +96,47 @@ export {
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type BunReplToolOptions, createBunReplTool, createBunReplToolDefinition } from "../bun-repl/tool.js";
 import type { ToolDefinition } from "../extensions/types.js";
+import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
+import { createFindTool, createFindToolDefinition } from "./native/find.js";
+import { createGrepTool, createGrepToolDefinition } from "./native/grep.js";
+import { createLnTool, createLnToolDefinition } from "./native/ln.js";
+import { createSedTool, createSedToolDefinition } from "./native/sed.js";
+import { createWcTool, createWcToolDefinition } from "./native/wc.js";
 import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } from "./skill.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "repl" | "skill";
-
+export type ToolName = "bash" | "repl" | "skill" | "grep" | "find" | "sed" | "wc" | "ln";
 export interface ToolsOptions {
 	repl?: BunReplToolOptions;
 	/** Skill provider; defaults to an empty roster (every lookup reports no skills). */
 	skill?: SkillToolOptions;
+	/** Live bash tool options; sessions thread defaultTimeoutSeconds from settings.toolTimeouts.bashSeconds. */
+	bash?: BashToolOptions;
 }
 
 export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
 		repl: createBunReplToolDefinition(options?.repl ?? {}),
 		skill: createSkillToolDefinition(_cwd, options?.skill ?? {}),
+		bash: createBashToolDefinition(_cwd, options?.bash),
+		grep: createGrepToolDefinition(_cwd),
+		find: createFindToolDefinition(_cwd),
+		sed: createSedToolDefinition(_cwd),
+		wc: createWcToolDefinition(_cwd),
+		ln: createLnToolDefinition(_cwd),
 	};
 }
 
 export function createAllTools(_cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
 		repl: createBunReplTool(options?.repl ?? {}),
+		bash: createBashTool(_cwd, options?.bash),
 		skill: createSkillTool(_cwd, options?.skill ?? {}),
+		grep: createGrepTool(_cwd),
+		find: createFindTool(_cwd),
+		sed: createSedTool(_cwd),
+		wc: createWcTool(_cwd),
+		ln: createLnTool(_cwd),
 	};
 }
