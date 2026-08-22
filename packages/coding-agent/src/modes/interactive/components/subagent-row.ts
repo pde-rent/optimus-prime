@@ -106,9 +106,11 @@ export function renderSubagentRow(model: SubagentRowModel, width: number): strin
 	const name = named ? model.name : formatSubagentTask(model.task, 40);
 	const task = named ? model.task : "";
 	const badge = model.badge ? theme.fg("dim", model.badge) : "";
-	const left = [model.prefix, glyph, name, task]
+	// The prefix glues straight onto the glyph so tree branches read as one
+	// mark; callers wanting separation include it in their prefix string.
+	const left = `${model.prefix ?? ""}${[glyph, name, task]
 		.filter((part): part is string => part !== undefined && part.length > 0)
-		.join(" ");
+		.join(" ")}`;
 	const right = [
 		formatSubagentRuntime(model.durationMs),
 		formatSubagentTokens(model.tokensIn, model.tokensOut, model.tokenCount),
