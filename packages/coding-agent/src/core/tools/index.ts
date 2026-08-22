@@ -38,11 +38,30 @@ export {
 	type GrepToolInput,
 } from "./native/grep.js";
 export {
+	createHeadTool,
+	createHeadToolDefinition,
+	createTailTool,
+	createTailToolDefinition,
+	type WindowToolDetails,
+} from "./native/head-tail.js";
+export {
 	createLnTool,
 	createLnToolDefinition,
 	type LnToolDetails,
 	type LnToolInput,
 } from "./native/ln.js";
+export {
+	createNetdiagTool,
+	createNetdiagToolDefinition,
+	type NetdiagToolDetails,
+	type NetdiagToolInput,
+} from "./native/netdiag.js";
+export {
+	createProcessesTool,
+	createProcessesToolDefinition,
+	type ProcessesToolDetails,
+	type ProcessesToolInput,
+} from "./native/processes.js";
 export {
 	createSedTool,
 	createSedToolDefinition,
@@ -50,6 +69,12 @@ export {
 	type SedToolDetails,
 	type SedToolInput,
 } from "./native/sed.js";
+export {
+	createSysinfoTool,
+	createSysinfoToolDefinition,
+	type SysinfoToolDetails,
+	type SysinfoToolInput,
+} from "./native/sysinfo.js";
 export { walkFiles, walkTree } from "./native/walk.js";
 export {
 	createWcTool,
@@ -57,6 +82,7 @@ export {
 	type WcToolDetails,
 	type WcToolInput,
 } from "./native/wc.js";
+
 export {
 	createReadFileTool,
 	createReadFileToolDefinition,
@@ -99,6 +125,12 @@ import type { ToolDefinition } from "../extensions/types.js";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
 import { createFindTool, createFindToolDefinition } from "./native/find.js";
 import { createGrepTool, createGrepToolDefinition } from "./native/grep.js";
+import {
+	createHeadTool,
+	createHeadToolDefinition,
+	createTailTool,
+	createTailToolDefinition,
+} from "./native/head-tail.js";
 import { createLnTool, createLnToolDefinition } from "./native/ln.js";
 import { createSedTool, createSedToolDefinition } from "./native/sed.js";
 import { createWcTool, createWcToolDefinition } from "./native/wc.js";
@@ -106,7 +138,7 @@ import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "bash" | "repl" | "skill" | "grep" | "find" | "sed" | "wc" | "ln";
+export type ToolName = "bash" | "repl" | "skill" | "grep" | "find" | "sed" | "wc" | "ln" | "head" | "tail";
 export interface ToolsOptions {
 	repl?: BunReplToolOptions;
 	/** Skill provider; defaults to an empty roster (every lookup reports no skills). */
@@ -124,6 +156,8 @@ export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): 
 		find: createFindToolDefinition(_cwd),
 		sed: createSedToolDefinition(_cwd),
 		wc: createWcToolDefinition(_cwd),
+		head: createHeadToolDefinition(_cwd),
+		tail: createTailToolDefinition(_cwd),
 		ln: createLnToolDefinition(_cwd),
 	};
 }
@@ -137,6 +171,8 @@ export function createAllTools(_cwd: string, options?: ToolsOptions): Record<Too
 		find: createFindTool(_cwd),
 		sed: createSedTool(_cwd),
 		wc: createWcTool(_cwd),
+		head: createHeadTool(_cwd),
+		tail: createTailTool(_cwd),
 		ln: createLnTool(_cwd),
 	};
 }

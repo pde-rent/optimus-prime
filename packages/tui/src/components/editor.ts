@@ -475,6 +475,13 @@ export class Editor implements Component, Focusable {
 		return this.historyIndex > -1;
 	}
 
+	/**
+	 * Host override for plain up/down that would otherwise recall input history.
+	 * Return true to consume the key (e.g. queue browsing while messages pend);
+	 * false falls through to normal history navigation.
+	 */
+	onHistoryRecallIntercept?: (direction: -1 | 1) => boolean;
+
 	private navigateHistory(direction: 1 | -1): void {
 		this.lastAction = null;
 		if (this.history.length === 0) return;
@@ -1032,6 +1039,8 @@ export class Editor implements Component, Focusable {
 		}
 
 		if (kb.matches(data, "tui.editor.cursorUp")) {
+			const wouldRecallHistory = this.isEditorEmpty() || (this.historyIndex > -1 && this.isOnFirstVisualLine());
+			if (wouldRecallHistory && this.onHistoryRecallIntercept?.(-1)) return;
 			if (this.isEditorEmpty()) {
 				this.navigateHistory(-1);
 			} else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
@@ -1044,6 +1053,7 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 		if (kb.matches(data, "tui.editor.cursorDown")) {
+			if (this.historyIndex > -1 && this.isOnLastVisualLine() && this.onHistoryRecallIntercept?.(1)) return;
 			if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
 				this.navigateHistory(1);
 			} else if (this.isOnLastVisualLine()) {
