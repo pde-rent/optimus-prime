@@ -483,6 +483,45 @@ describe("AuthStorage", () => {
 			expect(raw).toBe("{invalid-json");
 		});
 
+		test("removeVerified deletes from disk and memory", () => {
+			writeAuthJson({
+				"mcp:remote": { type: "api_key", key: "token" },
+				openai: { type: "api_key", key: "openai-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.removeVerified("mcp:remote");
+
+			const updated = JSON.parse(readFileSync(authJsonPath, "utf-8")) as Record<string, unknown>;
+			expect(updated["mcp:remote"]).toBeUndefined();
+			expect(authStorage.get("mcp:remote")).toBeUndefined();
+			expect((updated.openai as { key: string }).key).toBe("openai-key");
+		});
+
+		test("removeVerified is idempotent for an absent provider", () => {
+			writeAuthJson({
+				openai: { type: "api_key", key: "openai-key" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			expect(() => authStorage.removeVerified("mcp:missing")).not.toThrow();
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8")) as Record<string, unknown>;
+			expect((raw.openai as { key: string }).key).toBe("openai-key");
+		});
+
+		test("removeVerified throws while the credential may still exist on disk", () => {
+			writeAuthJson({
+				"mcp:remote": { type: "api_key", key: "token" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			writeFileSync(authJsonPath, "{invalid-json", "utf-8");
+
+			expect(() => authStorage.removeVerified("mcp:remote")).toThrow();
+			// Memory keeps the credential until the disk removal is verified.
+			expect(authStorage.get("mcp:remote")).toEqual({ type: "api_key", key: "token" });
+		});
+
 		test("reload records parse errors and drainErrors clears buffer", () => {
 			writeAuthJson({
 				anthropic: { type: "api_key", key: "anthropic-key" },

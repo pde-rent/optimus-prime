@@ -10,6 +10,87 @@ function manager(servers: Record<string, McpServerConfig>) {
 	return new McpManager({ authStorage, getUserServers: () => servers });
 }
 
+describe("endpoint-bound credentials", () => {
+	function storageWith(creds: Record<string, unknown>) {
+		return { get: (id: string) => creds[id], getApiKey: async () => undefined } as unknown as AuthStorage;
+	}
+
+	it("does not enable a server from a credential bound to a different endpoint or unbound", () => {
+		const authStorage = storageWith({
+			"mcp:unbound": { type: "oauth", access: "unbound-token", refresh: "r", expires: Date.now() + 3600_000 },
+			"mcp:remote": {
+				type: "oauth",
+				access: "old-token",
+				refresh: "r",
+				expires: Date.now() + 3600_000,
+				endpoint: "https://old.test/mcp",
+			},
+		});
+		const m = new McpManager({
+			authStorage,
+			getUserServers: () => ({
+				remote: { type: "http", url: "https://new.test/mcp", oauth: true },
+				unbound: { type: "http", url: "https://srv.test/mcp", oauth: true },
+			}),
+		});
+		const status = m.listStatus();
+		expect(status.find((s) => s.server === "remote")?.enabled).toBe(false);
+		expect(status.find((s) => s.server === "unbound")?.enabled).toBe(false);
+	});
+
+	it("enables a server from a credential bound to exactly its endpoint", () => {
+		const authStorage = storageWith({
+			"mcp:remote": {
+				type: "oauth",
+				access: "token",
+				refresh: "r",
+				expires: Date.now() + 3600_000,
+				endpoint: "https://srv.test/mcp",
+			},
+		});
+		const m = new McpManager({
+			authStorage,
+			getUserServers: () => ({ remote: { type: "http", url: "https://srv.test/mcp", oauth: true } }),
+		});
+		expect(m.listStatus().find((s) => s.server === "remote")?.enabled).toBe(true);
+	});
+
+	it("never sends a foreign-bound token to the endpoint", async () => {
+		const authHeaders: Array<string | null> = [];
+		const server = Bun.serve({
+			port: 0,
+			async fetch(request) {
+				authHeaders.push(request.headers.get("authorization"));
+				return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+			},
+		});
+		const cred = {
+			type: "oauth",
+			access: "old-token",
+			refresh: "r",
+			expires: Date.now() + 3600_000,
+			endpoint: "https://old.test/mcp",
+		};
+		const authStorage = {
+			get: () => cred,
+			getApiKey: async () => "old-token",
+		} as unknown as AuthStorage;
+		const m = new McpManager({
+			authStorage,
+			getUserServers: () => ({ remote: { type: "http", url: server.url.href, oauth: true } }),
+		});
+		try {
+			const handlers = m.hostHandlers();
+			await handlers["mcp.list_tools"]!({ server: "remote" }).catch(() => undefined);
+			// getAccessToken refused the misbound token, so no Authorization reached the wire.
+			expect(authHeaders.length).toBeGreaterThan(0);
+			expect(authHeaders.every((h) => h === null)).toBe(true);
+		} finally {
+			server.stop(true);
+		}
+	});
+});
+
 describe("configured servers", () => {
 	it("lists a stdio server rather than dropping it", async () => {
 		// Silently skipping made a correctly configured server report as unknown, which

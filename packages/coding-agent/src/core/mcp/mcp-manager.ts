@@ -123,7 +123,12 @@ export class McpManager {
 			return true;
 		}
 		const cred = this.authStorage.get(this.providerId(integration.server));
-		return cred !== undefined;
+		if (cred === undefined) return false;
+		// User-declared endpoints can be retargeted, so their tokens must prove where they belong.
+		// Mismatched or unbound tokens require re-login.
+		if (!integration.userDeclared) return true;
+		const endpoint = (cred as { endpoint?: string }).endpoint;
+		return typeof endpoint === "string" && endpoint === integration.url;
 	}
 
 	/** Host-request handlers exposed to the kernel. */
@@ -229,6 +234,11 @@ export class McpManager {
 			// Read per request so a refreshed token is picked up without rebuilding.
 			getAccessToken: async () => {
 				if (integration.bearerTokenEnvVar) return process.env[integration.bearerTokenEnvVar];
+				const cred = this.authStorage.get(this.providerId(server));
+				// A token issued for a different (or unknown) endpoint must never be sent here.
+				if (cred === undefined) return undefined;
+				const endpoint = (cred as { endpoint?: string }).endpoint;
+				if (typeof endpoint !== "string" || endpoint !== integration.url) return undefined;
 				return (await this.authStorage.getApiKey(this.providerId(server))) ?? undefined;
 			},
 		});
