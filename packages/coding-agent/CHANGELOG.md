@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Changed the "zai" provider display name to "Z.ai (GLM Coding Plan)" so the login menu shows what the credentials are for.
 - Hardened MCP OAuth: a set-but-empty credential env var now counts as a missing credential instead of sending the variable name; stored MCP OAuth tokens are bound to the endpoint (and RFC 9728 resource) they were issued for, so a retargeted server can no longer replay them; credential removal and `/mcp logout` are disk-verified before reporting success; and MCP OAuth discovery now follows path-scoped protected-resource metadata with authorization-server indirection and issuer validation.
 - Fixed model searches ranking stronger matches ahead of weaker signed-in matches while preferring signed-in providers for equivalent results ([#539](https://github.com/PrimeIntellect-ai/prime-agent/pull/539) by [@eliebak](https://github.com/eliebak)).
 - Added SuperGrok login: the "grok" provider appears in /login as "Grok (SuperGrok)" with device-flow OAuth, and defaults to grok-4.6.

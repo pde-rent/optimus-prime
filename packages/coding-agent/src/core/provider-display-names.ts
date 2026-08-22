@@ -24,7 +24,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	openrouter: "OpenRouter",
 	"vercel-ai-gateway": "Vercel AI Gateway",
 	xai: "xAI",
-	zai: "ZAI",
+	zai: "Z.ai (GLM Coding Plan)",
 	xiaomi: "Xiaomi MiMo",
 	"xiaomi-token-plan-cn": "Xiaomi MiMo Token Plan (China)",
 	"xiaomi-token-plan-ams": "Xiaomi MiMo Token Plan (Amsterdam)",
