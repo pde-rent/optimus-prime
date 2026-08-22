@@ -581,6 +581,12 @@ describe("Generate E2E Tests", () => {
 			],
 		},
 		{
+			name: "Nous Portal Provider (stealth/ox-alpha via OpenAI Completions)",
+			skipIf: !process.env.NOUS_API_KEY,
+			model: () => getModel("nous", "stealth/ox-alpha"),
+			cases: [text(), toolCall(), streaming()],
+		},
+		{
 			name: "Vercel AI Gateway Provider (google/gemini-2.5-flash via Anthropic Messages)",
 			skipIf: !process.env.AI_GATEWAY_API_KEY,
 			model: () => getModel("vercel-ai-gateway", "google/gemini-2.5-flash"),

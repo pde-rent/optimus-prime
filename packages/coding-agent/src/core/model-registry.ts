@@ -26,9 +26,8 @@ import {
 	type Validator,
 } from "@earendil-works/pi-ai";
 import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
-
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { getAgentDir } from "../config.js";
 import type { AuthSourceToken, AuthStatus, AuthStorage } from "./auth-storage.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.js";
@@ -411,6 +410,110 @@ function _isOfflineModeEnabled(): boolean {
 	if (!value) return false;
 	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
 }
+const DYNAMIC_MODELS_TTL_MS = 300_000;
+const DYNAMIC_MODELS_TIMEOUT_MS = 5_000;
+
+interface DynamicModelSource {
+	url: string;
+	api: Api;
+	baseUrl: string;
+}
+
+/** Providers whose catalog is refreshed live from a public OpenAI-shaped /models endpoint. */
+const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
+	openrouter: {
+		url: "https://openrouter.ai/api/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://openrouter.ai/api/v1",
+	},
+	opencode: {
+		url: "https://opencode.ai/zen/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://opencode.ai/zen/v1",
+	},
+	nous: {
+		url: "https://inference-api.nousresearch.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://inference-api.nousresearch.com/v1",
+	},
+};
+
+export type DynamicModelsFetcher = () => Promise<unknown>;
+
+// Test seam: replaces the HTTP fetch for a provider's discovery endpoint.
+const dynamicModelsFetchers = new Map<string, DynamicModelsFetcher>();
+
+export function setDynamicModelsFetcher(provider: string, fetcher: DynamicModelsFetcher | undefined): void {
+	if (fetcher) {
+		dynamicModelsFetchers.set(provider, fetcher);
+	} else {
+		dynamicModelsFetchers.delete(provider);
+	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+/** Parse an OpenAI-shaped `{ data: [...] }` list into model candidates. */
+function parseDynamicModelList(payload: unknown, provider: string, source: DynamicModelSource): Model<Api>[] {
+	const data = isRecord(payload) ? payload.data : undefined;
+	if (!Array.isArray(data)) {
+		throw new Error(`Invalid model list from ${provider}`);
+	}
+	return data.flatMap((entry) => {
+		if (!isRecord(entry) || typeof entry.id !== "string" || entry.id.length === 0) return [];
+		const pricing = isRecord(entry.pricing) ? entry.pricing : {};
+		const topProvider = isRecord(entry.top_provider) ? entry.top_provider : {};
+		const costPerMTok = (value: unknown): number => {
+			const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+			return Number.isFinite(parsed) && parsed > 0 ? parsed * 1_000_000 : 0;
+		};
+		const supportedParameters = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : [];
+		const contextWindow =
+			typeof entry.context_length === "number" && entry.context_length > 0 ? entry.context_length : 128000;
+		const maxTokens =
+			typeof topProvider.max_completion_tokens === "number" && topProvider.max_completion_tokens > 0
+				? topProvider.max_completion_tokens
+				: 16384;
+		return [
+			{
+				id: entry.id,
+				name: typeof entry.name === "string" && entry.name.length > 0 ? entry.name : entry.id,
+				api: source.api,
+				provider,
+				baseUrl: source.baseUrl,
+				reasoning: supportedParameters.includes("reasoning"),
+				input: ["text"],
+				cost: {
+					input: costPerMTok(pricing.prompt),
+					output: costPerMTok(pricing.completion),
+					cacheRead: 0,
+					cacheWrite: 0,
+				},
+				contextWindow,
+				maxTokens,
+			} satisfies Model<Api>,
+		];
+	});
+}
+
+interface DynamicModelCacheEntry {
+	fetchedAt: number;
+	models: Model<Api>[];
+}
+
+interface DynamicModelCacheFile {
+	version: 1;
+	providers: Record<string, DynamicModelCacheEntry>;
+}
+
+function isDynamicModelCacheEntry(value: unknown): value is DynamicModelCacheEntry {
+	if (!isRecord(value) || typeof value.fetchedAt !== "number" || !Array.isArray(value.models)) return false;
+	return value.models.every(
+		(model) => isRecord(model) && typeof model.id === "string" && typeof model.provider === "string",
+	);
+}
 
 /**
  * Model registry - loads and manages models, resolves API keys via AuthStorage.
@@ -424,6 +527,10 @@ export class ModelRegistry {
 	private registeredProviders: Map<string, ProviderConfigInput> = new Map();
 	private openAICodexModelsCache: { authFingerprint: string; modelIds: Set<string>; refreshedAt: number } | undefined;
 	private loadError: string | undefined = undefined;
+
+	private customModelsResult: CustomModelsResult = emptyCustomModelsResult();
+	private dynamicModelsRefreshedAt: Map<string, number> = new Map();
+	private discoveredModels: Map<string, Model<Api>[]> = new Map();
 
 	/** Re-register dynamic OAuth providers (e.g. user MCP servers) after refresh() resets the registry. */
 	private onOAuthProvidersReset?: () => void;
@@ -485,12 +592,11 @@ export class ModelRegistry {
 	}
 
 	private loadModels(): void {
-		const {
-			models: customModels,
-			overrides,
-			modelOverrides,
-			error,
-		} = this.modelsJsonPath ? this.loadCustomModels(this.modelsJsonPath) : emptyCustomModelsResult();
+		const customModelsResult = this.modelsJsonPath
+			? this.loadCustomModels(this.modelsJsonPath)
+			: emptyCustomModelsResult();
+		this.customModelsResult = customModelsResult;
+		const { models: customModels, overrides, modelOverrides, error } = customModelsResult;
 
 		if (error) {
 			this.loadError = error;
@@ -741,11 +847,121 @@ export class ModelRegistry {
 	}
 
 	async refreshModelCatalog(): Promise<ModelCatalogSnapshot> {
-		const availableModels = await this.refreshAvailableModels();
+		this.refresh();
+		await this.refreshDynamicModels();
+		const availableModels = this.getAvailable();
 		return {
 			models: this.models,
 			configuredProviders: [...new Set(availableModels.map((model) => model.provider))],
 		};
+	}
+
+	/**
+	 * Fetch fresh catalogs from discovery-enabled providers and merge them over the
+	 * static list. Falls back to the on-disk cache when a fetch fails.
+	 */
+	private async refreshDynamicModels(): Promise<void> {
+		await Promise.all(
+			Object.entries(DYNAMIC_MODEL_SOURCES)
+				.filter(([provider]) => this.hasConfiguredProviderAuth(provider))
+				.map(([provider, source]) => this.refreshDynamicProviderModels(provider, source)),
+		);
+	}
+
+	private async refreshDynamicProviderModels(provider: string, source: DynamicModelSource): Promise<void> {
+		const now = Date.now();
+		if (now - (this.dynamicModelsRefreshedAt.get(provider) ?? 0) < DYNAMIC_MODELS_TTL_MS) {
+			// refresh() rebuilds the static list, so re-apply the last discovery result.
+			const applied = this.discoveredModels.get(provider);
+			if (applied) this.applyDiscoveredModels(provider, applied);
+			return;
+		}
+
+		const cached = this.readDynamicModelCache().providers[provider];
+		if (cached && now - cached.fetchedAt < DYNAMIC_MODELS_TTL_MS) {
+			this.dynamicModelsRefreshedAt.set(provider, cached.fetchedAt);
+			this.applyDiscoveredModels(provider, cached.models);
+			return;
+		}
+
+		try {
+			let payload: unknown;
+			const fetcher = dynamicModelsFetchers.get(provider);
+			if (fetcher) {
+				payload = await fetcher();
+			} else {
+				const response = await fetch(source.url, { signal: AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS) });
+				if (!response.ok) {
+					throw new Error(`${provider} model discovery failed with HTTP ${response.status}`);
+				}
+				payload = await response.json();
+			}
+			const models = parseDynamicModelList(payload, provider, source);
+			if (models.length === 0) {
+				throw new Error(`Provider ${provider} returned an empty model list`);
+			}
+			const entry: DynamicModelCacheEntry = { fetchedAt: now, models };
+			this.writeDynamicModelCache(provider, entry);
+			this.dynamicModelsRefreshedAt.set(provider, now);
+			this.applyDiscoveredModels(provider, models);
+			this.discoveredModels.set(provider, models);
+		} catch {
+			if (!cached) return;
+			this.dynamicModelsRefreshedAt.set(provider, now);
+			this.applyDiscoveredModels(provider, cached.models);
+			this.discoveredModels.set(provider, cached.models);
+		}
+	}
+
+	/** Replace a provider's static entries with discovered ones, keeping models.json models. */
+	private applyDiscoveredModels(provider: string, discovered: Model<Api>[]): void {
+		const customIds = new Set(
+			this.customModelsResult.models.filter((model) => model.provider === provider).map((model) => model.id),
+		);
+		const overrides = this.customModelsResult.modelOverrides.get(provider);
+		const mapped = discovered.map((model) => {
+			const override = overrides?.get(model.id);
+			return override ? applyModelOverride(model, override) : model;
+		});
+		const kept = this.models.filter((model) => model.provider !== provider || customIds.has(model.id));
+		const keptIds = new Set(kept.filter((model) => model.provider === provider).map((model) => model.id));
+		this.models = [...kept, ...mapped.filter((model) => !keptIds.has(model.id))];
+	}
+
+	private dynamicModelCachePath(): string | undefined {
+		return this.modelsJsonPath ? join(dirname(this.modelsJsonPath), "model-cache.json") : undefined;
+	}
+
+	private readDynamicModelCache(): DynamicModelCacheFile {
+		const path = this.dynamicModelCachePath();
+		if (!path || !existsSync(path)) return { version: 1, providers: {} };
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+			if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.providers)) {
+				return { version: 1, providers: {} };
+			}
+			const providers: Record<string, DynamicModelCacheEntry> = {};
+			for (const [provider, entry] of Object.entries(parsed.providers)) {
+				if (isDynamicModelCacheEntry(entry)) {
+					providers[provider] = entry;
+				}
+			}
+			return { version: 1, providers };
+		} catch {
+			return { version: 1, providers: {} };
+		}
+	}
+
+	private writeDynamicModelCache(provider: string, entry: DynamicModelCacheEntry): void {
+		const path = this.dynamicModelCachePath();
+		if (!path) return;
+		try {
+			const cache = this.readDynamicModelCache();
+			cache.providers[provider] = entry;
+			writeFileSync(path, JSON.stringify(cache));
+		} catch {
+			// Cache writes are best-effort; discovery still works in memory.
+		}
 	}
 
 	async canUseModel(model: Model<Api>): Promise<boolean> {
@@ -810,7 +1026,11 @@ export class ModelRegistry {
 	 * Get API key for a model.
 	 */
 	hasConfiguredAuth(model: Model<Api>): boolean {
-		return this.authStorage.hasAuth(model.provider) || this.hasConfiguredProviderRequestAuth(model.provider);
+		return this.hasConfiguredProviderAuth(model.provider);
+	}
+
+	private hasConfiguredProviderAuth(provider: string): boolean {
+		return this.authStorage.hasAuth(provider) || this.hasConfiguredProviderRequestAuth(provider);
 	}
 
 	private fingerprintProviderRequestAuthSource(source: ProviderRequestAuthSource["source"], material: string): string {

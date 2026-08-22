@@ -11,6 +11,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	huggingface: "Hugging Face",
 	"kimi-coding": "Kimi For Coding",
 	mistral: "Mistral",
+	nous: "Nous Portal",
 	minimax: "MiniMax",
 	"minimax-cn": "MiniMax (China)",
 	moonshotai: "Moonshot AI",

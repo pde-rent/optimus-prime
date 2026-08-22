@@ -814,6 +814,63 @@ async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 	}
 }
 
+const NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1";
+
+// The Hermes Portal serves OpenRouter-shaped catalog entries over an
+// unauthenticated /models endpoint.
+async function fetchNousModels(): Promise<Model<any>[]> {
+	try {
+		console.log("Fetching models from Nous Research Hermes Portal API...");
+		const response = await fetch(`${NOUS_BASE_URL}/models`);
+		const data = await response.json();
+		const models: Model<any>[] = [];
+
+		for (const model of Array.isArray(data?.data) ? data.data : []) {
+			// Only include models that support tools
+			if (!model.supported_parameters?.includes("tools")) continue;
+
+			const input: ("text" | "image")[] = ["text"];
+			if (model.architecture?.input_modalities?.includes("image")) {
+				input.push("image");
+			}
+
+			// Convert pricing from $/token to $/million tokens.
+			const inputCost = Math.max(0, parseFloat(model.pricing?.prompt || "0")) * 1_000_000;
+			const outputCost = Math.max(0, parseFloat(model.pricing?.completion || "0")) * 1_000_000;
+			const cacheReadCost = Math.max(0, parseFloat(model.pricing?.input_cache_read || "0")) * 1_000_000;
+			const reasoningCapabilities = getOpenRouterReasoningCapabilities(model);
+
+			models.push({
+				id: model.id,
+				name: model.name ?? model.id,
+				api: "openai-completions",
+				baseUrl: NOUS_BASE_URL,
+				provider: "nous",
+				reasoning: model.supported_parameters?.includes("reasoning") || false,
+				...(reasoningCapabilities?.thinkingLevelMap ? { thinkingLevelMap: reasoningCapabilities.thinkingLevelMap } : {}),
+				...(reasoningCapabilities?.supportsReasoningEffort === false
+					? { compat: { supportsReasoningEffort: false } }
+					: {}),
+				input,
+				cost: {
+					input: inputCost,
+					output: outputCost,
+					cacheRead: cacheReadCost,
+					cacheWrite: 0,
+				},
+				contextWindow: model.context_length || 4096,
+				maxTokens: model.top_provider?.max_completion_tokens || 4096,
+			});
+		}
+
+		console.log(`Fetched ${models.length} tool-capable models from Nous Research`);
+		return models;
+	} catch (error) {
+		console.error("Failed to fetch Nous Research models:", error);
+		return [];
+	}
+}
+
 async function fetchAiGatewayModels(): Promise<Model<any>[]> {
 	try {
 		console.log("Fetching models from Vercel AI Gateway API...");
@@ -2119,6 +2176,9 @@ async function generateModels() {
 			maxTokens: 30000,
 		});
 	}
+
+	const nousModels = await fetchNousModels();
+	allModels.push(...nousModels);
 
 	const primeInferenceModels = await fetchPrimeInferenceModels();
 	allModels.push(...primeInferenceModels);

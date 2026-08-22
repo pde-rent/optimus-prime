@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+- Added live model discovery for the /model picker: fresh catalogs are fetched from configured providers (openrouter, opencode, nous), merged over the static list with a 5-minute TTL, and cached on disk as a fallback when a fetch fails.
+- Added `provider:<name>` filtering to the model picker search box.
+- Added a built-in `skill` tool that loads one installed skill's SKILL.md by name in a single step, wrapped in the same envelope as /skill: expansion; unknown names fail listing every available skill.
+- Changed the skill roster in the system prompt to carry each skill's resolved absolute SKILL.md path inline (entries are `name [binding] (path): summary`), replacing the per-root `Files:` path template that models had to expand themselves; the roster intro now says to prefer the skill tool with read_file as the fallback.
+- Added Nous Portal ("nous") as a built-in provider with "Nous Portal" display name and stealth/ox-alpha as the default model.
+- Added first-class `read_file` and `write_file` tools: reads return line-ranged, cap-aware content (`read_file` truncates at 2000 lines / 50KB with a resumable offset), writes serialize through the same mutation queue as `edit` and render unified diffs for overwrites; REPL `read()`/`write()` globals remain for computed content and batch operations.
 - Added full-row click targets for thinking blocks and tool-call rows (fullscreen mouse mode): clicking anywhere on the row toggles it, with hover drawn natively by the terminal's OSC 8 rendering and no extra mouse tracking.
 - Changed the live subagent graph panel to one compact line per child: status icon, de-slugged agent name, truncated task summary, and right-aligned runtime plus tokens in/out; running children animate with the shared braille spinner.
 - Added click-to-open on subagent graph rows (fullscreen mouse mode): clicking a child leaves to the scoped agents view with that subagent selected.

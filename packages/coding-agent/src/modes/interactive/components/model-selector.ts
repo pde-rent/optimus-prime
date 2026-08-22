@@ -56,6 +56,14 @@ const MODEL_LIST_RESERVED_ROWS = {
 const MODEL_SCROLL_INDICATOR_ROWS = 1;
 const MODEL_HELP_MIN_ROWS = 12;
 const MODEL_DETAIL_MIN_ROWS = 14;
+const PROVIDER_FILTER_PREFIX = "provider:";
+
+/** Split a `provider:<name>` search prefix from the rest of the query. */
+function splitProviderFilter(query: string): { text: string; provider?: string } {
+	if (!query.startsWith(PROVIDER_FILTER_PREFIX)) return { text: query };
+	const provider = query.slice(PROVIDER_FILTER_PREFIX.length).trim().toLowerCase();
+	return provider ? { text: "", provider } : { text: "" };
+}
 
 /**
  * Component that renders a model selector with search
@@ -145,7 +153,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.scopeText = new Text(this.getScopeText(), 0, 0);
 			this.scopeHintText = new Text(this.getScopeHintText(), 0, 0);
 		} else {
-			const hintText = "Signed-in providers first. Other models prompt sign-in.";
+			const hintText =
+				"Signed-in providers first. Other models prompt sign-in. Type provider:<name> to filter by provider.";
 			this.warningText = new Text(theme.fg("muted", hintText), 0, 0);
 		}
 		this.headerHelpContainer = new Container();
@@ -323,11 +332,15 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private filterModels(query: string): void {
 		const queryChanged = query !== this.searchQuery;
 		this.searchQuery = query;
-		if (query.trim()) {
+		const { text, provider } = splitProviderFilter(query.trim());
+		const pool = provider
+			? this.activeModels.filter((item) => item.provider.toLowerCase().includes(provider))
+			: this.activeModels;
+		if (text) {
 			const scored = fuzzyFilterScored(
-				this.activeModels,
-				query,
-				({ id, provider }) => `${id} ${provider} ${provider}/${id} ${provider} ${id}`,
+				pool,
+				text,
+				({ id, provider: itemProvider }) => `${id} ${itemProvider} ${itemProvider}/${id} ${itemProvider} ${id}`,
 			);
 			scored.sort(
 				(a, b) =>
@@ -337,7 +350,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			);
 			this.filteredModels = scored.map((r) => r.item);
 		} else {
-			this.filteredModels = this.activeModels;
+			this.filteredModels = pool;
 		}
 		this.selectedIndex = queryChanged ? 0 : Math.min(this.selectedIndex, Math.max(0, this.getSelectableCount() - 1));
 		this.updateList();

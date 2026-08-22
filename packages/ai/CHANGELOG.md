@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+- Added the "nous" provider (Nous Research Hermes Portal): OpenAI-compatible endpoint with `NOUS_API_KEY` auth and models generated from its public catalog.
+- Added OpenCode Zen and OpenCode Go OAuth device-flow login, accepted alongside `OPENCODE_API_KEY`.
 - Added an overflow pattern for OpenRouter credit-tier prompt token limit errors (HTTP 402 "Prompt tokens limit exceeded") so sessions auto-compact instead of failing.
 
 ## [0.7.3] - 2026-08-17
