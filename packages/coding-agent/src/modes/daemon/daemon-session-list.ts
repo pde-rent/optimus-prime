@@ -77,6 +77,8 @@ export interface SessionSummary {
 	summary?: string;
 	/** Completion verdict for an idle session; absent while working or unjudged. */
 	taskState?: AgentTaskState;
+	/** Most recent run error; additive failure signal, absent on success or old daemons. */
+	lastError?: string;
 	/** Resident session-host process state, populated by the global supervisor. */
 	workerState?: "starting" | "ready" | "recovering" | "stopping" | "failed";
 	/** Diagnostic process identity; clients must not use this as a stable session identifier. */
