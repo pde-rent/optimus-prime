@@ -101,6 +101,7 @@ mock.module("../src/core/session-lease.js", () => {
 import type { DaemonAttachResult } from "../src/modes/daemon/daemon-protocol.js";
 import type { DaemonWorkerFrameHeader } from "../src/modes/daemon/daemon-worker-protocol.js";
 
+const { waitForChildClose, waitForFile } = await import("./helpers/daemon-harness.js");
 const { getProcessStartId } = await import("../src/core/session-lease.js");
 const { CommandRecoveryJournal } = await import("../src/modes/daemon/command-recovery-journal.js");
 const { DaemonCatalogClient } = await import("../src/modes/daemon/daemon-catalog-process.js");
@@ -174,23 +175,6 @@ interface DeferredRecoveryHarness {
 
 function recoveryDeniedError(code: "supervisor_recovery_cancelled" | "supervisor_generation_stale"): Error {
 	return Object.assign(new Error(code), { code });
-}
-
-async function waitForCapturedChildClose(child: ChildProcess): Promise<void> {
-	if (child.exitCode !== null || child.signalCode !== null) {
-		return;
-	}
-	await new Promise<void>((resolveClose) => child.once("close", () => resolveClose()));
-}
-
-async function waitForFile(path: string): Promise<void> {
-	const deadline = Date.now() + 1000;
-	while (!existsSync(path) && Date.now() < deadline) {
-		await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-	}
-	if (!existsSync(path)) {
-		throw new Error(`Timed out waiting for ${path}`);
-	}
 }
 
 function createExistingLaunchWorker(root: string, descriptorDir: string) {
@@ -616,7 +600,7 @@ describe("daemon worker supervisor monitoring", () => {
 					if (!child) {
 						throw new Error("Worker child was not captured");
 					}
-					await waitForCapturedChildClose(child);
+					await waitForChildClose(child);
 				}
 			}),
 			connectWorker,

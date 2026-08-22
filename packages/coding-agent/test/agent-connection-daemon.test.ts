@@ -30,6 +30,7 @@ import {
 	type DaemonOutbound,
 	type DaemonResponse,
 } from "../src/modes/daemon/daemon-protocol.js";
+import { waitFor } from "./helpers/daemon-harness.js";
 
 class FakeDaemonClient {
 	readonly requests: DaemonCommand[] = [];
@@ -66,6 +67,12 @@ class FakeDaemonClient {
 	private readonly messageListeners = new Set<DaemonClientMessageListener>();
 	private readonly closeListeners = new Set<DaemonClientCloseListener>();
 
+	ok(commandType: DaemonCommand["type"], data?: unknown): DaemonResponse {
+		return data === undefined
+			? { type: "response", command: commandType, success: true }
+			: { type: "response", command: commandType, success: true, data };
+	}
+
 	async request(
 		command: DaemonCommand,
 		timeoutMs = 30000,
@@ -80,25 +87,15 @@ class FakeDaemonClient {
 				if (this.promptResponseError) {
 					return { type: "response", command: command.type, success: false, error: this.promptResponseError };
 				}
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "prompt_and_wait":
 				if (this.promptGate) await this.promptGate;
 				if (this.promptError) throw this.promptError;
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "cancel_prompt_admission":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { status: this.cancelPromptAdmissionStatus },
-				};
+				return this.ok(command.type, { status: this.cancelPromptAdmissionStatus });
 			case "list":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { sessions: this.updateRestartSessions },
-				};
+				return this.ok(command.type, { sessions: this.updateRestartSessions });
 			case "attach":
 				if (this.attachFailures > 0) {
 					this.attachFailures--;
@@ -116,144 +113,93 @@ class FakeDaemonClient {
 						error: "Unknown active session: missing",
 					};
 				}
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data:
-						this.attachResultFactory?.(command) ??
+				return this.ok(
+					command.type,
+					this.attachResultFactory?.(command) ??
 						createAttachResult(command.activeSessionId, command.clientId, command.capabilities, 12),
-				};
+				);
 			case "get_queue":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { steering: ["steer"], followUp: ["follow"] },
-				};
+				return this.ok(command.type, { steering: ["steer"], followUp: ["follow"] });
 			case "get_connection_state":
 				await this.connectionStateGate;
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data:
-						this.connectionStateFactory?.(command.activeSessionId) ??
+				return this.ok(
+					command.type,
+					this.connectionStateFactory?.(command.activeSessionId) ??
 						createConnectionState(command.activeSessionId, "session-current"),
-				};
+				);
 			case "get_messages":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { messages: [{ role: "user", content: "current prompt", timestamp: 4 }] },
-				};
+				return this.ok(command.type, { messages: [{ role: "user", content: "current prompt", timestamp: 4 }] });
 			case "get_resource_snapshot":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						contextFiles: [{ path: "/tmp/AGENTS.md" }],
-						skills: [
-							{
-								name: "demo-skill",
-								description: "Demo skill",
-								filePath: "/tmp/skills/demo-skill/SKILL.md",
-								sourceInfo: {
-									path: "/tmp/skills/demo-skill/SKILL.md",
-									source: "local",
-									scope: "project",
-									origin: "top-level",
-									baseDir: "/tmp/skills",
-								},
+				return this.ok(command.type, {
+					contextFiles: [{ path: "/tmp/AGENTS.md" }],
+					skills: [
+						{
+							name: "demo-skill",
+							description: "Demo skill",
+							filePath: "/tmp/skills/demo-skill/SKILL.md",
+							sourceInfo: {
+								path: "/tmp/skills/demo-skill/SKILL.md",
+								source: "local",
+								scope: "project",
+								origin: "top-level",
+								baseDir: "/tmp/skills",
 							},
-						],
+						},
+					],
+					prompts: [],
+					extensions: [],
+					themes: [],
+					diagnostics: {
+						skills: [],
 						prompts: [],
 						extensions: [],
 						themes: [],
-						diagnostics: {
-							skills: [],
-							prompts: [],
-							extensions: [],
-							themes: [],
-						},
 					},
-				};
+				});
 			case "get_model_catalog":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						models: [getModel("openai", "gpt-5.1")],
-						configuredProviders: ["openai"],
-					},
-				};
+				return this.ok(command.type, {
+					models: [getModel("openai", "gpt-5.1")],
+					configuredProviders: ["openai"],
+				});
 			case "get_available_models":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { models: [getModel("openai", "gpt-5.1")] },
-				};
+				return this.ok(command.type, { models: [getModel("openai", "gpt-5.1")] });
 			case "get_session_context":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						context: {
-							messages: [{ role: "user", content: "context prompt", timestamp: 3 }],
-							thinkingLevel: "medium",
-							model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
-						},
+				return this.ok(command.type, {
+					context: {
+						messages: [{ role: "user", content: "context prompt", timestamp: 3 }],
+						thinkingLevel: "medium",
+						model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
 					},
-				};
+				});
 			case "get_session_tree":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						flatNodes: [
-							{
-								entry: {
-									type: "message",
-									id: "user-1",
-									parentId: null,
-									timestamp: "2026-01-01T00:00:00.000Z",
-									message: { role: "user", content: "hello", timestamp: 1 },
-								},
+				return this.ok(command.type, {
+					flatNodes: [
+						{
+							entry: {
+								type: "message",
+								id: "user-1",
+								parentId: null,
+								timestamp: "2026-01-01T00:00:00.000Z",
+								message: { role: "user", content: "hello", timestamp: 1 },
 							},
-						],
-						leafId: "user-1",
-					},
-				};
-			case "get_tool_definition":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						toolDefinition: {
-							name: command.name,
-							label: command.name,
-							description: `${command.name} description`,
-							promptSnippet: `${command.name} prompt`,
-							promptGuidelines: [`Use ${command.name}`],
-							parameters: { type: "object" },
-							renderShell: "self",
 						},
+					],
+					leafId: "user-1",
+				});
+			case "get_tool_definition":
+				return this.ok(command.type, {
+					toolDefinition: {
+						name: command.name,
+						label: command.name,
+						description: `${command.name} description`,
+						promptSnippet: `${command.name} prompt`,
+						promptGuidelines: [`Use ${command.name}`],
+						parameters: { type: "object" },
+						renderShell: "self",
 					},
-				};
+				});
 			case "clear_queue":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { steering: ["cleared"], followUp: [] },
-				};
+				return this.ok(command.type, { steering: ["cleared"], followUp: [] });
 			case "abort_and_clear_queue":
 				if (this.abortAndClearQueueUnknownCommand) {
 					return {
@@ -263,12 +209,7 @@ class FakeDaemonClient {
 						error: "Unknown daemon command: abort_and_clear_queue",
 					};
 				}
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { steering: ["aborted"], followUp: ["cleared"] },
-				};
+				return this.ok(command.type, { steering: ["aborted"], followUp: ["cleared"] });
 			case "heartbeats_list":
 				return this.serverCapabilities.has("heartbeat_catalog")
 					? { type: "response", command: command.type, success: true, data: { heartbeats: [] } }
@@ -327,33 +268,28 @@ class FakeDaemonClient {
 					loaded: 2,
 					total: 2,
 				});
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						sessions: [
-							{
-								path: "/tmp/session-a.jsonl",
-								id: "session-a",
-								cwd: "/tmp",
-								name: "Saved session",
-								created: "2026-01-01T00:00:00.000Z",
-								modified: "2026-01-02T00:00:00.000Z",
-								messageCount: 2,
-								firstMessage: "hello",
-								allMessagesText: "hello world",
-							},
-						],
-					},
-				};
+				return this.ok(command.type, {
+					sessions: [
+						{
+							path: "/tmp/session-a.jsonl",
+							id: "session-a",
+							cwd: "/tmp",
+							name: "Saved session",
+							created: "2026-01-01T00:00:00.000Z",
+							modified: "2026-01-02T00:00:00.000Z",
+							messageCount: 2,
+							firstMessage: "hello",
+							allMessagesText: "hello world",
+						},
+					],
+				});
 			}
 			case "wait_for_idle":
 			case "set_scoped_models":
 			case "rename_saved_session":
 			case "extension_ui_response":
 			case "detach":
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "cancel_rlm_child":
 				if (command.childId === "stale-daemon") {
 					return {
@@ -363,12 +299,7 @@ class FakeDaemonClient {
 						error: "Unknown daemon command: cancel_rlm_child",
 					};
 				}
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { cancelled: command.childId === "child-1" },
-				};
+				return this.ok(command.type, { cancelled: command.childId === "child-1" });
 			case "execute_bash":
 				if (command.command === "stale-daemon") {
 					return {
@@ -378,7 +309,7 @@ class FakeDaemonClient {
 						error: "Unknown daemon command: execute_bash",
 					};
 				}
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "abort_bash":
 				if (this.abortBashUnknownCommand) {
 					return {
@@ -388,53 +319,38 @@ class FakeDaemonClient {
 						error: "Unknown daemon command: abort_bash",
 					};
 				}
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "start_side_question":
-				return { type: "response", command: command.type, success: true };
+				return this.ok(command.type);
 			case "delete_saved_session":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: { ok: true, method: "trash" },
-				};
+				return this.ok(command.type, { ok: true, method: "trash" });
 			case "refine":
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						id: "refine_daemon",
-						summary: "Daemon refinement",
-						rationale: "Test daemon refine timeout",
-						expectedOutcome: "Refine request completes",
-						appliedEdits: [],
-						harnessStatePath: "/tmp/harness_state.json",
-					},
-				};
+				return this.ok(command.type, {
+					id: "refine_daemon",
+					summary: "Daemon refinement",
+					rationale: "Test daemon refine timeout",
+					expectedOutcome: "Refine request completes",
+					appliedEdits: [],
+					harnessStatePath: "/tmp/harness_state.json",
+				});
 			case "cron_add":
 				await this.cronAddGate;
-				return {
-					type: "response",
-					command: command.type,
-					success: true,
-					data: {
-						job: {
-							id: `cron-${this.requests.filter((request) => request.type === "cron_add").length}`,
-							status: "active",
-							source: "cron",
-							activeSessionId: command.activeSessionId,
-							sessionId: "session-current",
-							sessionFile: "/tmp/session-current.jsonl",
-							cwd: "/tmp/project",
-							prompt: command.prompt,
-							schedule: { kind: "cron", expression: command.schedule },
-							createdAt: "2026-01-01T00:00:00.000Z",
-							updatedAt: "2026-01-01T00:00:00.000Z",
-							runCount: 0,
-						},
+				return this.ok(command.type, {
+					job: {
+						id: `cron-${this.requests.filter((request) => request.type === "cron_add").length}`,
+						status: "active",
+						source: "cron",
+						activeSessionId: command.activeSessionId,
+						sessionId: "session-current",
+						sessionFile: "/tmp/session-current.jsonl",
+						cwd: "/tmp/project",
+						prompt: command.prompt,
+						schedule: { kind: "cron", expression: command.schedule },
+						createdAt: "2026-01-01T00:00:00.000Z",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+						runCount: 0,
 					},
-				};
+				});
 			case "switch_session":
 				return {
 					type: "response",
@@ -554,6 +470,87 @@ class FakeDaemonClient {
 
 function asDaemonClient(client: FakeDaemonClient): DaemonClient {
 	return client as unknown as DaemonClient;
+}
+
+const CONNECTION_OPTIONS = new Set([
+	"ownedSession",
+	"closeClientOnDispose",
+	"snapshotTimeoutMs",
+	"reconnectTimeoutMs",
+	"recoverDaemon",
+]);
+
+/** Creates a FakeDaemonClient plus a DaemonAgentConnection bound to it. */
+function makeConnection(options: Record<string, unknown> & { activeSessionId: string }): {
+	client: FakeDaemonClient;
+	connection: DaemonAgentConnection;
+} {
+	const { activeSessionId, ...rest } = options;
+	const client = new FakeDaemonClient();
+	const connectionOptions: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(rest)) {
+		if (CONNECTION_OPTIONS.has(key)) {
+			connectionOptions[key] = value;
+		} else {
+			(client as unknown as Record<string, unknown>)[key] = value;
+		}
+	}
+	const connection = new DaemonAgentConnection(asDaemonClient(client), activeSessionId, connectionOptions as never);
+	return { client, connection };
+}
+
+/** Emits a sequenced session_event through the fake client (no cursor variant). */
+function emitSessionEvent(
+	client: FakeDaemonClient,
+	activeSessionId: string,
+	event: Record<string, unknown>,
+	sequence: number,
+): void {
+	client.emitMessage({
+		type: "session_event",
+		activeSessionId,
+		event: event as never,
+		meta: {
+			id: `${activeSessionId}:${sequence}`,
+			protocol: DAEMON_PROTOCOL_INFO,
+			activeSessionId,
+			sequence,
+			emittedAt: "2026-01-01T00:00:00.000Z",
+		},
+	});
+}
+
+/** Emits a sequenced session_event that carries an explicit generation cursor. */
+function emitSequencedEvent(
+	client: FakeDaemonClient,
+	activeSessionId: string,
+	event: Record<string, unknown>,
+	sequence: number,
+	generation = `generation-${activeSessionId}`,
+): void {
+	client.emitMessage({
+		type: "session_event",
+		activeSessionId,
+		event: event as never,
+		meta: {
+			id: `${activeSessionId}:${sequence}`,
+			protocol: DAEMON_PROTOCOL_INFO,
+			activeSessionId,
+			sequence,
+			cursor: { generation, sequence },
+			emittedAt: "2026-01-01T00:00:00.000Z",
+		},
+	});
+}
+
+/** Standard update-restart row advertised by the fake daemon's session list. */
+function restoredRow(sessionId: string, id = "active-restored") {
+	return {
+		id,
+		activeSessionId: id,
+		sessionId,
+		sessionFile: `/tmp/${sessionId}.jsonl`,
+	};
 }
 
 function createConnectionState(activeSessionId: string, sessionId: string): AgentConnectionState {
@@ -695,24 +692,9 @@ function emitSequencedQueueUpdate(client: FakeDaemonClient, activeSessionId: str
 	});
 }
 
-// vi.waitFor is unavailable in this bun version; poll on the assertion instead.
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) throw error;
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
-
 describe("DaemonAgentConnection", () => {
 	it("forwards queueIfBusy for prompt admission", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 
 		await connection.prompt("queued input", { streamingBehavior: "followUp", queueIfBusy: true });
 
@@ -726,8 +708,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("forwards signal-backed prompts with a unique cancellable admission id", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const abort = new AbortController();
 
 		await connection.prompt("startup", { signal: abort.signal, queueIfBusy: true });
@@ -742,10 +723,11 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("cancels rejected signal-backed admission and removes its abort listener", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.promptError = new Error("transport failed");
-		fakeClient.cancelPromptAdmissionStatus = "cancelled";
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({
+			activeSessionId: "active-1",
+			promptError: new Error("transport failed"),
+			cancelPromptAdmissionStatus: "cancelled",
+		});
 		const abort = new AbortController();
 		const add = vi.spyOn(abort.signal, "addEventListener");
 		const remove = vi.spyOn(abort.signal, "removeEventListener");
@@ -761,9 +743,10 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("preserves a definitive prompt rejection when the signal remains live", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.promptResponseError = "session rejected prompt";
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({
+			activeSessionId: "active-1",
+			promptResponseError: "session rejected prompt",
+		});
 
 		await expect(connection.prompt("startup", { signal: new AbortController().signal })).rejects.toEqual(
 			new Error("session rejected prompt"),
@@ -772,8 +755,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("sends zero requests for a pre-aborted prompt", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const abort = new AbortController();
 		abort.abort();
 
@@ -825,10 +807,11 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("treats a lost prompt response plus unknown cancellation as uncertain", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.promptError = new Error("lost response");
-		fakeClient.cancelPromptAdmissionStatus = "unknown";
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { connection } = makeConnection({
+			activeSessionId: "active-1",
+			promptError: new Error("lost response"),
+			cancelPromptAdmissionStatus: "unknown",
+		});
 
 		await expect(connection.prompt("startup", { signal: new AbortController().signal })).rejects.toMatchObject({
 			message: "lost response",
@@ -838,9 +821,10 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("translates unsupported admission cancellation into an admission error", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.promptError = new DaemonCapabilityUnavailableError("prompt", "prompt_admission_cancellation");
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({
+			activeSessionId: "active-1",
+			promptError: new DaemonCapabilityUnavailableError("prompt", "prompt_admission_cancellation"),
+		});
 
 		await expect(connection.prompt("startup", { signal: new AbortController().signal })).rejects.toMatchObject({
 			status: "unsupported",
@@ -849,10 +833,11 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("uses cancellable admission for promptAndWait", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.promptError = new Error("lost response");
-		fakeClient.cancelPromptAdmissionStatus = "cancelled";
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({
+			activeSessionId: "active-1",
+			promptError: new Error("lost response"),
+			cancelPromptAdmissionStatus: "cancelled",
+		});
 
 		await expect(connection.promptAndWait("wait", { signal: new AbortController().signal })).rejects.toMatchObject({
 			status: "cancelled",
@@ -906,8 +891,9 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("gates side-question follow-up transcripts on the daemon capability", async () => {
-		const oldDaemonClient = new FakeDaemonClient();
-		const oldConnection = new DaemonAgentConnection(asDaemonClient(oldDaemonClient), "active-original");
+		const { client: oldDaemonClient, connection: oldConnection } = makeConnection({
+			activeSessionId: "active-original",
+		});
 
 		// First questions carry no transcript and must keep working on old daemons.
 		await oldConnection.startSideQuestion("turn-1", "What changed?");
@@ -934,8 +920,9 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("gates transient bash on the daemon capability", async () => {
-		const oldDaemonClient = new FakeDaemonClient();
-		const oldConnection = new DaemonAgentConnection(asDaemonClient(oldDaemonClient), "active-original");
+		const { client: oldDaemonClient, connection: oldConnection } = makeConnection({
+			activeSessionId: "active-original",
+		});
 
 		// Regular bash keeps working on old daemons.
 		await oldConnection.executeBash("ls");
@@ -959,8 +946,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("degrades an unavailable heartbeat catalog without sending an unsupported command", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 
 		await expect(connection.listHeartbeats()).resolves.toEqual([]);
 		expect(fakeClient.requests).toEqual([]);
@@ -974,14 +960,7 @@ describe("DaemonAgentConnection", () => {
 		const fakeClient = new FakeDaemonClient();
 		fakeClient.emitCloseOnClose = true;
 		const restoredMessages: AgentMessage[] = [{ role: "user", content: "restored prompt", timestamp: 2 }];
-		fakeClient.updateRestartSessions = [
-			{
-				id: "active-restored",
-				activeSessionId: "active-restored",
-				sessionId: "session-current",
-				sessionFile: "/tmp/session-current.jsonl",
-			},
-		];
+		fakeClient.updateRestartSessions = [restoredRow("session-current")];
 		fakeClient.attachResultFactory = (command) =>
 			createAttachResult(command.activeSessionId, command.clientId, command.capabilities, 1, {
 				state: createConnectionState(command.activeSessionId, "session-current"),
@@ -1040,14 +1019,7 @@ describe("DaemonAgentConnection", () => {
 	it("reattaches when an update socket close arrives before the session notice", async () => {
 		const fakeClient = new FakeDaemonClient();
 		const restoredMessages: AgentMessage[] = [{ role: "user", content: "restored prompt", timestamp: 2 }];
-		fakeClient.updateRestartSessions = [
-			{
-				id: "active-restored",
-				activeSessionId: "active-restored",
-				sessionId: "session-current",
-				sessionFile: "/tmp/session-current.jsonl",
-			},
-		];
+		fakeClient.updateRestartSessions = [restoredRow("session-current")];
 		fakeClient.attachResultFactory = (command) =>
 			createAttachResult(command.activeSessionId, command.clientId, command.capabilities, 1, {
 				state: createConnectionState(command.activeSessionId, "session-current"),
@@ -1080,18 +1052,8 @@ describe("DaemonAgentConnection", () => {
 		const fakeClient = new FakeDaemonClient();
 		fakeClient.emitCloseOnClose = true;
 		fakeClient.updateRestartSessions = [
-			{
-				id: "restored-a",
-				activeSessionId: "restored-a",
-				sessionId: "session-a",
-				sessionFile: "/tmp/session-a.jsonl",
-			},
-			{
-				id: "restored-b",
-				activeSessionId: "restored-b",
-				sessionId: "session-b",
-				sessionFile: "/tmp/session-b.jsonl",
-			},
+			restoredRow("session-a", "restored-a"),
+			restoredRow("session-b", "restored-b"),
 		];
 		const sessionIds: Record<string, string> = {
 			"active-a": "session-a",
@@ -1143,8 +1105,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("does not reconnect after an explicit shutdown session close", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 		const closedEvents: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			if (event.type === "closed") {
@@ -1177,8 +1138,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("does not infer an update when shutdown closes the socket before the session notice", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 		const closedEvents: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			if (event.type === "closed") {
@@ -1201,8 +1161,7 @@ describe("DaemonAgentConnection", () => {
 		["completed", "The daemon closed this agent session after it completed."],
 		["replaced", "The daemon replaced this agent session with another session."],
 	] as const)("explains a %s session close instead of exposing the raw reason", async (reason, explanation) => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 		const closedEvents: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			if (event.type === "closed") {
@@ -1222,8 +1181,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("adds recovery and diagnostic context to unexpected daemon disconnects", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 		const closedEvents: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			if (event.type === "closed") {
@@ -1244,8 +1202,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("reports an unannounced clean socket close without treating it as an update", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-original" });
 		const closedEvents: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			if (event.type === "closed") {
@@ -1265,14 +1222,7 @@ describe("DaemonAgentConnection", () => {
 
 	it("does not emit a restored session after disposal begins", async () => {
 		const fakeClient = new FakeDaemonClient();
-		fakeClient.updateRestartSessions = [
-			{
-				id: "active-restored",
-				activeSessionId: "active-restored",
-				sessionId: "session-current",
-				sessionFile: "/tmp/session-current.jsonl",
-			},
-		];
+		fakeClient.updateRestartSessions = [restoredRow("session-current")];
 		let releaseRestoredAttach: (() => void) | undefined;
 		fakeClient.restoredAttachGate = new Promise<void>((resolve) => {
 			releaseRestoredAttach = resolve;
@@ -1307,9 +1257,10 @@ describe("DaemonAgentConnection", () => {
 
 	it("returns to normal close handling after update restoration times out", async () => {
 		{
-			const fakeClient = new FakeDaemonClient();
-			fakeClient.reconnectError = new Error("daemon unavailable");
-			const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
+			const { client: fakeClient, connection } = makeConnection({
+				activeSessionId: "active-original",
+				reconnectError: new Error("daemon unavailable"),
+			});
 			const closedEvents: AgentConnectionEvent[] = [];
 			connection.subscribe((event) => {
 				if (event.type === "closed") {
@@ -1411,8 +1362,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("loads connection state and forwards replacement snapshots through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			events.push(event);
@@ -1456,8 +1406,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("forwards catch-up snapshots as non-destructive resync events", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			events.push(event);
@@ -1575,8 +1524,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("preserves the in-flight assistant message when refreshing a stale snapshot", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 		const streamingMessage: AgentMessage = {
 			role: "assistant",
@@ -1595,19 +1543,7 @@ describe("DaemonAgentConnection", () => {
 			stopReason: "stop",
 			timestamp: 2,
 		};
-		fakeClient.emitMessage({
-			type: "session_event",
-			activeSessionId: "active-1",
-			event: { type: "message_start", message: streamingMessage },
-			meta: {
-				id: "active-1:13",
-				protocol: DAEMON_PROTOCOL_INFO,
-				activeSessionId: "active-1",
-				sequence: 13,
-				cursor: { generation: "generation-active-1", sequence: 13 },
-				emittedAt: "2026-01-01T00:00:00.000Z",
-			},
-		});
+		emitSequencedEvent(fakeClient, "active-1", { type: "message_start", message: streamingMessage }, 13);
 
 		await expect(connection.getInitialSnapshot()).resolves.toMatchObject({ streamingMessage });
 		expect(fakeClient.requests.map((request) => request.type)).toEqual([
@@ -1619,8 +1555,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("does not stamp independently fetched snapshot data with an event cursor observed mid-fetch", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 		emitSequencedQueueUpdate(fakeClient, "active-1", 13);
 		let releaseState!: () => void;
@@ -1672,8 +1607,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("rejects one failed snapshot without interrupting another session on the shared client", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const sibling = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-2");
+		const { client: fakeClient, connection: sibling } = makeConnection({ activeSessionId: "active-2" });
 		await sibling.attach();
 		const siblingEvents: AgentConnectionEvent[] = [];
 		sibling.subscribe((event) => {
@@ -1789,8 +1723,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("distinguishes chunked catch-up snapshots from runtime replacements", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
@@ -1857,8 +1790,7 @@ describe("DaemonAgentConnection", () => {
 	it.each(["replacement", "resync"] as const)(
 		"recovers a failed chunked %s snapshot without interrupting a sibling session",
 		async (purpose) => {
-			const fakeClient = new FakeDaemonClient();
-			const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+			const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 			const sibling = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-2");
 			await Promise.all([connection.attach(), sibling.attach()]);
 			const events: AgentConnectionEvent[] = [];
@@ -2121,14 +2053,7 @@ describe("DaemonAgentConnection", () => {
 
 	it("does not let a stalled subscriber block update recovery", async () => {
 		const fakeClient = new FakeDaemonClient();
-		fakeClient.updateRestartSessions = [
-			{
-				id: "active-restored",
-				activeSessionId: "active-restored",
-				sessionId: "session-current",
-				sessionFile: "/tmp/session-current.jsonl",
-			},
-		];
+		fakeClient.updateRestartSessions = [restoredRow("session-current")];
 		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-original");
 		const statuses: string[] = [];
 		connection.subscribe(() => new Promise<void>(() => undefined));
@@ -2182,8 +2107,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("ignores older sequenced events after an attach snapshot", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			events.push(event);
@@ -2232,8 +2156,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("sends queue commands through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(connection.getQueue()).resolves.toEqual({ steering: ["steer"], followUp: ["follow"] });
@@ -2271,8 +2194,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("cancels rlm child runs through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(connection.cancelRlmChild("child-1")).resolves.toBe(true);
@@ -2292,8 +2214,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("sends bash commands through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await connection.executeBash("echo hi", { excludeFromContext: true });
@@ -2319,8 +2240,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("loads resource snapshots through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(connection.getResourceSnapshot()).resolves.toMatchObject({
@@ -2352,8 +2272,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("falls back to configured models when the daemon lacks model catalog support", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		const catalog = await connection.getModelCatalog();
@@ -2367,24 +2286,17 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("loads session context through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
-		fakeClient.emitMessage({
-			type: "session_event",
-			activeSessionId: "active-1",
-			event: {
+		emitSessionEvent(
+			fakeClient,
+			"active-1",
+			{
 				type: "session_action_update",
 				actions: { queuedCount: 0, steering: [], followUps: [] },
 			},
-			meta: {
-				id: "active-1:13",
-				protocol: DAEMON_PROTOCOL_INFO,
-				activeSessionId: "active-1",
-				sequence: 13,
-				emittedAt: "2026-01-01T00:00:00.000Z",
-			},
-		});
+			13,
+		);
 
 		await expect(connection.getSessionContext()).resolves.toEqual({
 			messages: [{ role: "user", content: "context prompt", timestamp: 3 }],
@@ -2399,24 +2311,17 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("loads session trees through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
-		fakeClient.emitMessage({
-			type: "session_event",
-			activeSessionId: "active-1",
-			event: {
+		emitSessionEvent(
+			fakeClient,
+			"active-1",
+			{
 				type: "session_action_update",
 				actions: { queuedCount: 0, steering: [], followUps: [] },
 			},
-			meta: {
-				id: "active-1:13",
-				protocol: DAEMON_PROTOCOL_INFO,
-				activeSessionId: "active-1",
-				sequence: 13,
-				emittedAt: "2026-01-01T00:00:00.000Z",
-			},
-		});
+			13,
+		);
 
 		await expect(connection.getSessionTree()).resolves.toEqual({
 			tree: [
@@ -2441,8 +2346,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("loads serializable tool metadata through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(connection.getToolDefinition("custom_tool")).resolves.toEqual({
@@ -2463,29 +2367,22 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("forwards daemon session events through the connection boundary", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			events.push(event);
 		});
 		await connection.attach();
 
-		fakeClient.emitMessage({
-			type: "session_event",
-			activeSessionId: "active-1",
-			event: {
+		emitSessionEvent(
+			fakeClient,
+			"active-1",
+			{
 				type: "session_action_update",
 				actions: { queuedCount: 2, steering: ["interrupt"], followUps: ["later"] },
 			},
-			meta: {
-				id: "active-1:14",
-				protocol: DAEMON_PROTOCOL_INFO,
-				activeSessionId: "active-1",
-				sequence: 14,
-				emittedAt: "2026-01-01T00:00:00.000Z",
-			},
-		});
+			14,
+		);
 		fakeClient.emitMessage({
 			type: "session_event",
 			activeSessionId: "other",
@@ -2532,8 +2429,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("ignores delayed events from a retired daemon generation", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const steeringUpdates: Array<readonly string[]> = [];
 		connection.subscribe((event) => {
 			if (event.type === "session_event" && event.event.type === "session_action_update") {
@@ -2569,8 +2465,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("forwards extension UI requests and responses", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		const events: AgentConnectionEvent[] = [];
 		connection.subscribe((event) => {
 			events.push(event);
@@ -2620,8 +2515,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("uses an extended timeout for refine requests through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(
@@ -2643,8 +2537,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("lists and renames saved sessions through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 		const progress: Array<[number, number]> = [];
 		const discovered: AgentConnectionSavedSessionInfo[] = [];
@@ -2700,8 +2593,7 @@ describe("DaemonAgentConnection", () => {
 	});
 
 	it("rehydrates daemon recoverable errors for interactive recovery flows", async () => {
-		const fakeClient = new FakeDaemonClient();
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+		const { connection } = makeConnection({ activeSessionId: "active-1" });
 		await connection.attach();
 
 		await expect(connection.switchSession("/tmp/session.jsonl")).rejects.toBeInstanceOf(MissingSessionCwdError);

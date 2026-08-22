@@ -33,7 +33,6 @@ import { canonicalSessionPath } from "../src/core/session-lease.js";
 import { readSessionInfo, type SessionInfo, SessionManager } from "../src/core/session-manager.js";
 import type { ActiveSessionState, DaemonSocketClient } from "../src/modes/daemon/active-session-state.js";
 import {
-	AgentDaemon,
 	cancelPendingExtensionUiRequests,
 	detachClientFromActiveSession,
 	finishClientSnapshotStreaming,
@@ -55,11 +54,25 @@ import {
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import { DAEMON_WORKER_SUPERVISOR_SOCKET_ENV } from "../src/modes/daemon/daemon-worker-protocol.js";
 import { RlmSpawnLedger } from "../src/modes/daemon/rlm-ledger.js";
+import {
+	applySession,
+	daemonInternals,
+	makeAgentFamilyState,
+	makeClient,
+	makeCronJob,
+	makeDaemon,
+	makePersistedRlmDaemonFixture,
+	makeRuntimeSession,
+	makeState,
+	withTempDir,
+} from "./helpers/daemon-harness.js";
 
 describe("daemon mode helpers", () => {
 	it("preserves envelope client identity while registering prompt admission", () => {
-		const daemon = new AgentDaemon("/tmp/unused-daemon.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/unused-daemon.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const client = makeClient("worker-socket", "active");
@@ -70,8 +83,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("normalizes daemon session names before validation and persistence", async () => {
-		const daemon = new AgentDaemon("/tmp/unused-daemon.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/unused-daemon.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const setSessionName = vi.fn();
@@ -82,10 +97,7 @@ describe("daemon mode helpers", () => {
 			session: { setSessionName },
 		} as never;
 		const assertStateSessionNameAvailable = vi.fn(async () => {});
-		const internals = daemon as unknown as {
-			assertStateSessionNameAvailable: typeof assertStateSessionNameAvailable;
-			setStateSessionName(state: ActiveSessionState, name: string): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.assertStateSessionNameAvailable = assertStateSessionNameAvailable;
 
 		await internals.setStateSessionName(state, "  normalized  ");
@@ -97,43 +109,30 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("treats a depth-zero fork as a sibling of another root", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-fork-family.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-fork-family.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const fork = makeState("fork");
-		fork.runtime = {
-			...fork.runtime,
-			metadata: {
-				kind: "top-level",
-				createdAt: 1,
-				parentSessionId: "fork-origin",
-				parentSessionFile: "/tmp/fork-origin.jsonl",
-			},
-			session: {
-				sessionId: "session-fork",
-				sessionFile: "/tmp/fork.jsonl",
-				rlmDepth: 0,
-				sessionManager: { getHeader: () => ({ parentSession: "/tmp/fork-origin.jsonl" }) },
-			},
-		} as never;
+		applySession(fork, {
+			kind: "top-level",
+			parentSessionId: "fork-origin",
+			sessionId: "session-fork",
+			sessionFile: "/tmp/fork.jsonl",
+			depth: 0,
+			metadata: { parentSessionFile: "/tmp/fork-origin.jsonl" },
+			session: { sessionManager: { getHeader: () => ({ parentSession: "/tmp/fork-origin.jsonl" }) } },
+		});
 		const root = makeState("root");
-		root.runtime = {
-			...root.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "session-root",
-				sessionFile: "/tmp/root.jsonl",
-				rlmDepth: 0,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			agentFamilyEntry(state: ActiveSessionState): {
-				parentSessionId?: string;
-				parentSessionPath?: string;
-			};
-			isAgentFamilyReachable(current: ActiveSessionState, target: ActiveSessionState): boolean;
-		};
+		applySession(root, {
+			kind: "top-level",
+			sessionId: "session-root",
+			sessionFile: "/tmp/root.jsonl",
+			depth: 0,
+		});
+		const internals = daemonInternals(daemon);
 
 		expect(internals.agentFamilyEntry(fork)).not.toHaveProperty("parentSessionId");
 		expect(internals.agentFamilyEntry(fork)).not.toHaveProperty("parentSessionPath");
@@ -196,8 +195,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("acknowledges agent messages after target prompt preflight succeeds", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -223,33 +224,15 @@ describe("daemon mode helpers", () => {
 				});
 			},
 		);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-				acceptAgentMessagePrompt,
-			},
-		} as never;
-		fromState.runtime = {
-			...fromState.runtime,
-			session: {
-				sessionId: "session-source",
-				sessionName: "Source",
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			session: { sessionActions: { queuedCount: 0, steering: [], followUps: [] }, acceptAgentMessagePrompt },
+		});
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -271,40 +254,30 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("classifies local roster status with heartbeat and running-child activity", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-status-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-status-test.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const state = makeState("local-active");
 		let hasRunningChildren = true;
-		state.runtime = {
-			...state.runtime,
+		applySession(state, {
 			cwd: "/tmp",
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "local-session",
-				isSessionActive: false,
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				hasRunningRlmChildren: () => hasRunningChildren,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			cronStore: {
-				getHeartbeat(activeSessionId: string): AgentCronJob | undefined;
-				listRlmHeartbeats(activeSessionId: string): AgentCronJob[];
-			};
-			createAgentMessageAgentSummary(state: ActiveSessionState): { status?: string };
-		};
+			kind: "top-level",
+			sessionId: "local-session",
+			isSessionActive: false,
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { hasRunningRlmChildren: () => hasRunningChildren },
+		});
+		const internals = daemonInternals(daemon);
 		const getHeartbeat = vi.spyOn(internals.cronStore, "getHeartbeat").mockReturnValue(undefined);
 		const listRlmHeartbeats = vi.spyOn(internals.cronStore, "listRlmHeartbeats").mockReturnValue([]);
 
 		expect(internals.createAgentMessageAgentSummary(state).status).toBe("running");
 		hasRunningChildren = false;
-		state.runtime = {
-			...state.runtime,
-			metadata: { kind: "subagent", createdAt: 1 },
-		} as ActiveSessionState["runtime"];
+		applySession(state, { kind: "subagent", metadata: { createdAt: 1 } });
 		expect(internals.createAgentMessageAgentSummary(state).status).toBe("idle");
 		getHeartbeat.mockReturnValue({ status: "active" } as AgentCronJob);
 		expect(internals.createAgentMessageAgentSummary(state).status).toBe("running");
@@ -314,40 +287,37 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reserves a session name across equivalent session-relative parent headers", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-name-reservation.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-name-reservation.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const first = makeState("first");
 		const second = makeState("second");
-		first.runtime = {
-			...first.runtime,
+		applySession(first, {
+			sessionId: "first-session",
+			sessionFile: "/tmp/children/first.jsonl",
+			depth: 1,
 			session: {
-				sessionId: "first-session",
-				sessionFile: "/tmp/children/first.jsonl",
-				rlmDepth: 1,
 				sessionManager: { getHeader: vi.fn(() => ({ parentSession: "../parent.jsonl" })) },
 				setSessionName: vi.fn(),
 			},
-		} as never;
-		second.runtime = {
-			...second.runtime,
+		});
+		applySession(second, {
+			sessionId: "second-session",
+			sessionFile: "/tmp/children/nested/second.jsonl",
+			depth: 1,
 			session: {
-				sessionId: "second-session",
-				sessionFile: "/tmp/children/nested/second.jsonl",
-				rlmDepth: 1,
 				sessionManager: { getHeader: vi.fn(() => ({ parentSession: "../../parent.jsonl" })) },
 				setSessionName: vi.fn(),
 			},
-		} as never;
+		});
 		let releaseValidation!: () => void;
 		const validationGate = new Promise<void>((resolve) => {
 			releaseValidation = resolve;
 		});
-		const internals = daemon as unknown as {
-			assertStateSessionNameAvailable: ReturnType<typeof vi.fn>;
-			setStateSessionName(state: ActiveSessionState, name: string): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.assertStateSessionNameAvailable = vi.fn(async () => validationGate);
 
 		const firstRename = internals.setStateSessionName(first, "shared");
@@ -361,8 +331,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("allows concurrent same-name renames under different parents", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-scoped-name-reservation.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-scoped-name-reservation.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const first = makeState("first", "parent-a");
@@ -391,10 +363,7 @@ describe("daemon mode helpers", () => {
 		const validationGate = new Promise<void>((resolve) => {
 			releaseValidation = resolve;
 		});
-		const internals = daemon as unknown as {
-			assertStateSessionNameAvailable: ReturnType<typeof vi.fn>;
-			setStateSessionName(state: ActiveSessionState, name: string): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.assertStateSessionNameAvailable = vi.fn(async () => validationGate);
 
 		const firstRename = internals.setStateSessionName(first, "worker");
@@ -408,32 +377,28 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("scopes a switched child rename from its session-relative persisted parent header", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-switched-child-name-"));
-		try {
+		await withTempDir("optimus-switched-child-name-", async (tempDir) => {
 			const parentPath = join(tempDir, "parent.jsonl");
 			const childDir = join(tempDir, "child");
 			const childPath = join(childDir, "child.jsonl");
 			mkdirSync(childDir);
 			writeFileSync(parentPath, "");
 			const state = makeState("switched-child");
-			state.runtime = {
-				...state.runtime,
-				metadata: { kind: "top-level", createdAt: 1 },
-				session: {
-					sessionId: "session-child",
-					sessionFile: childPath,
-					rlmDepth: 1,
-					sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) },
-				},
-			} as never;
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
+			applySession(state, {
+				kind: "top-level",
+				sessionId: "session-child",
+				sessionFile: childPath,
+				depth: 1,
+				session: { sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) } },
+			});
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
 				createRuntime: vi.fn(),
 			});
-			const internals = daemon as unknown as {
-				createAgentFamilyCatalog: ReturnType<typeof vi.fn>;
-				assertStateSessionNameAvailable(state: ActiveSessionState, name: string): Promise<void>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.createAgentFamilyCatalog = vi.fn(async () => [
 				{
 					id: "sibling",
@@ -447,35 +412,28 @@ describe("daemon mode helpers", () => {
 			await expect(internals.assertStateSessionNameAvailable(state, "taken")).rejects.toThrow(
 				"an agent of that name already exists at depth 1 under this parent",
 			);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps fresh local rows over stale synced peers in the family catalog", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-local-precedence.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-local-precedence.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const state = makeState("local-active");
-		state.runtime = {
-			...state.runtime,
+		applySession(state, {
 			cwd: "/tmp",
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "shared-session",
-				sessionName: "fresh-local",
-				isSessionActive: false,
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				hasRunningRlmChildren: () => false,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			remoteAgentPeers: Map<string, Record<string, unknown>>;
-			createAgentFamilyCatalog(): Promise<Array<{ id: string; name?: string }>>;
-		};
+			kind: "top-level",
+			sessionId: "shared-session",
+			sessionName: "fresh-local",
+			isSessionActive: false,
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { hasRunningRlmChildren: () => false },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.remoteAgentPeers.set("stale-active", {
 			activeSessionId: "stale-active",
@@ -497,35 +455,33 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("canonicalizes symlinked paths in the family catalog and name reservations", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-family-catalog-paths-"));
-		try {
+		await withTempDir("optimus-family-catalog-paths-", async (tempDir) => {
 			const realDir = join(tempDir, "real");
 			const aliasDir = join(tempDir, "alias");
 			mkdirSync(realDir);
 			symlinkSync(realDir, aliasDir, "dir");
 			const parentPath = join(realDir, "parent.jsonl");
 			writeFileSync(parentPath, "");
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
 				createRuntime: vi.fn(),
 			});
 			const parent = makeState("parent");
-			parent.runtime = {
-				...parent.runtime,
+			applySession(parent, {
 				cwd: tempDir,
-				metadata: { kind: "top-level", createdAt: 1 },
-				session: {
-					sessionId: "session-parent",
-					sessionName: "parent",
-					sessionFile: parentPath,
-					sessionManager: { getSessionArtifactDir: () => undefined },
-					rlmDepth: 0,
-					isStreaming: false,
-					isSessionActive: false,
-					unfinishedActionCount: 0,
-					hasRunningRlmChildren: () => false,
-				},
-			} as never;
+				kind: "top-level",
+				sessionId: "session-parent",
+				sessionName: "parent",
+				sessionFile: parentPath,
+				depth: 0,
+				isStreaming: false,
+				isSessionActive: false,
+				unfinishedActionCount: 0,
+				session: { sessionManager: { getSessionArtifactDir: () => undefined }, hasRunningRlmChildren: () => false },
+			});
 			const child = {
 				activeSessionId: "child-active",
 				sessionId: "session-child",
@@ -538,11 +494,7 @@ describe("daemon mode helpers", () => {
 				rlmDepth: 1,
 				status: "idle",
 			};
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				remoteAgentPeers: Map<string, typeof child>;
-				createAgentFamilyRoster(state: ActiveSessionState): Promise<{ entries: Array<{ id: string }> }>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(parent.activeSessionId, parent);
 			internals.remoteAgentPeers.set(child.activeSessionId, child);
 			const listAll = vi.spyOn(SessionManager, "listAll").mockResolvedValue([]);
@@ -566,30 +518,27 @@ describe("daemon mode helpers", () => {
 			} finally {
 				listAll.mockRestore();
 			}
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("lists and sends agent messages to completed retained subagents", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const parentState = makeState("parent");
-		parentState.runtime = {
-			...parentState.runtime,
+		applySession(parentState, {
 			cwd: "/tmp",
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "session-parent",
-				sessionName: "Parent",
-				isStreaming: false,
-				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-			},
-		} as never;
+			kind: "top-level",
+			sessionId: "session-parent",
+			sessionName: "Parent",
+			isStreaming: false,
+			session: { sessionActions: { queuedCount: 0, steering: [], followUps: [] } },
+		});
 		const defaultSubagentName = createDefaultRlmSubagentSessionName("retained worker", "child-1");
 		const subagentState = makeState("child", "parent") as ActiveSessionState & {
 			runtime: ActiveSessionState["runtime"] & {
@@ -623,19 +572,14 @@ describe("daemon mode helpers", () => {
 				acceptAgentMessagePrompt,
 			},
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageController(
-				getCurrentState: () => ActiveSessionState | undefined,
-			): AgentSessionMessageController;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(parentState.activeSessionId, parentState);
 		// A successfully completed RLM child remains idle in this daemon registry.
 		internals.sessions.set(subagentState.activeSessionId, subagentState);
 
 		const controller = internals.createAgentMessageController(() => parentState);
 		const subagentSummary = (await controller.listAgents()).agents.find(
-			(agent) => agent.activeSessionId === subagentState.activeSessionId,
+			(agent: any) => agent.activeSessionId === subagentState.activeSessionId,
 		);
 		expect(subagentSummary).toMatchObject({
 			sessionName: defaultSubagentName,
@@ -662,8 +606,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("closes a hosted child through the release hook and persists cancellation", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-daemon-release-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-daemon-release-test.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const parentState = makeState("parent");
@@ -731,8 +677,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("persists a real child completion for passive discovery, roster, and listing", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-real-completion-"));
-		try {
+		await withTempDir("optimus-daemon-real-completion-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const parentManager = SessionManager.create(tempDir, sessionDir);
 			parentManager.newSession();
@@ -750,29 +695,14 @@ describe("daemon mode helpers", () => {
 				>["services"],
 				diagnostics: [],
 			}));
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				createRlmSubagentRuntime(
-					parentState: ActiveSessionState,
-					options: CreateRlmSubagentRuntimeOptions,
-				): Promise<ActiveSessionState["runtime"]>;
-				createSubagentRuntimeHost(parentState: ActiveSessionState): SubagentRuntimeHost;
-				listPassiveRlmSubagents(): Promise<Array<{ entry: { childId: string } }>>;
-				findPassiveRlmSubagent(target: string): Promise<{ entry: { childId: string } } | undefined>;
-				createAgentMessageController(
-					getCurrentState: () => ActiveSessionState | undefined,
-				): AgentSessionMessageController;
-				buildSessionListWithPassiveRlmSubagents(
-					active: ActiveSessionState[],
-					saved: Awaited<ReturnType<typeof SessionManager.listAll>>,
-					jobs: AgentCronJob[],
-				): Promise<Array<{ sessionFile?: string; rlmChildId?: string }>>;
-			};
+			const internals = daemonInternals(daemon);
 			const parentState = await internals.createRuntime({ type: "create", sessionPath: parentSessionFile });
 			Object.assign(parentState.runtime.session, {
 				isSessionActive: false,
@@ -812,10 +742,12 @@ describe("daemon mode helpers", () => {
 				daemon as unknown as { closeSession(state: ActiveSessionState, reason: "shutdown"): Promise<void> }
 			).closeSession(childState, "shutdown");
 
-			expect((await internals.listPassiveRlmSubagents()).map(({ entry }) => entry.childId)).toContain("child-1");
+			expect((await internals.listPassiveRlmSubagents()).map(({ entry }: any) => entry.childId)).toContain(
+				"child-1",
+			);
 			expect((await internals.findPassiveRlmSubagent("real-worker"))?.entry.childId).toBe("child-1");
 			const roster = await internals.createAgentMessageController(() => parentState).roster?.();
-			const passiveRosterEntry = roster?.entries.find((entry) => entry.name === "real-worker");
+			const passiveRosterEntry = roster?.entries.find((entry: any) => entry.name === "real-worker");
 			expect(passiveRosterEntry).toMatchObject({ relationship: "child", status: "inactive" });
 			expect(passiveRosterEntry).not.toHaveProperty("repliedSinceTask");
 			const listed = await internals.buildSessionListWithPassiveRlmSubagents(
@@ -839,14 +771,11 @@ describe("daemon mode helpers", () => {
 				status: "completed",
 				prompt: "complete and persist",
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("discovers a non-resident child left running in the persisted registry", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-orphan-running-child-"));
-		try {
+		await withTempDir("optimus-daemon-orphan-running-child-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const registryPath = join(fixture.parentArtifactDir, "rlm-subagents.jsonl");
 			const entry = JSON.parse(readFileSync(registryPath, "utf8")) as Record<string, unknown>;
@@ -867,14 +796,11 @@ describe("daemon mode helpers", () => {
 			await expect(internals.createAgentMessageController(() => parentState).roster?.()).resolves.toMatchObject({
 				entries: [expect.objectContaining({ relationship: "child", name: "renamed-worker" })],
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("persists explicit child depth for an in-memory daemon parent", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-in-memory-parent-depth-"));
-		try {
+		await withTempDir("optimus-daemon-in-memory-parent-depth-", async (tempDir) => {
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
 				session: makeRuntimeSession(options.sessionManager),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
@@ -885,17 +811,14 @@ describe("daemon mode helpers", () => {
 				>["services"],
 				diagnostics: [],
 			}));
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: join(tempDir, "sessions") },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: join(tempDir, "sessions"),
 				createRuntime,
 			});
-			const internals = daemon as unknown as {
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				createRlmSubagentRuntime(
-					parentState: ActiveSessionState,
-					options: CreateRlmSubagentRuntimeOptions,
-				): Promise<ActiveSessionState["runtime"]>;
-			};
+			const internals = daemonInternals(daemon);
 			const parentState = await internals.createRuntime({ type: "create", noSession: true });
 			const child = await internals.createRlmSubagentRuntime(parentState, {
 				parentSession: parentState.runtime.session,
@@ -919,9 +842,7 @@ describe("daemon mode helpers", () => {
 			expect(parentState.runtime.session.sessionFile).toBeUndefined();
 			expect(child.session.sessionManager.getHeader()).toMatchObject({ rlmDepth: 1 });
 			expect(child.session.sessionManager.getHeader()?.parentSession).toBeUndefined();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("defers RLM heartbeats while a subagent is binding", async () => {
@@ -976,20 +897,14 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				cronScheduler: { runDue(now: Date): Promise<number> };
-				sessions: Map<string, ActiveSessionState>;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				createRlmSubagentRuntime(
-					parentState: ActiveSessionState,
-					options: CreateRlmSubagentRuntimeOptions,
-				): Promise<ActiveSessionState["runtime"]>;
-			};
+			const internals = daemonInternals(daemon);
 			const parentState = await internals.createRuntime({ type: "create", sessionPath: parentSessionFile });
 			const childRuntimePromise = internals.createRlmSubagentRuntime(parentState, {
 				parentSession: parentState.runtime.session,
@@ -1030,7 +945,7 @@ describe("daemon mode helpers", () => {
 
 			expect(await internals.cronScheduler.runDue(new Date("2026-07-16T00:00:00.000Z"))).toBe(0);
 			expect(promptHeartbeat).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				runCount: 0,
 			});
@@ -1043,7 +958,7 @@ describe("daemon mode helpers", () => {
 			await childRuntimePromise;
 			expect(await internals.cronScheduler.runDue(new Date("2027-01-01T00:00:00.000Z"))).toBe(1);
 			expect(promptHeartbeat).toHaveBeenCalledOnce();
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				runCount: 1,
 			});
@@ -1054,19 +969,16 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("closes the exact parent-scoped daemon runtime when a retained subagent is deleted", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const parentState = makeState("parent");
-		parentState.runtime = {
-			...parentState.runtime,
-			session: {
-				sessionManager: { getSessionArtifactDir: () => undefined },
-			},
-		} as ActiveSessionState["runtime"];
+		applySession(parentState, { session: { sessionManager: { getSessionArtifactDir: () => undefined } } });
 		const childState = makeState("child", parentState.activeSessionId);
 		const foreignChildState = makeState("foreign-child", "other-parent");
 		const childSession = {
@@ -1086,13 +998,7 @@ describe("daemon mode helpers", () => {
 			session: foreignSession,
 		} as ActiveSessionState["runtime"];
 		const closeSession = vi.fn(async () => {});
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			closeSession: typeof closeSession;
-			createSubagentRuntimeHost(parent: ActiveSessionState): {
-				deleteRlmSubagentRuntime(childId: string, session: ActiveSessionState["runtime"]["session"]): Promise<void>;
-			};
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(childState.activeSessionId, childState);
 		internals.sessions.set(foreignChildState.activeSessionId, foreignChildState);
 		internals.closeSession = closeSession;
@@ -1166,8 +1072,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("keeps a child live when its durable deletion boundary cannot be read", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-delete-registry-failure-"));
-		try {
+		await withTempDir("optimus-daemon-delete-registry-failure-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const parentManager = SessionManager.create(tempDir, sessionDir);
 			parentManager.newSession();
@@ -1177,8 +1082,11 @@ describe("daemon mode helpers", () => {
 			}
 			mkdirSync(join(parentArtifactDir, "rlm-subagents.jsonl"), { recursive: true });
 
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -1195,16 +1103,7 @@ describe("daemon mode helpers", () => {
 				session: { disposeAsync: vi.fn(async () => {}) },
 			} as unknown as ActiveSessionState["runtime"];
 			const closeSession = vi.fn(async () => {});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				closeSession: typeof closeSession;
-				createSubagentRuntimeHost(parent: ActiveSessionState): {
-					deleteRlmSubagentRuntime(
-						childId: string,
-						session: ActiveSessionState["runtime"]["session"],
-					): Promise<void>;
-				};
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(childState.activeSessionId, childState);
 			internals.closeSession = closeSession;
 
@@ -1215,14 +1114,14 @@ describe("daemon mode helpers", () => {
 			).rejects.toThrow();
 			expect(closeSession).not.toHaveBeenCalled();
 			expect(internals.sessions.get(childState.activeSessionId)).toBe(childState);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("hides daemon sessions from messaging and observation while they are closing", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1235,29 +1134,15 @@ describe("daemon mode helpers", () => {
 			[parentState, "session-parent"],
 			[childState, "session-child"],
 		] as const) {
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: "/tmp",
-				session: {
-					sessionId,
-					sessionName: sessionId,
-					prompt: sessionPrompt,
-					isStreaming: false,
-					sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-				},
-			} as unknown as ActiveSessionState["runtime"];
+				sessionName: sessionId,
+				prompt: sessionPrompt,
+				isStreaming: false,
+				session: { sessionId, sessionActions: { queuedCount: 0, steering: [], followUps: [] } },
+			});
 		}
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			closingSessions: Map<string, { promise: Promise<void>; reason: "shutdown" }>;
-			createAgentMessageController(
-				getCurrentState: () => ActiveSessionState | undefined,
-			): AgentSessionMessageController;
-			getBoundSessionState(id: string): ActiveSessionState;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			agentMessageTargetLocks: Map<string, Promise<void>>;
-			promptWithAgentMessagePreparingGuard(state: ActiveSessionState, message: string): Promise<boolean>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(parentState.activeSessionId, parentState);
 		internals.sessions.set(childState.activeSessionId, childState);
 		internals.closingSessions.set(childState.activeSessionId, { promise: Promise.resolve(), reason: "shutdown" });
@@ -1295,8 +1180,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("removes a closing daemon session even when runtime disposal fails", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1305,28 +1192,15 @@ describe("daemon mode helpers", () => {
 		const dispose = vi.fn(async () => {
 			throw new Error("dispose failed");
 		});
-		state.runtime = {
-			...state.runtime,
-			dispose,
-			session: {
-				sessionId: "session-child",
-				sessionFile: undefined,
-				abort: vi.fn(() => new Promise<void>(() => {})),
-			},
-		} as unknown as ActiveSessionState["runtime"];
+		applySession(state, {
+			sessionId: "session-child",
+			sessionFile: undefined,
+			session: { abort: vi.fn(() => new Promise<void>(() => {})) },
+			runtime: { dispose },
+		});
 		state.extensionUiRequests = new Map();
 		state.unsubscribe = vi.fn();
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			closingSessions: Map<string, { promise: Promise<void>; reason: "shutdown" }>;
-			closeSession(state: ActiveSessionState, reason: "killed", waitForAbort?: boolean): Promise<void>;
-			closeChildSessions: ReturnType<typeof vi.fn>;
-			isEmptyDraftContent: ReturnType<typeof vi.fn>;
-			abortBashForClose: ReturnType<typeof vi.fn>;
-			recordWorkerRecoveryState: ReturnType<typeof vi.fn>;
-			broadcastToSession: ReturnType<typeof vi.fn>;
-			cancelScheduledJobsForSession: ReturnType<typeof vi.fn>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.closeChildSessions = vi.fn(async () => undefined);
 		internals.isEmptyDraftContent = vi.fn(() => true);
@@ -1343,24 +1217,23 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("lists and routes agent messages to peers hosted by another worker", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-worker-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 			worker: { authenticationToken: "worker-token" },
 		});
 		const source = makeState("source");
-		source.runtime = {
-			...source.runtime,
+		applySession(source, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-source",
-				sessionName: "Source",
-				isStreaming: false,
-				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-			},
-		} as never;
+			sessionId: "session-source",
+			sessionName: "Source",
+			isStreaming: false,
+			session: { sessionActions: { queuedCount: 0, steering: [], followUps: [] } },
+		});
 		const remoteSelector = "remote is closing";
 		const receipt = {
 			id: "agentmsg-remote",
@@ -1372,20 +1245,7 @@ describe("daemon mode helpers", () => {
 			deliveryMode: "auto",
 		};
 		const sendRemoteAgentSessionMessage = vi.fn().mockResolvedValue(receipt);
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			remoteAgentPeers: Map<string, Record<string, unknown>>;
-			createAgentMessageListResult(
-				current: ActiveSessionState,
-			): Promise<{ agents: Array<{ activeSessionId: string }> }>;
-			sendRemoteAgentSessionMessage: typeof sendRemoteAgentSessionMessage;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState: ActiveSessionState;
-				origin: "agent";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(source.activeSessionId, source);
 		internals.remoteAgentPeers.set(remoteSelector, {
 			activeSessionId: remoteSelector,
@@ -1413,37 +1273,27 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes nonresident agent-message targets through the supervisor wake path", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-worker-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 			worker: { authenticationToken: "worker-token" },
 		});
 		const source = makeState("source");
-		source.runtime = {
-			...source.runtime,
+		applySession(source, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-source",
-				sessionName: "Source",
-				isStreaming: false,
-				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-			},
-		} as never;
+			sessionId: "session-source",
+			sessionName: "Source",
+			isStreaming: false,
+			session: { sessionActions: { queuedCount: 0, steering: [], followUps: [] } },
+		});
 		const sendRemoteAgentSessionMessage = vi
 			.fn()
 			.mockRejectedValue(new Error("Unknown active session: deleted-child"));
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendRemoteAgentSessionMessage: typeof sendRemoteAgentSessionMessage;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState: ActiveSessionState;
-				origin: "agent";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(source.activeSessionId, source);
 		internals.sendRemoteAgentSessionMessage = sendRemoteAgentSessionMessage;
 
@@ -1459,8 +1309,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects invalid nonresident agent messages before remote fallback", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-worker-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1468,16 +1320,7 @@ describe("daemon mode helpers", () => {
 		});
 		const source = makeState("source");
 		const sendRemoteAgentSessionMessage = vi.fn();
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendRemoteAgentSessionMessage: typeof sendRemoteAgentSessionMessage;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState: ActiveSessionState;
-				origin: "agent";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(source.activeSessionId, source);
 		internals.sendRemoteAgentSessionMessage = sendRemoteAgentSessionMessage;
 
@@ -1543,8 +1386,10 @@ describe("daemon mode helpers", () => {
 		try {
 			await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 			process.env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV] = socketPath;
-			const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-				defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+			const daemon = makeDaemon({
+				socketPath: "/tmp/optimus-worker-test.sock",
+				agentDir: "/tmp/optimus-test-agent",
+				cwd: "/tmp",
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -1620,8 +1465,10 @@ describe("daemon mode helpers", () => {
 				server.listen(socketPath, resolve);
 			});
 			process.env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV] = socketPath;
-			const daemon = new AgentDaemon(join(tempDir, "worker.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "worker.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: vi.fn(),
 				worker: { authenticationToken: "token" },
 			});
@@ -1689,18 +1536,14 @@ describe("daemon mode helpers", () => {
 				server.listen(socketPath, resolve);
 			});
 			process.env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV] = socketPath;
-			const daemon = new AgentDaemon(join(tempDir, "worker.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "worker.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: vi.fn(),
 			});
 			const source = makeState("source");
-			const internals = daemon as unknown as {
-				sendRemoteAgentSessionMessage(
-					fromState: ActiveSessionState,
-					targetSelector: string,
-					message: string,
-				): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 
 			await expect(internals.sendRemoteAgentSessionMessage(source, "duplicate", "hello")).rejects.toThrow(
 				'Ambiguous session selector "duplicate"',
@@ -1715,8 +1558,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reports queued status when a direct accept races into the queue", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1729,30 +1574,15 @@ describe("daemon mode helpers", () => {
 				return Promise.resolve();
 			},
 		);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-				acceptAgentMessagePrompt,
-			},
-		} as never;
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			session: { sessionActions: { queuedCount: 0, steering: [], followUps: [] }, acceptAgentMessagePrompt },
+		});
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -1771,32 +1601,28 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("ignores a legacy follow-up mode and always steers agent messages", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const targetState = makeState("target");
 		const queueAgentMessagePrompt = vi.fn(async () => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: true,
-				isCompacting: false,
-				isRetrying: false,
-				isBashRunning: false,
-				unfinishedActionCount: 0,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: true,
+			isCompacting: false,
+			isRetrying: false,
+			isBashRunning: false,
+			unfinishedActionCount: 0,
+			session: { queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const response = await internals.handleCommand(makeClient("legacy-client", targetState.activeSessionId), {
@@ -1815,8 +1641,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rate limits agent messages per sender and target pair", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1824,36 +1652,23 @@ describe("daemon mode helpers", () => {
 		const fromState = makeState("source");
 		const targetA = makeState("target-a");
 		const targetB = makeState("target-b");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		for (const targetState of [targetA, targetB]) {
-			targetState.runtime = {
-				...targetState.runtime,
+			applySession(targetState, {
 				cwd: "/tmp",
+				sessionId: `session-${targetState.activeSessionId}`,
+				sessionName: targetState.activeSessionId,
+				isStreaming: false,
+				prompt: vi.fn(async () => {}),
+				followUp: vi.fn(async () => true),
 				session: {
-					sessionId: `session-${targetState.activeSessionId}`,
-					sessionName: targetState.activeSessionId,
-					isStreaming: false,
 					sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-					prompt: vi.fn(async () => {}),
-					followUp: vi.fn(async () => true),
 					clearQueue: vi.fn(() => ({ cleared: 0 })),
 					clearQueuedUserMessagesMatching: vi.fn(() => ({ steering: [], followUp: [] })),
 				},
-			} as never;
+			});
 		}
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetA.activeSessionId, targetA);
 		internals.sessions.set(targetB.activeSessionId, targetB);
@@ -1900,8 +1715,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears only queued agent-message prompts", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1914,22 +1731,15 @@ describe("daemon mode helpers", () => {
 			followUp: [],
 		}));
 		const clearQueue = vi.fn(() => ({ steering: ["user prompt"], followUp: ["heartbeat"] }));
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 2,
-				clearQueuedUserMessagesMatching,
-				clearQueue,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 2,
+			session: { clearQueuedUserMessagesMatching, clearQueue },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		await internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
@@ -1946,8 +1756,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("pause clears queued agent-message prompts from all sessions", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -1960,23 +1772,16 @@ describe("daemon mode helpers", () => {
 			[firstState, firstClear],
 			[secondState, secondClear],
 		] as const) {
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: "/tmp",
-				session: {
-					sessionId: `session-${state.activeSessionId}`,
-					sessionName: state.activeSessionId,
-					isStreaming: false,
-					unfinishedActionCount: 1,
-					clearQueuedUserMessagesMatching,
-				},
-			} as never;
+				sessionId: `session-${state.activeSessionId}`,
+				sessionName: state.activeSessionId,
+				isStreaming: false,
+				unfinishedActionCount: 1,
+				session: { clearQueuedUserMessagesMatching },
+			});
 		}
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			agentMessageRateLimiter: { clear: () => void };
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.agentMessageRateLimiter.clear = vi.fn();
 		internals.sessions.set(firstState.activeSessionId, firstState);
 		internals.sessions.set(secondState.activeSessionId, secondState);
@@ -1992,8 +1797,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("pause clears queued agent messages concurrently across sessions", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -2012,22 +1819,16 @@ describe("daemon mode helpers", () => {
 			[blockedState, blockedClear],
 			[readyState, readyClear],
 		] as const) {
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: "/tmp",
-				session: {
-					sessionId: `session-${state.activeSessionId}`,
-					sessionName: state.activeSessionId,
-					isStreaming: false,
-					unfinishedActionCount: 1,
-					clearQueuedUserMessagesMatching,
-				},
-			} as never;
+				sessionId: `session-${state.activeSessionId}`,
+				sessionName: state.activeSessionId,
+				isStreaming: false,
+				unfinishedActionCount: 1,
+				session: { clearQueuedUserMessagesMatching },
+			});
 		}
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(blockedState.activeSessionId, blockedState);
 		internals.sessions.set(readyState.activeSessionId, readyState);
 
@@ -2045,40 +1846,30 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("refunds agent message rate limit tokens when delivery fails", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
+		applySession(targetState, {
 			cwd: "/tmp",
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
 			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
 				prompt: vi.fn(async () => {
 					throw new Error("missing model");
 				}),
 			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2103,18 +1894,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("counts concurrent agent message queue reservations against the target queue cap", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		let rejectQueuedMessage: (error: Error) => void = () => {};
 		const queueAgentMessagePrompt = vi.fn(
 			(_message: string, _streamingBehavior: "steer" | "followUp") =>
@@ -2122,30 +1912,20 @@ describe("daemon mode helpers", () => {
 					rejectQueuedMessage = reject;
 				}),
 		);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: true,
+			unfinishedActionCount: 19,
+			prompt: vi.fn(async () => {}),
 			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: true,
-				unfinishedActionCount: 19,
 				clearQueue: vi.fn(() => ({ cleared: 0 })),
 				clearQueuedUserMessagesMatching: vi.fn(() => ({ steering: [], followUp: [] })),
 				queueAgentMessagePrompt,
-				prompt: vi.fn(async () => {}),
 			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2179,8 +1959,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("releases queue reservations once messages are queued so concurrent senders do not halve capacity", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -2204,23 +1986,15 @@ describe("daemon mode helpers", () => {
 				queueAgentMessagePrompt,
 			},
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 		// Distinct senders so the per-sender rate limit stays out of the way.
 		const senders = Array.from({ length: 12 }, (_, i) => {
 			const fromState = makeState(`source-${i}`);
-			fromState.runtime = {
-				...fromState.runtime,
-				session: { sessionId: `session-source-${i}`, sessionName: `Source ${i}` },
-			} as never;
+			applySession(fromState, {
+				sessionId: `session-source-${i}`,
+				sessionName: `Source ${i}`,
+			});
 			internals.sessions.set(fromState.activeSessionId, fromState);
 			return fromState;
 		});
@@ -2234,7 +2008,7 @@ describe("daemon mode helpers", () => {
 					fromState,
 					origin: "agent",
 				})
-				.catch((error) => {
+				.catch((error: any) => {
 					errors.push(error);
 				});
 		}
@@ -2249,43 +2023,30 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("resolves queued sends immediately with a queued receipt while the target is streaming", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
 		// A real streaming session only resolves this once its turn progresses;
 		// the send must not depend on it.
 		const waitForAgentMessagePromptDelivery = vi.fn(() => new Promise<void>(() => {}));
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: true,
-				unfinishedActionCount: 0,
-				queueAgentMessagePrompt,
-				waitForAgentMessagePromptDelivery,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: true,
+			unfinishedActionCount: 0,
+			session: { queueAgentMessagePrompt, waitForAgentMessagePromptDelivery },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2305,8 +2066,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("resolves mutual sends between two busy sessions without deadlocking", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -2330,15 +2093,7 @@ describe("daemon mode helpers", () => {
 		};
 		const stateA = makeBusyState("alpha");
 		const stateB = makeBusyState("beta");
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(stateA.activeSessionId, stateA);
 		internals.sessions.set(stateB.activeSessionId, stateB);
 
@@ -2362,41 +2117,28 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("counts accepted in-flight agent messages against the target queue cap", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 20,
-				hasAcceptedPromptInFlight: true,
-				acceptAgentMessagePrompt,
-				queueAgentMessagePrompt: vi.fn(async () => true),
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 20,
+			hasAcceptedPromptInFlight: true,
+			session: { acceptAgentMessagePrompt, queueAgentMessagePrompt: vi.fn(async () => true) },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2412,72 +2154,63 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reports accepted in-flight agent messages in agent-message lists", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const targetState = makeState("target");
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 3,
-				hasAcceptedPromptInFlight: true,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageListResult(current: ActiveSessionState): Promise<{
-				agents: Array<{ unfinishedActionCount: number }>;
-			}>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 3,
+			hasAcceptedPromptInFlight: true,
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		expect((await internals.createAgentMessageListResult(targetState)).agents[0]?.unfinishedActionCount).toBe(3);
 	});
 
 	it("reports non-streaming busy sessions as active in agent-observe summaries", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const targetState = makeState("target");
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			diagnostics: [],
-			modelFallbackMessage: undefined,
+			sessionId: "session-target",
+			sessionName: "Target",
+			sessionFile: undefined,
+			isStreaming: false,
+			isCompacting: false,
+			isBashRunning: false,
+			isRetrying: false,
+			hasAcceptedPromptInFlight: false,
+			unfinishedActionCount: 1,
+			isSessionActive: true,
 			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				sessionFile: undefined,
 				sessionManager: { getCwd: () => "/tmp" },
 				model: undefined,
 				thinkingLevel: "off",
-				isStreaming: false,
-				isCompacting: false,
-				isBashRunning: false,
-				isRetrying: false,
-				hasAcceptedPromptInFlight: false,
-				unfinishedActionCount: 1,
-				isSessionActive: true,
 				getSessionActionSnapshot: () => ({ queuedCount: 1, steering: [], followUps: [] }),
 				messages: [],
 				state: { pendingToolCalls: new Set(), streamingMessage: undefined },
 				hasRunningRlmChildren: () => false,
 			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentObserveListResult(current: ActiveSessionState): Promise<{ current: { status: string } }>;
-		};
+			runtime: { diagnostics: [], modelFallbackMessage: undefined },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		expect((await internals.createAgentObserveListResult(targetState)).current.status).toBe("busy");
@@ -2489,15 +2222,16 @@ describe("daemon mode helpers", () => {
 		expect((await internals.createAgentObserveListResult(targetState)).current.status).toBe("compacting");
 	});
 
-	it("canonicalizes symlinked family paths before comparison", () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-family-paths-"));
-		try {
+	it("canonicalizes symlinked family paths before comparison", async () => {
+		await withTempDir("optimus-family-paths-", async (tempDir) => {
 			const realDir = join(tempDir, "real");
 			const aliasDir = join(tempDir, "alias");
 			mkdirSync(realDir);
 			symlinkSync(realDir, aliasDir, "dir");
-			const daemon = new AgentDaemon("/tmp/optimus-family-paths.sock", {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: "/tmp/optimus-family-paths.sock",
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: vi.fn(),
 			});
 			const parent = makeState("parent");
@@ -2516,143 +2250,117 @@ describe("daemon mode helpers", () => {
 				},
 				session: { sessionId: "session-child", sessionFile: join(realDir, "child.jsonl") },
 			} as never;
-			const internals = daemon as unknown as {
-				assertAgentFamilyReachable(current: ActiveSessionState, target: ActiveSessionState): void;
-			};
+			const internals = daemonInternals(daemon);
 
 			expect(() => internals.assertAgentFamilyReachable(parent, child)).not.toThrow();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
-	it("resolves a reopened child's persisted header parent relative to its session file", () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-header-family-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+	it("resolves a reopened child's persisted header parent relative to its session file", async () => {
+		await withTempDir("optimus-header-family-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: vi.fn(),
 			});
 			const parent = makeState("parent");
 			const child = makeState("reopened-child");
 			const otherRoot = makeState("other-root");
-			parent.runtime = {
-				...parent.runtime,
-				metadata: { kind: "top-level", createdAt: 1 },
-				session: {
-					sessionId: "session-parent",
-					sessionFile: join(tempDir, "parent.jsonl"),
-					sessionManager: { getHeader: () => ({ parentSession: undefined }) },
-				},
-			} as never;
-			child.runtime = {
-				...child.runtime,
-				metadata: { kind: "top-level", createdAt: 1 },
-				session: {
-					sessionId: "session-child",
-					sessionFile: join(tempDir, "children", "child.jsonl"),
-					rlmDepth: 1,
-					sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) },
-				},
-			} as never;
-			otherRoot.runtime = {
-				...otherRoot.runtime,
-				metadata: { kind: "top-level", createdAt: 1 },
-				session: {
-					sessionId: "session-other",
-					sessionFile: join(tempDir, "other.jsonl"),
-					sessionManager: { getHeader: () => ({ parentSession: undefined }) },
-				},
-			} as never;
-			const internals = daemon as unknown as {
-				assertAgentFamilyReachable(current: ActiveSessionState, target: ActiveSessionState): void;
-			};
+			applySession(parent, {
+				kind: "top-level",
+				sessionId: "session-parent",
+				sessionFile: join(tempDir, "parent.jsonl"),
+				session: { sessionManager: { getHeader: () => ({ parentSession: undefined }) } },
+			});
+			applySession(child, {
+				kind: "top-level",
+				sessionId: "session-child",
+				sessionFile: join(tempDir, "children", "child.jsonl"),
+				depth: 1,
+				session: { sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) } },
+			});
+			applySession(otherRoot, {
+				kind: "top-level",
+				sessionId: "session-other",
+				sessionFile: join(tempDir, "other.jsonl"),
+				session: { sessionManager: { getHeader: () => ({ parentSession: undefined }) } },
+			});
+			const internals = daemonInternals(daemon);
 
 			expect(() => internals.assertAgentFamilyReachable(child, parent)).not.toThrow();
 			expect(() => internals.assertAgentFamilyReachable(child, otherRoot)).toThrow(AGENT_FAMILY_REACH_ERROR);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("uses the persisted header parent after a runtime session replacement", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-applied-family.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-applied-family.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const originalParent = makeState("original-parent");
 		const persistedParent = makeState("persisted-parent");
 		const child = makeState("child");
-		originalParent.runtime = {
-			...originalParent.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: { sessionId: "session-original", sessionFile: "/tmp/original-parent.jsonl" },
-		} as never;
-		persistedParent.runtime = {
-			...persistedParent.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: { sessionId: "session-persisted", sessionFile: "/tmp/persisted-parent.jsonl" },
-		} as never;
-		child.runtime = {
-			...child.runtime,
-			metadata: {
-				kind: "subagent",
-				createdAt: 1,
-				parentSessionId: "session-original",
-				parentSessionFile: "/tmp/original-parent.jsonl",
-			},
-			session: {
-				sessionId: "session-child",
-				sessionFile: "/tmp/child.jsonl",
-				rlmDepth: 1,
-				sessionManager: { getHeader: () => ({ parentSession: "/tmp/persisted-parent.jsonl" }) },
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			assertAgentFamilyReachable(current: ActiveSessionState, target: ActiveSessionState): void;
-		};
+		applySession(originalParent, {
+			kind: "top-level",
+			sessionId: "session-original",
+			sessionFile: "/tmp/original-parent.jsonl",
+		});
+		applySession(persistedParent, {
+			kind: "top-level",
+			sessionId: "session-persisted",
+			sessionFile: "/tmp/persisted-parent.jsonl",
+		});
+		applySession(child, {
+			kind: "subagent",
+			parentSessionId: "session-original",
+			sessionId: "session-child",
+			sessionFile: "/tmp/child.jsonl",
+			depth: 1,
+			metadata: { parentSessionFile: "/tmp/original-parent.jsonl" },
+			session: { sessionManager: { getHeader: () => ({ parentSession: "/tmp/persisted-parent.jsonl" }) } },
+		});
+		const internals = daemonInternals(daemon);
 
 		expect(() => internals.assertAgentFamilyReachable(child, persistedParent)).not.toThrow();
 		expect(() => internals.assertAgentFamilyReachable(child, originalParent)).toThrow(AGENT_FAMILY_REACH_ERROR);
 	});
 
 	it("labels a reopened header-linked child and parent consistently with family reach", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-header-relationship.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-header-relationship.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const parent = makeState("parent");
 		const child = makeState("reopened-child");
-		parent.runtime = {
-			...parent.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "session-parent",
-				sessionFile: "/tmp/parent.jsonl",
-				sessionManager: { getHeader: () => ({ parentSession: undefined }) },
-			},
-		} as never;
-		child.runtime = {
-			...child.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: {
-				sessionId: "session-child",
-				sessionFile: "/tmp/children/child.jsonl",
-				rlmDepth: 1,
-				sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) },
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			agentMessageRelationship(from: ActiveSessionState, target: ActiveSessionState): string | undefined;
-		};
+		applySession(parent, {
+			kind: "top-level",
+			sessionId: "session-parent",
+			sessionFile: "/tmp/parent.jsonl",
+			session: { sessionManager: { getHeader: () => ({ parentSession: undefined }) } },
+		});
+		applySession(child, {
+			kind: "top-level",
+			sessionId: "session-child",
+			sessionFile: "/tmp/children/child.jsonl",
+			depth: 1,
+			session: { sessionManager: { getHeader: () => ({ parentSession: "../parent.jsonl" }) } },
+		});
+		const internals = daemonInternals(daemon);
 
 		expect(internals.agentMessageRelationship(child, parent)).toBe("child");
 		expect(internals.agentMessageRelationship(parent, child)).toBe("parent");
 	});
 
 	it("limits agent send and observation to the nuclear family", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-family-reach.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-family-reach.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -2711,17 +2419,13 @@ describe("daemon mode helpers", () => {
 				},
 			} as never;
 		}
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageController(getCurrentState: () => ActiveSessionState): AgentSessionMessageController;
-			createAgentObserveController(getCurrentState: () => ActiveSessionState): AgentObserveController;
-		};
+		const internals = daemonInternals(daemon);
 		for (const state of states) internals.sessions.set(state.activeSessionId, state);
 		const child = states[1]!;
 		const messaging = internals.createAgentMessageController(() => child);
 		const observe = internals.createAgentObserveController(() => child);
 
-		expect((await observe.listAgents()).agents.map((agent) => agent.activeSessionId)).toEqual([
+		expect((await observe.listAgents()).agents.map((agent: any) => agent.activeSessionId)).toEqual([
 			"root",
 			"child",
 			"sibling",
@@ -2739,21 +2443,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("resolves a duplicate session name to the only family-reachable agent", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-family-name-resolution.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-family-name-resolution.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const observer = makeAgentFamilyState("observer", "observer");
 		const familyHelper = makeAgentFamilyState("family-helper", "helper", observer.state);
 		const otherRoot = makeAgentFamilyState("other-root", "other-root");
 		const unrelatedHelper = makeAgentFamilyState("unrelated-helper", "helper", otherRoot.state);
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageController(
-				getCurrentState: () => ActiveSessionState | undefined,
-			): AgentSessionMessageController;
-			createAgentObserveController(getCurrentState: () => ActiveSessionState | undefined): AgentObserveController;
-		};
+		const internals = daemonInternals(daemon);
 		for (const fixture of [observer, familyHelper, otherRoot, unrelatedHelper]) {
 			internals.sessions.set(fixture.state.activeSessionId, fixture.state);
 		}
@@ -2775,20 +2475,16 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("keeps a session ID ambiguous when a reachable agent uses it as its name", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-family-id-ambiguity.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-family-id-ambiguity.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const parent = makeAgentFamilyState("parent", "parent");
 		const observer = makeAgentFamilyState("observer", "observer", parent.state);
 		const sibling = makeAgentFamilyState("sibling", parent.state.runtime.session.sessionId, parent.state);
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageController(
-				getCurrentState: () => ActiveSessionState | undefined,
-			): AgentSessionMessageController;
-			createAgentObserveController(getCurrentState: () => ActiveSessionState | undefined): AgentObserveController;
-		};
+		const internals = daemonInternals(daemon);
 		for (const fixture of [parent, observer, sibling]) {
 			internals.sessions.set(fixture.state.activeSessionId, fixture.state);
 		}
@@ -2807,20 +2503,16 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("keeps a duplicate session name ambiguous when two family agents are reachable", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-family-name-ambiguity.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-family-name-ambiguity.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const parent = makeAgentFamilyState("parent", "helper");
 		const observer = makeAgentFamilyState("observer", "observer", parent.state);
 		const sibling = makeAgentFamilyState("sibling", "helper", parent.state);
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAgentMessageController(
-				getCurrentState: () => ActiveSessionState | undefined,
-			): AgentSessionMessageController;
-			createAgentObserveController(getCurrentState: () => ActiveSessionState | undefined): AgentObserveController;
-		};
+		const internals = daemonInternals(daemon);
 		for (const fixture of [parent, observer, sibling]) {
 			internals.sessions.set(fixture.state.activeSessionId, fixture.state);
 		}
@@ -2839,18 +2531,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("serializes concurrent agent messages to an idle target", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const promptResolves: Array<() => void> = [];
 		const prompt = vi.fn(
 			(_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) =>
@@ -2859,27 +2550,15 @@ describe("daemon mode helpers", () => {
 				}),
 		);
 		const followUp = vi.fn(async () => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt,
-				followUp,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { prompt, followUp },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2912,44 +2591,30 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages behind an idle target with a pending retry", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
 		const followUp = vi.fn(async () => true);
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				isRetrying: true,
-				unfinishedActionCount: 0,
-				prompt,
-				followUp,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			isRetrying: true,
+			unfinishedActionCount: 0,
+			session: { prompt, followUp, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -2969,43 +2634,29 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages behind existing pending work on an idle target", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
 		const followUp = vi.fn(async () => true);
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 1,
-				prompt,
-				followUp,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 1,
+			session: { prompt, followUp, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3025,42 +2676,29 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while the target is compacting", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				isCompacting: true,
-				unfinishedActionCount: 0,
-				prompt,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			isCompacting: true,
+			unfinishedActionCount: 0,
+			session: { prompt, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3079,42 +2717,29 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while target bash is running", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				isBashRunning: true,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			isBashRunning: true,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3133,18 +2758,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("acknowledges queued agent messages after queue insertion", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		let resolveQueuedDelivery: () => void = () => {};
 		const waitForAgentMessagePromptDelivery = vi.fn(
 			() =>
@@ -3153,27 +2777,15 @@ describe("daemon mode helpers", () => {
 				}),
 		);
 		const queueAgentMessagePrompt = vi.fn(async () => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: true,
-				unfinishedActionCount: 0,
-				queueAgentMessagePrompt,
-				waitForAgentMessagePromptDelivery,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: true,
+			unfinishedActionCount: 0,
+			session: { queueAgentMessagePrompt, waitForAgentMessagePromptDelivery },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3192,18 +2804,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("recomputes agent message streaming behavior after waiting for the target lock", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const promptResolves: Array<() => void> = [];
 		const prompt = vi.fn(
 			(_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) =>
@@ -3213,28 +2824,15 @@ describe("daemon mode helpers", () => {
 		);
 		const followUp = vi.fn(async () => true);
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt,
-				followUp,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { prompt, followUp, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3268,39 +2866,27 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when queued delivery is coalesced", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const queueAgentMessagePrompt = vi.fn(async () => false);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: true,
-				unfinishedActionCount: 1,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: true,
+			unfinishedActionCount: 1,
+			session: { queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3316,44 +2902,32 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when direct delivery preflight fails", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		const acceptAgentMessagePrompt = vi.fn(
 			(_message: string, options?: { preflightResult?: (didSucceed: boolean) => void }) => {
 				options?.preflightResult?.(false);
 				return Promise.resolve();
 			},
 		);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3368,8 +2942,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while daemon prompts prepare to stream", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3385,28 +2961,15 @@ describe("daemon mode helpers", () => {
 		});
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt,
-				acceptAgentMessagePrompt,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { prompt, acceptAgentMessagePrompt, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 		const promptClient = makeClient("client-1", targetState.activeSessionId);
 		(promptClient.socket as unknown as { write: ReturnType<typeof vi.fn> }).write = vi.fn();
@@ -3435,8 +2998,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("waits for an in-flight agent-message accept before starting daemon prompts", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3454,27 +3019,15 @@ describe("daemon mode helpers", () => {
 		const prompt = vi.fn(async (_message: string, options?: { preflightResult?: (didSucceed: boolean) => void }) => {
 			options?.preflightResult?.(true);
 		});
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt,
-				acceptAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { prompt, acceptAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const send = internals.sendAgentSessionMessage({
@@ -3508,8 +3061,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("releases cron preparing state after prompt admission", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3525,30 +3080,16 @@ describe("daemon mode helpers", () => {
 		const promptUntilAccepted = vi.fn(async () => {});
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				isBashRunning: false,
-				unfinishedActionCount: 0,
-				prompt,
-				promptUntilAccepted,
-				acceptAgentMessagePrompt,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			runCronJob(job: AgentCronJob): Promise<"skipped" | undefined>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			isBashRunning: false,
+			unfinishedActionCount: 0,
+			session: { prompt, promptUntilAccepted, acceptAgentMessagePrompt, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const cronRun = internals.runCronJob(
@@ -3572,8 +3113,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("keeps the preparing state until every concurrent prompt settles", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3588,28 +3131,15 @@ describe("daemon mode helpers", () => {
 		);
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt,
-				acceptAgentMessagePrompt,
-				queueAgentMessagePrompt,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { prompt, acceptAgentMessagePrompt, queueAgentMessagePrompt },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 		const promptClient = makeClient("client-1", targetState.activeSessionId);
 		(promptClient.socket as unknown as { write: ReturnType<typeof vi.fn> }).write = vi.fn();
@@ -3648,18 +3178,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("re-checks agent message queue capacity after waiting for the target lock", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const fromState = makeState("source");
 		const targetState = makeState("target");
-		fromState.runtime = {
-			...fromState.runtime,
-			session: { sessionId: "session-source", sessionName: "Source" },
-		} as never;
+		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
 		let resolveFirstPrompt: () => void = () => {};
 		const acceptAgentMessagePrompt = vi.fn(
 			() =>
@@ -3668,27 +3197,15 @@ describe("daemon mode helpers", () => {
 				}),
 		);
 		const followUp = vi.fn(async () => true);
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-				followUp,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt, followUp },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(fromState.activeSessionId, fromState);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
@@ -3726,28 +3243,24 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rate limits CLI agent messages by stable daemon identity", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const targetState = makeState("target");
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt: vi.fn(async () => {}),
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			prompt: vi.fn(async () => {}),
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		for (let i = 0; i < 3; i++) {
@@ -3771,8 +3284,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("holds the target lock while clearing queued agent messages", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3788,27 +3303,15 @@ describe("daemon mode helpers", () => {
 			},
 		);
 		const clearQueuedUserMessagesMatching = vi.fn(() => ({ steering: [], followUp: [] }));
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-				clearQueuedUserMessagesMatching,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt, clearQueuedUserMessagesMatching },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const send = internals.sendAgentSessionMessage({
@@ -3834,8 +3337,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when pause wins the target lock", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3849,27 +3354,15 @@ describe("daemon mode helpers", () => {
 				}),
 		);
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-				clearQueuedUserMessagesMatching,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt, clearQueuedUserMessagesMatching },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const pause = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
@@ -3894,8 +3387,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when the target session changes before delivery", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3909,27 +3404,15 @@ describe("daemon mode helpers", () => {
 				}),
 		);
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				acceptAgentMessagePrompt,
-				clearQueuedUserMessagesMatching,
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			session: { acceptAgentMessagePrompt, clearQueuedUserMessagesMatching },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const clear = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
@@ -3955,8 +3438,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when the target session closes before delivery", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -3972,16 +3457,15 @@ describe("daemon mode helpers", () => {
 		);
 		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const dispose = vi.fn(async () => {});
-		targetState.runtime = {
-			...targetState.runtime,
-			dispose,
+		applySession(targetState, {
 			cwd: "/tmp",
-			metadata: { kind: "subagent", createdAt: 1 },
+			kind: "subagent",
+			metadata: { createdAt: 1 },
+			sessionId: "session-target",
+			sessionName: "Target",
+			isStreaming: false,
+			unfinishedActionCount: 0,
 			session: {
-				sessionId: "session-target",
-				sessionName: "Target",
-				isStreaming: false,
-				unfinishedActionCount: 0,
 				messages: [],
 				acceptAgentMessagePrompt,
 				clearQueuedUserMessagesMatching,
@@ -3989,16 +3473,9 @@ describe("daemon mode helpers", () => {
 				dispose: vi.fn(),
 				sessionManager: { appendSessionState: vi.fn(), hasUserContent: () => true },
 			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			runtime: { dispose },
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const clear = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
@@ -4031,33 +3508,24 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages to the sending session", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const state = makeState("self");
-		state.runtime = {
-			...state.runtime,
+		applySession(state, {
 			cwd: "/tmp",
-			session: {
-				sessionId: "session-self",
-				sessionName: "Self",
-				isStreaming: false,
-				unfinishedActionCount: 0,
-				prompt: vi.fn(async () => {}),
-			},
-		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			sendAgentSessionMessage(options: {
-				targetSelector: string;
-				message: string;
-				fromState?: ActiveSessionState;
-				origin: "agent" | "cli";
-			}): Promise<unknown>;
-		};
+			sessionId: "session-self",
+			sessionName: "Self",
+			isStreaming: false,
+			unfinishedActionCount: 0,
+			prompt: vi.fn(async () => {}),
+		});
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await expect(
@@ -4103,8 +3571,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("delivers session closure while a client is snapshotting and backpressured", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -4119,12 +3589,7 @@ describe("daemon mode helpers", () => {
 		client.backpressured = true;
 		client.catchupActiveSessionIds = new Set([state.activeSessionId]);
 		state.clients.add(client);
-		const internals = daemon as unknown as {
-			broadcastToSession(
-				state: ActiveSessionState,
-				message: { type: "session_closed"; activeSessionId: string; reason: "killed" },
-			): void;
-		};
+		const internals = daemonInternals(daemon);
 
 		internals.broadcastToSession(state, {
 			type: "session_closed",
@@ -4138,8 +3603,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("catches up on drain only after events are skipped behind a backpressured write", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -4152,22 +3619,7 @@ describe("daemon mode helpers", () => {
 			return writes.length === 1;
 		});
 		const socket = Object.assign(new EventEmitter(), { destroyed: false, write }) as unknown as Socket;
-		const internals = daemon as unknown as {
-			clients: Set<DaemonSocketClient>;
-			sessions: Map<string, ActiveSessionState>;
-			handleConnection(socket: Socket): void;
-			createAttachResult(client: DaemonSocketClient, state: ActiveSessionState): DaemonAttachResult;
-			broadcastToSession(
-				state: ActiveSessionState,
-				message: {
-					type: "extension_error";
-					activeSessionId: string;
-					extensionPath: string;
-					event: string;
-					error: string;
-				},
-			): void;
-		};
+		const internals = daemonInternals(daemon);
 		internals.handleConnection(socket);
 		const client = [...internals.clients][0]!;
 		client.attachedActiveSessionIds.add(state.activeSessionId);
@@ -4221,8 +3673,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("automatically retries every pending catch-up after snapshot creation rejects", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -4251,16 +3705,7 @@ describe("daemon mode helpers", () => {
 				lastEventSequence: state.lastEventSequence,
 			} as unknown as DaemonAttachResult;
 		});
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAttachResult: typeof createAttachResult;
-			queueClientCatchup(
-				client: DaemonSocketClient,
-				activeSessionId: string,
-				purpose?: "replacement" | "resync",
-			): void;
-			catchUpBackpressuredClient(client: DaemonSocketClient): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(firstState.activeSessionId, firstState);
 		internals.sessions.set(secondState.activeSessionId, secondState);
 		internals.createAttachResult = createAttachResult;
@@ -4289,8 +3734,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears a scheduled catch-up retry when the client disconnects", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -4307,14 +3754,7 @@ describe("daemon mode helpers", () => {
 		const createAttachResult = vi.fn(async () => {
 			throw new Error("snapshot creation failed");
 		});
-		const internals = daemon as unknown as {
-			clients: Set<DaemonSocketClient>;
-			sessions: Map<string, ActiveSessionState>;
-			handleConnection(socket: Socket): void;
-			createAttachResult: typeof createAttachResult;
-			queueClientCatchup(client: DaemonSocketClient, activeSessionId: string): void;
-			catchUpBackpressuredClient(client: DaemonSocketClient): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.handleConnection(socket);
 		const client = [...internals.clients][0]!;
 		client.attachedActiveSessionIds.add(state.activeSessionId);
@@ -4334,8 +3774,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("does not attach a non-chunked client until its snapshot is ready", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const state = makeState("active");
@@ -4350,11 +3792,7 @@ describe("daemon mode helpers", () => {
 			snapshot: { summary: {}, state: {}, messages: [] },
 			lastEventSequence: 0,
 		} as unknown as DaemonAttachResult;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAttachResult: ReturnType<typeof vi.fn>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.createAttachResult = vi.fn(async () => {
 			await snapshotGate;
@@ -4372,8 +3810,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects an attach when its session closes during snapshot creation", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const state = makeState("active");
@@ -4383,11 +3823,7 @@ describe("daemon mode helpers", () => {
 		const snapshotGate = new Promise<void>((resolve) => {
 			releaseSnapshot = resolve;
 		});
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAttachResult: ReturnType<typeof vi.fn>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.createAttachResult = vi.fn(async () => {
 			await snapshotGate;
@@ -4406,8 +3842,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("drops a backpressure catch-up when the client detaches during snapshot creation", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const state = makeState("active");
@@ -4425,11 +3863,7 @@ describe("daemon mode helpers", () => {
 			snapshot: { summary: {}, state: {}, messages: [], lastEventSequence: 0 },
 			lastEventSequence: 0,
 		} as unknown as DaemonAttachResult;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAttachResult: ReturnType<typeof vi.fn>;
-			drainBackpressuredClientCatchups(client: DaemonSocketClient): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.createAttachResult = vi.fn(async () => {
 			await snapshotGate;
@@ -4446,10 +3880,11 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("marks a chunked attach as snapshotting before deferred streaming", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-snapshot-order-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-snapshot-order-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -4464,12 +3899,7 @@ describe("daemon mode helpers", () => {
 				lastEventSequence: 0,
 			} as unknown as DaemonAttachResult;
 			const streamWorkerSnapshot = vi.fn(async () => undefined);
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createAttachResult: () => DaemonAttachResult;
-				streamWorkerSnapshot: typeof streamWorkerSnapshot;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			internals.createAttachResult = () => result;
 			internals.streamWorkerSnapshot = streamWorkerSnapshot;
@@ -4484,9 +3914,7 @@ describe("daemon mode helpers", () => {
 			expect(client.snapshotStreaming).toBe(true);
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			expect(streamWorkerSnapshot).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps overlapping snapshots active until every stream finishes", () => {
@@ -4506,12 +3934,13 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("falls back to a full replacement when snapshot cache creation fails", async () => {
-		const root = mkdtempSync(join(tmpdir(), "optimus-daemon-replacement-fallback-"));
-		try {
+		await withTempDir("optimus-daemon-replacement-fallback-", async (root) => {
 			const invalidAgentDir = join(root, "not-a-directory");
 			writeFileSync(invalidAgentDir, "file");
-			const daemon = new AgentDaemon(join(root, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: invalidAgentDir, cwd: root },
+			const daemon = makeDaemon({
+				socketPath: join(root, "daemon.sock"),
+				agentDir: invalidAgentDir,
+				cwd: root,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -4533,11 +3962,7 @@ describe("daemon mode helpers", () => {
 				},
 				lastEventSequence: 0,
 			} as unknown as DaemonAttachResult;
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createAttachResult: () => Promise<DaemonAttachResult>;
-				broadcastToSession(state: ActiveSessionState, message: unknown): void;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			internals.createAttachResult = async () => result;
 
@@ -4553,16 +3978,16 @@ describe("daemon mode helpers", () => {
 			expect(frames).toContain('"type":"session_replaced"');
 			expect(frames).toContain('"snapshotFollows":true');
 			expect(frames).toContain('"type":"session_snapshot_begin"');
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it.each(["resolved", "rejected"] as const)(
 		"does not send a replacement snapshot after the session closes while preparation is %s",
 		async (outcome) => {
-			const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-				defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+			const daemon = makeDaemon({
+				socketPath: "/tmp/optimus-test.sock",
+				agentDir: "/tmp/optimus-test-agent",
+				cwd: "/tmp",
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -4571,17 +3996,13 @@ describe("daemon mode helpers", () => {
 			state.eventGeneration = "generation-1";
 			state.extensionUiRequests = new Map();
 			state.unsubscribe = vi.fn();
-			state.runtime = {
-				...state.runtime,
-				dispose: vi.fn(async () => {}),
-				session: {
-					sessionId: "session-active",
-					sessionFile: undefined,
-					isBashRunning: false,
-					abort: vi.fn(async () => {}),
-					sessionManager: { appendSessionState: vi.fn() },
-				},
-			} as unknown as ActiveSessionState["runtime"];
+			applySession(state, {
+				sessionId: "session-active",
+				sessionFile: undefined,
+				isBashRunning: false,
+				session: { abort: vi.fn(async () => {}), sessionManager: { appendSessionState: vi.fn() } },
+				runtime: { dispose: vi.fn(async () => {}) },
+			});
 			const write = vi.fn((_data: unknown) => true);
 			const client = makeClient("client-1", state.activeSessionId);
 			client.socket = { destroyed: false, write } as unknown as Socket;
@@ -4595,18 +4016,7 @@ describe("daemon mode helpers", () => {
 				rejectAttach = reject;
 			});
 			const streamWorkerSnapshot = vi.fn(async () => {});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createAttachResult: ReturnType<typeof vi.fn>;
-				streamWorkerSnapshot: typeof streamWorkerSnapshot;
-				closeSession(state: ActiveSessionState, reason: "killed"): Promise<void>;
-				closeChildSessions: ReturnType<typeof vi.fn>;
-				isEmptyDraftContent: ReturnType<typeof vi.fn>;
-				abortBashForClose: ReturnType<typeof vi.fn>;
-				recordWorkerRecoveryState: ReturnType<typeof vi.fn>;
-				cancelScheduledJobsForSession: ReturnType<typeof vi.fn>;
-				broadcastToSession(state: ActiveSessionState, message: unknown): void;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			internals.createAttachResult = vi.fn(() => pendingAttach);
 			internals.streamWorkerSnapshot = streamWorkerSnapshot;
@@ -4648,8 +4058,10 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("drains queued catch-up after replacement snapshot preparation outlives its session", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -4668,12 +4080,7 @@ describe("daemon mode helpers", () => {
 		const catchUpBackpressuredClient = vi.fn(async (target: DaemonSocketClient) => {
 			target.catchupActiveSessionIds?.clear();
 		});
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			createAttachResult: ReturnType<typeof vi.fn>;
-			catchUpBackpressuredClient: typeof catchUpBackpressuredClient;
-			broadcastToSession(state: ActiveSessionState, message: DaemonOutbound): void;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.sessions.set(otherState.activeSessionId, otherState);
 		internals.createAttachResult = vi.fn(() => pendingAttach);
@@ -4702,8 +4109,7 @@ describe("daemon mode helpers", () => {
 		["explicit session file", (sessionPath: string) => ({ type: "create" as const, sessionPath })],
 		["continue recent", (_sessionPath: string) => ({ type: "create" as const, continueRecent: true })],
 	])("deduplicates concurrent creates after resolving the %s", async (_label, commandFor) => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-open-race-"));
-		try {
+		await withTempDir("optimus-daemon-open-race-", async (tempDir) => {
 			const recent = SessionManager.create(tempDir, tempDir);
 			const sessionPath = recent.materializeSessionFile();
 			recent.appendSessionInfo("Recent");
@@ -4724,9 +4130,12 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
 			const create = (
 				daemon as unknown as {
@@ -4746,14 +4155,11 @@ describe("daemon mode helpers", () => {
 			expect(secondState).toBe(firstState);
 			expect(firstState.runtime.session.sessionFile).toBe(sessionPath);
 			expect(createRuntime).toHaveBeenCalledTimes(1);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("adopts client env on session reuse only when the session has none", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-env-"));
-		try {
+		await withTempDir("optimus-daemon-env-", async (tempDir) => {
 			const sessionPath = join(tempDir, "session.jsonl");
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				return {
@@ -4767,9 +4173,12 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
 			const create = (
 				daemon as unknown as {
@@ -4793,14 +4202,11 @@ describe("daemon mode helpers", () => {
 			// that extensions already captured.
 			await create({ type: "create", sessionPath, env: { HERDR_PANE_ID: "w2:p9" } });
 			expect(state.clientEnv).toEqual({ HERDR_PANE_ID: "w1:p1" });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("uses the binding session as its own list and roster context", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-controller-race-"));
-		try {
+		await withTempDir("optimus-daemon-controller-race-", async (tempDir) => {
 			let listedAgentsDuringBind = 0;
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				const session = makeRuntimeSession(options.sessionManager);
@@ -4824,9 +4230,12 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
 			const create = (
 				daemon as unknown as {
@@ -4838,14 +4247,11 @@ describe("daemon mode helpers", () => {
 			await create({ type: "create", sessionPath: join(tempDir, "session-2.jsonl") });
 
 			expect(listedAgentsDuringBind).toBe(2);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("restores a completed subagent through its parent when an RLM heartbeat becomes due", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-restore-subagent-heartbeat-"));
-		try {
+		await withTempDir("optimus-daemon-restore-subagent-heartbeat-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const parentManager = SessionManager.create(tempDir, sessionDir);
 			parentManager.newSession();
@@ -4894,14 +4300,14 @@ describe("daemon mode helpers", () => {
 				>["services"],
 				diagnostics: [],
 			}));
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				getOrCreateCronJobSession(job: AgentCronJob, requirePersistedJob: boolean): Promise<ActiveSessionState>;
-			};
+			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createRlmHeartbeat({
 				activeSessionId: "stale-child-active-id",
 				sessionId: childManager.getSessionId(),
@@ -4920,19 +4326,16 @@ describe("daemon mode helpers", () => {
 				rlmChildId: childId,
 			});
 			expect(createRuntime).toHaveBeenCalledTimes(2);
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				activeSessionId: childState.activeSessionId,
 				sessionId: childManager.getSessionId(),
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("replaces a resident top-level RLM child when restoring its heartbeat", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-replace-child-heartbeat-"));
-		try {
+		await withTempDir("optimus-daemon-replace-child-heartbeat-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const parentManager = SessionManager.open(fixture.parentSessionFile);
 			parentManager.appendSessionState({ status: "active" });
@@ -4974,14 +4377,11 @@ describe("daemon mode helpers", () => {
 				status: "active",
 				activeSessionId: childState?.activeSessionId,
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("cancels an RLM heartbeat for a resident top-level session that is not a registered child", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-nonchild-heartbeat-"));
-		try {
+		await withTempDir("optimus-daemon-nonchild-heartbeat-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const parentManager = SessionManager.create(tempDir, sessionDir);
 			parentManager.newSession();
@@ -5008,18 +4408,14 @@ describe("daemon mode helpers", () => {
 				>["services"],
 				diagnostics: [],
 			}));
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				getOrCreateCronJobSession(
-					job: AgentCronJob,
-					requirePersistedJob: boolean,
-				): Promise<ActiveSessionState | undefined>;
-			};
+			const internals = daemonInternals(daemon);
 			const topLevelState = await internals.createRuntime({ type: "create", sessionPath: sessionFile });
 			const abort = topLevelState.runtime.session.abort as ReturnType<typeof vi.fn>;
 			const heartbeat = internals.cronStore.createRlmHeartbeat({
@@ -5035,14 +4431,12 @@ describe("daemon mode helpers", () => {
 
 			await expect(internals.getOrCreateCronJobSession(heartbeat, true)).resolves.toBeUndefined();
 			expect(abort).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "cancelled",
 			});
 			expect(createRuntime).toHaveBeenCalledTimes(2);
 			expect(createRuntime.mock.calls[1]?.[0].sessionManager.getSessionFile()).toBe(parentSessionFile);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("waits for a concurrently hydrating heartbeat child to finish binding", async () => {
@@ -5122,8 +4516,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("cancels a detached subagent heartbeat when its parent is archived", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-archived-subagent-heartbeat-"));
-		try {
+		await withTempDir("optimus-daemon-archived-subagent-heartbeat-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const parentManager = SessionManager.create(tempDir, sessionDir);
 			parentManager.newSession();
@@ -5143,17 +4536,14 @@ describe("daemon mode helpers", () => {
 			const createRuntime = vi.fn(async () => {
 				throw new Error("archived parent must not be restored");
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				getOrCreateCronJobSession(
-					job: AgentCronJob,
-					requirePersistedJob: boolean,
-				): Promise<ActiveSessionState | undefined>;
-			};
+			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createRlmHeartbeat({
 				activeSessionId: "stale-child-active-id",
 				sessionId: childManager.getSessionId(),
@@ -5167,17 +4557,14 @@ describe("daemon mode helpers", () => {
 
 			await expect(internals.getOrCreateCronJobSession(heartbeat, true)).resolves.toBeUndefined();
 			expect(createRuntime).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "cancelled",
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("reports failed passive children as errors without creating child runtimes", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-list-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-list-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			// Simulate children written before rlmDepth was added to the extensible header.
 			// Their persisted registry rows remain the compatibility source after restart.
@@ -5322,14 +4709,11 @@ describe("daemon mode helpers", () => {
 					}),
 				]),
 			);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("lists passive descendants under a nonresident saved root", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-nonresident-root-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-nonresident-root-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const parentManager = SessionManager.open(fixture.parentSessionFile);
 			parentManager.appendMessage({ role: "user", content: "parent task", timestamp: 0 });
@@ -5366,14 +4750,11 @@ describe("daemon mode helpers", () => {
 			});
 			expect(grandchild?.parentActiveSessionId).toBeUndefined();
 			expect(fixture.createRuntime).not.toHaveBeenCalled();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("prefers registry depth when listing a passive legacy child", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-passive-legacy-depth-"));
-		try {
+		await withTempDir("optimus-daemon-passive-legacy-depth-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const parentManager = SessionManager.open(fixture.parentSessionFile);
 			parentManager.appendMessage({ role: "user", content: "parent task", timestamp: 0 });
@@ -5400,14 +4781,11 @@ describe("daemon mode helpers", () => {
 
 			const sessions = await internals.buildSessionListWithPassiveRlmSubagents([], [parentInfo], []);
 			expect(sessions.find((session) => session.sessionFile === fixture.childSessionFile)?.rlmDepth).toBe(5);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("prefers the per-child display file over the legacy registry for passive metadata", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-display-over-registry-"));
-		try {
+		await withTempDir("optimus-daemon-display-over-registry-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			// A post-consolidation write: the display file is fresher than the
 			// stale pre-ledger registry entry left behind by an old daemon.
@@ -5439,14 +4817,11 @@ describe("daemon mode helpers", () => {
 				({ entry }) => entry.childId === fixture.childId,
 			);
 			expect(passive?.entry).toMatchObject({ prompt: "fresher prompt", rlmMaxDepth: 6 });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("falls back to the legacy registry for a pre-ledger child without a display file", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-legacy-metadata-fallback-"));
-		try {
+		await withTempDir("optimus-daemon-legacy-metadata-fallback-", async (tempDir) => {
 			// The fixture writes registries exactly as the pre-consolidation daemon
 			// did and no display files: the pure migration state.
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
@@ -5483,9 +4858,7 @@ describe("daemon mode helpers", () => {
 				rlmMaxDepth: 4,
 				status: "completed",
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("ignores a crashed registry tail and protects a nested cycle back to the root", async () => {
@@ -5540,8 +4913,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("recomputes snapshot children when the runtime session changes during the passive walk", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-snapshot-replacement-"));
-		try {
+		await withTempDir("optimus-daemon-snapshot-replacement-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -5570,14 +4942,11 @@ describe("daemon mode helpers", () => {
 			expect(internals.buildRlmChildSnapshotsWithPassiveRlmSubagents).toHaveBeenCalledTimes(2);
 			expect(snapshot.children).toEqual([expect.objectContaining({ id: "new-child" })]);
 			expect(snapshot.messages).toBe(replacementSession.messages);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("bounds snapshot stabilization when every child build replaces the runtime session", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-snapshot-stabilization-bound-"));
-		try {
+		await withTempDir("optimus-daemon-snapshot-stabilization-bound-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -5607,14 +4976,11 @@ describe("daemon mode helpers", () => {
 				summary: { sessionId: "session-4" },
 			});
 			expect(internals.buildRlmChildSnapshotsWithPassiveRlmSubagents).toHaveBeenCalledTimes(4);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("validates a requested passive child name before hydration", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-passive-name-preflight-"));
-		try {
+		await withTempDir("optimus-daemon-passive-name-preflight-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -5649,14 +5015,11 @@ describe("daemon mode helpers", () => {
 			expect(internals.hydratePassiveRlmSubagent).not.toHaveBeenCalled();
 			expect(fixture.createRuntime).toHaveBeenCalledOnce();
 			expect([...internals.sessions.values()]).toEqual([parentState]);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("hydrates a passive child on agent message and delivers to it", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-message-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-message-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -5686,14 +5049,11 @@ describe("daemon mode helpers", () => {
 			expect(
 				[...internals.sessions.values()].filter((state) => state.runtime.metadata.kind === "subagent"),
 			).toHaveLength(1);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("rehydrates a legacy child with depth inferred from its session file path", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-legacy-rlm-depth-"));
-		try {
+		await withTempDir("optimus-daemon-legacy-rlm-depth-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const lines = readFileSync(fixture.childSessionFile, "utf8").split("\n");
 			const header = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
@@ -5713,14 +5073,11 @@ describe("daemon mode helpers", () => {
 				.sendAgentMessage({ target: "renamed-worker", message: "report progress" });
 
 			expect(fixture.createRuntime.mock.calls[1]?.[0].sessionOptions?.rlmDepth).toBe(1);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("does not match a renamed passive child by its stale registry name", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-renamed-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-renamed-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const siblingId = "child-2";
 			const siblingSessionDir = join(fixture.parentArtifactDir, siblingId);
@@ -5767,14 +5124,11 @@ describe("daemon mode helpers", () => {
 			});
 			expect(fixture.createRuntime).toHaveBeenCalledTimes(2);
 			expect(fixture.createRuntime.mock.calls[1]?.[0].sessionManager.getSessionFile()).toBe(siblingSessionFile);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("rehydrates completed children without rewriting their persisted completion", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-idempotent-rlm-hydration-"));
-		try {
+		await withTempDir("optimus-daemon-idempotent-rlm-hydration-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -5797,14 +5151,11 @@ describe("daemon mode helpers", () => {
 			expect(internals.recordRlmSubagentState).not.toHaveBeenCalled();
 			expect(readFileSync(registryPath, "utf8")).toBe(before);
 			expect(existsSync(join(fixture.childSessionDir, "rlm-subagent.json"))).toBe(false);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("rehydrates a legacy passive subagent at depth one", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-legacy-rlm-depth-"));
-		try {
+		await withTempDir("optimus-daemon-legacy-rlm-depth-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const childLines = readFileSync(fixture.childSessionFile, "utf8").split("\n");
 			const childHeader = JSON.parse(childLines[0] ?? "{}") as Record<string, unknown>;
@@ -5833,14 +5184,11 @@ describe("daemon mode helpers", () => {
 				.sendAgentMessage({ target: "renamed-worker", message: "report progress" });
 
 			expect(fixture.createRuntime.mock.calls[1]?.[0].sessionOptions?.rlmDepth).toBe(1);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("prefers the persisted header depth when a legacy registry entry lacks one", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-legacy-header-depth-"));
-		try {
+		await withTempDir("optimus-daemon-legacy-header-depth-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const childLines = readFileSync(fixture.childSessionFile, "utf8").split("\n");
 			const childHeader = JSON.parse(childLines[0] ?? "{}") as Record<string, unknown>;
@@ -5871,14 +5219,11 @@ describe("daemon mode helpers", () => {
 			// The nested header depth must win over the legacy depth-1 default so the
 			// woken child does not come up shallower than persisted.
 			expect(fixture.createRuntime.mock.calls[1]?.[0].sessionOptions?.rlmDepth).toBe(2);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("rejects direct messages to nested passive grandchildren without hydrating them", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-nested-message-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-nested-message-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -5908,14 +5253,11 @@ describe("daemon mode helpers", () => {
 
 			expect([...internals.sessions.values()]).toEqual([parentState]);
 			expect(fixture.createRuntime).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("hydrates a passive child when agent_observe reads it", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-observe-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-observe-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -5935,9 +5277,7 @@ describe("daemon mode helpers", () => {
 				messages: [],
 			});
 			expect(fixture.createRuntime).toHaveBeenCalledTimes(2);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("waits for an explicit open reservation before hydrating a passive child", async () => {
@@ -6047,8 +5387,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("does not adopt a failed passive opener env on the root parent", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-failed-passive-env-"));
-		try {
+		await withTempDir("optimus-daemon-failed-passive-env-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -6086,9 +5425,7 @@ describe("daemon mode helpers", () => {
 			expect(childEnvAtRuntimeCreation).toEqual(["failed-pane", "successful-pane"]);
 			expect(parentState.clientEnv).toEqual({ HERDR_PANE_ID: "successful-pane" });
 			expect(childState.clientEnv).toEqual({ HERDR_PANE_ID: "successful-pane" });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("joins binding when advertised session ID resolution races passive hydration", async () => {
@@ -6151,8 +5488,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects an ambiguous live selector before consulting passive children", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-ambiguous-passive-selector-"));
-		try {
+		await withTempDir("optimus-daemon-ambiguous-passive-selector-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -6173,9 +5509,7 @@ describe("daemon mode helpers", () => {
 				'Ambiguous active session "renamed-worker"',
 			);
 			expect(fixture.createRuntime).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("leaves passive hydration resident when its runtime-open guard is cancelled", async () => {
@@ -6343,8 +5677,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("repairs a wrong-kind pending open while preserving the passive row id", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-wrong-kind-open-"));
-		try {
+		await withTempDir("optimus-daemon-wrong-kind-open-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -6370,14 +5703,11 @@ describe("daemon mode helpers", () => {
 			expect(childState.activeSessionId).toBe(passive.info.id);
 			expect(childState.runtime.metadata).toMatchObject({ kind: "subagent", rlmChildId: fixture.childId });
 			expect(internals.sessions.has(wrongState.activeSessionId)).toBe(false);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("rejects passive hydration while an update restart is fenced", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-update-hydration-"));
-		try {
+		await withTempDir("optimus-daemon-update-hydration-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				updateRestart: unknown;
@@ -6391,9 +5721,7 @@ describe("daemon mode helpers", () => {
 				"Daemon is preparing an update restart",
 			);
 			expect(fixture.createRuntime).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("coalesces a gated hydration with concurrent messaging and an explicit open", async () => {
@@ -6503,8 +5831,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("returns a resident target when a concurrent opener wins a parent-change restart", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-parent-change-open-race-"));
-		try {
+		await withTempDir("optimus-daemon-parent-change-open-race-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -6554,14 +5881,11 @@ describe("daemon mode helpers", () => {
 			});
 
 			await expect(internals.hydratePassiveRlmSubagent(passive)).resolves.toBe(residentGrandchild);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("re-walks the passive chain when an intermediate parent passivates between entries", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-chain-parent-passivation-race-"));
-		try {
+		await withTempDir("optimus-daemon-chain-parent-passivation-race-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -6629,9 +5953,7 @@ describe("daemon mode helpers", () => {
 				expect.anything(),
 				undefined,
 			);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("retries hydration when the target child starts passivating after the initial wait", async () => {
@@ -6799,8 +6121,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("does not passivate a child that starts streaming during the fence snapshot", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-passivation-stream-race-"));
-		try {
+		await withTempDir("optimus-daemon-passivation-stream-race-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -6828,9 +6149,7 @@ describe("daemon mode helpers", () => {
 			expect(passiveListCalls).toBe(2);
 			expect(childSession.abort).not.toHaveBeenCalled();
 			expect(parentState.runtime.session.releaseRlmChildSession).not.toHaveBeenCalled();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("re-adopts a resident child when its passivation close fails", async () => {
@@ -6927,8 +6246,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("limits each worker sweep and leaves non-leaf children resident", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-passivation-cap.sock", {
-			defaultSessionConfig: { agentDir: "/tmp", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-passivation-cap.sock",
+			agentDir: "/tmp",
+			cwd: "/tmp",
 			createRuntime: vi.fn(),
 		});
 		const root = makeState("root");
@@ -6938,13 +6259,7 @@ describe("daemon mode helpers", () => {
 		const nonLeaf = makeState("non-leaf", "root");
 		const nested = makeState("nested", "non-leaf");
 		const states = [root, oldestLeaf, nextLeaf, queuedLeaf, nonLeaf, nested];
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			listPassiveRlmSubagents: ReturnType<typeof vi.fn>;
-			sessionPassivationSnapshot: ReturnType<typeof vi.fn>;
-			passivateSession: ReturnType<typeof vi.fn>;
-			passivateIdleChildren(threshold: number, now: number, limit: number): Promise<number>;
-		};
+		const internals = daemonInternals(daemon);
 		for (const state of states) internals.sessions.set(state.activeSessionId, state);
 		const order = new Map([
 			[oldestLeaf, 1],
@@ -6970,14 +6285,13 @@ describe("daemon mode helpers", () => {
 		await expect(internals.passivateIdleChildren(90, 200 * 60_000, 2)).resolves.toBe(2);
 		expect(internals.sessionPassivationSnapshot).toHaveBeenCalledTimes(states.length);
 		expect(internals.passivateSession).toHaveBeenCalledTimes(2);
-		expect(internals.passivateSession.mock.calls.map((call) => call[0])).toEqual([oldestLeaf, nextLeaf]);
+		expect(internals.passivateSession.mock.calls.map((call: any) => call[0])).toEqual([oldestLeaf, nextLeaf]);
 		expect(internals.passivateSession).not.toHaveBeenCalledWith(nonLeaf, expect.anything(), expect.anything());
 		expect(internals.passivateSession).not.toHaveBeenCalledWith(queuedLeaf, expect.anything(), expect.anything());
 	});
 
 	it("passivates an idle leaf and makes list, attach, and message use the normal passive wake path", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-passivate-child-"));
-		try {
+		await withTempDir("optimus-daemon-passivate-child-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -7033,9 +6347,7 @@ describe("daemon mode helpers", () => {
 				expect.stringContaining("wake after passivation"),
 				expect.any(Object),
 			);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps an idle child resident while an agent message waits for admission", async () => {
@@ -7144,8 +6456,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("hydrates a passive child when it is opened from its saved-session row", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-open-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-open-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -7163,14 +6474,11 @@ describe("daemon mode helpers", () => {
 			expect(childState.runtime.session.sessionName).toBe("explicit-new-name");
 			expect(childState.clientEnv).toEqual({ HERDR_PANE_ID: "pane-42" });
 			expect(fixture.createRuntime).toHaveBeenCalledTimes(2);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps a passive child row id when attach hydrates it", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-attach-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-attach-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -7200,14 +6508,11 @@ describe("daemon mode helpers", () => {
 			expect(attachResponse.data.activeSessionId).toBe(passiveRow.id);
 			expect(internals.sessions.get(passiveRow.id)?.activeSessionId).toBe(passiveRow.id);
 			expect(client.attachedActiveSessionIds).toContain(passiveRow.id);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps cancel pure when a retained or unknown child has no active run", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-rlm-cancel-"));
-		try {
+		await withTempDir("optimus-daemon-rlm-cancel-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -7230,14 +6535,11 @@ describe("daemon mode helpers", () => {
 				expect(result.data.cancelled).toBe(false);
 			}
 			expect(parentSession.deleteRlmSubagent).not.toHaveBeenCalled();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("refuses to delete a busy hydrated child and deletes it after it becomes idle", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-hydrated-rlm-delete-"));
-		try {
+		await withTempDir("optimus-daemon-hydrated-rlm-delete-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -7283,14 +6585,11 @@ describe("daemon mode helpers", () => {
 			})) as { data: { deleted: boolean } };
 			expect(idle.data).toEqual({ deleted: true });
 			expect(internals.sessions.has(childState.activeSessionId)).toBe(false);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("refuses to delete a busy nested resident child through the root session", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-nested-rlm-delete-"));
-		try {
+		await withTempDir("optimus-daemon-nested-rlm-delete-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				sessions: Map<string, ActiveSessionState>;
@@ -7325,14 +6624,11 @@ describe("daemon mode helpers", () => {
 			expect(result.data).toEqual({ deleted: false, reason: "running" });
 			expect(deleteSpy).not.toHaveBeenCalled();
 			expect(internals.sessions.get(nestedState.activeSessionId)).toBe(nestedState);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("deletes a passive child without hydrating it and treats unknown children benignly", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-lazy-rlm-delete-"));
-		try {
+		await withTempDir("optimus-daemon-lazy-rlm-delete-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -7403,14 +6699,11 @@ describe("daemon mode helpers", () => {
 				.createSubagentRuntimeHost(parentState)
 				.deleteRlmSubagentRuntime(fixture.childId);
 			expect(cronStore.list().find((candidate) => candidate.id === retryJob.id)?.status).toBe("cancelled");
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("removes a deleted child's nested artifact dir but keeps its transcript and display tombstone", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-artifact-cleanup-"));
-		try {
+		await withTempDir("optimus-daemon-artifact-cleanup-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			writeFileSync(join(fixture.childArtifactDir, "kernel-state.dill"), "payload");
 			const internals = fixture.daemon as unknown as {
@@ -7439,9 +6732,7 @@ describe("daemon mode helpers", () => {
 			await host.deleteRlmSubagentRuntime(fixture.childId);
 			expect(existsSync(fixture.childArtifactDir)).toBe(false);
 			expect(existsSync(fixture.childSessionFile)).toBe(true);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	// chmod-based read-only dirs don't block root, so skip when running as uid 0.
@@ -7482,8 +6773,7 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("still sweeps and resolves when scheduled-job cancellation throws", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-artifact-cancel-throw-"));
-		try {
+		await withTempDir("optimus-daemon-artifact-cancel-throw-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			writeFileSync(join(fixture.childArtifactDir, "kernel-state.dill"), "payload");
 			const internals = fixture.daemon as unknown as {
@@ -7502,14 +6792,11 @@ describe("daemon mode helpers", () => {
 			expect(internals.cancelScheduledJobsForSessionFile).toHaveBeenCalledOnce();
 			expect(existsSync(fixture.childArtifactDir)).toBe(false);
 			expect(existsSync(fixture.childSessionFile)).toBe(true);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("sweeps the artifact dir even when child teardown throws", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-artifact-teardown-throw-"));
-		try {
+		await withTempDir("optimus-daemon-artifact-teardown-throw-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -7533,14 +6820,11 @@ describe("daemon mode helpers", () => {
 			expect(throwingSession.disposeAsync).toHaveBeenCalledOnce();
 			expect(existsSync(fixture.childArtifactDir)).toBe(false);
 			expect(existsSync(fixture.childSessionFile)).toBe(true);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("cancels scheduled jobs when deleting a pre-ledger legacy child without hydrating it", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-legacy-delete-jobs-"));
-		try {
+		await withTempDir("optimus-daemon-legacy-delete-jobs-", async (tempDir) => {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
 			const internals = fixture.daemon as unknown as {
 				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
@@ -7572,14 +6856,11 @@ describe("daemon mode helpers", () => {
 				status: string;
 			};
 			expect(display).toMatchObject({ status: "deleted" });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("gives RLM subagents messaging controllers for their own nested children", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-nested-controller-"));
-		try {
+		await withTempDir("optimus-daemon-nested-controller-", async (tempDir) => {
 			const sessionNamesDuringBind: Array<string | undefined> = [];
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				const session = makeRuntimeSession(options.sessionManager);
@@ -7597,19 +6878,14 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				bindingSessions: Set<string>;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				createRlmSubagentRuntime(
-					parentState: ActiveSessionState,
-					options: CreateRlmSubagentRuntimeOptions,
-				): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const parentState = await internals.createRuntime({
 				type: "create",
 				sessionPath: join(tempDir, "parent.jsonl"),
@@ -7633,7 +6909,7 @@ describe("daemon mode helpers", () => {
 				rlmDepth: 1,
 				rlmMaxDepth: 2,
 				rlmParentNodeId: "child-1",
-				onSessionPublished: (session) => {
+				onSessionPublished: (session: any) => {
 					expect(session.sessionName).toBe(childSessionName);
 					const state = [...internals.sessions.values()].find(
 						(candidate) => candidate.runtime.session === session,
@@ -7697,27 +6973,25 @@ describe("daemon mode helpers", () => {
 			).rejects.toThrow();
 			expect(parentState.runtime.session.getRlmChildRunStatus).toHaveBeenCalledWith("cancelled-child");
 			expect(internals.sessions.size).toBe(sessionsBeforeCancelledStartup);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("disposes a newly opened runtime when its requested root name collides", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-root-name-failure-"));
-		try {
+		await withTempDir("optimus-daemon-root-name-failure-", async (tempDir) => {
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => ({
 				session: makeRuntimeSession(options.sessionManager),
 				extensionsResult: { extensions: [], errors: [], runtime: {} } as never,
 				services: { cwd: options.cwd, agentDir: options.agentDir } as never,
 				diagnostics: [],
 			}));
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-			};
+			const internals = daemonInternals(daemon);
 			await internals.createRuntime({ type: "create", sessionPath: join(tempDir, "first.jsonl"), name: "taken" });
 			await expect(
 				internals.createRuntime({ type: "create", sessionPath: join(tempDir, "second.jsonl"), name: "taken" }),
@@ -7727,14 +7001,11 @@ describe("daemon mode helpers", () => {
 				? (await createRuntime.mock.results[1].value).session
 				: undefined;
 			expect(failedSession?.disposeAsync).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("closes a registered RLM runtime when its requested session name cannot be persisted", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-child-name-failure-"));
-		try {
+		await withTempDir("optimus-daemon-child-name-failure-", async (tempDir) => {
 			let failingChildSession: ReturnType<typeof makeRuntimeSession> | undefined;
 			const createRuntime = vi.fn(async (options: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
 				const session = makeRuntimeSession(options.sessionManager);
@@ -7755,18 +7026,14 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
 			});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				createRlmSubagentRuntime(
-					parentState: ActiveSessionState,
-					options: CreateRlmSubagentRuntimeOptions,
-				): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const parentState = await internals.createRuntime({
 				type: "create",
 				sessionPath: join(tempDir, "parent.jsonl"),
@@ -7795,14 +7062,11 @@ describe("daemon mode helpers", () => {
 			expect(failingChildSession).toBeDefined();
 			expect(failingChildSession?.disposeAsync).toHaveBeenCalledOnce();
 			expect(internals.sessions.size).toBe(1);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("waits for extension binding before targeting half-bound sessions", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-binding-gate-"));
-		try {
+		await withTempDir("optimus-daemon-binding-gate-", async (tempDir) => {
 			let releaseBind: () => void = () => {};
 			const bindBarrier = new Promise<void>((resolve) => {
 				releaseBind = resolve;
@@ -7824,35 +7088,23 @@ describe("daemon mode helpers", () => {
 					diagnostics: [],
 				};
 			});
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir: tempDir },
-				createRuntime,
-			});
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-				createAgentMessageListResult(current: ActiveSessionState): Promise<{
-					agents: Array<{ activeSessionId: string }>;
-				}>;
-				sendAgentSessionMessage(options: {
-					targetSelector: string;
-					message: string;
-					fromState?: ActiveSessionState;
-					origin: "agent" | "cli";
-				}): Promise<unknown>;
-			};
-			const fromState = makeState("source");
-			fromState.runtime = {
-				...fromState.runtime,
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
 				cwd: tempDir,
-				session: {
-					sessionId: "session-source",
-					sessionName: "Source",
-					isStreaming: false,
-					unfinishedActionCount: 0,
-				},
-			} as never;
+				sessionDir: tempDir,
+				createRuntime: createRuntime,
+			});
+			const internals = daemonInternals(daemon);
+			const fromState = makeState("source");
+			applySession(fromState, {
+				cwd: tempDir,
+				sessionId: "session-source",
+				sessionName: "Source",
+				isStreaming: false,
+				unfinishedActionCount: 0,
+				runtime: { diagnostics: [] },
+			});
 			internals.sessions.set(fromState.activeSessionId, fromState);
 
 			const created = internals.createRuntime({ type: "create", sessionPath: join(tempDir, "session.jsonl") });
@@ -7897,7 +7149,7 @@ describe("daemon mode helpers", () => {
 			expect(messageSettled).toBe(false);
 			expect(attachSettled).toBe(false);
 			expect(
-				(await internals.createAgentMessageListResult(fromState)).agents.map((agent) => agent.activeSessionId),
+				(await internals.createAgentMessageListResult(fromState)).agents.map((agent: any) => agent.activeSessionId),
 			).toEqual([fromState.activeSessionId]);
 
 			releaseBind();
@@ -7906,29 +7158,22 @@ describe("daemon mode helpers", () => {
 			await attach.catch(() => undefined);
 
 			expect(
-				(await internals.createAgentMessageListResult(fromState)).agents.map((agent) => agent.activeSessionId),
+				(await internals.createAgentMessageListResult(fromState)).agents.map((agent: any) => agent.activeSessionId),
 			).toEqual(expect.arrayContaining([fromState.activeSessionId, bindingId]));
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("includes paused jobs in the default cron list", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-cron-list-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: {
-					agentDir: tempDir,
-					cwd: tempDir,
-				},
+		await withTempDir("optimus-daemon-cron-list-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: "active-1",
 				sessionId: "session-1",
@@ -7946,19 +7191,15 @@ describe("daemon mode helpers", () => {
 			})) as { data: { jobs: AgentCronJob[] } };
 
 			expect(response.data.jobs).toEqual([expect.objectContaining({ id: heartbeat.id, status: "paused" })]);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("cancels scheduled jobs when a live session is killed", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-kill-cron-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: {
-					agentDir: tempDir,
-					cwd: tempDir,
-				},
+		await withTempDir("optimus-daemon-kill-cron-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -7986,11 +7227,7 @@ describe("daemon mode helpers", () => {
 					removeQueuedFollowUp,
 				},
 			} as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				sessions: Map<string, ActiveSessionState>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			const cron = internals.cronStore.create({
 				activeSessionId: state.activeSessionId,
@@ -8029,17 +7266,15 @@ describe("daemon mode helpers", () => {
 			});
 
 			for (const id of [cron.id, heartbeat.id, rlmHeartbeat.id]) {
-				expect(internals.cronStore.list().find((job) => job.id === id)).toMatchObject({ status: "cancelled" });
-				expect(internals.cronStore.list().find((job) => job.id === id)).not.toHaveProperty("nextRunAt");
+				expect(internals.cronStore.list().find((job: any) => job.id === id)).toMatchObject({ status: "cancelled" });
+				expect(internals.cronStore.list().find((job: any) => job.id === id)).not.toHaveProperty("nextRunAt");
 			}
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${heartbeat.id}`);
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${rlmHeartbeat.id}`);
 			expect(abort).toHaveBeenCalledOnce();
 			expect(dispose).toHaveBeenCalledOnce();
 			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("applies killed effects when kill joins a passivation close", async () => {
@@ -8053,8 +7288,10 @@ describe("daemon mode helpers", () => {
 			markDisposeStarted = resolve;
 		});
 		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -8079,17 +7316,7 @@ describe("daemon mode helpers", () => {
 					abort: vi.fn(async () => {}),
 				},
 			} as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				sessions: Map<string, ActiveSessionState>;
-				closeSession(
-					state: ActiveSessionState,
-					reason: "shutdown",
-					waitForAbort: boolean,
-					cascadeChildren: boolean,
-				): Promise<void>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			const cron = internals.cronStore.create({
 				activeSessionId: state.activeSessionId,
@@ -8111,7 +7338,9 @@ describe("daemon mode helpers", () => {
 			releaseDispose();
 
 			await expect(Promise.all([passivationClose, kill])).resolves.toBeDefined();
-			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "cancelled" });
+			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+				status: "cancelled",
+			});
 			expect(appendSessionState).toHaveBeenCalledOnce();
 			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
 		} finally {
@@ -8127,33 +7356,28 @@ describe("daemon mode helpers", () => {
 			rejectClose = reject;
 		});
 		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
 			const appendSessionState = vi.fn();
 			const state = makeState("active-1");
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: tempDir,
-				session: {
-					sessionId: "session-1",
-					sessionFile: join(tempDir, "session.jsonl"),
-					sessionManager: { appendSessionState },
-				},
-			} as never;
+				sessionId: "session-1",
+				sessionFile: join(tempDir, "session.jsonl"),
+				session: { sessionManager: { appendSessionState } },
+			});
 			const existingClose = {
 				promise: failedClose,
 				reason: "shutdown" as const,
 				descendants: new Set<ActiveSessionState>(),
 			};
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				closingSessions: Map<string, typeof existingClose>;
-				closeSession(state: ActiveSessionState, reason: "killed"): Promise<void>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.closingSessions.set(state.activeSessionId, existingClose);
 			const cron = internals.cronStore.create({
 				activeSessionId: state.activeSessionId,
@@ -8168,7 +7392,9 @@ describe("daemon mode helpers", () => {
 			rejectClose(new Error("dispose failed"));
 
 			await expect(kill).rejects.toThrow("dispose failed");
-			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "cancelled" });
+			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+				status: "cancelled",
+			});
 			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
 			expect(existingClose.reason).toBe("killed");
 		} finally {
@@ -8177,10 +7403,11 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("finishes a reason upgrade after one target fails to archive", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-kill-archive-failure-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-kill-archive-failure-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -8195,26 +7422,18 @@ describe("daemon mode helpers", () => {
 				[parent, "session-parent", parentArchive],
 				[child, "session-child", childArchive],
 			] as const) {
-				state.runtime = {
-					...state.runtime,
+				applySession(state, {
 					cwd: tempDir,
-					session: {
-						sessionId,
-						sessionFile: join(tempDir, `${sessionId}.jsonl`),
-						sessionManager: { appendSessionState },
-					},
-				} as never;
+					sessionFile: join(tempDir, `${sessionId}.jsonl`),
+					session: { sessionId, sessionManager: { appendSessionState } },
+				});
 			}
 			const existingClose = {
 				promise: Promise.resolve(),
 				reason: "shutdown" as "shutdown" | "killed",
 				descendants: new Set([child]),
 			};
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				closingSessions: Map<string, typeof existingClose>;
-				closeSession(state: ActiveSessionState, reason: "killed"): Promise<void>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.closingSessions.set(parent.activeSessionId, existingClose);
 			const jobs = [parent, child].map((state) =>
 				internals.cronStore.create({
@@ -8230,7 +7449,7 @@ describe("daemon mode helpers", () => {
 			await expect(internals.closeSession(parent, "killed")).rejects.toThrow("archive failed");
 
 			for (const job of jobs) {
-				expect(internals.cronStore.list().find((candidate) => candidate.id === job.id)).toMatchObject({
+				expect(internals.cronStore.list().find((candidate: any) => candidate.id === job.id)).toMatchObject({
 					status: "cancelled",
 				});
 			}
@@ -8240,9 +7459,7 @@ describe("daemon mode helpers", () => {
 			await expect(internals.closeSession(parent, "killed")).resolves.toBeUndefined();
 			expect(parentArchive).toHaveBeenCalledOnce();
 			expect(childArchive).toHaveBeenCalledOnce();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("upgrades resident descendants when kill joins a parent shutdown close", async () => {
@@ -8309,8 +7526,10 @@ describe("daemon mode helpers", () => {
 			markDisposeStarted = resolve;
 		});
 		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -8333,12 +7552,7 @@ describe("daemon mode helpers", () => {
 					sessionManager: { appendSessionState, hasUserContent: () => true },
 				},
 			} as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				sessions: Map<string, ActiveSessionState>;
-				closeSession(state: ActiveSessionState, reason: "completed"): Promise<void>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			const cron = internals.cronStore.create({
 				activeSessionId: state.activeSessionId,
@@ -8359,7 +7573,9 @@ describe("daemon mode helpers", () => {
 			releaseDispose();
 
 			await expect(Promise.all([completedClose, kill])).resolves.toBeDefined();
-			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "cancelled" });
+			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+				status: "cancelled",
+			});
 			expect(appendSessionState).toHaveBeenCalledOnce();
 			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
 		} finally {
@@ -8369,21 +7585,16 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("cancels scheduled jobs when a saved session is deleted", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-delete-cron-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: {
-					agentDir: tempDir,
-					cwd: tempDir,
-				},
+		await withTempDir("optimus-daemon-delete-cron-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const sessionFile = join(tempDir, "saved-session.jsonl");
 			const otherSessionFile = join(tempDir, "other-session.jsonl");
 			const cron = internals.cronStore.create({
@@ -8420,19 +7631,20 @@ describe("daemon mode helpers", () => {
 				sessionPath: sessionFile,
 			});
 
-			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "cancelled" });
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
 				status: "cancelled",
 			});
-			expect(internals.cronStore.list().find((job) => job.id === unrelated.id)).toMatchObject({ status: "active" });
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+				status: "cancelled",
+			});
+			expect(internals.cronStore.list().find((job: any) => job.id === unrelated.id)).toMatchObject({
+				status: "active",
+			});
+		});
 	});
 
 	it("streams detached saved-session catalog requests", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-saved-session-catalog-"));
-		try {
+		await withTempDir("optimus-daemon-saved-session-catalog-", async (tempDir) => {
 			const sessionDir = join(tempDir, "sessions");
 			const session = SessionManager.create(tempDir, sessionDir);
 			session.appendSessionState({ status: "active" });
@@ -8442,15 +7654,16 @@ describe("daemon mode helpers", () => {
 				basedOnMessageCount: 0,
 			});
 			session.appendSessionState({ status: "active" });
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
+				sessionDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
-			const internals = daemon as unknown as {
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const writes: string[] = [];
 			const client = {
 				...makeClient("client-1", "detached"),
@@ -8510,29 +7723,21 @@ describe("daemon mode helpers", () => {
 				]),
 			);
 			expect(updates.every((update) => update.activeSessionId === undefined)).toBe(true);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("keeps saved session jobs when file deletion fails", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-delete-cron-fail-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: {
-					agentDir: tempDir,
-					cwd: tempDir,
-				},
+		await withTempDir("optimus-daemon-delete-cron-fail-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
 			const deleteSavedSessionFile = vi.fn(async () => ({ ok: false, error: "delete failed" }) as const);
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				deleteSavedSessionFile: typeof deleteSavedSessionFile;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.deleteSavedSessionFile = deleteSavedSessionFile;
 			const sessionFile = join(tempDir, "saved-session.jsonl");
 			const cron = internals.cronStore.create({
@@ -8564,21 +7769,18 @@ describe("daemon mode helpers", () => {
 			expect(deleteSavedSessionFile).toHaveBeenCalledWith(sessionFile, {
 				afterFileRemoved: expect.any(Function),
 			});
-			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "active" });
-			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({ status: "active" });
+			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("preserves omitted global scope on daemon refine commands", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: {
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-			},
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -8596,10 +7798,7 @@ describe("daemon mode helpers", () => {
 			};
 		};
 		state.runtime.session = { refine } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -8617,8 +7816,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes queued message mutation to the active session", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -8626,10 +7827,7 @@ describe("daemon mode helpers", () => {
 		const mutateQueuedMessage = vi.fn(() => "applied" as const);
 		const state = makeState("active-1") as ActiveSessionState;
 		(state.runtime as { session: unknown }).session = { mutateQueuedMessage };
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		const client = makeClient("client-1", state.activeSessionId);
 		const mutation = { type: "replace", text: "edited", lane: "followUp" } as const;
@@ -8647,8 +7845,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("gets and sets RLM max depth directly on the active session", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -8661,10 +7861,7 @@ describe("daemon mode helpers", () => {
 		}));
 		const state = makeState("active-1") as ActiveSessionState;
 		(state.runtime as { session: unknown }).session = { getRlmMaxDepthStatus, setRlmMaxDepth };
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		const client = makeClient("client-1", state.activeSessionId);
 
@@ -8810,8 +8007,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("delivers steer heartbeats after an RPC prompt finishes preflight while its turn is still streaming", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -8854,12 +8053,7 @@ describe("daemon mode helpers", () => {
 			};
 		};
 		state.runtime.session = Object.assign(sessionState, { prompt, promptHeartbeat }) as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			agentMessagePreparingTargets: Map<string, number>;
-			promptWithAgentMessagePreparingGuard(state: ActiveSessionState, message: string): Promise<void>;
-			runCronJob(job: AgentCronJob): Promise<"skipped" | undefined>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		const promptPromise = internals.promptWithAgentMessagePreparingGuard(state, "long-running prompt");
@@ -8882,8 +8076,10 @@ describe("daemon mode helpers", () => {
 	it.each(["steer", "follow_up"] as const)(
 		"idle daemon %s inserts into its scheduler lane exactly once",
 		async (type) => {
-			const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-				defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+			const daemon = makeDaemon({
+				socketPath: "/tmp/optimus-test.sock",
+				agentDir: "/tmp/optimus-test-agent",
+				cwd: "/tmp",
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -8896,11 +8092,7 @@ describe("daemon mode helpers", () => {
 				};
 			};
 			state.runtime = { ...state.runtime, session: { isStreaming: false, steer, followUp } } as never;
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				recordWorkerRecoveryState: ReturnType<typeof vi.fn>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			internals.recordWorkerRecoveryState = vi.fn();
 
@@ -8930,8 +8122,10 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("clears prompt admission registered before unauthenticated worker rejection", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-worker-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -8940,10 +8134,7 @@ describe("daemon mode helpers", () => {
 		const client = makeClient("unauthenticated", "active-1");
 		const end = vi.fn();
 		client.socket = { destroyed: false, write: vi.fn(() => true), end } as unknown as Socket;
-		const internals = daemon as unknown as {
-			promptAdmissions: Map<string, unknown>;
-			handleLine(client: DaemonSocketClient, line: string): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 
 		await internals.handleLine(
 			client,
@@ -8960,19 +8151,17 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears prompt admission when restart fencing rejects before dispatch", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-worker-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
 		const client = makeClient("client", "active-1");
 		client.socket = { destroyed: false, write: vi.fn(() => true), end: vi.fn() } as unknown as Socket;
-		const internals = daemon as unknown as {
-			promptAdmissions: Map<string, unknown>;
-			updateRestart: { phase: "fencing" };
-			handleLine(client: DaemonSocketClient, line: string): Promise<void>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.updateRestart = { phase: "fencing" };
 
 		await internals.handleLine(
@@ -8992,8 +8181,10 @@ describe("daemon mode helpers", () => {
 	it.each(["success", "late-failure", "replacement"] as const)(
 		"handles cancellation followed by supervisor-claim %s without affecting the wrong socket binding",
 		async (outcome) => {
-			const daemon = new AgentDaemon("/tmp/optimus-worker-test.sock", {
-				defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+			const daemon = makeDaemon({
+				socketPath: "/tmp/optimus-worker-test.sock",
+				agentDir: "/tmp/optimus-test-agent",
+				cwd: "/tmp",
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -9014,13 +8205,7 @@ describe("daemon mode helpers", () => {
 				resolveClaim = resolve;
 				rejectClaim = reject;
 			});
-			const internals = daemon as unknown as {
-				promptAdmissions: Map<string, { controller?: AbortController }>;
-				supervisorClaims: Map<DaemonSocketClient, { claim: typeof claim; ownerFingerprint: string }>;
-				assertSupervisorClaimCurrent: ReturnType<typeof vi.fn>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-				handleLine(client: DaemonSocketClient, line: string): Promise<void>;
-			};
+			const internals = daemonInternals(daemon);
 			const originalBinding = { claim, ownerFingerprint: "owner" };
 			internals.supervisorClaims.set(client, originalBinding);
 			internals.assertSupervisorClaimCurrent = vi.fn(() => claimCheck);
@@ -9065,8 +8250,10 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("cancels only pre-ownership prompt admission and cleans up its controller", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9086,12 +8273,7 @@ describe("daemon mode helpers", () => {
 			runtime: ActiveSessionState["runtime"] & { session: { promptUntilAccepted: typeof promptUntilAccepted } };
 		};
 		state.runtime = { ...state.runtime, session: { promptUntilAccepted } } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			promptAdmissions: Map<string, unknown>;
-			parseCommandAndRegisterPromptAdmission(client: DaemonSocketClient, line: string): unknown;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		const client = makeClient("client-1", state.activeSessionId);
 		client.socket = { destroyed: false, write: vi.fn(() => true) } as unknown as Socket;
@@ -9154,8 +8336,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("settles cancellation while prompt routing waits on the target lock", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9163,13 +8347,7 @@ describe("daemon mode helpers", () => {
 		const promptUntilAccepted = vi.fn(async () => {});
 		const state = makeState("active-lock") as ActiveSessionState;
 		state.runtime = { ...state.runtime, session: { promptUntilAccepted } } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			agentMessageTargetLocks: Map<string, Promise<void>>;
-			promptAdmissions: Map<string, unknown>;
-			parseCommandAndRegisterPromptAdmission(client: DaemonSocketClient, line: string): unknown;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		internals.agentMessageTargetLocks.set(state.activeSessionId, new Promise(() => {}));
 		const client = makeClient("client-lock", state.activeSessionId);
@@ -9201,17 +8379,15 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("aborts waiting prompt admissions when their session closes", () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
 		});
-		const internals = daemon as unknown as {
-			promptAdmissions: Map<string, { status: string; controller?: AbortController }>;
-			parseCommandAndRegisterPromptAdmission(client: DaemonSocketClient, line: string): unknown;
-			abortWaitingPromptAdmissionsForSession(activeSessionId: string): void;
-		};
+		const internals = daemonInternals(daemon);
 		const client = makeClient("client-closing", "closing-session");
 		internals.parseCommandAndRegisterPromptAdmission(
 			client,
@@ -9229,8 +8405,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("uses the queued default lane for old-client prompts on a new daemon", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9240,10 +8418,7 @@ describe("daemon mode helpers", () => {
 			runtime: ActiveSessionState["runtime"] & { session: { promptUntilAccepted: typeof promptUntilAccepted } };
 		};
 		state.runtime = { ...state.runtime, session: { promptUntilAccepted } } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown> | undefined;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		const client = makeClient("legacy-client", state.activeSessionId);
 		const write = vi.fn((_data: unknown) => true);
@@ -9266,8 +8441,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes resume_queue through the session scheduler", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9280,10 +8457,7 @@ describe("daemon mode helpers", () => {
 			};
 		};
 		state.runtime = { ...state.runtime, session: { resumeQueuedWork, agent: { continue: continueAgent } } } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await expect(
@@ -9298,8 +8472,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it.each(["steer", "follow_up"] as const)("routes correlated daemon %s commands", async (type) => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9319,10 +8495,7 @@ describe("daemon mode helpers", () => {
 			};
 		};
 		state.runtime.session = { steer, followUp, restoreSteeringMessage, restoreFollowUpMessage } as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 		const client = makeClient("client-1", state.activeSessionId);
 		const base = { type, activeSessionId: state.activeSessionId } as const;
@@ -9392,10 +8565,11 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects invalid heartbeat delivery modes before persisting", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-heartbeat-delivery-mode-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-heartbeat-delivery-mode-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -9409,19 +8583,8 @@ describe("daemon mode helpers", () => {
 					};
 				};
 			};
-			state.runtime = {
-				...state.runtime,
-				cwd: tempDir,
-				session: {
-					sessionFile,
-					sessionId: "session-1",
-				},
-			} as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				sessions: Map<string, ActiveSessionState>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			applySession(state, { cwd: tempDir, sessionId: "session-1", session: { sessionFile } });
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 
 			await expect(
@@ -9435,16 +8598,15 @@ describe("daemon mode helpers", () => {
 				}),
 			).rejects.toThrow('Heartbeat delivery mode must be "steer" or "follow_up"');
 			expect(internals.cronStore.getHeartbeat(state.activeSessionId)).toBeUndefined();
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("preserves the current heartbeat delivery mode when replacement omits it", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-heartbeat-preserve-delivery-mode-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-heartbeat-preserve-delivery-mode-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -9458,24 +8620,13 @@ describe("daemon mode helpers", () => {
 					};
 				};
 			};
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: tempDir,
-				session: {
-					removeQueuedFollowUp: vi.fn(() => false),
-					sessionFile: join(tempDir, "session.jsonl"),
-					sessionId: "session-1",
-				},
-			} as never;
-			const internals = daemon as unknown as {
-				sessions: Map<string, ActiveSessionState>;
-				handleCommand(
-					client: DaemonSocketClient,
-					command: DaemonCommand,
-				): Promise<{
-					data: { heartbeat: AgentCronJob };
-				}>;
-			};
+				removeQueuedFollowUp: vi.fn(() => false),
+				sessionFile: join(tempDir, "session.jsonl"),
+				sessionId: "session-1",
+			});
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			const client = makeClient("client-1", state.activeSessionId);
 
@@ -9499,16 +8650,15 @@ describe("daemon mode helpers", () => {
 				prompt: "replacement instruction",
 				deliveryMode: "follow_up",
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
-	it("removes queued RLM heartbeat follow-ups when only delivery mode changes", () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-rlm-delivery-mode-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+	it("removes queued RLM heartbeat follow-ups when only delivery mode changes", async () => {
+		await withTempDir("optimus-daemon-rlm-delivery-mode-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -9522,13 +8672,7 @@ describe("daemon mode helpers", () => {
 				};
 			};
 			state.runtime.session = { removeQueuedFollowUp } as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				updateRlmHeartbeatForState(
-					state: ActiveSessionState,
-					input: { id: string; deliveryMode: "steer" | "follow_up" },
-				): AgentCronJob | undefined;
-			};
+			const internals = daemonInternals(daemon);
 			const rlmHeartbeat = internals.cronStore.createRlmHeartbeat({
 				activeSessionId: state.activeSessionId,
 				sessionId: "session-1",
@@ -9547,16 +8691,15 @@ describe("daemon mode helpers", () => {
 
 			expect(updated).toMatchObject({ id: rlmHeartbeat.id, deliveryMode: "steer" });
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${rlmHeartbeat.id}`);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("removes queued heartbeat follow-ups when a heartbeat is cleared", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-heartbeat-clear-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-heartbeat-clear-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
@@ -9570,11 +8713,7 @@ describe("daemon mode helpers", () => {
 				};
 			};
 			state.runtime.session = { removeQueuedFollowUp } as never;
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				sessions: Map<string, ActiveSessionState>;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			internals.sessions.set(state.activeSessionId, state);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: state.activeSessionId,
@@ -9594,24 +8733,20 @@ describe("daemon mode helpers", () => {
 			});
 
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${heartbeat.id}`);
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("manages a persisted heartbeat after its session unloads", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-unloaded-heartbeat-"));
-		try {
-			const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-				defaultSessionConfig: { agentDir: tempDir, cwd: tempDir },
+		await withTempDir("optimus-daemon-unloaded-heartbeat-", async (tempDir) => {
+			const daemon = makeDaemon({
+				socketPath: join(tempDir, "daemon.sock"),
+				agentDir: tempDir,
+				cwd: tempDir,
 				createRuntime: async () => {
 					throw new Error("unexpected runtime creation");
 				},
 			});
-			const internals = daemon as unknown as {
-				cronStore: AgentCronJobStore;
-				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-			};
+			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: "unloaded-session",
 				sessionId: "session-1",
@@ -9633,14 +8768,14 @@ describe("daemon mode helpers", () => {
 				success: true,
 				data: { heartbeat: { id: heartbeat.id, status: "cancelled" } },
 			});
-		} finally {
-			rmSync(tempDir, { recursive: true, force: true });
-		}
+		});
 	});
 
 	it("sets models without waiting for model_select extension handlers while running", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9678,10 +8813,7 @@ describe("daemon mode helpers", () => {
 			isCompacting: false,
 			setModel,
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -9696,8 +8828,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("waits for model_select extension handlers when setting models while idle", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9735,10 +8869,7 @@ describe("daemon mode helpers", () => {
 			isCompacting: false,
 			setModel,
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -9753,8 +8884,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("cycles models without waiting for model_select extension handlers while running", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9790,10 +8923,7 @@ describe("daemon mode helpers", () => {
 			isCompacting: false,
 			cycleModel,
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -9807,8 +8937,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("waits for model_select extension handlers when cycling models while idle", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9844,10 +8976,7 @@ describe("daemon mode helpers", () => {
 			isCompacting: false,
 			cycleModel,
 		} as never;
-		const internals = daemon as unknown as {
-			sessions: Map<string, ActiveSessionState>;
-			handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
-		};
+		const internals = daemonInternals(daemon);
 		internals.sessions.set(state.activeSessionId, state);
 
 		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -9860,11 +8989,10 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("validates active sessions before reading a heartbeat", async () => {
-		const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-			defaultSessionConfig: {
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-			},
+		const daemon = makeDaemon({
+			socketPath: "/tmp/optimus-test.sock",
+			agentDir: "/tmp/optimus-test-agent",
+			cwd: "/tmp",
 			createRuntime: async () => {
 				throw new Error("unexpected runtime creation");
 			},
@@ -9899,8 +9027,10 @@ function makeCronAdmissionFixture(
 	options: { acceptingAgentMessage?: boolean } = {},
 ) {
 	const activeSessionId = "active-1";
-	const daemon = new AgentDaemon("/tmp/optimus-test.sock", {
-		defaultSessionConfig: { agentDir: "/tmp/optimus-test-agent", cwd: "/tmp" },
+	const daemon = makeDaemon({
+		socketPath: "/tmp/optimus-test.sock",
+		agentDir: "/tmp/optimus-test-agent",
+		cwd: "/tmp",
 		createRuntime: async () => {
 			throw new Error("unexpected runtime creation");
 		},
@@ -9922,27 +9052,17 @@ function makeCronAdmissionFixture(
 	const state = makeState(activeSessionId) as ActiveSessionState & {
 		runtime: ActiveSessionState["runtime"] & { session: Record<string, unknown> };
 	};
-	state.runtime = {
-		...state.runtime,
-		session: {
-			isStreaming: false,
-			isCompacting: false,
-			isRetrying: false,
-			isBashRunning: false,
-			hasPendingSessionWork: false,
-			unfinishedActionCount: 0,
-			...activity,
-			prompt,
-			promptHeartbeat,
-			followUp,
-			removeQueuedFollowUp,
-		},
-	} as never;
-	const internals = daemon as unknown as {
-		sessions: Map<string, ActiveSessionState>;
-		agentMessageAcceptingTargets: Set<string>;
-		runCronJob(job: AgentCronJob): Promise<"skipped" | undefined>;
-	};
+	applySession(state, {
+		isStreaming: false,
+		isCompacting: false,
+		isRetrying: false,
+		isBashRunning: false,
+		hasPendingSessionWork: false,
+		unfinishedActionCount: 0,
+		session: { ...activity, prompt, promptHeartbeat, followUp, removeQueuedFollowUp },
+		runtime: { diagnostics: [] },
+	});
+	const internals = daemonInternals(daemon);
 	internals.sessions.set(activeSessionId, state);
 	if (options.acceptingAgentMessage) {
 		internals.agentMessageAcceptingTargets.add(activeSessionId);
@@ -9955,304 +9075,5 @@ function makeCronAdmissionFixture(
 		followUp,
 		removeQueuedFollowUp,
 		runCronJob: internals.runCronJob.bind(daemon),
-	};
-}
-
-function makeCronJob(input: {
-	id: string;
-	source: AgentCronJob["source"];
-	activeSessionId: string;
-	deliveryMode?: AgentCronJob["deliveryMode"];
-}): AgentCronJob {
-	return {
-		id: input.id,
-		status: "active",
-		source: input.source,
-		...(input.deliveryMode ? { deliveryMode: input.deliveryMode } : {}),
-		activeSessionId: input.activeSessionId,
-		sessionId: "session-1",
-		sessionFile: "/tmp/session.jsonl",
-		cwd: "/tmp",
-		prompt: "heartbeat prompt",
-		schedule: { kind: "interval", expression: "every 5m", intervalMs: 300_000 },
-		createdAt: "2026-01-01T12:00:00.000Z",
-		updatedAt: "2026-01-01T12:00:00.000Z",
-		nextRunAt: "2026-01-01T12:05:00.000Z",
-		runCount: 0,
-	};
-}
-
-function makePersistedRlmDaemonFixture(
-	tempDir: string,
-	options: {
-		childRuntimeStarted?: () => void;
-		childRuntimeGate?: Promise<void>;
-		childBindingStarted?: () => void;
-		childBindingGate?: Promise<void>;
-		grandchildRuntimeStarted?: () => void;
-		grandchildRuntimeGate?: Promise<void>;
-		childDisposeStarted?: () => void;
-		childDisposeGate?: Promise<void>;
-		childAdmissionStarted?: () => void;
-		childAdmissionGate?: Promise<void>;
-	} = {},
-) {
-	const sessionDir = join(tempDir, "sessions");
-	const parentManager = SessionManager.create(tempDir, sessionDir);
-	parentManager.newSession();
-	parentManager.appendSessionInfo("Parent");
-	parentManager.appendSessionState({ status: "active" });
-	const parentSessionFile = parentManager.getSessionFile();
-	const parentArtifactDir = parentManager.getSessionArtifactDir();
-	if (!parentSessionFile || !parentArtifactDir) {
-		throw new Error("Missing parent session paths");
-	}
-
-	const childId = "child-1";
-	const childSessionDir = join(parentArtifactDir, "sub-1234abcd");
-	const childManager = SessionManager.create(tempDir, childSessionDir);
-	childManager.newSession({ parentSession: parentSessionFile });
-	childManager.appendSessionInfo("spawn-worker");
-	childManager.appendSessionInfo("renamed-worker");
-	childManager.appendMessage({ role: "user", content: "complete this task", timestamp: 1 });
-	childManager.flushNow();
-	const childSessionFile = childManager.getSessionFile();
-	const childArtifactDir = childManager.getSessionArtifactDir();
-	if (!childSessionFile || !childArtifactDir) {
-		throw new Error("Missing child session paths");
-	}
-	const grandchildId = "grandchild-1";
-	mkdirSync(childArtifactDir, { recursive: true });
-	const grandchildSessionDir = join(childSessionDir, "sub-deadbeef");
-	const grandchildManager = SessionManager.create(tempDir, grandchildSessionDir);
-	grandchildManager.newSession({ parentSession: childSessionFile });
-	grandchildManager.appendSessionInfo("nested-worker");
-	grandchildManager.appendMessage({ role: "user", content: "complete the nested task", timestamp: 2 });
-	grandchildManager.flushNow();
-	const grandchildSessionFile = grandchildManager.getSessionFile();
-	if (!grandchildSessionFile) throw new Error("Missing grandchild session file");
-	writeFileSync(
-		join(childArtifactDir, "rlm-subagents.jsonl"),
-		`${JSON.stringify({
-			type: "rlm_subagent",
-			childId: grandchildId,
-			sessionName: "nested-worker",
-			sessionDir: grandchildSessionDir,
-			sessionFile: grandchildSessionFile,
-			parentSessionId: childManager.getSessionId(),
-			parentSessionFile: childSessionFile,
-			rlmDepth: 2,
-			rlmMaxDepth: 4,
-			rlmParentNodeId: grandchildId,
-			status: "completed",
-			createdAt: 2,
-			updatedAt: "2026-01-01T00:00:01.000Z",
-		})}
-`,
-	);
-	writeFileSync(
-		join(parentArtifactDir, "rlm-subagents.jsonl"),
-		`${JSON.stringify({
-			type: "rlm_subagent",
-			childId,
-			sessionName: "spawn-worker",
-			sessionDir: childSessionDir,
-			sessionFile: childSessionFile,
-			parentSessionId: parentManager.getSessionId(),
-			parentSessionFile,
-			rlmDepth: 1,
-			rlmMaxDepth: 4,
-			rlmParentNodeId: childId,
-			status: "completed",
-			createdAt: 1,
-			updatedAt: "2026-01-01T00:00:00.000Z",
-		})}
-`,
-	);
-
-	const acceptAgentMessagePrompt = vi.fn(
-		async (_message: string, promptOptions?: { preflightResult?: (didSucceed: boolean) => void }) => {
-			if (options.childAdmissionGate) {
-				options.childAdmissionStarted?.();
-				await options.childAdmissionGate;
-			}
-			promptOptions?.preflightResult?.(true);
-		},
-	);
-	const runtimeSessions: Array<ReturnType<typeof makeRuntimeSession>> = [];
-	const createRuntime = vi.fn(async (runtimeOptions: Parameters<CreateAgentSessionRuntimeFactory>[0]) => {
-		const sessionFile = runtimeOptions.sessionManager.getSessionFile();
-		const isChild = sessionFile === childSessionFile;
-		const isGrandchild = sessionFile === grandchildSessionFile;
-		if (isChild && options.childRuntimeGate) {
-			options.childRuntimeStarted?.();
-			await options.childRuntimeGate;
-		}
-		if (isGrandchild && options.grandchildRuntimeGate) {
-			options.grandchildRuntimeStarted?.();
-			await options.grandchildRuntimeGate;
-		}
-		const runtimeSession = makeRuntimeSession(runtimeOptions.sessionManager);
-		runtimeSessions.push(runtimeSession);
-		if (isChild && options.childBindingGate) {
-			runtimeSession.bindExtensions = vi.fn(async () => {
-				options.childBindingStarted?.();
-				await options.childBindingGate;
-			});
-		}
-		if (isChild && options.childDisposeGate) {
-			runtimeSession.disposeAsync = vi.fn(async () => {
-				options.childDisposeStarted?.();
-				await options.childDisposeGate;
-			});
-		}
-		Object.assign(runtimeSession, {
-			isStreaming: false,
-			isCompacting: false,
-			isSessionActive: false,
-			unfinishedActionCount: 0,
-			state: { pendingToolCalls: new Set() },
-			hasRunningRlmChildren: () => false,
-			getSessionActionSnapshot: () => ({ queuedCount: 0, steering: [], followUps: [] }),
-			sessionActions: { queuedCount: 0, steering: [], followUps: [] },
-			acceptAgentMessagePrompt,
-		});
-		return {
-			session: runtimeSession,
-			extensionsResult: { extensions: [], errors: [], runtime: {} } as unknown as Awaited<
-				ReturnType<CreateAgentSessionRuntimeFactory>
-			>["extensionsResult"],
-			services: { cwd: runtimeOptions.cwd, agentDir: runtimeOptions.agentDir } as Awaited<
-				ReturnType<CreateAgentSessionRuntimeFactory>
-			>["services"],
-			diagnostics: [],
-		};
-	});
-	const daemon = new AgentDaemon(join(tempDir, "daemon.sock"), {
-		defaultSessionConfig: { agentDir: tempDir, cwd: tempDir, sessionDir },
-		createRuntime,
-	});
-	return {
-		daemon,
-		createRuntime,
-		runtimeSessions,
-		acceptAgentMessagePrompt,
-		parentSessionFile,
-		parentArtifactDir,
-		parentSessionId: parentManager.getSessionId(),
-		childId,
-		childSessionFile,
-		childSessionDir,
-		childArtifactDir,
-		grandchildId,
-		grandchildSessionFile,
-	};
-}
-
-function makeRuntimeSession(
-	sessionManager: Parameters<CreateAgentSessionRuntimeFactory>[0]["sessionManager"],
-): Awaited<ReturnType<CreateAgentSessionRuntimeFactory>>["session"] {
-	return {
-		sessionManager,
-		messages: [],
-		extensionRunner: {
-			hasHandlers: vi.fn(() => false),
-			emit: vi.fn(async () => {}),
-		},
-		sessionFile: sessionManager.getSessionFile(),
-		sessionId: sessionManager.getSessionId(),
-		get sessionName() {
-			return sessionManager.getSessionName();
-		},
-		setSubagentRuntimeHost: vi.fn(),
-		getRlmChildRunStatus: vi.fn(() => "running"),
-		registerRlmChildSession: vi.fn(() => true),
-		releaseRlmChildSession: vi.fn(() => vi.fn()),
-		subscribe: vi.fn(() => vi.fn()),
-		bindExtensions: vi.fn(async () => {}),
-		setExecEnvProvider: vi.fn(),
-		getAvailableThinkingLevels: vi.fn(() => []),
-		scopedModels: [],
-		getActiveToolNames: vi.fn(() => []),
-		getContextUsage: vi.fn(() => undefined),
-		setSessionName: vi.fn((name: string) => sessionManager.appendSessionInfo(name)),
-		dispose: vi.fn(),
-		disposeAsync: vi.fn(async () => {}),
-		abort: vi.fn(async () => {}),
-	} as unknown as Awaited<ReturnType<CreateAgentSessionRuntimeFactory>>["session"];
-}
-
-function makeAgentFamilyState(
-	activeSessionId: string,
-	sessionName: string,
-	parent?: ActiveSessionState,
-): { state: ActiveSessionState; acceptAgentMessagePrompt: ReturnType<typeof vi.fn> } {
-	const state = makeState(activeSessionId, parent?.activeSessionId);
-	const acceptAgentMessagePrompt = vi.fn(
-		(_message: string, options?: { preflightResult?: (didSucceed: boolean) => void }) => {
-			options?.preflightResult?.(true);
-			return Promise.resolve();
-		},
-	);
-	const parentSessionId = parent?.runtime.session.sessionId;
-	state.runtime = {
-		...state.runtime,
-		cwd: "/tmp",
-		diagnostics: [],
-		metadata: {
-			kind: parent ? "subagent" : "top-level",
-			createdAt: 1,
-			...(parent ? { parentActiveSessionId: parent.activeSessionId, parentSessionId } : {}),
-		},
-		session: {
-			sessionId: `session-${activeSessionId}`,
-			sessionName,
-			runtimeKind: parent ? "subagent" : "top-level",
-			rlmDepth: parent ? (parent.runtime.session.rlmDepth ?? 0) + 1 : 0,
-			isStreaming: false,
-			isCompacting: false,
-			isBashRunning: false,
-			isRetrying: false,
-			isSessionActive: false,
-			hasAcceptedPromptInFlight: false,
-			unfinishedActionCount: 0,
-			messages: [],
-			state: { pendingToolCalls: new Set(), streamingMessage: undefined },
-			sessionManager: {
-				getCwd: () => "/tmp",
-				getHeader: () => ({ created: new Date(0).toISOString() }),
-			},
-			hasRunningRlmChildren: () => false,
-			getSessionActionSnapshot: () => ({ queuedCount: 0, steering: [], followUps: [] }),
-			acceptAgentMessagePrompt,
-		},
-	} as never;
-	return { state, acceptAgentMessagePrompt };
-}
-
-function makeState(activeSessionId: string, parentActiveSessionId?: string): ActiveSessionState {
-	return {
-		activeSessionId,
-		clients: new Set(),
-		pendingAttaches: 0,
-		lastEventSequence: 0,
-		runtime: {
-			metadata: {
-				kind: "subagent",
-				createdAt: 1,
-				parentActiveSessionId,
-			},
-		},
-	} as unknown as ActiveSessionState;
-}
-
-function makeClient(id: string, activeSessionId: string, supportsExtensionUi = false): DaemonSocketClient {
-	return {
-		id,
-		socket: { destroyed: false } as Socket,
-		attachedActiveSessionIds: new Set([activeSessionId]),
-		detachInput: vi.fn(),
-		supportsExtensionUi,
-		capabilities: new Set(supportsExtensionUi ? ["extension_ui"] : []),
 	};
 }
