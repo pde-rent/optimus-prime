@@ -2,6 +2,7 @@
  * System prompt construction and project context loading
  */
 
+import os from "node:os";
 import type { GraphResolverLevel } from "./graph-resolver.js";
 import {
 	buildChildAgentDoctrine,
@@ -111,8 +112,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			prompt += formatSkillsForPrompt(skills);
 		}
 
-		// Add date and working directory last
-		prompt += `\nCurrent date: ${date}`;
+		// Working context last. Only routing-relevant facts live here (they price every
+		// request); everything else about the host is the sysinfo tool's job, on demand.
+		const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+		const localTime = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(11, 19);
+		prompt += `\nCurrent date: ${date}, ${localTime} (${tz})`;
+		prompt += `\nSystem: ${os.platform()} ${os.arch()} - shell dialect and paths follow this`;
 		prompt += `\nCurrent working directory: ${promptCwd}`;
 
 		const childDoctrine = buildChildAgentDoctrine({
