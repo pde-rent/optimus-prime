@@ -11,7 +11,14 @@ import { withFullscreenImageFallback } from "./components/image.js";
 import { FullscreenViewport, type ScrollInfo, type SelectionScrollDirection } from "./fullscreen.js";
 import { getKeybindings } from "./keybindings.js";
 import { isKeyRelease, matchesKey } from "./keys.js";
-import { isMouseSequence, isWheelDown, isWheelUp, MOUSE_BUTTON_LEFT, parseSgrMouseEvent } from "./mouse.js";
+import {
+	isMouseSequence,
+	isWheelDown,
+	isWheelUp,
+	MOUSE_BUTTON_LEFT,
+	type MouseEvent,
+	parseSgrMouseEvent,
+} from "./mouse.js";
 import type { TableCellSelectionRegion } from "./selection-metadata.js";
 import type { Terminal } from "./terminal.js";
 import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.js";
@@ -98,6 +105,13 @@ export interface Component {
 
 	getSelectionRegions?(): ReadonlyArray<TableCellSelectionRegion>;
 
+	/**
+	 * Handle a fullscreen mouse hit at a position inside this component's
+	 * rendered output (row/col are relative to the component's own lines).
+	 * Return true to consume the event; unconsumed hits fall through to
+	 * transcript/frame selection.
+	 */
+	handleMouseHit?(phase: "press" | "drag" | "release", row: number, col: number): boolean;
 	/**
 	 * Optional handler for keyboard input when component has focus
 	 */
@@ -283,6 +297,8 @@ export interface OverlayHandle {
 export class Container implements Component {
 	children: Component[] = [];
 	private selectionRegions: TableCellSelectionRegion[] = [];
+	/** Rendered height per child from the last render(); used for mouse hit routing. */
+	private childRenderHeights: number[] = [];
 
 	addChild(component: Component): void {
 		this.children.push(component);
@@ -311,10 +327,12 @@ export class Container implements Component {
 
 	render(width: number): string[] {
 		const lines: string[] = [];
+		const heights: number[] = [];
 		const selectionRegions: TableCellSelectionRegion[] = [];
 		for (const child of this.children) {
 			const lineOffset = lines.length;
 			const childLines = child.render(width);
+			heights.push(childLines.length);
 			for (const region of child.getSelectionRegions?.() ?? []) {
 				selectionRegions.push({
 					...region,
@@ -327,8 +345,21 @@ export class Container implements Component {
 				lines.push(line);
 			}
 		}
+		this.childRenderHeights = heights;
 		this.selectionRegions = selectionRegions;
 		return lines;
+	}
+
+	handleMouseHit(phase: "press" | "drag" | "release", row: number, col: number): boolean {
+		let offset = 0;
+		for (let i = 0; i < this.children.length; i++) {
+			const height = this.childRenderHeights[i] ?? 0;
+			if (row >= offset && row < offset + height) {
+				return this.children[i]?.handleMouseHit?.(phase, row - offset, col) ?? false;
+			}
+			offset += height;
+		}
+		return false;
 	}
 
 	getSelectionRegions(): ReadonlyArray<TableCellSelectionRegion> {
@@ -871,6 +902,11 @@ export class TUI extends Container {
 		execFile(command, args, () => {});
 	}
 
+	/** Copy text to the clipboard (app hook or OSC 52 fallback). */
+	copyText(text: string): void {
+		this.copySelection(text);
+	}
+
 	private copySelection(text: string): void {
 		if (this.onCopy) {
 			this.onCopy(text);
@@ -879,6 +915,14 @@ export class TUI extends Container {
 		// fallback: OSC 52 works locally, over SSH, and through tmux (set-clipboard)
 		const base64 = Buffer.from(text, "utf8").toString("base64");
 		this.terminal.write(`\x1b]52;c;${base64}\x07`);
+	}
+	/** Route a fullscreen mouse event into the dock's focused component (editor). */
+	private routeDockMouseHit(event: MouseEvent, phase: "press" | "drag" | "release"): boolean {
+		const fullscreen = this.fullscreen;
+		if (!fullscreen) return false;
+		const dockRow = event.y - 1 - fullscreen.viewport.windowHeight();
+		if (dockRow < 0) return false;
+		return fullscreen.dock.handleMouseHit?.(phase, dockRow, event.x - 1) ?? false;
 	}
 
 	private updateSelectionAutoScroll(viewport: FullscreenViewport, screenRow: number, screenColumn: number): void {
@@ -995,9 +1039,33 @@ export class TUI extends Container {
 			if (isKeyRelease(data) && !this.focusedComponent.wantsKeyRelease) {
 				return;
 			}
+			if (this.dismissFullscreenSelection(data)) return;
 			this.focusedComponent.handleInput(data);
 			this.requestRender();
 		}
+	}
+
+	/**
+	 * Dismissal rules for a persistent fullscreen selection: escape consumes
+	 * the key and only dismisses; typing or editing keys dismiss while still
+	 * reaching the editor. Returns true when the key was consumed.
+	 */
+	private dismissFullscreenSelection(data: string): boolean {
+		const viewport = this.fullscreen?.viewport;
+		if (!viewport || !viewport.hasSelection()) return false;
+		if (matchesKey(data, "escape")) {
+			viewport.clearSelection();
+			this.requestRender();
+			return true;
+		}
+		if (TUI.isEditingKeyData(data)) viewport.clearSelection();
+		return false;
+	}
+
+	private static isEditingKeyData(data: string): boolean {
+		if (data.length === 0) return false;
+		if (data.includes("\x1b")) return matchesKey(data, "backspace") || matchesKey(data, "delete");
+		return data.charCodeAt(0) >= 32 || data === "\r" || data === "\n" || data === "\b" || data === "\x7f";
 	}
 
 	// Mouse reports are always consumed (nothing downstream understands them);
@@ -1030,26 +1098,31 @@ export class TUI extends Container {
 					this.scrollBy(TUI.WHEEL_SCROLL_LINES);
 				} else if (event.button === MOUSE_BUTTON_LEFT && event.press && !event.motion) {
 					this.stopSelectionAutoScroll();
-					if (!viewport.beginSelection(event.y - 1, event.x - 1)) {
+					if (this.routeDockMouseHit(event, "press")) {
+						// New click on the editor dismisses a persistent selection.
+						viewport.clearSelection();
+					} else if (!viewport.beginSelection(event.y - 1, event.x - 1)) {
 						viewport.beginFrameSelection(event.y - 1, event.x - 1);
 					}
 					this.requestRender();
 				} else if (event.button === MOUSE_BUTTON_LEFT && event.press && event.motion) {
-					viewport.extendActiveSelection(event.y - 1, event.x - 1);
-					this.updateSelectionAutoScroll(viewport, event.y - 1, event.x - 1);
-					this.requestRender();
-				} else if (!event.press && viewport.hasSelection()) {
-					this.stopSelectionAutoScroll();
-					const text = viewport.endActiveSelection();
-					if (text) this.copySelection(text);
+					if (!this.routeDockMouseHit(event, "drag")) {
+						viewport.extendActiveSelection(event.y - 1, event.x - 1);
+						this.updateSelectionAutoScroll(viewport, event.y - 1, event.x - 1);
+					}
 					this.requestRender();
 				} else if (!event.press) {
 					this.stopSelectionAutoScroll();
-					viewport.clearSelection();
-					if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
+					if (this.routeDockMouseHit(event, "release")) {
+						// Editor selection copies itself and stays persistent.
+					} else if (viewport.hasSelection()) {
+						const text = viewport.endActiveSelection();
+						if (text) this.copySelection(text);
+					} else if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
 						const url = this.fullscreenPressedHyperlink ?? viewport.hyperlinkAt(event.y - 1, event.x - 1);
 						if (url) this.openHyperlink(url);
 					}
+					this.requestRender();
 				}
 			} else if (event && overlayFocused) {
 				this.stopSelectionAutoScroll();
@@ -1062,16 +1135,15 @@ export class TUI extends Container {
 				} else if (event.button === MOUSE_BUTTON_LEFT && event.press && event.motion) {
 					viewport.extendActiveSelection(event.y - 1, event.x - 1);
 					this.requestRender();
-				} else if (!event.press && viewport.hasSelection()) {
-					const text = viewport.endActiveSelection();
-					if (text) this.copySelection(text);
-					this.requestRender();
 				} else if (!event.press) {
-					viewport.clearSelection();
-					if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
+					if (viewport.hasSelection()) {
+						const text = viewport.endActiveSelection();
+						if (text) this.copySelection(text);
+					} else if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
 						const url = this.fullscreenPressedHyperlink ?? viewport.hyperlinkAt(event.y - 1, event.x - 1);
 						if (url) this.openHyperlink(url);
 					}
+					this.requestRender();
 				}
 			}
 			if (event?.button === MOUSE_BUTTON_LEFT && !event.press) {

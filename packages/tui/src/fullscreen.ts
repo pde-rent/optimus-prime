@@ -90,7 +90,8 @@ export class FullscreenViewport {
 	private selectionAnchor: SelectionPoint | null = null;
 	private selectionHead: SelectionPoint | null = null;
 	private selectionMode: SelectionMode | null = null;
-
+	/** True between mouse press and release while a selection is dragged. */
+	private selectionDragging = false;
 	/**
 	 * Compose a frame of exactly `height` lines: scrolled transcript window on
 	 * top, dock pinned to the bottom. Following pins the window to the
@@ -182,6 +183,7 @@ export class FullscreenViewport {
 			this.activeTableSelection = null;
 			this.selectionMode = "transcript";
 		}
+		this.selectionDragging = true;
 		return true;
 	}
 
@@ -226,20 +228,21 @@ export class FullscreenViewport {
 		return true;
 	}
 
-	/** Finish the selection and return its plain text (null when empty). */
+	/** Finish an active drag and return its plain text (null when empty).
+	 * The selection stays persistent so the highlight survives mouse release;
+	 * dismissal happens via clearSelection() from new clicks, typing, or escape.
+	 */
 	endSelection(): string | null {
 		if (this.selectionMode !== "transcript" && this.selectionMode !== "table") {
 			this.clearSelection();
 			return null;
 		}
+		this.selectionDragging = false;
 		const sel = this.orderedSelection();
-		const text = sel
-			? this.selectionMode === "table"
-				? this.extractTableSelectionText(this.lastTranscript, sel)
-				: this.extractSelectionText(this.lastTranscript, sel)
-			: null;
-		this.clearSelection();
-		return text;
+		if (!sel) return null;
+		return this.selectionMode === "table"
+			? this.extractTableSelectionText(this.lastTranscript, sel)
+			: this.extractSelectionText(this.lastTranscript, sel);
 	}
 
 	extendActiveSelection(screenRow: number, screenCol: number): void {
@@ -270,6 +273,16 @@ export class FullscreenViewport {
 		if (this.selectionMode !== "frame") return;
 		const sel = this.orderedSelection();
 		if (!sel) return;
+		if (!this.selectionDragging) {
+			// Released selection: re-anchor to the live frame each render so the
+			// persistent highlight tracks dock/overlay content changes.
+			this.activeFrameSelection = {
+				frame: [...frame],
+				regions: selectableRegions.map((region) => ({ ...region })),
+				visibleStart: this.lastFrameVisibleStart,
+				visibleHeight: this.lastFrameVisibleHeight,
+			};
+		}
 		for (let lineIndex = sel.start.line; lineIndex <= sel.end.line; lineIndex++) {
 			let line = frame[lineIndex];
 			if (line === undefined) continue;
@@ -296,6 +309,7 @@ export class FullscreenViewport {
 		this.selectionAnchor = point;
 		this.selectionHead = { ...point };
 		this.selectionMode = "frame";
+		this.selectionDragging = true;
 		return true;
 	}
 
@@ -313,12 +327,12 @@ export class FullscreenViewport {
 			this.clearSelection();
 			return null;
 		}
+		this.selectionDragging = false;
 		const sel = this.orderedSelection();
+		if (!sel) return null;
 		const active = this.activeFrameSelection;
 		const sourceLines = active?.frame ?? this.lastFrame;
 		const regions = active?.regions ?? this.frameSelectionRegions;
-		this.clearSelection();
-		if (!sel) return null;
 		return this.extractFrameSelectionText(sourceLines, regions, sel);
 	}
 
@@ -617,10 +631,16 @@ export class FullscreenViewport {
 		this.selectionMode = null;
 		this.activeFrameSelection = null;
 		this.activeTableSelection = null;
+		this.selectionDragging = false;
 	}
 
 	hasSelection(): boolean {
 		return this.orderedSelection() !== null;
+	}
+
+	/** True while a mouse press-drag cycle owns the selection (copy on release). */
+	isSelecting(): boolean {
+		return this.selectionDragging;
 	}
 
 	/**

@@ -310,4 +310,20 @@ describe("CustomEditor", () => {
 
 		expect(editor.render(40)).toEqual(withoutCallback);
 	});
+
+	it("Delete deletes a keyboard-selected range (editor selection)", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+		editor.focused = true;
+		editor.setText("hello world");
+		editor.handleInput("\x01"); // ctrl+a: cursor to line start
+		editor.handleInput("\x1b[c"); // shift+right
+		editor.handleInput("\x1b[c"); // select "he"
+		expect(editor.hasSelection()).toBe(true);
+		expect(editor.getSelectedText()).toBe("he");
+
+		editor.handleInput("\x1b[3~"); // Delete
+
+		expect(editor.getText()).toBe("llo world");
+		expect(editor.hasSelection()).toBe(false);
+	});
 });
