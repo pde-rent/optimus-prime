@@ -99,8 +99,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		}
 
 		// Append skills section only when the model has a way to inspect skill files.
+		// The skill tool alone is enough: it returns SKILL.md content directly.
 		const customPromptHasFileAccess =
-			!selectedTools || selectedTools.includes("repl") || selectedTools.includes("bash");
+			!selectedTools ||
+			selectedTools.includes("repl") ||
+			selectedTools.includes("bash") ||
+			selectedTools.includes("skill");
 		if (customPromptHasFileAccess && skills.length > 0) {
 			prompt += formatSkillsForPrompt(skills);
 		}
@@ -172,7 +176,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 
 	// Append skills section only when the model has a way to inspect skill files.
-	const hasFileAccess = tools.includes("repl") || tools.includes("bash");
+	const hasFileAccess = tools.includes("repl") || tools.includes("bash") || tools.includes("skill");
 	if (hasFileAccess && skills.length > 0) {
 		prompt += formatSkillsForPrompt(skills);
 	}

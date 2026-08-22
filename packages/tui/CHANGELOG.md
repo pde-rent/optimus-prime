@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Fixed empty bracketed pastes being silently dropped by `Editor`: they now reach `handlePaste`, where subclasses can interpret them (e.g. clipboard image paste); the base editor ignores them as before.
 - Exported `SPINNER_FRAMES` from the `Loader` module so non-component surfaces can reuse the canonical braille spinner.
 
 - Added a shared ~125ms animation ticker on `TUI` (`onAnimationTick`); `Loader` animates from it instead of running its own interval per spinner.
