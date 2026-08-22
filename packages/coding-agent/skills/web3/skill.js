@@ -1,6 +1,7 @@
 /**
- * Web3: one binding over the three questions a chain wallet actually raises - what does this
- * node say, what does this wallet hold, and what is this chain or protocol worth.
+ * Web3: one binding over the four questions a chain actually raises - what does this node
+ * say, what does this wallet hold, what is this chain worth now and before, and what happened
+ * on it in deep history (HyperSync).
  *
  * They were three skills. Merging them is a prompt-budget decision and a routing one. Budget:
  * the roster bills one summary line per skill on every request, so three descriptions cost
@@ -9,7 +10,7 @@
  * a contract read to fill in what the portfolio API could not name - and a model that has to
  * discover three separate skills to answer it will stop after the first.
  *
- * THE NAMESPACE IS NESTED, NOT FLAT. `web3.rpc.*`, `web3.portfolio.*`, `web3.defi.*`, with
+ * THE NAMESPACE IS NESTED, NOT FLAT. `web3.rpc.*`, `web3.portfolio.*`, `web3.defi.*`, `web3.hypersync.*`, with
  * nothing hoisted to the top level. Three reasons, in order of weight:
  *
  *   1. The vocabularies collide. "Chain" means an EVM id to `rpc.pick` and a DefiLlama chain
@@ -24,15 +25,16 @@
  *      because the module that raised it is still `rpc`.
  *
  * The cost is five keystrokes per call and one extra hop of recall, against `Object.keys(web3)`
- * being three names a model can hold rather than sixteen from three vocabularies.
+ * being four names a model can hold rather than twenty from four vocabularies.
  *
  * Each subsystem stays in its own module. They share no state and no fetch layer - `rpc` speaks
- * JSON-RPC to nodes, `portfolio` and `defi` speak HTTP GET to third-party services with their
- * own caches and their own error conventions - so a single file would only have made 1700 lines
- * that never call each other look like they might.
+ * JSON-RPC to nodes, `portfolio`, `defi`, and `hypersync` speak HTTP to third-party services
+ * with their own caches, keys, and error conventions - so a single file would only have made
+ * thousands of lines that never call each other look like they might.
  */
 
 import { createDefi } from "./defi.js";
+import { createHypersync } from "./hypersync.js";
 import { createPortfolio } from "./portfolio.js";
 import { createRpc } from "./rpc.js";
 
@@ -41,5 +43,6 @@ export default function createSkill() {
 		rpc: createRpc(),
 		portfolio: createPortfolio(),
 		defi: createDefi(),
+		hypersync: createHypersync(),
 	};
 }

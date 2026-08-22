@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 // @ts-expect-error - bundled skills are plain JS with JSDoc types, no .d.ts
 import * as defiModule from "../skills/web3/defi.js";
 // @ts-expect-error - bundled skills are plain JS with JSDoc types, no .d.ts
+import * as hypersyncModule from "../skills/web3/hypersync.js";
+// @ts-expect-error - bundled skills are plain JS with JSDoc types, no .d.ts
 import * as portfolioModule from "../skills/web3/portfolio.js";
 // @ts-expect-error - bundled skills are plain JS with JSDoc types, no .d.ts
 import * as rpcModule from "../skills/web3/rpc.js";
@@ -19,12 +21,13 @@ import * as web3Skill from "../skills/web3/skill.js";
 describe("web3 binding", () => {
 	const web3 = web3Skill.default();
 
-	it("composes exactly the three documented subsystems", () => {
-		expect(Object.keys(web3).sort()).toEqual(["defi", "portfolio", "rpc"]);
+	it("composes exactly the four documented subsystems", () => {
+		expect(Object.keys(web3).sort()).toEqual(["defi", "hypersync", "portfolio", "rpc"]);
 	});
 
 	it("binds each subsystem to its own module factory", () => {
 		expect(Object.keys(web3.rpc).sort()).toEqual(Object.keys(rpcModule.createRpc()).sort());
+		expect(Object.keys(web3.hypersync).sort()).toEqual(Object.keys(hypersyncModule.createHypersync()).sort());
 		expect(Object.keys(web3.portfolio).sort()).toEqual(Object.keys(portfolioModule.createPortfolio()).sort());
 		expect(Object.keys(web3.defi).sort()).toEqual(Object.keys(defiModule.createDefi()).sort());
 	});
@@ -2208,5 +2211,242 @@ describe("web3.defi", () => {
 			expect([...(chainAliases(LLAMA_CHAINS, "BSC") ?? [])]).toEqual(["bsc", "binance"]);
 			expect(chainAliases(LLAMA_CHAINS, "nope")).toBeNull();
 		});
+	});
+});
+
+describe("web3.hypersync", () => {
+	const { createHypersync, clearHypersyncCache, candidateChains } = hypersyncModule;
+
+	type ErrorValue = { error: string; status?: number };
+	type LogRow = { block_number: number; address?: string; topic0?: string; data?: string; transaction_hash?: string };
+
+	const hs = createHypersync();
+	const realFetch = globalThis.fetch;
+	const realKey = process.env.HYPERSYNC_API_KEY;
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+		clearHypersyncCache();
+		if (realKey === undefined) delete process.env.HYPERSYNC_API_KEY;
+		else process.env.HYPERSYNC_API_KEY = realKey;
+	});
+
+	/** Stub `fetch`, recording every request. No test here touches the network. */
+	function stubFetch(handler: (url: string, body: any, init?: RequestInit) => unknown) {
+		const calls: { url: string; body: any; init?: RequestInit }[] = [];
+		globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+			const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+			calls.push({ url: String(url), body, init });
+			return handler(String(url), body, init);
+		}) as unknown as typeof fetch;
+		return calls;
+	}
+
+	function httpResponse(body: unknown, { status = 200 } = {}) {
+		return {
+			ok: status >= 200 && status < 300,
+			status,
+			headers: new Headers(),
+			json: async () => body,
+			text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+		};
+	}
+
+	/** One `/query` page in the NESTED wire shape: rows under `data[0].logs`, never top-level. */
+	function page(logs: LogRow[], next_block: number | null, archive_height = 9_999_999) {
+		return httpResponse({ data: [{ logs }], next_block, archive_height });
+	}
+
+	function row(i: number): LogRow {
+		return { block_number: 100 + i, address: "0xa", topic0: "0xt", data: "0x", transaction_hash: `0x${i}` };
+	}
+
+	it("returns a missing-key error value without touching the network", async () => {
+		delete process.env.HYPERSYNC_API_KEY;
+		const calls = stubFetch(() => httpResponse({}));
+		for (const out of [
+			await hs.height("eth"),
+			await hs.chains(),
+			await hs.logs("eth", { fromBlock: 0 }),
+			await hs.query("eth", {}),
+		]) {
+			expect((out as ErrorValue).error).toContain("HYPERSYNC_API_KEY");
+		}
+		expect(calls).toHaveLength(0);
+	});
+
+	it("flattens rows out of the nested data[i].logs envelope", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		stubFetch(() => page([row(0), row(1)], null, 5_000_000));
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+
+		expect(out.rows).toHaveLength(2);
+		expect(out.rows[0].block_number).toBe(100);
+		expect(out.complete).toBe(true);
+		expect(out.nextBlock).toBeNull();
+		expect(out.archiveHeight).toBe(5_000_000);
+		expect(out.queries).toBe(1);
+	});
+
+	it("paginates on next_block until the range completes", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch((_url, body) =>
+			body.from_block === 0 ? page([row(0)], 200) : page([row(1), row(2)], null),
+		);
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+
+		expect(calls).toHaveLength(2);
+		expect(calls[1].body.from_block).toBe(200);
+		expect(out.rows).toHaveLength(3);
+		expect(out.complete).toBe(true);
+		expect(out.queries).toBe(2);
+	});
+
+	it("stops at the maxRows budget and hands back the cursor to resume from", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		stubFetch((_url, body) => page([row(body.from_block), row(body.from_block + 1)], body.from_block + 100));
+		const out = (await hs.logs("eth", { fromBlock: 0, maxRows: 3 })) as any;
+
+		// Two pages of 2 rows overshoot the budget of 3 - the server completes block groups.
+		expect(out.rows).toHaveLength(4);
+		expect(out.complete).toBe(false);
+		expect(out.nextBlock).toBe(200);
+	});
+
+	it("treats to_block as exclusive", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch(() => page([row(0)], 2_000_000));
+		const out = (await hs.logs("eth", { fromBlock: 0, toBlock: 2_000_000 })) as any;
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0].body.to_block).toBe(2_000_000);
+		expect(out.complete).toBe(true);
+	});
+
+	it("builds a flat topic0..3 field selection and never a topics array", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch(() => page([], null));
+		await hs.logs("eth", {
+			fromBlock: 10,
+			address: "0xABC",
+			topic0: "0xSIG",
+			topic1: "0xP1",
+			topic2: "0xP2",
+			topic3: "0xP3",
+		});
+		const body = calls[0].body;
+
+		expect(body.from_block).toBe(10);
+		expect(body.max_num_rows).toBe(5000);
+		expect(body.field_selection.log).toEqual([
+			"block_number",
+			"address",
+			"topic0",
+			"topic1",
+			"topic2",
+			"topic3",
+			"data",
+			"transaction_hash",
+		]);
+		expect(body.field_selection.block).toEqual(["number", "timestamp"]);
+		expect(body.logs[0].address).toEqual(["0xabc"]);
+		expect(body.logs[0].topic0).toEqual(["0xsig"]);
+		expect(body.logs[0].topic3).toEqual(["0xp3"]);
+		expect(JSON.stringify(body)).not.toContain('"topics"');
+		expect(calls[0].init?.headers && (calls[0].init.headers as Record<string, string>).Authorization).toBe(
+			"Bearer k",
+		);
+	});
+
+	it("accepts filter arrays and batches multiple selections into ONE body", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch(() => page([], null));
+		await hs.logs("eth", {
+			fromBlock: 0,
+			selections: [{ address: "0xa", topic0: "0xs0" }, { address: ["0xb", "0xc"] }],
+		});
+
+		expect(calls[0].body.logs).toHaveLength(2);
+		expect(calls[0].body.logs[1].address).toEqual(["0xb", "0xc"]);
+	});
+
+	it("returns HTTP failures as {error, status} values that never carry the key", async () => {
+		process.env.HYPERSYNC_API_KEY = "sekrit";
+		stubFetch(() => httpResponse("quota exceeded", { status: 429 }));
+		const out = (await hs.query("eth", { from_block: 0 })) as ErrorValue;
+
+		expect(out.status).toBe(429);
+		expect(out.error).toContain("429");
+		expect(out.error).toContain("quota exceeded");
+		expect(out.error).not.toContain("sekrit");
+	});
+
+	it("returns a mid-scan failure with the rows already collected and the resume cursor", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		stubFetch((_url, body) => (body.from_block === 0 ? page([row(0)], 500) : httpResponse("boom", { status: 500 })));
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+
+		expect(out.error).toContain("500");
+		expect(out.rows).toHaveLength(1);
+		expect(out.nextBlock).toBe(500);
+	});
+
+	it("height returns the number and query passes the response through verbatim", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch((url) =>
+			url.endsWith("/height") ? httpResponse({ height: 1_234_567 }) : page([row(0)], null),
+		);
+
+		expect(await hs.height("base")).toBe(1_234_567);
+		expect(calls[0].init?.method).toBe("GET");
+		const out = (await hs.query("base", { from_block: 1 })) as any;
+		expect(out.next_block).toBeNull();
+		expect(out.data[0].logs).toHaveLength(1);
+		expect(calls[1].init?.method).toBe("POST");
+	});
+
+	it("chains() probes candidates via /height, memoises, and refreshes on demand", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		const calls = stubFetch((url) =>
+			url.includes("bb.hypersync") || url.includes("cc.hypersync")
+				? httpResponse({ height: 1 })
+				: httpResponse("nope", { status: 404 }),
+		);
+
+		expect(await hs.chains({ candidates: ["aa", "bb", "cc"] })).toEqual(["bb", "cc"]);
+		expect(calls).toHaveLength(3);
+		// Memoised: the second call costs no round trip; refresh re-probes.
+		await hs.chains({ candidates: ["aa", "bb", "cc"] });
+		expect(calls).toHaveLength(3);
+		await hs.chains({ candidates: ["aa", "bb", "cc"], refresh: true });
+		expect(calls).toHaveLength(6);
+	});
+
+	it("chains() returns an error value when nothing answers", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		stubFetch(() => httpResponse("unreachable", { status: 503 }));
+		const out = (await hs.chains({ candidates: ["aa", "bb"] })) as ErrorValue;
+
+		expect(out.error).toContain("none of 2");
+	});
+
+	it("ships a non-empty curated candidate list", () => {
+		expect(candidateChains.length).toBeGreaterThan(20);
+		expect(candidateChains).toContain("eth");
+		expect(candidateChains).toContain("base");
+	});
+
+	it("throws TypeError on caller bugs", async () => {
+		process.env.HYPERSYNC_API_KEY = "k";
+		expect(() => hs.height("")).toThrow(TypeError);
+		expect(() => hs.height("https://evil.example")).toThrow(TypeError);
+		expect(() => hs.logs("eth", { fromBlock: -1 })).toThrow(TypeError);
+		expect(() => hs.logs("eth", { fromBlock: 10, toBlock: 10 })).toThrow(TypeError);
+		expect(() => hs.logs("eth", { fromBlock: 0, topic0: 5 as unknown as string })).toThrow(TypeError);
+		// These validate inside the async method, so they surface as rejections.
+		await expect(hs.logs("eth", { fromBlock: "0" as unknown as number })).rejects.toThrow(TypeError);
+		await expect(hs.query("eth", [1, 2] as unknown as object)).rejects.toThrow(TypeError);
+		await expect(hs.query("eth", "nope" as unknown as object)).rejects.toThrow(TypeError);
+		await expect(hs.query("eth", "nope" as unknown as object)).rejects.toThrow(TypeError);
 	});
 });

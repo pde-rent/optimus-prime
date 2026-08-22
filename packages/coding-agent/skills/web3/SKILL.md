@@ -1,22 +1,23 @@
 ---
 name: web3
-summary: Chain RPC + wallet balances - use for ANY EVM/Solana call instead of curl/cast
-description: Chain RPC, wallet balances and DeFi analytics for EVM, Solana and Tron. One binding, nested - `web3.rpc` is JSON-RPC 2.0 to any node with live endpoint discovery and transparent failover (`.call`, `.batch` for N calls in ONE round trip, `.pick`, `.endpoints`, `.tron` REST, exact BigInt unit helpers); `web3.portfolio.balances(addr)` -> priced token rows sorted by `valueUsd`; `web3.defi` -> DefiLlama TVL and GeckoTerminal DEX volume, by chain or protocol, history opt-in. Failures -> `{error, status?}`; bad args throw TypeError.
+summary: Chain RPC, balances, DeFi analytics - and deep EVM history via HyperSync - instead of curl/cast
+description: Chain RPC, wallet balances and DeFi analytics for EVM, Solana and Tron. One binding, nested - `web3.rpc` is JSON-RPC 2.0 to any node with live endpoint discovery and transparent failover (`.call`, `.batch` for N calls in ONE round trip, `.pick`, `.endpoints`, `.tron` REST, exact BigInt unit helpers); `web3.portfolio.balances(addr)` -> priced token rows sorted by `valueUsd`; `web3.defi` -> DefiLlama TVL and GeckoTerminal DEX volume, by chain or protocol, history opt-in; `web3.hypersync` -> Envio HyperSync deep-history logs/events with automatic `next_block` pagination (NOT for latest-state reads). Failures -> `{error, status?}`; bad args throw TypeError.
 ---
 
 # Web3
 
-Three subsystems under one binding, because "what is this wallet worth" is not three questions.
+Four subsystems under one binding, because "what is this wallet worth" is not three questions.
 
 | `Object.keys(web3)` | answers | full contract |
 |---|---|---|
 | `web3.rpc` | what does a node say - any JSON-RPC method on any EVM chain, Solana, Tron, Bitcoin | [references/rpc.md](references/rpc.md) |
 | `web3.portfolio` | what does one wallet hold, priced | [references/portfolio.md](references/portfolio.md) |
 | `web3.defi` | what is a chain or protocol worth, now and before | [references/defi.md](references/defi.md) |
+| `web3.hypersync` | what happened on a chain in DEEP history - logs/events past RPC range caps | [references/hypersync.md](references/hypersync.md) |
 
 **Read the reference for the subsystem you are about to use.** The table below is enough to make
 the call; the reference carries the option defaults, the observed field drift, and the failure
-modes each upstream actually has. All three are live third-party sources and all three lie
+modes each upstream actually has. All four are live third-party sources and all four lie
 occasionally in documented ways.
 
 ## The namespace is nested on purpose
@@ -98,6 +99,32 @@ always DefiLlama's; `volume24h` is always GeckoTerminal's. No crossover, no fall
 seam, so the field name is the provenance and no row carries a source tag. Quote a number against
 the source the field name names.
 
+### `web3.hypersync` - deep history
+
+| Call | Returns |
+|---|---|
+| `await web3.hypersync.logs(chain, opts)` | `{rows, nextBlock, archiveHeight, complete, queries}`, or `{error}` |
+| `await web3.hypersync.height(chain, opts?)` | latest indexed block as a number |
+| `await web3.hypersync.chains(opts?)` | slugs that answered a live probe, memoised for the session |
+| `await web3.hypersync.query(chain, body, opts?)` | the raw `/query` response, verbatim |
+
+`opts`: `{fromBlock, toBlock (EXCLUSIVE), address?, topic0..topic3? (string or string[]),
+selections? (batch several filters into ONE body), maxRows (=5000), timeout (=30)}`. Needs
+`HYPERSYNC_API_KEY` in the environment; the key value is never printed.
+
+**Routing: deep history comes here, latest state does not.** Governance event archaeology,
+transfer scans, indexer rebuilds, any `eth_getLogs` that hit "requested range too large" or a
+pruned node - `logs()` paginates `next_block` internally, so a million-block scan is one call.
+A latest-state read stays on `web3.rpc.call`: one `eth_call` needs no key and wins on latency,
+and HyperSync is never the cheaper single read.
+
+**Rate-limit and batching practice:** set the row budget explicitly (`maxRows`) rather than
+leaving `max_num_rows` implicit; batch multiple filters into one request with `selections`
+instead of firing one query per filter; paginate via `next_block` instead of widening ranges.
+The server may slightly overshoot `maxRows` to finish a block group, so slice before trusting
+an exact count. Rows arrive flattened from their nested `data[i].logs` envelope, which no
+caller should have to know about - unless it uses `query()`, which returns everything verbatim.
+
 ## Errors, uniformly
 
 Every subsystem follows the same rule, which is the `websearch` convention:
@@ -160,6 +187,6 @@ you, so nothing here needs a `.rename`.
 
 ## Not this skill
 
-No ABI encoding, no signing, no key handling, no prices for arbitrary tokens, no pools, no swap
-routing, no yields. `web3.rpc.call` sends whatever method you compose, including a pre-signed
+No ABI encoding, no signing, no key management (hypersync only reads `HYPERSYNC_API_KEY` from
+the environment), no prices for arbitrary tokens, no pools, no swap routing, no yields. `web3.rpc.call` sends whatever method you compose, including a pre-signed
 `eth_sendRawTransaction`, but nothing here builds or signs one.
