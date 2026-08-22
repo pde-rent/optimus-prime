@@ -29,11 +29,28 @@ export const defaultIdleReapClock: IdleReapClock = {
  * still remaining since the last touch, so a timer armed late (event-loop delay, a cell
  * that ended while the arm was queued) never waits longer than the configured timeout.
  */
+const PRESSURE_POLL_INTERVAL_MS = 15_000;
+
 export class IdleReapScheduler {
 	private handle: unknown;
 	private lastActivityAt: number;
+	private pressureHandle: unknown;
 
-	constructor(private readonly options: { timeoutMs: number; clock: IdleReapClock; onExpire: () => void }) {
+	constructor(
+		private readonly options: {
+			timeoutMs: number;
+			clock: IdleReapClock;
+			onExpire: () => void;
+			/**
+			 * When set, an idle kernel whose sampled RSS exceeds this many bytes is
+			 * reaped before the idle timeout elapses: a kernel that once peaked at
+			 * hundreds of MB keeps that RSS while idle, and several such kernels
+			 * add up to real memory pressure. Sampled at most once per interval.
+			 */
+			pressureBytes?: number;
+			sampleRss?: () => number | undefined;
+		},
+	) {
 		this.lastActivityAt = options.clock.now();
 	}
 
@@ -44,6 +61,7 @@ export class IdleReapScheduler {
 	/** Activity resumed (a cell is starting): reset the timestamp and cancel any pending reap. */
 	touch(): void {
 		this.lastActivityAt = this.options.clock.now();
+		this.disarmPressure();
 		this.disarm();
 	}
 
@@ -56,12 +74,37 @@ export class IdleReapScheduler {
 			this.handle = undefined;
 			this.options.onExpire();
 		}, remaining);
+		this.armPressure();
 	}
 
 	disarm(): void {
 		if (this.handle === undefined) return;
 		this.options.clock.clearTimeout(this.handle);
 		this.handle = undefined;
+		this.disarmPressure();
+	}
+
+	/** While idle, poll RSS at a slow cadence and reap early on pressure. */
+	private armPressure(): void {
+		const { pressureBytes, sampleRss } = this.options;
+		if (pressureBytes === undefined || sampleRss === undefined || this.pressureHandle !== undefined) return;
+		const poll = (): void => {
+			const rss = sampleRss();
+			if (rss !== undefined && rss >= pressureBytes) {
+				this.disarmPressure();
+				this.disarm();
+				this.options.onExpire();
+				return;
+			}
+			this.pressureHandle = this.options.clock.setTimeout(poll, PRESSURE_POLL_INTERVAL_MS);
+		};
+		this.pressureHandle = this.options.clock.setTimeout(poll, PRESSURE_POLL_INTERVAL_MS);
+	}
+
+	private disarmPressure(): void {
+		if (this.pressureHandle === undefined) return;
+		this.options.clock.clearTimeout(this.pressureHandle);
+		this.pressureHandle = undefined;
 	}
 }
 
@@ -88,6 +131,8 @@ export interface BunReplProvisionerOptions {
 	 * one there is nothing to restore from, so disposal would silently destroy state.
 	 */
 	idleTimeoutMs?: number;
+	/** Reap an idle kernel early when its RSS exceeds this many bytes. 0/undefined disables. */
+	pressureReapBytes?: number;
 	/** Injectable clock/timers for tests. */
 	clock?: IdleReapClock;
 }
@@ -107,6 +152,11 @@ export class BunReplProvisioner {
 			timeoutMs: options.snapshotDir ? timeoutMs : 0,
 			clock: options.clock ?? defaultIdleReapClock,
 			onExpire: () => void this.reapIdleKernel(),
+			pressureBytes:
+				options.snapshotDir && options.pressureReapBytes && options.pressureReapBytes > 0
+					? options.pressureReapBytes
+					: undefined,
+			sampleRss: () => this.startedManager?.childRssBytes(),
 		});
 	}
 

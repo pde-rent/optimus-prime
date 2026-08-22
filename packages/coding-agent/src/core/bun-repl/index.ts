@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -1047,6 +1047,19 @@ export class BunReplManager {
 	/** Tail of the child's stderr, for surfacing why a REPL failed to start. */
 	get childStderr(): string {
 		return this._childStderr;
+	}
+
+	/** Resident size of the kernel child process in bytes; undefined when not running or unreadable. */
+	childRssBytes(): number | undefined {
+		const pid = this._child?.pid;
+		if (!pid || !this.isRunning) return undefined;
+		try {
+			const out = spawnSync("ps", ["-o", "rss=", "-p", String(pid)], { stdio: "pipe" });
+			const kb = Number.parseInt(out.stdout.toString().trim(), 10);
+			return Number.isFinite(kb) && kb > 0 ? kb * 1024 : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	private _scheduleAutoSnapshot(): void {

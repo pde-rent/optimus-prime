@@ -6,6 +6,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverLevel } from "./graph-resolver.js";
+import type { MaxRunningAgentsSetting } from "./resources/agent-admission.js";
 
 const RECENT_MODELS_LIMIT = 20;
 export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
@@ -164,6 +165,8 @@ export interface Settings {
 	reasoningLoopGuard?: boolean;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
+	/** Cap on concurrently running rlm subagents. "auto" sizes it from a live memory sample; a number pins it (kill-switch). default: "auto" */
+	maxRunningAgents?: MaxRunningAgentsSetting;
 	/** Multi-agent graph budget dial. "off" keeps the single-agent path. default: "off" */
 	graphResolver?: GraphResolverLevel;
 	/** Clamp on the level ceiling. Only ever lowers it; it cannot raise a level past its budget. */
@@ -171,6 +174,8 @@ export interface Settings {
 	idleEvictionMinutes?: number | "off"; // global daemon policy; default: 90
 	/** Minutes a Bun REPL kernel may sit idle before it is disposed (snapshot-restored on next use). "off" keeps the kernel forever. default: 10 */
 	replIdleTimeoutMinutes?: number | "off";
+	/** Reap an idle REPL kernel early once its RSS exceeds this many MB. 0 disables. default: 512 */
+	replPressureReapMb?: number;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -869,6 +874,23 @@ export class SettingsManager {
 	}
 
 	/**
+	 * Cap on concurrently running rlm subagents. A number pins the cap and skips memory
+	 * sampling entirely (kill-switch); "auto" sizes it from a live sample at admission time.
+	 */
+	getMaxRunningAgents(): MaxRunningAgentsSetting {
+		const value: unknown = this.settings.maxRunningAgents;
+		if (typeof value === "number" && Number.isInteger(value) && value >= 1) return value;
+		return "auto";
+	}
+
+	setMaxRunningAgents(value: MaxRunningAgentsSetting): void {
+		if (value !== "auto" && !(typeof value === "number" && Number.isInteger(value) && value >= 1)) {
+			throw new Error('maxRunningAgents must be "auto" or a positive integer');
+		}
+		this.setGlobalField("maxRunningAgents", value);
+	}
+
+	/**
 	 * Graph budget dial. Env wins over the settings file so a run can be escalated without
 	 * editing configuration, mirroring how `RLM_MAX_DEPTH` behaves.
 	 */
@@ -903,6 +925,11 @@ export class SettingsManager {
 			throw new Error("Idle eviction minutes must be a positive number or off");
 		}
 		this.setGlobalField("idleEvictionMinutes", value);
+	}
+
+	getReplPressureReapMb(): number {
+		const value = this.settings.replPressureReapMb;
+		return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 512;
 	}
 
 	getReplIdleTimeoutMinutes(): number | "off" {

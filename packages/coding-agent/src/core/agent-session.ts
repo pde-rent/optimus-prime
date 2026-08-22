@@ -91,7 +91,6 @@ import {
 	setAutonomousEnabled,
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
-
 import {
 	expandInjectionRefs,
 	type InjectionRefSite,
@@ -272,6 +271,7 @@ import {
 } from "./session-manager.js";
 import type { SessionStats } from "./session-stats.js";
 import type { SettingsManager } from "./settings-manager.js";
+import { buildSkillBlock } from "./skill-blocks.js";
 import { getJsSkillRuntimeInfo, type Skill } from "./skills.js";
 import {
 	parseCompactCommandOptions,
@@ -4912,7 +4912,7 @@ export class AgentSession {
 		try {
 			const content = readFileSync(skill.filePath, "utf-8");
 			const body = stripFrontmatter(content).trim();
-			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+			const skillBlock = buildSkillBlock(skill, body);
 			return args ? `${skillBlock}\n\n${args}` : skillBlock;
 		} catch (err) {
 			this._extensionRunner.emitError({
@@ -9062,6 +9062,10 @@ export class AgentSession {
 				onLateSentAgentMessage: (toolCallId, message) => this._recordLateReplSentAgentMessage(toolCallId, message),
 			});
 			configuredBaseToolDefinitions = createAllToolDefinitions(this._cwd, {
+				skill: {
+					// Live provider, resolved per call so /reload picks up new skills.
+					getSkills: () => this._resourceLoader.getSkills().skills,
+				},
 				repl: {
 					provisioner: this._replKernelProvisioner,
 					cwd: this._cwd,
