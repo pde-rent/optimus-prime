@@ -62,7 +62,7 @@ optimus
 | xAI | `XAI_API_KEY` | `xai` |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
 | Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `vercel-ai-gateway` |
-| ZAI | `ZAI_API_KEY` | `zai` |
+| Z.ai (GLM Coding Plan) | `ZAI_API_KEY` | `zai` |
 | OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
 | OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
 | Hugging Face | `HF_TOKEN` | `huggingface` |
@@ -72,6 +72,15 @@ optimus
 | MiniMax (China) | `MINIMAX_CN_API_KEY` | `minimax-cn` |
 | Xiaomi MiMo | `XIAOMI_API_KEY` | `xiaomi` |
 | Xiaomi MiMo Token Plan (China) | `XIAOMI_TOKEN_PLAN_CN_API_KEY` | `xiaomi-token-plan-cn` |
+| NVIDIA NIM | `NVIDIA_API_KEY` | `nvidia` |
+| Alibaba Qwen Coding Plan | `ALIBABA_CODING_PLAN_API_KEY` | `alibaba-coding-plan` |
+| Alibaba Qwen Coding Plan (China) | `ALIBABA_CODING_PLAN_API_KEY` | `alibaba-coding-plan-cn` |
+| Zhipu GLM Coding Plan (China) | `ZHIPU_API_KEY` | `zhipuai-coding-plan` |
+| Tencent Coding Plan | `TENCENT_CODING_PLAN_API_KEY` | `tencent-coding-plan` |
+| SiliconFlow | `SILICONFLOW_API_KEY` | `siliconflow` |
+| Together AI | `TOGETHER_API_KEY` | `togetherai` |
+| Nous Portal | `NOUS_API_KEY` | `nous` |
+
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |
 

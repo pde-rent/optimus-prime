@@ -1618,6 +1618,55 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
+
+		// Process additional OpenAI-compatible providers straight from models.dev.
+		// Keys must match models.dev provider ids; baseUrls are the canonical
+		// endpoints for each plan/cloud.
+		const openAiCompatibleVariants = [
+			{ key: "nvidia", provider: "nvidia", baseUrl: "https://integrate.api.nvidia.com/v1" },
+			{ key: "alibaba-coding-plan", provider: "alibaba-coding-plan", baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1" },
+			{ key: "alibaba-coding-plan-cn", provider: "alibaba-coding-plan-cn", baseUrl: "https://coding.dashscope.aliyuncs.com/v1" },
+			{ key: "zhipuai-coding-plan", provider: "zhipuai-coding-plan", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4" },
+			{ key: "tencent-coding-plan", provider: "tencent-coding-plan", baseUrl: "https://api.lkeap.cloud.tencent.com/coding/v3" },
+			{ key: "siliconflow", provider: "siliconflow", baseUrl: "https://api.siliconflow.com/v1" },
+			{ key: "togetherai", provider: "togetherai", baseUrl: "https://api.together.xyz/v1" },
+		] as const;
+		const genericOpenAiCompat: OpenAICompletionsCompat = {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsReasoningEffort: false,
+			maxTokensField: "max_tokens",
+			supportsStrictMode: false,
+		};
+
+		for (const { key, provider, baseUrl } of openAiCompatibleVariants) {
+			if (!data[key]?.models) continue;
+
+			for (const [modelId, model] of Object.entries(data[key].models)) {
+				const m = model as ModelsDevModel;
+				if (m.tool_call !== true) continue;
+
+				models.push({
+					id: modelId,
+					name: m.name || modelId,
+					api: "openai-completions",
+					provider,
+					baseUrl,
+					reasoning: m.reasoning === true,
+					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					cost: {
+						input: m.cost?.input || 0,
+						output: m.cost?.output || 0,
+						cacheRead: m.cost?.cache_read || 0,
+						cacheWrite: m.cost?.cache_write || 0,
+					},
+					contextWindow: m.limit?.context || 4096,
+					maxTokens: m.limit?.output || 4096,
+					compat: genericOpenAiCompat,
+				});
+			}
+		}
+
 		// Process Xiaomi MiMo models
 		// Built-in `xiaomi` targets the API billing endpoint (single stable URL,
 		// keys from platform.xiaomimimo.com). The three `xiaomi-token-plan-*`

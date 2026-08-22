@@ -567,6 +567,49 @@ describe("Generate E2E Tests", () => {
 				multiTurnCase(reasoningMedium),
 			],
 		},
+
+		{
+			name: "NVIDIA NIM Provider (nemotron-super via OpenAI Completions)",
+			skipIf: !process.env.NVIDIA_API_KEY,
+			model: () => getModel("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1"),
+			cases: [text(), toolCall(), streaming(), multiTurnCase()],
+		},
+		{
+			name: "Alibaba Qwen Coding Plan Provider (qwen3.7-max via OpenAI Completions)",
+			skipIf: !process.env.ALIBABA_CODING_PLAN_API_KEY,
+			model: () => getModel("alibaba-coding-plan", "qwen3.7-max"),
+			cases: [text(), toolCall(), streaming(), multiTurnCase()],
+		},
+		{
+			name: "Zhipu GLM Coding Plan CN Provider (glm-5.1 via OpenAI Completions)",
+			skipIf: !process.env.ZHIPU_API_KEY,
+			model: () => getModel("zhipuai-coding-plan", "glm-5.1"),
+			cases: [
+				text(),
+				toolCall(),
+				streaming(),
+				thinking(reasoningMedium, "should handle thinking mode"),
+				multiTurnCase(),
+			],
+		},
+		{
+			name: "Tencent Coding Plan Provider (kimi-k2.5 via OpenAI Completions)",
+			skipIf: !process.env.TENCENT_CODING_PLAN_API_KEY,
+			model: () => getModel("tencent-coding-plan", "kimi-k2.5"),
+			cases: [text(), toolCall(), streaming(), multiTurnCase()],
+		},
+		{
+			name: "SiliconFlow Provider (MiniMax-M2.5 via OpenAI Completions)",
+			skipIf: !process.env.SILICONFLOW_API_KEY,
+			model: () => getModel("siliconflow", "MiniMaxAI/MiniMax-M2.5"),
+			cases: [text(), toolCall(), streaming(), multiTurnCase()],
+		},
+		{
+			name: "Together AI Provider (Kimi-K2.6 via OpenAI Completions)",
+			skipIf: !process.env.TOGETHER_API_KEY,
+			model: () => getModel("togetherai", "moonshotai/Kimi-K2.6"),
+			cases: [text(), toolCall(), streaming(), multiTurnCase()],
+		},
 		{
 			name: "OpenRouter Provider (glm-4.5v via OpenAI Completions)",
 			skipIf: !process.env.OPENROUTER_API_KEY,
