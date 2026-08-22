@@ -8,6 +8,7 @@
  */
 
 export { anthropicOAuthProvider, loginAnthropic, refreshAnthropicToken } from "./anthropic.js";
+export { cursorOAuthProvider, loginCursor, refreshCursorToken } from "./cursor.js";
 export {
 	getGitHubCopilotBaseUrl,
 	githubCopilotOAuthProvider,
@@ -27,6 +28,7 @@ export {
 export * from "./types.js";
 
 import { anthropicOAuthProvider } from "./anthropic.js";
+import { cursorOAuthProvider } from "./cursor.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
 import { grokOAuthProvider } from "./grok.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
@@ -36,6 +38,7 @@ import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProvide
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	anthropicOAuthProvider,
 	githubCopilotOAuthProvider,
+	cursorOAuthProvider,
 	grokOAuthProvider,
 	openaiCodexOAuthProvider,
 	opencodeOAuthProvider,

@@ -23,6 +23,7 @@ export type KnownProvider =
 	| "deepseek"
 	| "github-copilot"
 	| "grok"
+	| "cursor"
 	| "xai"
 	| "groq"
 	| "cerebras"

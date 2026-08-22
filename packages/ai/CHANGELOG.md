@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Added the "cursor" provider for Cursor subscribers: Connect JSON streaming against api2.cursor.sh with PKCE browser OAuth login, `CURSOR_ACCESS_TOKEN` bypass, Cursor client headers (checksum, session id, request id), and an incremental Connect envelope parser for text and tool-call deltas.
 - Added the "grok" provider for paid SuperGrok subscribers: xAI CLI proxy (Responses API) with OAuth device-flow login via auth.x.ai, `XAI_OAUTH_TOKEN` raw-token bypass, required proxy client headers, and payload sanitization to avoid 422s.
 - Added the "nous" provider (Nous Research Hermes Portal): OpenAI-compatible endpoint with `NOUS_API_KEY` auth and models generated from its public catalog.
 - Added OpenCode Zen and OpenCode Go OAuth device-flow login, accepted alongside `OPENCODE_API_KEY`.

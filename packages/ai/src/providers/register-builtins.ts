@@ -105,6 +105,14 @@ export const { stream: streamAzureOpenAIResponses, streamSimple: streamSimpleAzu
 	},
 );
 
+export const { stream: streamCursorConnect, streamSimple: streamSimpleCursorConnect } = lazyProvider(
+	"cursor-connect",
+	async () => {
+		const module = await import("./cursor.js");
+		return { stream: module.streamCursorConnect, streamSimple: module.streamSimpleCursorConnect };
+	},
+);
+
 export const { stream: streamGrok, streamSimple: streamSimpleGrok } = lazyProvider("grok-responses", async () => {
 	const module = await import("./grok.js");
 	return { stream: module.streamGrok, streamSimple: module.streamSimpleGrok };
@@ -181,6 +189,12 @@ const REGISTER_BUILTIN_APIS: readonly (() => void)[] = [
 			streamSimple: streamSimpleOpenAICodexResponses,
 		}),
 	() => registerApiProvider({ api: "grok-responses", stream: streamGrok, streamSimple: streamSimpleGrok }),
+	() =>
+		registerApiProvider({
+			api: "cursor-connect",
+			stream: streamCursorConnect,
+			streamSimple: streamSimpleCursorConnect,
+		}),
 	() => registerApiProvider({ api: "google-generative-ai", stream: streamGoogle, streamSimple: streamSimpleGoogle }),
 ];
 

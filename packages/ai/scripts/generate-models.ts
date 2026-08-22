@@ -871,6 +871,41 @@ async function fetchNousModels(): Promise<Model<any>[]> {
 	}
 }
 
+// Cursor subscription access reaches api2.cursor.sh with OAuth credentials;
+// the catalog is seeded statically because AvailableModels requires auth and
+// is plan-gated per account.
+function fetchCursorModels(): Model<any>[] {
+	const CURSOR_BASE_URL = "https://api2.cursor.sh";
+	const seed = [
+		{ id: "composer-1", name: "Composer 1", contextWindow: 272_000, reasoning: true },
+		{ id: "gpt-5", name: "GPT-5", contextWindow: 400_000, reasoning: true },
+		{ id: "gpt-5-codex", name: "GPT-5 Codex", contextWindow: 400_000, reasoning: true },
+		{ id: "o4-mini", name: "o4-mini", contextWindow: 200_000, reasoning: true },
+		{ id: "claude-4.5-sonnet", name: "Claude 4.5 Sonnet", contextWindow: 200_000, reasoning: true },
+		{ id: "claude-4.5-opus", name: "Claude 4.5 Opus", contextWindow: 200_000, reasoning: true },
+		{ id: "claude-4.7-opus", name: "Claude 4.7 Opus", contextWindow: 200_000, reasoning: true },
+	];
+
+	return seed.map((model) => ({
+		id: model.id,
+		name: model.name,
+		api: "cursor-connect",
+		baseUrl: CURSOR_BASE_URL,
+		provider: "cursor",
+		reasoning: model.reasoning,
+		input: ["text"],
+		cost: {
+			// Subscription-based: usage draws down the plan quota, not a token bill.
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		},
+		contextWindow: model.contextWindow,
+		maxTokens: 16384,
+	}));
+}
+
 // SuperGrok subscribers reach xAI through the CLI chat proxy; the catalog is
 // seeded statically because the live /v1/models endpoint requires OAuth.
 function fetchGrokModels(): Model<any>[] {
@@ -2213,6 +2248,8 @@ async function generateModels() {
 
 	const nousModels = await fetchNousModels();
 	allModels.push(...nousModels);
+
+	allModels.push(...fetchCursorModels());
 
 	allModels.push(...fetchGrokModels());
 

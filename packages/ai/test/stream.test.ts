@@ -593,6 +593,12 @@ describe("Generate E2E Tests", () => {
 			cases: [text(), streaming()],
 		},
 		{
+			name: "Cursor Provider (composer-1 via Cursor subscription)",
+			skipIf: !process.env.CURSOR_ACCESS_TOKEN,
+			model: () => getModel("cursor", "composer-1"),
+			cases: [text(), streaming()],
+		},
+		{
 			name: "Vercel AI Gateway Provider (google/gemini-2.5-flash via Anthropic Messages)",
 			skipIf: !process.env.AI_GATEWAY_API_KEY,
 			model: () => getModel("vercel-ai-gateway", "google/gemini-2.5-flash"),
