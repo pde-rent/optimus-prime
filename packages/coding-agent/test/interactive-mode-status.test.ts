@@ -134,6 +134,24 @@ describe("InteractiveMode update notifications", () => {
 		expect(output).toBe("Update available: v1.2.3. Run /update");
 	});
 
+	test("routes empty bracketed pastes to the clipboard-image handler", () => {
+		const proto = InteractiveMode.prototype as unknown as Record<
+			string,
+			(this: InteractiveMode, text: string) => boolean
+		>;
+		const handleClipboardImagePaste = vi.fn();
+		const handlePastedPaths = vi.fn(() => false);
+
+		const consumed = proto.handlePastedText.call(
+			{ handleClipboardImagePaste, handlePastedPaths } as unknown as InteractiveMode,
+			"",
+		);
+
+		expect(consumed).toBe(true);
+		expect(handleClipboardImagePaste).toHaveBeenCalledOnce();
+		expect(handlePastedPaths).not.toHaveBeenCalled();
+	});
+
 	test("shows package updates in one compact line", () => {
 		const chatContainer = new Container();
 		const fakeThis = {

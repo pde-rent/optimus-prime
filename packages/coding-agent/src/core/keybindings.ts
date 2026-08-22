@@ -145,7 +145,9 @@ export const KEYBINDINGS = {
 		description: "Move selected pending message later",
 	},
 	"app.clipboard.pasteImage": {
-		defaultKeys: process.platform === "win32" ? "alt+v" : "ctrl+v",
+		// alt+v is a second default everywhere: macOS terminals consume Cmd+V, and
+		// ctrl+v is awkward on some layouts, so keep a chord terminals always deliver.
+		defaultKeys: process.platform === "win32" ? "alt+v" : ["ctrl+v", "alt+v"],
 		description: "Paste image from clipboard",
 	},
 	"app.clipboard.copyLoginUrl": {

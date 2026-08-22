@@ -694,9 +694,10 @@ export class Editor implements Component, Focusable {
 			const endIndex = this.pasteBuffer.indexOf("\x1b[201~");
 			if (endIndex !== -1) {
 				const pasteContent = this.pasteBuffer.substring(0, endIndex);
-				if (pasteContent.length > 0) {
-					this.handlePaste(pasteContent);
-				}
+				// Empty bracketed pastes still matter: macOS terminals send them for
+				// Cmd+V when the clipboard holds only an image, and subclasses hook
+				// handlePaste to turn that into a clipboard-image attach.
+				this.handlePaste(pasteContent);
 				this.isInPaste = false;
 				const remaining = this.pasteBuffer.substring(endIndex + 6);
 				this.pasteBuffer = "";
@@ -1200,6 +1201,9 @@ export class Editor implements Component, Focusable {
 	}
 
 	protected handlePaste(pastedText: string): void {
+		// Empty pastes carry no text to insert; subclasses override this to
+		// interpret them (e.g. clipboard image attach), the base just ignores.
+		if (pastedText.length === 0) return;
 		this.cancelAutocomplete();
 		this.historyIndex = -1; // Exit history browsing mode
 		this.lastAction = null;

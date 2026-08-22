@@ -102,6 +102,29 @@ describe("CustomEditor", () => {
 		expect(editor.getText()).toBe("");
 	});
 
+	it("routes an empty bracketed paste to onPasteText instead of dropping it", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+		const pasteText = vi.fn(() => true);
+		editor.onPasteText = pasteText;
+
+		editor.handleInput("\x1b[200~\x1b[201~");
+
+		expect(pasteText).toHaveBeenCalledWith("");
+		expect(editor.getText()).toBe("");
+	});
+
+	it("does not fire onPasteImage for an empty bracketed paste consumed by onPasteText", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+		const pasteImage = vi.fn();
+		const pasteText = vi.fn(() => true);
+		editor.onPasteImage = pasteImage;
+		editor.onPasteText = pasteText;
+
+		editor.handleInput("\x1b[200~\x1b[201~");
+
+		expect(pasteText).toHaveBeenCalledOnce();
+		expect(pasteImage).not.toHaveBeenCalled();
+	});
 	it("routes Escape through its handler while dismissing autocomplete", async () => {
 		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
 		const handler = vi.fn();

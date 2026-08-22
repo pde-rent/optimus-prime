@@ -1588,6 +1588,29 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
 		});
 
+		it("delivers empty bracketed pastes to handlePaste (macOS Cmd+V with image-only clipboard)", () => {
+			class PasteSpyEditor extends Editor {
+				lastPaste: string | null = null;
+				pasteCount = 0;
+				protected override handlePaste(pastedText: string): void {
+					this.lastPaste = pastedText;
+					this.pasteCount++;
+				}
+			}
+			const editor = new PasteSpyEditor(createTestTUI(), defaultEditorTheme);
+			editor.handleInput("\x1b[200~\x1b[201~");
+			assert.strictEqual(editor.lastPaste, "");
+			assert.strictEqual(editor.pasteCount, 1);
+			assert.strictEqual(editor.getText(), "");
+		});
+
+		it("ignores empty bracketed pastes in the base editor", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("keep");
+			editor.handleInput("\x1b[200~\x1b[201~");
+			assert.strictEqual(editor.getText(), "keep");
+		});
+
 		it("undoes multi-line paste atomically", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
