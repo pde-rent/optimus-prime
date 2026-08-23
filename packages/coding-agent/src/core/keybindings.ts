@@ -33,8 +33,6 @@ export interface AppKeybindings {
 	"app.message.followUp": true;
 	"app.message.navigateOlder": true;
 	"app.message.navigateNewer": true;
-	"app.message.moveEarlier": true;
-	"app.message.moveLater": true;
 	"app.clipboard.pasteImage": true;
 	"app.clipboard.copyLoginUrl": true;
 	"app.session.new": true;
@@ -135,14 +133,6 @@ export const KEYBINDINGS = {
 	"app.message.navigateNewer": {
 		defaultKeys: "alt+down",
 		description: "Select newer pending message or draft",
-	},
-	"app.message.moveEarlier": {
-		defaultKeys: "ctrl+alt+up",
-		description: "Move selected pending message earlier",
-	},
-	"app.message.moveLater": {
-		defaultKeys: "ctrl+alt+down",
-		description: "Move selected pending message later",
 	},
 	"app.clipboard.pasteImage": {
 		// alt+v is a second default everywhere: macOS terminals consume Cmd+V, and

@@ -179,6 +179,8 @@ export interface Settings {
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
+	/** How a submitted message interacts with an existing queue. default: "merge" */
+	queueMergeBehavior?: "merge" | "separate";
 	theme?: string;
 	compaction?: CompactionSettings;
 	autoRefine?: AutoRefineSettings;
@@ -746,6 +748,14 @@ export class SettingsManager {
 
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
 		this.setGlobalField("followUpMode", mode);
+	}
+
+	getQueueMergeBehavior(): "merge" | "separate" {
+		return this.settings.queueMergeBehavior || "merge";
+	}
+
+	setQueueMergeBehavior(behavior: "merge" | "separate"): void {
+		this.setGlobalField("queueMergeBehavior", behavior);
 	}
 
 	getTheme(): string | undefined {

@@ -4,6 +4,7 @@ import { KeybindingsManager } from "../src/core/keybindings.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { ClientPromptStashStore, type PromptStashState } from "../src/modes/interactive/prompt-stash-state.js";
 import { QueueSelection } from "../src/modes/interactive/queue-selection.js";
+import { createDeferred } from "./helpers/wait.js";
 
 type FakePasteSnapshot = {
 	pastes: readonly (readonly [number, string])[];
@@ -70,6 +71,7 @@ type ResetHarness = PromptStashLiveMarkerHarness & {
 	pendingBashComponents: unknown[];
 	activityTracker: { reset: Mock };
 	contextUsageTokenBaseline: number;
+	expandedBlocks: Map<string, unknown>;
 	agentRunFileChanges: Map<string, unknown>;
 	recapContainer: { clear: Mock };
 	ui: { requestRender: Mock };
@@ -152,18 +154,6 @@ function createEditor(
 		}),
 	};
 	return editor;
-}
-
-type Deferred = { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void };
-
-function createDeferred(): Deferred {
-	let resolve!: () => void;
-	let reject!: (error: Error) => void;
-	const promise = new Promise<void>((nextResolve, nextReject) => {
-		resolve = nextResolve;
-		reject = nextReject;
-	});
-	return { promise, resolve, reject };
 }
 
 function createPromptStashHarness(
@@ -646,6 +636,7 @@ describe("InteractiveMode prompt stash", () => {
 			pendingBashComponents: [],
 			activityTracker: { reset: vi.fn() },
 			contextUsageTokenBaseline: 1,
+			expandedBlocks: new Map(),
 			agentRunFileChanges: new Map(),
 			recapContainer: { clear: vi.fn() },
 			ui: { requestRender: vi.fn() },
@@ -682,6 +673,7 @@ describe("InteractiveMode prompt stash", () => {
 			pendingBashComponents: [],
 			activityTracker: { reset: vi.fn() },
 			contextUsageTokenBaseline: 1,
+			expandedBlocks: new Map(),
 			agentRunFileChanges: new Map(),
 			recapContainer: { clear: vi.fn() },
 			ui: { requestRender: vi.fn() },

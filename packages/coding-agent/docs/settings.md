@@ -137,6 +137,7 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 |---------|------|---------|-------------|
 | `steeringMode` | string | `"one-at-a-time"` | How steering messages are sent: `"all"` or `"one-at-a-time"` |
 | `followUpMode` | string | `"one-at-a-time"` | How follow-up messages are sent: `"all"` or `"one-at-a-time"` |
+| `queueMergeBehavior` | string | `"merge"` | How a submitted message interacts with an existing queue: `"merge"` folds an edited checked-out message back into the queue flow, `"separate"` always re-queues the original and sends the edit as its own entry |
 | `transport` | string | `"sse"` | Preferred transport for providers that support multiple transports: `"sse"`, `"websocket"`, or `"auto"` |
 
 ### Terminal & Images

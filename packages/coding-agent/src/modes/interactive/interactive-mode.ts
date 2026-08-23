@@ -163,6 +163,7 @@ import {
 } from "../shared/startup-notices.js";
 import { AGENT_ACTIVITY_LABELS, AgentActivityTracker, formatTokenCount } from "./agent-activity.js";
 import { getAnthropicSubscriptionAuthWarning, ProviderAuthFlows } from "./auth-flows.js";
+import { BrandSplashHeader, truncatePathMiddle } from "./brand-splash.js";
 import { AgentMessageComponent } from "./components/agent-message.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
@@ -219,34 +220,34 @@ import {
 	type ToolExecutionDefinition,
 } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
+import { TurnMetadataComponent } from "./components/turn-metadata.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
-import { FeatureHintDeck } from "./feature-hints.js";
-import { buildHotkeysGuide, buildShortcutGuide } from "./guides.js";
-import {
-	formatGoalDetailSuffix,
-	formatGoalStatus,
-	goalAnnouncementSnapshot,
-	type GoalAnnouncementSnapshot,
-} from "./goal-tray.js";
 import {
 	getPayloadBoolean,
-	getPayloadNumber,
 	getPayloadNotifyType,
+	getPayloadNumber,
 	getPayloadString,
 	getPayloadStringArray,
 	getPayloadWidgetPlacement,
 	getPayloadWorkingIndicatorOptions,
 } from "./extension-payload.js";
+import { FeatureHintDeck } from "./feature-hints.js";
+import {
+	formatGoalDetailSuffix,
+	formatGoalStatus,
+	type GoalAnnouncementSnapshot,
+	goalAnnouncementSnapshot,
+} from "./goal-tray.js";
+import { buildHotkeysGuide, buildShortcutGuide } from "./guides.js";
 import {
 	HEARTBEAT_ARGUMENT_COMPLETIONS,
 	HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS,
-	heartbeatLegacyPromptToleranceMs,
 	HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS,
+	heartbeatLegacyPromptToleranceMs,
 	isLikelyHeartbeatPromptTimestamp,
 	isTextOnlyUserMessage,
 } from "./heartbeat-support.js";
-import { BrandSplashHeader, truncatePathMiddle } from "./brand-splash.js";
 import { formatSplashCwd } from "./path-formatting.js";
 import { formatQueuedMessagePreview, styleQueuedMessagePreview } from "./queue-preview.js";
 import { initialRenderMessages, omitOrphanToolResults } from "./transcript-render.js";
@@ -257,9 +258,8 @@ import {
 	updateArgsIncludeSelf,
 } from "./update-relaunch.js";
 
-export { BrandSplashHeader } from "./brand-splash.js";
 export type { BrandSplashHeaderOptions, BrandSplashMetadataLine } from "./brand-splash.js";
-export { truncatePathMiddle } from "./brand-splash.js";
+export { BrandSplashHeader, truncatePathMiddle } from "./brand-splash.js";
 export { formatSplashCwd } from "./path-formatting.js";
 export { formatQueuedMessagePreview, styleQueuedMessagePreview } from "./queue-preview.js";
 export {
@@ -268,6 +268,7 @@ export {
 	resolveInteractiveUpdateDaemonSocketPath,
 	updateArgsIncludeSelf,
 } from "./update-relaunch.js";
+
 import { scopeHeartbeatsToSession } from "./heartbeat-scope.js";
 import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionCellColor, playIgnitionSound } from "./ignition.js";
 import {
@@ -285,7 +286,7 @@ import type {
 } from "./interactive-mode-services.js";
 import { type OnboardingStartupState, shouldRunOnboarding } from "./onboarding.js";
 import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
-import { QueueSelection } from "./queue-selection.js";
+import { type QueueCheckout, QueueSelection } from "./queue-selection.js";
 import { formatResumeHint } from "./resume-hint.js";
 import {
 	buildScopeGroups,
@@ -327,7 +328,6 @@ interface PendingToolCallRenderInput {
 	arguments: ToolCall["arguments"];
 }
 
-
 const MODEL_CATALOG_REFRESH_TTL_MS = 60_000;
 const FEATURE_HINT_DELAY_MS = 5_000;
 
@@ -342,8 +342,6 @@ export const START_HINTS = [
 export function getRandomStartHint(random = Math.random): (typeof START_HINTS)[number] {
 	return START_HINTS[Math.floor(random() * START_HINTS.length)] ?? START_HINTS[0];
 }
-
-
 
 function isExpandable(obj: unknown): obj is Expandable {
 	return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
@@ -391,8 +389,6 @@ class ExpandableText extends Text implements Expandable {
 	}
 }
 
-
-
 function mergeSubagentSnapshot(
 	previous: AgentConnectionRlmChildAgentSnapshot,
 	incoming: AgentConnectionRlmChildAgentSnapshot,
@@ -412,17 +408,12 @@ function mergeSubagentSnapshot(
 	};
 }
 
-
-
 type StartupPromptBarrierOutcome = "admitted" | "retained" | "lifecycle-cancelled";
-
 
 type ModelFallbackWarningAction = "show" | "suppress";
 
 /** Matches the width auth-flows uses, so the same component looks the same everywhere. */
 const EXTENSION_SELECTOR_WIDTH = 76;
-
-
 
 const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 
@@ -432,8 +423,6 @@ const DEAD_TERMINAL_ERROR_CODES = new Set(["EIO", "EPIPE", "ENOTCONN"]);
 const MAX_PASTED_IMAGE_BYTES = 64 * 1024 * 1024;
 export const INITIAL_TRANSCRIPT_RENDER_MESSAGE_LIMIT = 400;
 
-
-
 function isDeadTerminalError(error: unknown): boolean {
 	if (!error || typeof error !== "object" || !("code" in error)) {
 		return false;
@@ -441,10 +430,6 @@ function isDeadTerminalError(error: unknown): boolean {
 	const code = (error as NodeJS.ErrnoException).code;
 	return code !== undefined && DEAD_TERMINAL_ERROR_CODES.has(code);
 }
-
-
-
-
 
 export interface InteractiveInitialPrompt {
 	text: string;
@@ -655,6 +640,14 @@ export class InteractiveMode {
 	private agentMessagesExpanded = false;
 	private editDiffsExpanded = false;
 
+	// Per-block expansion keyed by click-target id, so a user's toggles survive
+	// transcript rebuilds (compaction resync, reconnect, thinking-toggle, reload).
+	private expandedBlocks = new Map<string, boolean>();
+	// Usage accumulated across one agent run; flushed as a turn-metadata rule at agent_end.
+	private turnMetaAccumulator:
+		| { startTs: number | undefined; endedAtMs: number; input: number; output: number; costUsd: number }
+		| undefined = undefined;
+
 	private hideThinkingBlock = false;
 
 	private skillCommands = new Map<string, string>();
@@ -698,6 +691,10 @@ export class InteractiveMode {
 	private isApplyingQueueSelectionText = false;
 	private queueMutationChain: Promise<void> = Promise.resolve();
 	private pendingQueueEdit: symbol | undefined;
+	/** Resolves true when the checked-out original is confirmed out of the queue. */
+	private checkoutDrained: Promise<boolean> | undefined;
+	/** Set when a checkout pop applied; the next queue snapshot is its echo, not an external wipe. */
+	private checkoutPopEchoPending = false;
 
 	private shutdownRequested = false;
 
@@ -1799,20 +1796,51 @@ export class InteractiveMode {
 	}
 
 	private replaceConnectionQueue(queue: AgentConnectionQueueState): void {
+		const before = this.connectionQueue;
 		this.connectionQueue = {
 			steering: [...queue.steering],
 			followUp: [...queue.followUp],
 		};
-		const dropped = this.queueSelection.sync(this.connectionQueue);
-		if (dropped !== undefined) {
-			const editorText = this.editor.getText();
-			if (editorText === dropped) {
-				this.setEditorTextFromQueueSelection(this.queueSelection.reset());
-			} else if (!this.pendingQueueEdit) {
-				this.queueSelection.replaceDraft(editorText);
-			}
+		// The snapshot echoing our own checkout pop lands here; only a later
+		// emptied queue is a genuine external wipe. A pop still in flight is
+		// guarded by pendingQueueEdit.
+		const echoOfOwnPop = this.checkoutPopEchoPending;
+		this.checkoutPopEchoPending = false;
+		const checkout = this.queueSelection.checkedOut;
+		const hadItems = before.steering.length + before.followUp.length > 0;
+		if (
+			checkout &&
+			hadItems &&
+			!echoOfOwnPop &&
+			!this.pendingQueueEdit &&
+			this.connectionQueue.steering.length === 0 &&
+			this.connectionQueue.followUp.length === 0
+		) {
+			this.requeueAfterWipe(checkout);
 		}
 		this.updatePendingMessagesDisplay();
+	}
+
+	/**
+	 * Best-effort rescue when the whole queue is wiped externally while an edit
+	 * holds a checked-out message: requeue the original, or surface the text
+	 * loudly so nothing is silently lost.
+	 */
+	private requeueAfterWipe(checkout: QueueCheckout): void {
+		const editedText = this.editor.getText();
+		void this.requeueCheckedOutOriginal(
+			checkout,
+			() => this.showWarning("The queue was wiped while you were editing; the original message was re-queued."),
+			() =>
+				this.showError(
+					`The queue was wiped while you were editing and the message could not be re-queued. Its text: "${checkout.originalText}"`,
+				),
+		).then((requeued) => {
+			const draft = this.queueSelection.reset();
+			if (requeued && (editedText === checkout.originalText || editedText.length === 0)) {
+				this.setEditorTextFromQueueSelection(draft);
+			}
+		});
 	}
 
 	private async refreshConnectionCatalog(): Promise<void> {
@@ -2112,9 +2140,15 @@ export class InteractiveMode {
 		this.queuedMessagesContainer.clear();
 		this.connectionQueue = { steering: [], followUp: [] };
 		this.pendingQueueEdit = undefined;
-		// The selection and its stashed draft belong to the previous session;
-		// every editor draft is cleared below, so discard rather than restore.
+		// A checkout cannot survive the session wipe: surface the original text
+		// loudly (and leave it in the editor) instead of silently losing it.
+		const checkedOut = this.queueSelection.checkedOut;
 		this.queueSelection.reset();
+		if (checkedOut) {
+			this.showWarning(
+				"Session restarted while a queued message was being edited; its original text was kept in the editor.",
+			);
+		}
 		this.featureHintSuppressedByQueue = false;
 		if (options?.clearPromptStash) {
 			this.promptStash = undefined;
@@ -2127,6 +2161,9 @@ export class InteractiveMode {
 		if (this.editor !== this.defaultEditor) {
 			this.editor.clearHistory?.();
 			this.editor.setText("");
+		}
+		if (checkedOut) {
+			this.editor.setText(checkedOut.originalText);
 		}
 		const keepImageIds = this.liveImageMarkerIds();
 		for (const markerId of this.pastedImages.keys()) {
@@ -2145,6 +2182,7 @@ export class InteractiveMode {
 		this.contextUsageTokenBaseline = 0;
 		this.resetPendingToolState();
 		this.agentRunFileChanges.clear();
+		this.expandedBlocks.clear();
 		this.renderRecap();
 		this.replToolComponents.clear();
 		this.lateReplSentAgentMessages.clear();
@@ -2294,6 +2332,7 @@ export class InteractiveMode {
 			component.setExpanded(this.toolOutputExpanded);
 			component.setAgentMessagesExpanded(this.agentMessagesExpanded);
 			component.setEditDiffsExpanded(this.editDiffsExpanded);
+			this.restorePersistedExpansionFor(component);
 			if (this.startedToolCalls.has(latestToolCall.id)) {
 				component.markExecutionStarted();
 			}
@@ -3414,8 +3453,6 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
 		this.defaultEditor.onAction("app.message.navigateOlder", () => this.browseQueueSelection(-1));
 		this.defaultEditor.onAction("app.message.navigateNewer", () => this.browseQueueSelection(1));
-		this.defaultEditor.onAction("app.message.moveEarlier", () => this.moveQueueSelection(-1));
-		this.defaultEditor.onAction("app.message.moveLater", () => this.moveQueueSelection(1));
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 		this.defaultEditor.onAction("app.session.tree", () => {
 			void this.showTreeSelector();
@@ -3944,14 +3981,45 @@ export class InteractiveMode {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			const streamingBehavior = this.submittedInputBehavior;
 			this.submittedInputBehavior = "steer";
-			if (this.queueSelection?.isBrowsing && !this.pendingQueueEdit) {
-				const targetLane = streamingBehavior === "followUp" ? "followUp" : "steering";
-				try {
-					if (await this.applyQueueSelection(text, targetLane)) return;
-				} catch (error) {
-					this.showError(error instanceof Error ? error.message : String(error));
+			let checkedOutDraft = "";
+			if (this.queueSelection?.isBrowsing) {
+				const trimmedEdit = text.trim();
+				if (!trimmedEdit) {
+					// An empty edit cannot be resent as a fresh message; Enter
+					// cancels the checkout and returns the original instead.
+					this.cancelQueueCheckout();
 					return;
 				}
+				// Checkout-edit-reinsert: with the default "merge" behavior the
+				// popped original becomes a brand-new submission through the normal
+				// pipeline below and is NOT put back - the edited text takes over
+				// the checked-out slot in the queue flow.
+				const checkedOut = this.queueSelection.checkedOut;
+				this.queueSelection.clearCheckout();
+				checkedOutDraft = this.queueSelection.reset();
+				if (checkedOut && this.settingsManager.getQueueMergeBehavior() === "separate") {
+					// Opt-out stacking behavior: nothing merges. The original returns
+					// to the queue as its own entry and the edit is sent separately.
+					const requeued = await this.requeueCheckedOutOriginal(
+						checkedOut,
+						() => {},
+						(error) =>
+							this.showError(
+								`Could not re-queue the original message. Its text: "${checkedOut.originalText}" (${error instanceof Error ? error.message : String(error)})`,
+							),
+					);
+					if (!requeued) {
+						if (this.editor.getText().length === 0) this.editor.setText(text);
+						return;
+					}
+				} else if (!(await this.settleCheckedOutPop())) {
+					// The pop never applied, so sending would duplicate a message
+					// that is still (or again) in the queue.
+					if (this.editor.getText().length === 0) this.editor.setText(text);
+					this.showStatus("Queued message is back in the queue; edit kept in the editor");
+					return;
+				}
+				text = trimmedEdit;
 			}
 			text = text.trim();
 			if (!text) return;
@@ -4399,6 +4467,9 @@ export class InteractiveMode {
 					return;
 				}
 				this.updatePendingMessagesDisplay();
+				if (checkedOutDraft && this.editor.getText().length === 0) {
+					this.setEditorTextFromQueueSelection(checkedOutDraft);
+				}
 				this.ui.requestRender();
 			} finally {
 				if (this.isShuttingDown || this.agentsViewRequest) {
@@ -4684,6 +4755,7 @@ export class InteractiveMode {
 		switch (event.type) {
 			case "agent_start":
 				this.featureHintRunPending = this.getRetryAttempt() === 0;
+				this.turnMetaAccumulator ??= { startTs: Date.now(), endedAtMs: 0, input: 0, output: 0, costUsd: 0 };
 				this.resetPendingToolState();
 				this.renderRecap();
 				if (this.settingsManager.getShowTerminalProgress()) {
@@ -4862,6 +4934,7 @@ export class InteractiveMode {
 						this.streamingMessage.errorMessage = errorMessage;
 					}
 					this.ensureAssistantStreamingComponent(event.message).updateContent(this.streamingMessage);
+					this.accumulateTurnUsage(this.streamingMessage);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -4957,6 +5030,7 @@ export class InteractiveMode {
 				this.flushPendingBashComponents();
 				this.resetPendingToolState();
 				this.renderRecap();
+				this.flushTurnMetadata();
 
 				this.applyOptimisticContextUsage();
 				// Auto-compaction can start server-side while this event is being handled.
@@ -5780,7 +5854,23 @@ export class InteractiveMode {
 			this.chatContainer.addChild(new Spacer(1));
 		}
 
-		for (const message of messagesToRender) {
+		const turnEndIndices = new Set<number>();
+		for (let i = 0; i < messagesToRender.length; i++) {
+			if (i === messagesToRender.length - 1 || messagesToRender[i + 1]?.role === "user") {
+				turnEndIndices.add(i);
+			}
+		}
+		let turnStartTs: number | undefined;
+		let turnAssistants: AssistantMessage[] = [];
+
+		for (const [messageIndex, message] of messagesToRender.entries()) {
+			// Turn grouping for the per-turn metadata rule.
+			if (message.role === "user") {
+				turnStartTs = message.timestamp;
+				turnAssistants = [];
+			} else if (message.role === "assistant") {
+				turnAssistants.push(message);
+			}
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
 				this.addMessageToChat(message);
@@ -5836,7 +5926,26 @@ export class InteractiveMode {
 				// All other messages use standard rendering
 				this.addMessageToChat(message, renderOptions);
 			}
+			if (turnEndIndices.has(messageIndex) && turnAssistants.length > 0) {
+				const assistants = turnAssistants;
+				turnAssistants = [];
+				const last = assistants[assistants.length - 1];
+				if (last.usage && (last.usage.output > 0 || last.usage.input > 0)) {
+					this.chatContainer.addChild(
+						new TurnMetadataComponent({
+							endedAtMs: last.timestamp,
+							durationMs: turnStartTs !== undefined ? Math.max(0, last.timestamp - turnStartTs) : 0,
+							inputTokens: assistants.reduce((sum, m) => sum + (m.usage?.input ?? 0), 0),
+							outputTokens: assistants.reduce((sum, m) => sum + (m.usage?.output ?? 0), 0),
+							costUsd: assistants.reduce((sum, m) => sum + (m.usage?.cost?.total ?? 0), 0),
+						}),
+					);
+				}
+			}
 		}
+
+		// Re-apply the user's per-block expansion toggles after any transcript rebuild.
+		this.restorePersistedExpansion();
 
 		for (const [toolCallId, component] of renderedPendingTools) {
 			component.setIncludeImageDimensions(true);
@@ -5915,6 +6024,10 @@ export class InteractiveMode {
 
 	private handleEscape(): void {
 		this.clearCtrlCExitHint();
+		if (this.queueSelection.isBrowsing) {
+			this.cancelQueueCheckout();
+			return;
+		}
 		if (this.sideQuestionEvent) {
 			this.clearEscapeRepeat();
 			this.clearSideQuestion({ abort: true });
@@ -6234,12 +6347,6 @@ export class InteractiveMode {
 	private async handleFollowUp(): Promise<void> {
 		const editorText = this.editor.getText();
 		const text = (this.editor.getExpandedText?.() ?? editorText).trim();
-		if (this.queueSelection?.isBrowsing && !this.pendingQueueEdit) {
-			await this.applyQueueSelection(text, "followUp").catch((error) =>
-				this.showError(error instanceof Error ? error.message : String(error)),
-			);
-			return;
-		}
 		if (!text || !this.editor.onSubmit) return;
 
 		// Unlike Enter, Alt+Enter does not go through Editor.submitValue(), so
@@ -6264,11 +6371,144 @@ export class InteractiveMode {
 	}
 
 	private browseQueueSelection(direction: -1 | 1): void {
-		if (this.pendingQueueEdit) return;
-		const text = this.queueSelection.move(this.connectionQueue, this.editor.getText(), direction);
-		if (text === undefined) return;
-		this.setEditorTextFromQueueSelection(text);
-		this.ui.requestRender();
+		if (direction > 0) {
+			// Navigating back down to the draft cancels the checkout: the
+			// original text is returned to the queue and the draft restored.
+			if (this.queueSelection.isBrowsing) this.cancelQueueCheckout();
+			return;
+		}
+		// v1 checkout browsing holds a single item; older navigation is a no-op
+		// until the current checkout is resolved.
+		if (this.pendingQueueEdit || this.queueSelection.isBrowsing) return;
+		const checkout = this.queueSelection.checkoutNewest(this.connectionQueue, this.editor.getText());
+		if (!checkout) return;
+		const sessionGeneration = this.sessionEventGeneration;
+		const editorTextBefore = this.editor.getText();
+		let outcome: "applied" | "unsupported" | "changed" = "changed";
+		const pendingQueueEdit = Symbol("pending-queue-edit");
+		this.pendingQueueEdit = pendingQueueEdit;
+		const drained = this.enqueueQueueMutation(async (): Promise<boolean> => {
+			if (sessionGeneration !== this.sessionEventGeneration) return false;
+			// Earlier serialized mutations may have shifted indices.
+			const lane = this.connectionQueue[checkout.lane];
+			const index =
+				lane[checkout.originalIndex] === checkout.originalText
+					? checkout.originalIndex
+					: lane.indexOf(checkout.originalText);
+			if (index < 0) return false;
+			const queueBefore = this.connectionQueue;
+			let status: AgentConnectionQueuedMessageMutationStatus;
+			try {
+				status = await this.agentConnection.mutateQueuedMessage(checkout.lane, index, checkout.originalText, {
+					type: "delete",
+				});
+			} catch {
+				return false;
+			}
+			if (sessionGeneration !== this.sessionEventGeneration) return false;
+			if (status === "unsupported") outcome = "unsupported";
+			else if (status !== "applied") return false;
+			else {
+				outcome = "applied";
+				this.checkoutPopEchoPending = true;
+				// Same optimistic patch as before: skip when a queue event has
+				// already replaced the mirror object.
+				const currentLane = this.connectionQueue[checkout.lane];
+				if (this.connectionQueue === queueBefore && currentLane[index] === checkout.originalText) {
+					currentLane.splice(index, 1);
+				}
+				this.updatePendingMessagesDisplay();
+			}
+			return outcome === "applied";
+		}).catch(() => false);
+		this.checkoutDrained = drained;
+		void drained.then((applied) => {
+			if (this.pendingQueueEdit === pendingQueueEdit) this.pendingQueueEdit = undefined;
+			if (applied) {
+				// Show the popped text only after the delete applied: no window
+				// exists where the agent can consume a message being edited.
+				if (this.editor.getText() === editorTextBefore) {
+					this.setEditorTextFromQueueSelection(checkout.originalText);
+				}
+			} else {
+				// Not popped: abandon the checkout and hand the editor back its draft.
+				const draft = this.queueSelection.reset();
+				if (this.editor.getText() === editorTextBefore) this.setEditorTextFromQueueSelection(draft);
+				if (outcome === "unsupported") this.showStatus("Queue editing requires a newer daemon");
+				else if (sessionGeneration === this.sessionEventGeneration)
+					this.showStatus("Queue changed; item left in the queue");
+			}
+			this.ui.requestRender();
+		});
+	}
+
+	/**
+	 * Waits for the checked-out original to be confirmed out of the queue.
+	 * Returns false when the pop did not apply (or a cancel already returned
+	 * the text), so the caller must not resend a duplicate.
+	 */
+	private async settleCheckedOutPop(): Promise<boolean> {
+		const drained = this.checkoutDrained;
+		this.checkoutDrained = undefined;
+		if (!drained) return true;
+		return await drained;
+	}
+
+	/** Cancels the checked-out edit: requeues the original text and restores the stashed draft. */
+	private cancelQueueCheckout(): void {
+		const checkout = this.queueSelection.checkedOut;
+		if (!checkout || this.pendingQueueEdit) return;
+		void this.requeueCheckedOutOriginal(
+			checkout,
+			() => this.showStatus("Original message returned to the queue"),
+			(error) =>
+				this.showError(`Could not re-queue the message: ${error instanceof Error ? error.message : String(error)}`),
+		).then((requeued) => {
+			if (!requeued) return;
+			const draft = this.queueSelection.reset();
+			this.setEditorTextFromQueueSelection(draft);
+			this.ui.requestRender();
+		});
+	}
+
+	/**
+	 * Requeues a checked-out original at the tail of its original lane through
+	 * the normal submission pipeline (the mutation API has no insert). Resolves
+	 * false when the requeue failed; the checkout then stays resolvable so
+	 * Enter never duplicates the text.
+	 */
+	private requeueCheckedOutOriginal(
+		checkout: QueueCheckout,
+		onSuccess: () => void,
+		onFailure: (error: unknown) => void,
+	): Promise<boolean> {
+		const sessionGeneration = this.sessionEventGeneration;
+		const pendingQueueEdit = Symbol("pending-queue-edit");
+		this.pendingQueueEdit = pendingQueueEdit;
+		const requeued = this.enqueueQueueMutation(async (): Promise<boolean> => {
+			try {
+				if (sessionGeneration !== this.sessionEventGeneration) return false;
+				await this.agentConnection.prompt(checkout.originalText, {
+					streamingBehavior: checkout.lane === "steering" ? "steer" : "followUp",
+					queueIfBusy: true,
+				});
+			} catch (error) {
+				onFailure(error);
+				return false;
+			}
+			if (sessionGeneration !== this.sessionEventGeneration) return false;
+			const lane = this.connectionQueue[checkout.lane];
+			if (!lane.includes(checkout.originalText)) lane.push(checkout.originalText);
+			this.updatePendingMessagesDisplay();
+			onSuccess();
+			return true;
+		}).catch(() => false);
+		this.checkoutDrained = requeued;
+		void requeued.then(() => {
+			if (this.pendingQueueEdit === pendingQueueEdit) this.pendingQueueEdit = undefined;
+			this.ui.requestRender();
+		});
+		return requeued;
 	}
 
 	/** Serializes queue mutations so rapid keypresses never race each other or use stale indices. */
@@ -6281,188 +6521,6 @@ export class InteractiveMode {
 		return next;
 	}
 
-	private moveQueueSelection(direction: -1 | 1): void {
-		if (this.pendingQueueEdit) return;
-		const submittedSelection = this.queueSelection.selected;
-		if (!submittedSelection) return;
-		const sessionGeneration = this.sessionEventGeneration;
-		void this.enqueueQueueMutation(async () => {
-			if (sessionGeneration !== this.sessionEventGeneration) return;
-			const lane = this.connectionQueue[submittedSelection.lane];
-			const resolvedIndex =
-				lane[submittedSelection.index] === submittedSelection.text
-					? submittedSelection.index
-					: lane.indexOf(submittedSelection.text);
-			if (resolvedIndex < 0) {
-				this.showStatus("Queue changed; reorder not applied");
-				return;
-			}
-			const selected = { ...submittedSelection, index: resolvedIndex };
-			const queueBefore = this.connectionQueue;
-			const status = await this.agentConnection.mutateQueuedMessage(selected.lane, selected.index, selected.text, {
-				type: "move",
-				direction,
-			});
-			if (sessionGeneration !== this.sessionEventGeneration) return;
-			if (status === "applied") {
-				// The queue event for this mutation can land before or after the
-				// response. Patch the mirror only when no event has replaced it
-				// meanwhile (events always assign a fresh object); patching an
-				// already-updated mirror would apply the mutation twice.
-				const lane = this.connectionQueue[selected.lane];
-				const target = selected.index + direction;
-				if (
-					this.connectionQueue === queueBefore &&
-					lane[selected.index] === selected.text &&
-					target >= 0 &&
-					target < lane.length
-				) {
-					[lane[selected.index], lane[target]] = [lane[target] as string, selected.text];
-					this.queueSelection.sync(this.connectionQueue);
-					this.updatePendingMessagesDisplay();
-					this.ui.requestRender();
-				}
-			} else if (status === "unsupported") this.showStatus("Queue editing requires a newer daemon");
-			else this.showStatus("Queue changed; reorder not applied");
-		}).catch((error) => {
-			if (sessionGeneration === this.sessionEventGeneration) {
-				this.showError(error instanceof Error ? error.message : String(error));
-			}
-		});
-	}
-
-	/**
-	 * Applies the edited text to the selected queued message. Returns true when
-	 * the submission was consumed (the caller must not treat it as a new prompt).
-	 * Empty text deletes; otherwise replaces, moving the item to `targetLane`.
-	 */
-	private applyQueueSelection(text: string, targetLane: "steering" | "followUp"): Promise<boolean> {
-		if (this.pendingQueueEdit) return Promise.resolve(false);
-		const submittedSelection = this.queueSelection.selected;
-		if (!submittedSelection) return Promise.resolve(false);
-		const pendingQueueEdit = Symbol("pending-queue-edit");
-		this.pendingQueueEdit = pendingQueueEdit;
-		const sessionGeneration = this.sessionEventGeneration;
-		const submissionGeneration = this.inputSubmissionGeneration;
-		const trimmed = text.trim();
-		const mutation =
-			trimmed.length === 0
-				? ({ type: "delete" } as const)
-				: ({
-						type: "replace",
-						text: trimmed,
-						images: this.collectQueueReplaceImages(trimmed),
-						lane: targetLane,
-					} as const);
-		const editorTextBefore = this.editor.getText();
-		const discardStaleSelection = (): boolean => {
-			if (sessionGeneration === this.sessionEventGeneration) return false;
-			if (this.pendingQueueEdit === pendingQueueEdit) {
-				this.pendingQueueEdit = undefined;
-				this.queueSelection.reset();
-				if (submissionGeneration === this.inputSubmissionGeneration && this.editor.getText() === editorTextBefore) {
-					this.setEditorTextFromQueueSelection("");
-				}
-				this.ui.requestRender();
-			}
-			return true;
-		};
-		return this.enqueueQueueMutation(async () => {
-			if (discardStaleSelection()) return true;
-			// Earlier serialized moves may have changed the selected item's index.
-			const lane = this.connectionQueue[submittedSelection.lane];
-			const resolvedIndex =
-				lane[submittedSelection.index] === submittedSelection.text
-					? submittedSelection.index
-					: lane.indexOf(submittedSelection.text);
-			if (resolvedIndex < 0) {
-				this.queueSelection.sync(this.connectionQueue);
-				const editorUntouched =
-					submissionGeneration === this.inputSubmissionGeneration && this.editor.getText() === editorTextBefore;
-				if (editorUntouched) {
-					this.setEditorTextFromQueueSelection(text);
-				}
-				this.queueSelection.replaceDraft(editorUntouched ? text : this.editor.getText());
-				this.showStatus("Queue changed; edit kept in the editor");
-				this.updatePendingMessagesDisplay();
-				this.ui.requestRender();
-				return true;
-			}
-			const selected = { ...submittedSelection, index: resolvedIndex };
-			const queueBefore = this.connectionQueue;
-			let status: AgentConnectionQueuedMessageMutationStatus;
-			try {
-				status = await this.agentConnection.mutateQueuedMessage(
-					selected.lane,
-					selected.index,
-					selected.text,
-					mutation,
-				);
-			} catch (error) {
-				if (discardStaleSelection()) return true;
-				// The editor was already cleared by Enter; restore the edit before surfacing the error.
-				const editorUntouched =
-					submissionGeneration === this.inputSubmissionGeneration && this.editor.getText() === editorTextBefore;
-				if (editorUntouched) {
-					this.setEditorTextFromQueueSelection(text);
-				}
-				if (!this.queueSelection.isBrowsing) {
-					this.queueSelection.replaceDraft(editorUntouched ? text : this.editor.getText());
-				}
-				throw error;
-			}
-			if (discardStaleSelection()) return true;
-			const editorUntouched =
-				submissionGeneration === this.inputSubmissionGeneration && this.editor.getText() === editorTextBefore;
-			if (status === "applied") {
-				// Same optimistic patch as moveQueueSelection, and the same guard:
-				// skip when a queue event already replaced the mirror.
-				const lane = this.connectionQueue[selected.lane];
-				if (this.connectionQueue === queueBefore && lane[selected.index] === selected.text) {
-					if (!trimmed) lane.splice(selected.index, 1);
-					else if (targetLane === selected.lane) lane[selected.index] = trimmed;
-					else {
-						lane.splice(selected.index, 1);
-						this.connectionQueue[targetLane].push(trimmed);
-					}
-				}
-				if (trimmed) this.editor.addToHistory?.(trimmed);
-				const draft = this.queueSelection.reset();
-				if (editorUntouched) this.setEditorTextFromQueueSelection(draft);
-			} else {
-				this.queueSelection.sync(this.connectionQueue);
-				// Enter submissions clear the editor before onSubmit runs; restore the
-				// edit so a failed mutation never swallows it.
-				if (editorUntouched) this.setEditorTextFromQueueSelection(text);
-				if (!this.queueSelection.isBrowsing) {
-					this.queueSelection.replaceDraft(editorUntouched ? text : this.editor.getText());
-				}
-				if (status === "invalid")
-					this.showStatus("Edited command is not a valid session command; edit kept in the editor");
-				else if (status === "unsupported") this.showStatus("Queue editing requires a newer daemon");
-				else this.showStatus("Queue changed; edit kept in the editor");
-			}
-			this.updatePendingMessagesDisplay();
-			this.ui.requestRender();
-			return true;
-		}).finally(() => {
-			if (this.pendingQueueEdit === pendingQueueEdit) this.pendingQueueEdit = undefined;
-		});
-	}
-
-	/**
-	 * Images for a queue replace: undefined preserves the server's images (some
-	 * markers cannot be resolved by this client), [] clears, a list replaces.
-	 */
-	private collectQueueReplaceImages(text: string): ImageContent[] | undefined {
-		const markers = [...new Set(imageMarkerIds(text))];
-		if (markers.length === 0) return [];
-		const resolved = markers.map((markerId) => this.pastedImages.get(markerId));
-		return resolved.every((image) => image !== undefined)
-			? resolved.map((image) => ({ ...(image as ImageContent) }))
-			: undefined;
-	}
-
 	private setEditorTextFromQueueSelection(text: string): void {
 		this.isApplyingQueueSelectionText = true;
 		try {
@@ -6473,17 +6531,14 @@ export class InteractiveMode {
 	}
 
 	private getQueueSelectionHeader(): string | undefined {
-		const selected = this.queueSelection.selected;
+		const selected = this.queueSelection.checkedOut;
 		if (!selected) return undefined;
 		const lane = selected.lane === "steering" ? "steering" : "follow-up";
-		const older = keyText("app.message.navigateOlder");
 		const newer = keyText("app.message.navigateNewer");
-		const earlier = keyText("app.message.moveEarlier");
-		const later = keyText("app.message.moveLater");
 		const queue = keyText("app.message.followUp");
 		return theme.fg(
 			"dim",
-			`${lane} ${selected.index + 1} · ${older}/${newer} browse · ${earlier}/${later} reorder · enter steers · ${queue} queues · empty deletes`,
+			`editing queued ${lane} · enter sends · ${newer}/esc re-queues · ${queue} sends as follow-up`,
 		);
 	}
 
@@ -6595,6 +6650,7 @@ export class InteractiveMode {
 			for (const child of this.chatContainer.children) {
 				if (isCollapsible(child) && child.toggleTargetId === blockTarget.id) {
 					child.toggleExpandedSelf();
+					this.recordBlockExpansion(child);
 					this.requestRenderAfterBlockToggle();
 					return true;
 				}
@@ -6608,6 +6664,7 @@ export class InteractiveMode {
 		for (const child of this.chatContainer.children) {
 			if (isCollapsible(child) && child.toggleTargetId === target) {
 				child.toggleExpandedSelf();
+				this.recordBlockExpansion(child);
 				this.requestRenderAfterBlockToggle();
 				return true;
 			}
@@ -6642,6 +6699,64 @@ export class InteractiveMode {
 		void this.returnToAgentsView("scoped_agents_view");
 	}
 
+	/** Remember a block's current absolute expansion so rebuilds can restore it. */
+	private recordBlockExpansion(component: unknown): void {
+		if (isCollapsible(component) && typeof component.isExpanded === "boolean") {
+			this.expandedBlocks.set(component.toggleTargetId, component.isExpanded);
+		}
+	}
+
+	private restorePersistedExpansionFor(component: unknown): void {
+		if (!isCollapsible(component)) return;
+		const wanted = this.expandedBlocks.get(component.toggleTargetId);
+		if (wanted !== undefined && typeof component.isExpanded === "boolean" && component.isExpanded !== wanted) {
+			component.toggleExpandedSelf();
+		}
+	}
+
+	/** One sweep after (re)rendering the transcript: re-apply every persisted per-block toggle. */
+	private restorePersistedExpansion(): void {
+		for (const child of this.chatContainer.children) {
+			this.restorePersistedExpansionFor(child);
+		}
+	}
+
+	private accumulateTurnUsage(message: AssistantMessage): void {
+		const usage = message.usage;
+		if (!usage) return;
+		if (!this.turnMetaAccumulator) {
+			this.turnMetaAccumulator = {
+				startTs: undefined,
+				endedAtMs: message.timestamp,
+				input: 0,
+				output: 0,
+				costUsd: 0,
+			};
+		}
+		const acc = this.turnMetaAccumulator;
+		acc.endedAtMs = message.timestamp;
+		acc.input += usage.input ?? 0;
+		acc.output += usage.output ?? 0;
+		acc.costUsd += usage.cost?.total ?? 0;
+	}
+
+	/** Turn boundary: emit the dotted rule with right-aligned time/tokens/runtime/cost. */
+	private flushTurnMetadata(): void {
+		const acc = this.turnMetaAccumulator;
+		this.turnMetaAccumulator = undefined;
+		if (!acc || (acc.input === 0 && acc.output === 0)) return;
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new TurnMetadataComponent({
+				endedAtMs: acc.endedAtMs,
+				durationMs: acc.startTs !== undefined ? Math.max(0, acc.endedAtMs - acc.startTs) : 0,
+				inputTokens: acc.input,
+				outputTokens: acc.output,
+				costUsd: acc.costUsd,
+			}),
+		);
+	}
+
 	private applyChatExpansion(): void {
 		const activeHeader = this.customHeader ?? this.builtInHeader;
 		if (isExpandable(activeHeader)) {
@@ -6657,6 +6772,7 @@ export class InteractiveMode {
 			if (hasEditDiffsExpansion(child)) {
 				child.setEditDiffsExpanded(this.editDiffsExpanded);
 			}
+			this.recordBlockExpansion(child);
 		}
 		// Expanding/collapsing changes blocks above the viewport, which would
 		// otherwise force a full redraw that scrolls to the top and replays the
@@ -6745,9 +6861,13 @@ export class InteractiveMode {
 	private clearInputBar(): void {
 		this.clearEscapeRepeat();
 		this.clearCtrlCExitHint({ render: false });
-		// Leaving browse mode restores the stashed draft instead of arming an
-		// accidental empty-submit delete of the selected queued message.
-		this.editor.setText(this.queueSelection.hasDraft ? this.queueSelection.reset() : "");
+		if (this.queueSelection.isBrowsing) {
+			// Leaving browse mode re-queues the checked-out original and restores
+			// the stashed draft.
+			this.cancelQueueCheckout();
+			return;
+		}
+		this.editor.setText("");
 		this.ui.requestRender();
 	}
 
@@ -7899,6 +8019,7 @@ export class InteractiveMode {
 				},
 				initialSelectedId,
 				initialFilterMode,
+				{ cwd: this.getCurrentCwd() },
 			);
 			return selector;
 		});

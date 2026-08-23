@@ -4,55 +4,56 @@ import { QueueSelection } from "../src/modes/interactive/queue-selection.js";
 const queue = { steering: ["s1", "s2"], followUp: ["f1", "f2"] };
 
 describe("QueueSelection", () => {
-	it("browses newest-first from the draft and back", () => {
+	it("checks out the newest queued item and stashes the draft", () => {
 		const selection = new QueueSelection();
-		expect(selection.move(queue, "draft", 1)).toBeUndefined();
-		expect(selection.move(queue, "draft", -1)).toBe("f2");
-		expect(selection.selected).toEqual({ lane: "followUp", index: 1, text: "f2" });
-		expect(selection.move(queue, "", -1)).toBe("f1");
-		expect(selection.move(queue, "", -1)).toBe("s2");
-		expect(selection.move(queue, "", -1)).toBe("s1");
-		expect(selection.move(queue, "", -1)).toBeUndefined();
-		expect(selection.selected).toEqual({ lane: "steering", index: 0, text: "s1" });
-		for (const expected of ["s2", "f1", "f2", "draft"]) {
-			expect(selection.move(queue, "", 1)).toBe(expected);
-		}
 		expect(selection.isBrowsing).toBe(false);
-	});
-
-	it("does not enter browse mode when the queue is empty", () => {
-		const selection = new QueueSelection();
-		expect(selection.move({ steering: [], followUp: [] }, "draft", -1)).toBeUndefined();
-		expect(selection.isBrowsing).toBe(false);
-	});
-
-	it("keeps, retargets, or drops the selection when the queue changes", () => {
-		const selection = new QueueSelection();
-		selection.move(queue, "draft", -1);
-		selection.move(queue, "", -1);
-		selection.move(queue, "", -1); // s2
-		expect(selection.sync({ steering: ["s1", "s2"], followUp: ["f2"] })).toBeUndefined();
-		expect(selection.selected).toEqual({ lane: "steering", index: 1, text: "s2" });
-		expect(selection.sync({ steering: ["s0", "s2"], followUp: [] })).toBeUndefined(); // retarget by text
-		expect(selection.selected).toEqual({ lane: "steering", index: 1, text: "s2" });
-		expect(selection.sync({ steering: ["s0"], followUp: ["s2"] })).toBe("s2"); // same text, other lane: drop
-		expect(selection.isBrowsing).toBe(false);
-	});
-
-	it("keeps the stashed draft across an external selection drop", () => {
-		const selection = new QueueSelection();
-		selection.move(queue, "my draft", -1); // editing f2
-		selection.sync({ steering: [], followUp: [] }); // f2 delivered: selection dropped
-		expect(selection.isBrowsing).toBe(false);
-		selection.move({ steering: ["s9"], followUp: [] }, "f2 leftover text", -1);
-		expect(selection.reset()).toBe("my draft");
-	});
-
-	it("reset returns the stashed draft once", () => {
-		const selection = new QueueSelection();
-		selection.move(queue, "my draft", -1);
-		expect(selection.reset()).toBe("my draft");
+		const checkout = selection.checkoutNewest(queue, "draft");
+		expect(checkout).toEqual({ lane: "followUp", originalIndex: 1, originalText: "f2" });
+		expect(selection.checkedOut).toBe(checkout);
+		expect(selection.isBrowsing).toBe(true);
+		expect(selection.hasDraft).toBe(true);
+		expect(selection.reset()).toBe("draft");
 		expect(selection.isBrowsing).toBe(false);
 		expect(selection.reset()).toBe("");
+	});
+
+	it("falls back to the steering lane tail and records the original index", () => {
+		const selection = new QueueSelection();
+		expect(selection.checkoutNewest({ steering: ["s1"], followUp: [] }, "")).toEqual({
+			lane: "steering",
+			originalIndex: 0,
+			originalText: "s1",
+		});
+	});
+
+	it("does not check out when the queue is empty", () => {
+		const selection = new QueueSelection();
+		expect(selection.checkoutNewest({ steering: [], followUp: [] }, "draft")).toBeUndefined();
+		expect(selection.isBrowsing).toBe(false);
+		expect(selection.hasDraft).toBe(false);
+	});
+
+	it("holds a single checkout until it is resolved", () => {
+		const selection = new QueueSelection();
+		selection.checkoutNewest(queue, "draft");
+		expect(selection.checkoutNewest(queue, "other draft")).toBeUndefined();
+		expect(selection.checkedOut?.originalText).toBe("f2");
+		expect(selection.reset()).toBe("draft");
+	});
+
+	it("clearCheckout detaches without returning text but keeps the stashed draft", () => {
+		const selection = new QueueSelection();
+		selection.checkoutNewest(queue, "draft");
+		selection.clearCheckout();
+		expect(selection.checkedOut).toBeUndefined();
+		expect(selection.isBrowsing).toBe(false);
+		expect(selection.reset()).toBe("draft");
+	});
+
+	it("replaceDraft updates the stashed draft once", () => {
+		const selection = new QueueSelection();
+		selection.checkoutNewest(queue, "draft");
+		selection.replaceDraft("newer draft");
+		expect(selection.reset()).toBe("newer draft");
 	});
 });

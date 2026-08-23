@@ -77,7 +77,6 @@ export function buildHotkeysGuide(extensionShortcuts: ReadonlyMap<KeyId, Extensi
 	const promptStash = keyText("app.prompt.stash");
 	const followUp = keyText("app.message.followUp");
 	const browseQueue = keyText("app.message.navigateOlder");
-	const reorderQueue = `${keyText("app.message.moveEarlier")} / ${keyText("app.message.moveLater")}`;
 	const pasteImage = keyText("app.clipboard.pasteImage");
 	const viewportPageUp = keyText("tui.viewport.pageUp");
 	const viewportPageDown = keyText("tui.viewport.pageDown");
@@ -127,8 +126,7 @@ ${interrupt ? `| \`${interrupt}\` | Interrupt current operation |\n` : ""}${shor
 | \`${externalEditor}\` | Edit message in external editor |
 | \`${promptStash}\` | Stash or restore draft prompt |
 | \`${followUp}\` | Queue follow-up message |
-| \`${browseQueue}\` | Browse and edit queued messages |
-| \`${reorderQueue}\` | Reorder the selected queued message |
+| \`${browseQueue}\` | Check out a queued message for editing (esc returns it) |
 | \`${pasteImage}\` | Paste image from clipboard |
 | \`/\` | Slash commands |
 

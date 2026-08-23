@@ -187,6 +187,7 @@ type RenderSessionContextHarness = {
 	pendingTools: Map<string, ToolExecutionComponent>;
 	replToolComponents: Map<string, unknown>;
 	lateReplSentAgentMessages: Map<string, unknown[]>;
+	expandedBlocks: Map<string, unknown>;
 	toolOutputExpanded: boolean;
 	chatContainer: Container;
 	editor: { addToHistory?: (text: string) => void };
@@ -234,6 +235,7 @@ function createRenderSessionContextHarness(overrides: Partial<RenderSessionConte
 		pendingTools: new Map<string, ToolExecutionComponent>(),
 		replToolComponents: new Map<string, unknown>(),
 		lateReplSentAgentMessages: new Map<string, unknown[]>(),
+		expandedBlocks: new Map(),
 		toolOutputExpanded: false,
 		chatContainer,
 		editor: { addToHistory },
@@ -304,6 +306,7 @@ describe("InteractiveMode.renderSessionContext", () => {
 				pendingTools: new Map(),
 				replToolComponents,
 				lateReplSentAgentMessages,
+				expandedBlocks: new Map(),
 				toolOutputExpanded: false,
 				chatContainer,
 				updateEditorBorderColor: vi.fn(),
@@ -357,6 +360,7 @@ describe("InteractiveMode.renderSessionContext", () => {
 				pendingTools,
 				replToolComponents: new Map(),
 				lateReplSentAgentMessages: new Map(),
+				expandedBlocks: new Map(),
 				toolOutputExpanded: false,
 				chatContainer,
 				updateEditorBorderColor: vi.fn(),
@@ -1216,10 +1220,16 @@ describe("InteractiveMode pending bash components", () => {
 		const editorStub = { clearHistory: vi.fn(), setText: vi.fn() };
 		const endFeatureHintRun = vi.fn();
 		const queueSelection = new QueueSelection();
-		queueSelection.move({ steering: ["s1"], followUp: [] }, "draft", -1);
+		queueSelection.checkoutNewest({ steering: ["s1"], followUp: [] }, "draft");
 		const fakeThis = {
 			endFeatureHintRun,
+			showWarning: vi.fn(),
 			queueSelection,
+			connectionQueue: { steering: ["s1"], followUp: [] },
+			pendingQueueEdit: undefined,
+			featureHintSuppressedByQueue: true,
+			promptStash: undefined,
+			promptStashState: undefined,
 			chatContainer: new Container(),
 			shortcutGuideContainer: new Container(),
 			pendingMessagesContainer: new Container(),
@@ -1234,6 +1244,7 @@ describe("InteractiveMode pending bash components", () => {
 			pendingBashComponents: [component],
 			activityTracker: { reset: vi.fn() },
 			agentRunFileChanges: new Map(),
+			expandedBlocks: new Map(),
 			recapContainer: new Container(),
 			renderRecap: vi.fn(),
 			replToolComponents: new Map(),
@@ -1835,6 +1846,7 @@ describe("InteractiveMode tool event rendering", () => {
 			startedToolCalls: new Set<string>(),
 			replToolComponents: new Map(),
 			lateReplSentAgentMessages: new Map(),
+			expandedBlocks: new Map(),
 			loadToolDefinition: vi.fn(() => definitionPromise),
 			uiServices: {
 				settingsManager: {
