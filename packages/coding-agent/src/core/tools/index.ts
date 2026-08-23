@@ -42,6 +42,8 @@ export {
 	createHeadToolDefinition,
 	createTailTool,
 	createTailToolDefinition,
+	type WindowBatchDetails,
+	type WindowBatchFileDetails,
 	type WindowToolDetails,
 } from "./native/head-tail.js";
 export {
