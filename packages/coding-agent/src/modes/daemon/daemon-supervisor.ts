@@ -59,6 +59,7 @@ import {
 	makeDaemonHello,
 	markClientSnapshotStreaming,
 	queueClientCatchup,
+	socketWriteWithBackpressure,
 	takePendingClientCatchups,
 } from "./daemon-client-connection.js";
 import { deserializeDaemonError, serializeDaemonError } from "./daemon-errors.js";
@@ -4923,14 +4924,7 @@ export class DaemonSupervisor {
 	}
 
 	private writeSerialized(client: DaemonSocketClient, line: string | Uint8Array): boolean {
-		if (client.socket.destroyed) {
-			return false;
-		}
-		const accepted = client.socket.write(line);
-		if (!accepted) {
-			client.backpressured = true;
-		}
-		return accepted;
+		return socketWriteWithBackpressure(client, line);
 	}
 
 	private registerSignalHandlers(): void {

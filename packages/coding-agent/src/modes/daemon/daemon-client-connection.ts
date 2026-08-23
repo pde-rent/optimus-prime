@@ -129,3 +129,20 @@ export function makeDaemonHello(options: {
 		...options.extras,
 	} as DaemonOutbound;
 }
+
+/**
+ * Write serialized bytes to a client socket with the shared backpressure
+ * contract: destroyed sockets report false without touching the stream, and a
+ * rejected write flips `backpressured` until the socket drains. Returns
+ * whether the kernel accepted the data.
+ */
+export function socketWriteWithBackpressure(client: DaemonSocketClient, wireData: string | Uint8Array): boolean {
+	if (client.socket.destroyed) {
+		return false;
+	}
+	const accepted = client.socket.write(wireData);
+	if (!accepted) {
+		client.backpressured = true;
+	}
+	return accepted;
+}

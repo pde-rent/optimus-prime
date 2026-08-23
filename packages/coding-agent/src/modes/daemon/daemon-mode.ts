@@ -132,6 +132,7 @@ import {
 	makeDaemonHello,
 	markClientSnapshotStreaming,
 	queueClientCatchup,
+	socketWriteWithBackpressure,
 } from "./daemon-client-connection.js";
 
 export {
@@ -6786,11 +6787,7 @@ export class AgentDaemon {
 						typeof line === "string" ? Buffer.from(line) : line,
 					)
 				: line;
-		const accepted = client.socket.write(wireData);
-		if (!accepted) {
-			client.backpressured = true;
-		}
-		return accepted;
+		return socketWriteWithBackpressure(client, wireData);
 	}
 
 	private abortSideQuestionsFor(client: DaemonSocketClient, activeSessionId: string): void {
