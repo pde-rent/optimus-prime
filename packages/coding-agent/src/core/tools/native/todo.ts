@@ -1,5 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { type TodoStatus, TodoStore, todoTreeRows } from "../../todo/store.js";
 import { throwIfAborted } from "../abortable.js";
@@ -122,6 +123,15 @@ export function createTodoToolDefinition(
 		executionMode: "sequential",
 		kind: "edit",
 		read_only: false,
+		renderCall(args, theme) {
+			const op = "op" in args ? args.op : "...";
+			const detail = "title" in args ? args.title : "id" in args ? args.id : "";
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("todo"))} ${theme.fg("accent", String(op))}${detail ? theme.fg("dim", ` ${String(detail)}`) : ""}`,
+				0,
+				0,
+			);
+		},
 		async execute(
 			_toolCallId,
 			input: TodoToolInput,

@@ -1,6 +1,7 @@
 import { type Stats, statSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
 import { resolveToCwd } from "../path-utils.js";
@@ -103,6 +104,15 @@ export function createFindToolDefinition(
 		executionMode: "parallel",
 		kind: "search",
 		read_only: true,
+		renderCall(args, theme) {
+			const path = args?.path ?? ".";
+			const pattern = args?.name ?? (args?.type ? `type:${args.type}` : "...");
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("find"))} ${theme.fg("accent", pattern)} ${theme.fg("dim", path)}`,
+				0,
+				0,
+			);
+		},
 		async execute(
 			_toolCallId,
 			input: FindToolInput,

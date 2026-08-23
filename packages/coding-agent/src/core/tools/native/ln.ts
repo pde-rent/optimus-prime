@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { link as fsLink, symlink as fsSymlink } from "fs/promises";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
@@ -51,6 +52,14 @@ export function createLnToolDefinition(cwd: string): ToolDefinition<typeof lnSch
 		parameters: lnSchema,
 		kind: "edit",
 		read_only: false,
+		renderCall(args, theme) {
+			const target = args?.target ?? "...";
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("ln"))} ${theme.fg("accent", target)} ${theme.fg("dim", "→")} ${theme.fg("accent", args?.linkPath ?? "...")}`,
+				0,
+				0,
+			);
+		},
 		async execute(
 			_toolCallId,
 			input: LnToolInput,
