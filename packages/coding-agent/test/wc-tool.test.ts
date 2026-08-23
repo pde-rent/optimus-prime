@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createWcTool } from "../src/core/tools/native/wc.js";
 import { getTextOutput } from "./helpers/render.js";

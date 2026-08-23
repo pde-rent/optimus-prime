@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createReadFileTool } from "../src/core/tools/read-file.js";
 import { getTextOutput } from "./helpers/render.js";

@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import net from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import tls from "node:tls";
 import { clearCredentialCommandCache, NetAuthError, NetProtocolError } from "../src/core/net/core.js";
 import {
 	assembleMessage,
@@ -38,9 +36,9 @@ function startFakeSmtp(opts: FakeSmtpOptions = {}): FakeSmtpServer {
 	// STARTTLS deliberately absent from the defaults: the plain-text fake cannot
 	// honour it. Real mid-stream upgrades are covered by startStarttlsSmtp below.
 	const caps = opts.capabilities ?? ["8BITMIME", "AUTH PLAIN LOGIN", "SMTPUTF8"];
-	let ehloCount = 0;
+	let _ehloCount = 0;
 	let loginStep = 0;
-	let secure = opts.tls !== undefined; // Implicit TLS: the channel is already private.
+	let _secure = opts.tls !== undefined; // Implicit TLS: the channel is already private.
 	const listenOpts = {
 		hostname: "127.0.0.1",
 		port: 0,
@@ -54,11 +52,11 @@ function startFakeSmtp(opts: FakeSmtpOptions = {}): FakeSmtpServer {
 					if (!raw) continue;
 					transcript.push(raw);
 					if (raw.startsWith("EHLO")) {
-						ehloCount++;
+						_ehloCount++;
 						const lines = caps.map((cap, i) => (i === caps.length - 1 ? `250 ${cap}` : `250-${cap}`));
-						socket.write(lines.join("\r\n") + "\r\n");
+						socket.write(`${lines.join("\r\n")}\r\n`);
 					} else if (raw === "STARTTLS") {
-						secure = true;
+						_secure = true;
 						socket.write("220 2.0.0 Ready to start TLS\r\n");
 					} else if (raw === "AUTH LOGIN") {
 						socket.write(opts.authAccepted === false ? "535 5.7.8 Bad credentials\r\n" : "334 VXNlcm5hbWU6\r\n");

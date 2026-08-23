@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { platform } from "process";
 import { createLnTool } from "../src/core/tools/native/ln.js";

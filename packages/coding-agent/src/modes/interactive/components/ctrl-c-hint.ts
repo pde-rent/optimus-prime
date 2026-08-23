@@ -1,5 +1,3 @@
-import type { Component } from "@earendil-works/pi-tui";
-
 /**
  * Shared Ctrl-C press-twice-to-exit hint state: owns the expiry timestamp and
  * the unref'd hide timer. Callers render the hint when `isVisible()` and pass

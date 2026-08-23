@@ -5,7 +5,7 @@ import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
 import { resolveToCwd } from "../path-utils.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
-import { GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "../truncate.js";
+import { truncateHead, truncateLine } from "../truncate.js";
 import { looksLikeBinary, statSearchRoot, walkFiles } from "./walk.js";
 
 const grepSchema = Type.Object(

@@ -44,7 +44,7 @@ export class TurnMetadataComponent implements Component {
 		].filter((p) => p !== undefined) as string[];
 		const metaText = theme.fg("dim", parts.join(" · "));
 		const pad = Math.max(0, w - visibleWidth(parts.join(" · ")) - 1);
-		const line = "·".repeat(pad) + " " + metaText;
+		const line = `${"·".repeat(pad)} ${metaText}`;
 		return [truncateToWidth(line, width)];
 	}
 }

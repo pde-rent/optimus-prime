@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "fs";
+import { mkdirSync, statSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { withFileMutationQueue } from "../src/core/tools/file-mutation-queue.js";
 import { createReadFileTool } from "../src/core/tools/read-file.js";

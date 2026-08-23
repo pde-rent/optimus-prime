@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { writeFile } from "node:fs/promises";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createWriteFileTool, type WriteFileOperations } from "../src/core/tools/write-file.js";
 import { getTextOutput } from "./helpers/render.js";

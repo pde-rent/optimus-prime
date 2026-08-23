@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createSedTool, parseSubstitution } from "../src/core/tools/native/sed.js";
 import { getTextOutput } from "./helpers/render.js";

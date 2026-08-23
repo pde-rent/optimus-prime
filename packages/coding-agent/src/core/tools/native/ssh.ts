@@ -140,7 +140,7 @@ export function createSshToolDefinition(cwd: string): ToolDefinition<typeof sshS
 function formatExec(host: string, result: SshExecResult): string {
 	if (result.exitCode === 0) {
 		let text = result.stdout.trimEnd();
-		if (result.stderr.trim()) text += (text ? "\n\n" : "") + "[stderr]\n" + result.stderr.trimEnd();
+		if (result.stderr.trim()) text += `${text ? "\n\n" : ""}[stderr]\n${result.stderr.trimEnd()}`;
 		if (result.truncated) text += "\n[output truncated]";
 		return text || "(no output)";
 	}

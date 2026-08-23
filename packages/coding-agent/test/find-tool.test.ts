@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync, utimesSync, writeFileSync } from "fs";
+import { mkdirSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createFindTool } from "../src/core/tools/native/find.js";
 import { getTextOutput } from "./helpers/render.js";
