@@ -76,7 +76,7 @@ Optimus Prime runs in your current working directory and can modify files there.
 
 ## Recursive Subagents
 
-Recursive subagents are a built-in Optimus Prime capability. The model spawns independent work from the REPL with `await rlm("subtask")`; each call returns at admission with a child handle and never returns the answer. Children send requested results as explicit `agent_message` replies to the parent or write them to files. Child agents use the same TypeScript agent runtime, providers, tools, skills, and session machinery as the parent.
+Recursive subagents are a built-in Optimus Prime capability. The model spawns independent work from the REPL with `await spawn("subtask")`; each call returns at admission with a child handle and never returns the answer. Children send requested results as explicit `agent_message` replies to the parent or write them to files. Child agents use the same TypeScript agent runtime, providers, tools, skills, and session machinery as the parent.
 
 You can prompt the model to use that capability directly:
 

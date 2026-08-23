@@ -1,9 +1,13 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import { renderDiff } from "../../../modes/interactive/components/diff.js";
+import { countChangedLines } from "../../../modes/interactive/components/edit-summary.js";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
+import { EditChangeSummaryComponent } from "../edit.js";
 import { detectLineEnding, generateDiffString, normalizeToLF, restoreLineEndings, stripBom } from "../edit-diff.js";
 import { withFileMutationQueue } from "../file-mutation-queue.js";
 import { resolveToCwd } from "../path-utils.js";
@@ -121,10 +125,36 @@ export function createSedToolDefinition(cwd: string): ToolDefinition<typeof sedS
 		name: "sed",
 		label: "sed",
 		description:
-			'Stream-edit a file with one s/pattern/replacement/[flags] substitution. Default (apply:false) is a dry-run returning the unified diff; pass apply:true only after reviewing it to write the change. Deliberately narrower than GNU sed: no line addressing, no scripts, one substitution per call - prefer edit for targeted multi-line changes. Zero matches leave the file untouched and answer without a diff. Failures report the exact problem: "Invalid sed expression: <expression>. <reason>.", "Could not read file: <path>. Error code: <code>.", "Could not write file: <path>. Error code: <code>."',
-		promptSnippet:
-			"Substitute in a file via s/pattern/replacement; dry-run diff by default; not for multi-file edits - use grep+edit",
+			"Substitute s/pattern/replacement/ in one file - the default and fastest way to apply one reviewed regex change; dry-run diff by default, apply:true writes; runs in-process on Windows/macOS/Linux; replaces bash sed -i. Not for multi-line or multi-change work - use edit; several files - grep+edit.",
+		promptSnippet: "s/pattern/replacement/ in one file; dry-run diff by default; multi-edit use edit",
 		parameters: sedSchema,
+		renderResult(result, _options, theme, context) {
+			if (context.isError) {
+				const errorText = result.content
+					.filter((c) => c.type === "text")
+					.map((c) => c.text || "")
+					.join("\n");
+				return new Text(theme.fg("error", errorText), 1, 0);
+			}
+			const details = result.details as SedToolDetails | undefined;
+			const diff = details?.diff;
+			// Dry runs and no-match results are reads: show the notice line only.
+			if (!details?.applied || !diff) {
+				const text = result.content
+					.filter((c) => c.type === "text")
+					.map((c) => c.text || "")
+					.join("\n")
+					.split("\n")[0];
+				return new Text(theme.fg("muted", text), 1, 0);
+			}
+			return new EditChangeSummaryComponent(
+				context.args?.path ?? "...",
+				context.cwd,
+				countChangedLines(diff),
+				context.expanded,
+				context.expanded ? renderDiff(diff).split("\n") : undefined,
+			);
+		},
 		kind: "edit",
 		read_only: false,
 		async execute(

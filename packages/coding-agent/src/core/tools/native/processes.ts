@@ -506,9 +506,8 @@ export function createProcessesToolDefinition(
 		name: "processes",
 		label: "processes",
 		description:
-			'List, sample and kill OS processes across linux/darwin/win32 without shell quoting hazards. Use it for "what is eating CPU or memory" questions and stopping a specific pid; do not use it for host-level memory/load/disk totals (use sysinfo) or sockets and DNS (use netdiag). list renders a ps aux-style table PID PPID USER S CPU% RSS COMMAND sorted by cpu or mem and capped by limit (default 25); sample takes two snapshots intervalMs apart (default 500ms) and reports top-style per-pid CPU percent deltas; kill signals one pid (default SIGTERM) and refuses this agent\'s own process tree - SIGKILL needs force:true. Missing helper binaries fail with "Could not spawn <binary>: binary not found on PATH."; kill errors are exact: "No such process: <pid>.", "Permission denied signalling pid <pid>: EPERM.", "Signal SIGKILL requires force: true.", "Refusing to kill pid <pid>: ...".',
-		promptSnippet:
-			"Per-process CPU/RAM table like ps/top, sampled CPU deltas over an interval, guarded kill - use instead of shelling out to ps/top/kill",
+			"List, sample and kill OS processes: ps-style table, top-style CPU deltas, guarded kill - the default and fastest way to answer what is using CPU or memory; runs in-process on Windows/macOS/Linux; replaces parsing bash ps/top/kill. Refuses its own process tree; SIGKILL needs force:true. Host totals - use sysinfo.",
+		promptSnippet: "Per-process CPU/RAM table, sampled CPU deltas, guarded kill; replaces ps/top/kill parsing",
 		parameters: processesSchema,
 		executionMode: "parallel",
 		kind: "process",

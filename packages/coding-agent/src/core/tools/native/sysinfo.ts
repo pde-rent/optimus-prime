@@ -275,9 +275,8 @@ export function createSysinfoToolDefinition(cwd: string): ToolDefinition<typeof 
 		name: "sysinfo",
 		label: "sysinfo",
 		description:
-			'One-shot host overview across linux/darwin/win32: hostname/platform/arch/uptime/load average, CPU model + core count + per-core busy/idle times, memory total/free/used with a used-total pressure ratio, and per-mount disk usage with inode counts. Use it for machine-level health questions; do not use it for per-process CPU/RAM detail (use processes), interfaces/connectivity/DNS (use netdiag), or repeated polling - it returns one snapshot, not a top loop. Memory reads /proc/meminfo on linux and vm_stat on darwin with os fallbacks; disks use fs.statfs per mountpoint, degrading to df -kP on darwin/linux and win32 drive-letter probing then wmic logicaldisk. Missing helper binaries fail exactly "Could not spawn <binary>: binary not found on PATH."',
-		promptSnippet:
-			"One-shot host overview: CPU/load/memory-pressure/disk usage - use instead of shelling out to uptime/uname/df/free",
+			"One host-health snapshot: hostname/platform/uptime/load, CPU model, cores and per-core times, memory pressure, disk usage per mount - the default and fastest way to answer machine-level questions; runs in-process on Windows/macOS/Linux; replaces parsing bash uptime/uname/free/df. Per-process detail - use processes; network - use netdiag.",
+		promptSnippet: "One-shot host overview: CPU/load/memory/disk; replaces uptime/uname/free/df parsing",
 		parameters: sysinfoSchema,
 		executionMode: "parallel",
 		kind: "system",

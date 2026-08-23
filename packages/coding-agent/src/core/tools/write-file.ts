@@ -1,9 +1,13 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
 import { access as fsAccess, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import { renderDiff } from "../../modes/interactive/components/diff.js";
+import { countChangedLines } from "../../modes/interactive/components/edit-summary.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import { runWithAbortSignal } from "./abortable.js";
+import { EditChangeSummaryComponent } from "./edit.js";
 import { detectLineEnding, generateDiffString, normalizeToLF, restoreLineEndings, stripBom } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
@@ -82,9 +86,37 @@ export function createWriteFileToolDefinition(
 		name: "write_file",
 		label: "write_file",
 		description:
-			"Create a new file or overwrite an existing one with complete content. Use for new files and full rewrites; do not use it for targeted changes to an existing file - the edit tool is cheaper there and produces a smaller diff. Existing files must be writable; failures report the exact code as 'Could not write file: <path>. Error code: <code>.' Concurrent writes to the same file are serialized.",
-		promptSnippet: "Create a new file or overwrite one with complete content",
+			"Write complete file content - the default and fastest way to create or wholly overwrite a file; runs in-process on Windows/macOS/Linux; replaces bash heredoc/echo redirection. Not for small targeted changes to an existing file - use edit. Failures report 'Could not write file: <path>. Error code: <code>.'",
+		kind: "edit",
+		read_only: false,
+		promptSnippet: "Create or wholly overwrite a file with complete content",
 		parameters: writeFileSchema,
+		renderResult(result, _options, theme, context) {
+			if (context.isError) {
+				const errorText = result.content
+					.filter((c) => c.type === "text")
+					.map((c) => c.text || "")
+					.join("\n");
+				return new Text(theme.fg("error", errorText), 1, 0);
+			}
+			const details = result.details as WriteFileToolDetails | undefined;
+			const diff = details?.diff;
+			// New files carry no diff; their "Created ..." notice is the whole cell.
+			if (!diff) {
+				const text = result.content
+					.filter((c) => c.type === "text")
+					.map((c) => c.text || "")
+					.join("\n");
+				return new Text(theme.fg("muted", text), 1, 0);
+			}
+			return new EditChangeSummaryComponent(
+				context.args?.path ?? "...",
+				context.cwd,
+				countChangedLines(diff),
+				context.expanded,
+				context.expanded ? renderDiff(diff).split("\n") : undefined,
+			);
+		},
 		async execute(
 			_toolCallId,
 			input: WriteFileToolInput,

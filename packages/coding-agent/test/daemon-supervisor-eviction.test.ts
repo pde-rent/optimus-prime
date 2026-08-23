@@ -10,6 +10,7 @@ import {
 	DaemonSupervisor,
 	idleEvictionSweepIntervalMs,
 } from "../src/modes/daemon/daemon-supervisor.js";
+import { waitFor } from "./helpers/wait.js";
 
 interface WorkerFixture {
 	descriptor: {
@@ -60,19 +61,6 @@ function useFastTimers(): void {
 
 function useRealTimers(): void {
 	(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = realSetTimeout;
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) throw error;
-			await new Promise<void>((resolve) => realSetTimeout(resolve, 5));
-		}
-	}
 }
 
 const tempDirs: string[] = [];

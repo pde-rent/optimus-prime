@@ -118,6 +118,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		const localTime = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(11, 19);
 		prompt += `\nCurrent date: ${date}, ${localTime} (${tz})`;
 		prompt += `\nSystem: ${os.platform()} ${os.arch()} - shell dialect and paths follow this`;
+		prompt += `\nNative tools are the DEFAULT and FASTEST path for information and execution - read_file/write_file/edit/grep/find/sed/wc/head/tail plus the diagnostic tools run in-process on every OS this platform supports, with no shell or process spawn. Use them first; bash equivalents (grep/cat/echo/sed/find/wc/ln/ps/top/df) are the slower fallback for only what natives do not cover. Do not assume a Unix shell.`;
 		prompt += `\nCurrent working directory: ${promptCwd}`;
 
 		const childDoctrine = buildChildAgentDoctrine({

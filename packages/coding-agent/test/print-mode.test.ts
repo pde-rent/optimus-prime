@@ -3,6 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentAutonomousStatus } from "../src/core/autonomous.js";
 import type { SessionShutdownEvent } from "../src/index.js";
+import { waitFor } from "./helpers/wait.js";
 import { createAssistantMessage as createBaseAssistantMessage } from "./test-helpers.js";
 
 const output = { write: vi.fn(), flush: vi.fn(async () => {}) };
@@ -132,21 +133,6 @@ afterEach(() => {
 });
 
 // bun:test has no vi.waitFor; poll until the assertion stops throwing.
-async function waitFor(assert: () => void): Promise<void> {
-	const deadline = Date.now() + 5_000;
-	let lastError: unknown;
-	while (Date.now() < deadline) {
-		try {
-			assert();
-			return;
-		} catch (error) {
-			lastError = error;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw lastError;
-}
-
 describe("runPrintMode", () => {
 	it("emits session_shutdown in text mode", async () => {
 		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }));
@@ -182,13 +168,13 @@ describe("runPrintMode", () => {
 			mode: "text",
 			initialMessage: "Wait",
 		});
-		await waitFor(() => expect(session.promptAndWait).toHaveBeenCalled());
+		await waitFor(() => expect(session.promptAndWait).toHaveBeenCalled(), 5_000);
 		const handler = onSpy.mock.calls.find(([event]) => event === "SIGINT")?.[1];
 		if (typeof handler !== "function") throw new Error("SIGINT handler was not registered");
 
 		handler();
 
-		await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130));
+		await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(130), 5_000);
 		expect(runtimeHost.dispose).toHaveBeenCalledTimes(1);
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
 		resolvePrompt?.();

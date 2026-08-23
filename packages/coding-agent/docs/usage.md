@@ -103,16 +103,16 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 Normal interactive sessions are persistent agents backed by isolated worker processes. Closing the TUI detaches the client; use `optimus agents`, `optimus list`, or `optimus attach <agent>` to find and reattach to running work. `optimus stop <agent>` stops one root agent, while `optimus shutdown` stops all workers and the local supervisor.
 
-Within a session, the model can delegate through the `rlm` callable already available in the REPL:
+Within a session, the model can delegate through the `spawn` callable already available in the REPL (`rlm` is an equivalent alias):
 
 ```js
 // Spawn independent children. Each call returns at admission with a child handle,
 // never the child's answer.
-const review = await rlm("Review authentication and reply to the parent with findings.", {
+const review = await spawn("Review authentication and reply to the parent with findings.", {
   name: "auth-reviewer",
 });
-const tests = await rlm("Find missing regression tests and reply to the parent.", { name: "test-reviewer" });
-const docs = await rlm("Find stale public documentation and reply to the parent.", { name: "docs-reviewer" });
+const tests = await spawn("Find missing regression tests and reply to the parent.", { name: "test-reviewer" });
+const docs = await spawn("Find stale public documentation and reply to the parent.", { name: "docs-reviewer" });
 
 // Children reply from their own sessions with:
 // await agent_message.send(message, { receiver_role: "parent" });

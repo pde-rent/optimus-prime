@@ -163,8 +163,9 @@ describe("bundled skills preload into the REPL", () => {
 });
 
 describe("sandbox rlm bridge", () => {
-	// Regression: the prompt documents `await rlm('sub-task')`, but the sandbox bound a
-	// plain object, so the bare call threw "rlm is not a function".
+	// Regression: the prompt taught spawning with a bare call (`spawn(...)`, aliased as
+	// `rlm(...)`), but the sandbox bound a plain object, so the bare call threw
+	// "rlm is not a function".
 	it("exposes rlm as a callable that also carries its helpers", async () => {
 		const prompts: string[] = [];
 		const manager = new BunReplManager({
@@ -189,6 +190,42 @@ describe("sandbox rlm bridge", () => {
 			expect(spawned.status).toBe("ok");
 			expect(jsonResult(spawned.result)).toEqual({ rlm_child_id: "child-1", name: "api-reviewer" });
 			expect(prompts).toEqual(["sub-task"]);
+		} finally {
+			await manager.dispose();
+		}
+	}, 60_000);
+
+	// spawn() is an exact alias of rlm(): the same callable object, identical dispatch.
+	it("exposes spawn as an exact alias of rlm that dispatches identically", async () => {
+		const payloads: Array<Record<string, unknown>> = [];
+		const manager = new BunReplManager({
+			cwd: makeTempDir(),
+			hostHandlers: {
+				"rlm.run": async (payload) => {
+					payloads.push(payload);
+					return { rlm_child_id: `child-${payloads.length}`, name: "child" };
+				},
+			},
+		});
+
+		try {
+			await manager.start();
+
+			const shape = await manager.execute(
+				`JSON.stringify([typeof spawn, spawn === rlm, typeof spawn.run, typeof spawn.list_subagents])`,
+			);
+			expect(jsonResult(shape.result)).toEqual(["function", true, "function", "function"]);
+
+			const viaSpawn = await manager.execute(`JSON.stringify(await spawn("sub-task", { name: "via-spawn" }))`);
+			expect(viaSpawn.status).toBe("ok");
+			const viaRlm = await manager.execute(`JSON.stringify(await rlm("sub-task", { name: "via-rlm" }))`);
+			expect(viaRlm.status).toBe("ok");
+
+			expect(payloads.map((payload) => payload.prompt)).toEqual(["sub-task", "sub-task"]);
+			expect(payloads.map((payload) => (payload.kwargs as { name?: string }).name)).toEqual([
+				"via-spawn",
+				"via-rlm",
+			]);
 		} finally {
 			await manager.dispose();
 		}

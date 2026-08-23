@@ -422,9 +422,9 @@ export function createNetdiagToolDefinition(cwd: string): ToolDefinition<typeof 
 		name: "netdiag",
 		label: "netdiag",
 		description:
-			'Network diagnostics across linux/darwin/win32: enriched interface inventory (name/address/mac/internal/cidr), DNS lookups (A AAAA CNAME MX TXT NS via node:dns with a timeout), system-ping runs parsed into structured transmitted/received/loss%/rtt-min-avg-max JSON (never a raw dump), one-shot TCP port probes with open/closed + latencyMs, and listening-socket tables (linux reads /proc/net pure-TS, darwin spawns netstat -anv, win32 netstat -ano). Use it for connectivity questions; do not use it to download HTTP bodies (use fetch), for CPU/memory/disk health (use sysinfo), or per-process CPU detail (use processes). Missing binaries fail exactly "Could not spawn <binary>: binary not found on PATH."; unresolvable hosts fail with the resolver message prefixed "Could not resolve <host>: ".',
+			"Diagnose networks: interfaces, DNS lookups, ping, TCP port probes, listening sockets as structured JSON - the default and fastest way to answer connectivity questions; runs in-process on Windows/macOS/Linux; replaces parsing bash ifconfig/nslookup/ping/netstat. Not for HTTP downloads or host health - use sysinfo.",
 		promptSnippet:
-			"Interfaces/DNS/ping/port-probe/listening-sockets as structured tables - use instead of shelling out to ifconfig/nslookup/ping/netstat",
+			"Interfaces/DNS/ping/port-probe/listening-sockets as JSON; replaces ifconfig/nslookup/ping/netstat parsing",
 		parameters: netdiagSchema,
 		executionMode: "parallel",
 		kind: "network",

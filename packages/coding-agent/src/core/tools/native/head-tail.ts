@@ -322,16 +322,16 @@ function makeDefinition<S extends typeof headSchema | typeof tailSchema>(
 ): ToolDefinition<S, WindowResultDetails> {
 	const description =
 		which === "head"
-			? `Show the first lines or bytes of one or more files without loading all of them (head(1)). Default 10 lines; pass bytes to switch to byte mode. Not for reading whole files - use read_file; not for pattern search - use grep. Pass paths[] (up to ${MAX_BATCH_PATHS}) to window many files in ONE call: the tool sizes them first and reads newest-mtime-first within limitBytes total (default ${formatSize(BATCH_DEFAULT_MAX_BYTES)}), rendering each file under a "=== <path> (N bytes) ===" header; if nothing fits it returns only the size table - raise limitBytes or pass fewer paths. A missing path fails with "Could not search path: <path>. Error code: <code>."`
-			: `Show the last lines or bytes of one or more files without loading all of them (tail(1)) - reads backwards from EOF, so the last 10 lines of a 10 GB log read a few KB. Default 10 lines; pass bytes to switch to byte mode. Does not follow live streams (-f is unsupported). Not for reading whole files - use read_file. Pass paths[] (up to ${MAX_BATCH_PATHS}) to window many files in ONE call: the tool sizes them first and reads newest-mtime-first within limitBytes total (default ${formatSize(BATCH_DEFAULT_MAX_BYTES)}), rendering each file under a "=== <path> (N bytes) ===" header; if nothing fits it returns only the size table - raise limitBytes or pass fewer paths. A missing path fails with "Could not search path: <path>. Error code: <code>."`;
+			? `Show the first lines or bytes of files. Replaces bash head; runs in-process on Windows/macOS/Linux. Not for whole files (read_file), pattern search (grep) or last lines (tail). Default 10 lines; bytes switches mode; paths[] batches many files within limitBytes.`
+			: `Show the last lines or bytes of files, reading backwards so the tail of a huge log costs a few KB. Replaces bash tail; runs in-process on Windows/macOS/Linux. Not for whole files (read_file); no live following (-f). Default 10 lines; bytes switches mode; paths[] batches many files.`;
 	return {
 		name: which,
 		label: which,
 		description,
 		promptSnippet:
 			which === "head"
-				? "First lines/bytes of one or more files via paths[]; not for whole files - use read_file"
-				: "Last lines/bytes of one or more files via cheap backward reads and paths[]; not for whole files - use read_file",
+				? "First lines/bytes of files; not for whole files - use read_file"
+				: "Last lines/bytes of files via cheap backward reads; not for whole files - use read_file",
 		parameters: schema,
 		executionMode: "parallel",
 		kind: "read",

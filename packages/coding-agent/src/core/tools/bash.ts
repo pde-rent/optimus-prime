@@ -109,7 +109,7 @@ function getNativeCommandTip(command: string): string | undefined {
 	}
 	if (!nativeTool || hintedNativeCommands.has(parsed.token)) return undefined;
 	hintedNativeCommands.add(parsed.token);
-	return `tip: ${nativeTool} does this natively, cross-platform - try it next time`;
+	return `tip: the ${nativeTool} tool is the default and fastest path for this - in-process, cross-platform; try it next time`;
 }
 
 const bashSchema = Type.Object({
@@ -370,9 +370,11 @@ export function createBashToolDefinition(
 	const definition: ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> = {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. If the command is covered by a native tool (grep, read_file, write_file, sed, find, wc, head, tail, ln, sysinfo, netdiag), a one-time tip is appended to the result.`,
-		promptSnippet:
-			"Run shell commands; for plain file search/count/substitution prefer the native grep/find/sed/wc tools",
+		kind: "execute",
+		read_only: false,
+		description:
+			"Execute a bash command in the working directory - the fallback for anything no native tool covers; the native siblings run in-process on Windows/macOS/Linux and replace bash grep/find/sed/wc/head/tail/ln/read/write/sysinfo/netdiag/processes. Output caps at ${DEFAULT_MAX_LINES} lines / ${DEFAULT_MAX_BYTES / 1024}KB; overflow goes to a temp file. Optional timeout in seconds.",
+		promptSnippet: "Run a shell command only for what no native tool covers",
 		parameters: bashSchema,
 		async execute(
 			_toolCallId,

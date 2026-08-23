@@ -46,8 +46,8 @@ export function createLnToolDefinition(cwd: string): ToolDefinition<typeof lnSch
 		name: "ln",
 		label: "ln",
 		description:
-			'Create a symbolic link (default) or hardlink to an existing file, without spawning a shell. Use it when two paths must share one content inode; do not use it for independent copies (write_file) and remember hardlinks cannot cross filesystems or point at directories, while Windows symlinks may need elevated privileges - the OS error is passed through. The destination must not already exist. Failures report the exact problem: "Link target does not exist: <target>.", "Link destination already exists: <linkPath>.", "Could not create link: <reason>."',
-		promptSnippet: "Create a symbolic or hard link",
+			"Create a symbolic (default) or hard link - the default and fastest way to make one path share another's content; runs in-process on Windows/macOS/Linux; replaces bash ln. Destination must not exist; hardlinks stay on one filesystem and never target directories. Not for independent copies - use write_file.",
+		promptSnippet: "Create a symbolic or hard link; prefer over bash ln",
 		parameters: lnSchema,
 		kind: "edit",
 		read_only: false,

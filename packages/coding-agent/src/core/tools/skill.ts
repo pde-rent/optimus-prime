@@ -80,7 +80,7 @@ export function createSkillToolDefinition(
 		name: "skill",
 		label: "Load skill",
 		description:
-			"Load one installed skill's full SKILL.md into context by name. Use when a task matches a skill's roster description and you need its contract before calling it; this is one step and needs no path reasoning, so prefer it over read_file on the roster path. Do not call it speculatively or to re-read a skill already loaded this session -- the roster summary is enough to decide relevance. Only provide 'name' exactly as listed in the roster; unknown names fail with: Unknown skill '<name>'. Available skills: ... Output contract: the SKILL.md body inside a <skill name location> envelope whose header states the base directory all relative references resolve against.",
+			"Load an installed skill's SKILL.md by name - the default and fastest way to get a skill's full contract into context; runs in-process on Windows/macOS/Linux; replaces catting the roster path via bash. Not for deciding relevance - the roster summary already covers that; loaded skills need no re-read.",
 		promptSnippet: "Load an installed skill's SKILL.md by name",
 		parameters: skillSchema,
 		executionMode: "parallel",

@@ -25,7 +25,7 @@ flowchart TD
 When the model delegates work:
 
 ```js
-const handle = await rlm("inspect the API", { name: "api-reviewer" });
+const handle = await spawn("inspect the API", { name: "api-reviewer" });
 console.log(handle.rlm_child_id, handle.name, handle.session_dir, handle.model);
 ```
 
@@ -44,7 +44,7 @@ sequenceDiagram
     participant P as Model provider
 
     M->>H: repl tool call
-    H->>R: execute frame · await rlm("inspect the API")
+    H->>R: execute frame · await spawn("inspect the API")
     R->>H: hostRequest frame · rlm.run
     H->>H: check depth and resolve model
     H->>H: admit child task and update registry
@@ -130,7 +130,7 @@ Ordinary output frames are accepted only when their `id` matches the active exec
 A running cell can await task admission:
 
 ```js
-const handle = await rlm("subtask");
+const handle = await spawn("subtask");
 ```
 
 The cell is executing inside an async IIFE in the `node:vm` context, so awaiting it yields the child's event loop. The child's stdin pump is an ordinary `data` listener, so it keeps reading frames while the cell is suspended: the `hostResponse` arrives, the pending-promise table resolves it, and the cell resumes. Nothing on either side blocks on a synchronous read, so no second channel is needed.
@@ -152,7 +152,7 @@ const { readdir } = await import("node:fs/promises");
 
 ### Sandbox Globals
 
-The vm context is populated explicitly. Cells get `console`, `display()`, `rlm`, `cd(dir)`, `pwd()`, `env`, `crypto`, `Buffer`, `URL`, `URLSearchParams`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`, `util.inspect`, the timer functions, `queueMicrotask`, and one binding per preloaded JS skill. Bun's own globals (`Bun.file`, `Bun.write`, `Bun.Glob`, `Bun.spawn`, `fetch`) and every `node:*` builtin are reachable as usual.
+The vm context is populated explicitly. Cells get `console`, `display()`, `spawn` (alias `rlm`), `cd(dir)`, `pwd()`, `env`, `crypto`, `Buffer`, `URL`, `URLSearchParams`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`, `util.inspect`, the timer functions, `queueMicrotask`, and one binding per preloaded JS skill. Bun's own globals (`Bun.file`, `Bun.write`, `Bun.Glob`, `Bun.spawn`, `fetch`) and every `node:*` builtin are reachable as usual.
 
 Database and storage clients are bound under the names Bun's own documentation uses: `Database`
 (`bun:sqlite`), `SQL` and `sql` (Postgres, MySQL, MariaDB), `redis` and `RedisClient`, and
@@ -201,9 +201,10 @@ Skills no longer ship CLI entry points. There is no `<skill> --help` shell comma
 
 ## Sandbox RLM API
 
-The sandbox exposes a callable `rlm` with methods attached, so these are equivalent:
+The sandbox exposes a callable `spawn` with methods attached, and `rlm` is an exact alias bound to the same object, so all of these are equivalent:
 
 ```js
+await spawn("subtask");
 await rlm("subtask");
 await rlm.run("subtask");
 ```
@@ -211,20 +212,20 @@ await rlm.run("subtask");
 The full surface is:
 
 ```text
-rlm(prompt, kwargs?)
-rlm.run(prompt, kwargs?)
-rlm.find_models(query)
-rlm.list_subagents()
-rlm.delete_subagent(id)
-rlm.host_request(requestType, payload)
+spawn(prompt, kwargs?)
+spawn.run(prompt, kwargs?)
+spawn.find_models(query)
+spawn.list_subagents()
+spawn.delete_subagent(id)
+spawn.host_request(requestType, payload)
 ```
 
-Every one of them is async. The spawn handle returned by `rlm.run` carries `rlm_child_id`, `name`, `session_dir`, and `model`. It confirms admission only and never contains the child's answer.
+Every one of them is async. The spawn handle returned by `spawn.run` carries `rlm_child_id`, `name`, `session_dir`, and `model`. It confirms admission only and never contains the child's answer.
 
-Supported `rlm.run` options are:
+Supported `spawn` options are:
 
 - `name`: a unique readable child session name;
-- `model`: an exact `provider/model` selector from `rlm.find_models()`;
+- `model`: an exact `provider/model` selector from `spawn.find_models()`;
 - `effort`: the child's reasoning level, clamped to what its model supports; and
 - `peers`: the sibling names this child may message. Edges are one-way, so listing `b` in `a`'s
   peers does not let `b` reach `a`. `[]` means it reports only to its parent. Omitting the option
@@ -255,9 +256,9 @@ Children receive incremented `RLM_DEPTH`, the inherited maximum depth, and their
 Each direct call admits an independent child and returns its handle immediately:
 
 ```js
-const apiReview = await rlm("review the API", { name: "api-reviewer" });
-const testReview = await rlm("review the tests", { name: "test-reviewer" });
-const audit = await rlm("slow independent audit", { name: "audit-reviewer" });
+const apiReview = await spawn("review the API", { name: "api-reviewer" });
+const testReview = await spawn("review the tests", { name: "test-reviewer" });
+const audit = await spawn("slow independent audit", { name: "audit-reviewer" });
 ```
 
 End the turn instead of waiting for completion. Children send requested answers with `await agent_message.send(message, { receiver_role: "parent" })`, and replies arrive as ordinary agent messages over later turns. A child may instead write results to files for the parent to read. The host runs each admitted child as an independent `AgentSession`; daemon-backed children can be retained as independently addressable session workers.

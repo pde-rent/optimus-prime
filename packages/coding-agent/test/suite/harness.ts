@@ -74,6 +74,7 @@ export interface HarnessOptions {
 	subagentRuntimeHost?: SubagentRuntimeHost;
 	persistSession?: boolean;
 	rlmDepth?: number;
+	rlmSessionDir?: string;
 	rlmMaxDepth?: number;
 	autonomous?: AgentAutonomousConfig;
 	autoRefineReviewer?: AutoRefineReviewer;
@@ -237,6 +238,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		baseToolsOverride: toolMap,
 		extensionRunnerRef,
 		rlmDepth: options.rlmDepth,
+		rlmSessionDir: options.rlmSessionDir,
 		rlmMaxDepth: options.rlmMaxDepth,
 		autonomous: options.autonomous,
 		autoRefineReviewer: options.autoRefineReviewer,

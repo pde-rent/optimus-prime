@@ -252,7 +252,7 @@ function getEditHeaderBg(
 
 // Width-aware `╰─ <path> +N -M` summary plus optional indented diff rows: the
 // summary truncates to one row and wrapped diff lines keep the indent column.
-class EditChangeSummaryComponent implements Component {
+export class EditChangeSummaryComponent implements Component {
 	constructor(
 		private readonly rawPath: string,
 		private readonly cwd: string,
@@ -349,11 +349,12 @@ export function createEditToolDefinition(
 		name: "edit",
 		label: "edit",
 		description:
-			"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
-		promptSnippet:
-			"Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+			"Edit exact strings in one file - the default and fastest way to change existing files; runs in-process on Windows/macOS/Linux; replaces bash sed/perl patching. Several disjoint edits per call; every edits[].oldText must match uniquely. Not for whole rewrites - use write_file; not for regex substitution - use sed.",
+		promptSnippet: "Make exact-text edits in one file, several disjoint changes per call",
 		parameters: editSchema,
 		renderShell: "self",
+		kind: "edit",
+		read_only: false,
 		prepareArguments: prepareEditArguments,
 		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?, _ctx?) {
 			const { path, edits } = validateEditInput(input);
