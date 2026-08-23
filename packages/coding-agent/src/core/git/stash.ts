@@ -60,7 +60,9 @@ export function stashPush(repo: GitRepository, options: { message?: string } = {
 	for (const path of trackedPaths) {
 		const bytes = content.get(path);
 		if (bytes === undefined) continue; // deleted in worktree
-		worktreeMap.set(path, { mode: modeOf(repo, path), sha: repo.hashBlob(bytes) });
+		// Store the blob - a virtual hash would make the stash worktree tree
+		// reference objects that do not exist, breaking every later apply.
+		worktreeMap.set(path, { mode: modeOf(repo, path), sha: repo.writeBlob(bytes) });
 	}
 	const worktreeTree = writeTreeFromFiles(repo, worktreeMap);
 	const identity = stashIdentity(repo);

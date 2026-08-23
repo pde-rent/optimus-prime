@@ -112,7 +112,7 @@ export async function startDeviceFlow(options: {
 }
 
 /** Poll the token endpoint until the user approves, slow_down backoff included. */
-export async function pollForDeviceToken(options: {
+async function pollForDeviceToken(options: {
 	tokenUrl: string;
 	clientId: string;
 	deviceCode: string;

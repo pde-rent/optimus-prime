@@ -5,8 +5,6 @@ const LABEL = "Hint:";
 const SHIMMER_RADIUS = 1;
 const SHIMMER_PAUSE_FRAMES = 14;
 
-export const FEATURE_HINT_ANIMATION_INTERVAL_MS = 160;
-
 function renderLabelShimmer(characters: string[], frame: number): string {
 	if (characters.length === 0) return "";
 

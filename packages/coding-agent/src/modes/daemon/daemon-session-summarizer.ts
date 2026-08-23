@@ -17,7 +17,7 @@ const SUMMARY_MAX_CHARS_PER_MESSAGE = 600;
 // Generous so a chatty model still closes the tags before truncation.
 const SUMMARY_MAX_TOKENS = 400;
 
-export const AGENT_STATUS_SYSTEM_PROMPT = `You generate a status line for an AI coding agent dashboard. You are given the recent conversation between a user and the agent, plus whether the agent is currently working or idle.
+const AGENT_STATUS_SYSTEM_PROMPT = `You generate a status line for an AI coding agent dashboard. You are given the recent conversation between a user and the agent, plus whether the agent is currently working or idle.
 
 Output ONLY these two tags, nothing before, between, or after. Do not think out loud, explain, or count words.
 <recap>a present-tense clause, at most 12 words, saying what the agent is doing or just did, no trailing period</recap>
@@ -38,7 +38,7 @@ export interface AgentStatusResult {
 }
 
 /** Resolve the cheap summary model, or undefined when it has no configured auth. */
-export function resolveSummaryModel(registry: ModelRegistry): Model<Api> | undefined {
+function resolveSummaryModel(registry: ModelRegistry): Model<Api> | undefined {
 	const model = registry.find(SUMMARY_MODEL_PROVIDER, SUMMARY_MODEL_ID);
 	if (model && registry.hasConfiguredAuth(model)) {
 		return model;
@@ -148,7 +148,7 @@ export interface GenerateAgentStatusParams {
 }
 
 /** One cheap model call for a fresh status, or undefined if unavailable/empty/failed. */
-export async function generateAgentStatus(params: GenerateAgentStatusParams): Promise<AgentStatusResult | undefined> {
+async function generateAgentStatus(params: GenerateAgentStatusParams): Promise<AgentStatusResult | undefined> {
 	const { registry, messages, isWorking, signal } = params;
 	if (messages.length === 0) {
 		return undefined;

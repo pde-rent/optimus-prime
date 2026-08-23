@@ -27,7 +27,7 @@ export type AuthenticationResult =
 	| { status: "cancelled" }
 	| { status: "failed" };
 
-export const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
+const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party harness usage draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
 
 function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {

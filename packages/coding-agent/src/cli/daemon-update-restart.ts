@@ -390,7 +390,7 @@ function readCoordinatorRecord(path: string): DaemonUpdateRestartCoordinatorReco
 	}
 }
 
-export class DaemonUpdateRestartCoordinatorLease {
+class DaemonUpdateRestartCoordinatorLease {
 	private released = false;
 
 	constructor(

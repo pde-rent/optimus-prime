@@ -153,7 +153,7 @@ const ALIASES: Record<string, string> = {
 	sc: "scala",
 };
 
-export function resolveLanguage(name: string): string | undefined {
+function resolveLanguage(name: string): string | undefined {
 	const key = name.toLowerCase();
 	const resolved = ALIASES[key] ?? key;
 	return resolved in LANGUAGES ? resolved : undefined;

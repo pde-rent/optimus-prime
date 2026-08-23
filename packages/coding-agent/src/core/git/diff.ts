@@ -21,6 +21,12 @@ import type { GitRepository } from "./repository.js";
 
 export interface DiffOptions {
 	contextLines?: number;
+	/**
+	 * Byte source for blob shas that are not in the object store - diffWorktree
+	 * hashes worktree content virtually and feeds those bytes through here.
+	 * Defaults to reading the stored blob.
+	 */
+	readBytes?: (sha: string) => Uint8Array;
 }
 
 export interface FileDiff {
@@ -162,8 +168,10 @@ export function renderFileDiff(
 	options: DiffOptions = {},
 ): FileDiff {
 	const context = options.contextLines ?? 3;
-	const oldBytes = before ? blobBytes(repo, before.sha) : new Uint8Array();
-	const newBytes = after ? blobBytes(repo, after.sha) : new Uint8Array();
+	const read = (file: TreeFile | null): Uint8Array =>
+		file === null ? new Uint8Array() : (options.readBytes?.(file.sha) ?? blobBytes(repo, file.sha));
+	const oldBytes = read(before);
+	const newBytes = read(after);
 	const binary = (before !== null && isBinaryContent(oldBytes)) || (after !== null && isBinaryContent(newBytes));
 	const meta: string[] = [];
 	meta.push(`diff --git a/${path} b/${path}`);
@@ -362,11 +370,18 @@ export function diffWorktree(repo: GitRepository, options: DiffOptions = {}): Fi
 	const content = flatWorktree(repo);
 	// Deleted paths simply drop out of the after-map, so diffSnapshots renders them.
 	const after = new Map<string, TreeFile>();
+	const worktreeBlobs = new Map<string, Uint8Array>();
 	for (const [path, entry] of indexed) {
 		const bytes = content.get(path);
-		if (bytes !== undefined) after.set(path, { mode: entry.mode, sha: repo.hashBlob(bytes) });
+		if (bytes === undefined) continue;
+		const sha = repo.hashBlob(bytes);
+		worktreeBlobs.set(sha, bytes);
+		after.set(path, { mode: entry.mode, sha });
 	}
-	return diffSnapshots(repo, indexed, after, options);
+	return diffSnapshots(repo, indexed, after, {
+		...options,
+		readBytes: (sha) => worktreeBlobs.get(sha) ?? blobBytes(repo, sha),
+	});
 }
 
 /** "git diff --cached": HEAD vs index. */

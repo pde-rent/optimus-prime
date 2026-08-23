@@ -514,9 +514,7 @@ export function landMergeConflicts(repo: GitRepository, index: GitIndex, conflic
 }
 
 function stageEntry(repo: GitRepository, path: string, file: TreeFile, stage: number): IndexEntry {
-	const entry = repo.makeIndexEntry(path, file.sha);
-	entry.flags = (Buffer.byteLength(path) & 0xfff) | (stage << 12);
-	return entry;
+	return repo.makeStageIndexEntry(path, file.sha, stage);
 }
 
 /** Create the merge commit after conflicts were resolved in the index (git merge --continue). */

@@ -118,7 +118,7 @@ export function classifyAgentsViewSession(summary: SessionSummary): AgentsViewSe
 	return "done";
 }
 
-export function classifyUnifiedSession(
+function classifyUnifiedSession(
 	record: Pick<UnifiedSessionRecord, "daemon" | "saved" | "heartbeat">,
 	nowMs: number = Date.now(),
 ): AgentsViewSection {
@@ -870,7 +870,7 @@ function findParentRow(
 	return undefined;
 }
 
-export function isSubagentSummary(summary: SessionSummary): boolean {
+function isSubagentSummary(summary: SessionSummary): boolean {
 	if (summary.runtimeKind) {
 		return summary.runtimeKind === "subagent";
 	}

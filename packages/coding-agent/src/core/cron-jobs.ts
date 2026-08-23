@@ -1225,7 +1225,7 @@ export function parseHeartbeatCommand(input: string): ParsedHeartbeatCommand {
 	};
 }
 
-export function nextRunAtForSchedule(schedule: AgentCronSchedule, after: Date): Date | undefined {
+function nextRunAtForSchedule(schedule: AgentCronSchedule, after: Date): Date | undefined {
 	if (schedule.kind === "once") {
 		return undefined;
 	}

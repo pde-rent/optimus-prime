@@ -5,7 +5,7 @@ export const GOAL_STATE_CUSTOM_TYPE = "thread_goal_state";
 export const GOAL_CONTEXT_CUSTOM_TYPE = "goal_context";
 export const GOAL_CONTEXT_PREVIEW_LABEL = "Goal context";
 export const GOAL_SKILL_NAME = "goal";
-export const MAX_THREAD_GOAL_OBJECTIVE_CHARS = 4000;
+const MAX_THREAD_GOAL_OBJECTIVE_CHARS = 4000;
 
 export type GoalStatus = "idle" | "active" | "paused" | "budget_limited" | "complete" | "error";
 export type GoalContextKind = "continuation" | "budget_limit" | "objective_updated";

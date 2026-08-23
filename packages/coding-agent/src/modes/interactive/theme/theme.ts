@@ -113,7 +113,7 @@ type ThemeJson = Static<typeof ThemeJsonSchema>;
 let validateThemeJson: Validator<Static<typeof ThemeJsonSchema>> | undefined;
 let themeValidatorPromise: Promise<void> | undefined;
 
-export function preloadThemeValidator(): Promise<void> {
+function preloadThemeValidator(): Promise<void> {
 	themeValidatorPromise ??= Promise.resolve().then(() => {
 		validateThemeJson = Compile(ThemeJsonSchema);
 	});
@@ -1105,14 +1105,6 @@ export function getResolvedThemeColors(themeName?: string): Record<string, strin
 		}
 	}
 	return cssColors;
-}
-
-/**
- * Check if a theme is a "light" theme (for CSS that needs light/dark variants).
- */
-export function isLightTheme(themeName?: string): boolean {
-	// Currently just check the name - could be extended to analyze colors
-	return themeName === "light";
 }
 
 /**

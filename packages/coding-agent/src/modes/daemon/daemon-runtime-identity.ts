@@ -4,8 +4,8 @@ import type { DaemonRuntimeIdentity } from "./daemon-protocol.js";
 
 declare const __PI_BUILD_ID__: string | undefined;
 
-export const OPTIMUS_BUILD_ID_ENV = "OPTIMUS_BUILD_ID";
-export const OPTIMUS_LAUNCHER_PATH_ENV = "OPTIMUS_LAUNCHER_PATH";
+const OPTIMUS_BUILD_ID_ENV = "OPTIMUS_BUILD_ID";
+const OPTIMUS_LAUNCHER_PATH_ENV = "OPTIMUS_LAUNCHER_PATH";
 
 function bundledBuildId(): string | undefined {
 	return typeof __PI_BUILD_ID__ === "undefined" ? undefined : __PI_BUILD_ID__;

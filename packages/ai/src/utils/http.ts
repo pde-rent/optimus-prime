@@ -19,9 +19,9 @@
 export type HeaderInput = Record<string, string | null | undefined> | undefined;
 
 /** Default request timeout, matching the OpenAI/Anthropic SDK default of 10 minutes. */
-export const DEFAULT_TIMEOUT_MS = 600_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
 /** Default retry count, matching the OpenAI/Anthropic SDK default. */
-export const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_MAX_RETRIES = 2;
 
 const INITIAL_RETRY_DELAY_SECONDS = 0.5;
 const MAX_RETRY_DELAY_SECONDS = 8;
@@ -64,15 +64,6 @@ export function joinUrl(baseUrl: string, path: string, query?: Record<string, st
 		}
 	}
 	return url.toString();
-}
-
-/** Convert `Headers` to a plain lowercase-keyed record. */
-export function headersToObject(headers: Headers): Record<string, string> {
-	const result: Record<string, string> = {};
-	headers.forEach((value, key) => {
-		result[key] = value;
-	});
-	return result;
 }
 
 /**
@@ -131,7 +122,7 @@ function makeErrorMessage(status: number, error: unknown, fallback: string): str
 }
 
 /** Thrown when the request exceeded its timeout; retried like a connection error. */
-export class ProviderTimeoutError extends Error {
+class ProviderTimeoutError extends Error {
 	constructor(message = "Request timed out.") {
 		super(message);
 		this.name = "ProviderTimeoutError";
@@ -139,7 +130,7 @@ export class ProviderTimeoutError extends Error {
 }
 
 /** Thrown when the connection failed; retried like the SDKs do. */
-export class ProviderConnectionError extends Error {
+class ProviderConnectionError extends Error {
 	constructor(message: string, options?: { cause?: unknown }) {
 		super(message, options);
 		this.name = "ProviderConnectionError";

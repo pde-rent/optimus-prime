@@ -198,7 +198,7 @@ const REGISTER_BUILTIN_APIS: readonly (() => void)[] = [
 	() => registerApiProvider({ api: "google-generative-ai", stream: streamGoogle, streamSimple: streamSimpleGoogle }),
 ];
 
-export function registerBuiltInApiProviders(): void {
+function registerBuiltInApiProviders(): void {
 	for (const register of REGISTER_BUILTIN_APIS) {
 		register();
 	}

@@ -5,10 +5,10 @@ import { toPosixPath } from "../../../utils/shared.js";
 import { addIgnoreRules } from "../../ignore-rules.js";
 
 /** Directory names never descended into by the native file tools. */
-export const SKIP_DIR_NAMES = new Set(["node_modules", ".git"]);
+const SKIP_DIR_NAMES = new Set(["node_modules", ".git"]);
 
 /** Bytes inspected from a file head when sniffing for binary content. */
-export const BINARY_SNIFF_BYTES = 8192;
+const BINARY_SNIFF_BYTES = 8192;
 
 export interface WalkedEntry {
 	/** Absolute path of the entry. */
@@ -36,7 +36,7 @@ export function looksLikeBinary(buffer: Buffer): boolean {
 }
 
 /** Match one gitignore-style glob against a forward-slash relative path. */
-export function globMatches(glob: string, relPosixPath: string): boolean {
+function globMatches(glob: string, relPosixPath: string): boolean {
 	const matcher: IgnoreMatcher = new IgnoreMatcher().add(glob);
 	return matcher.ignores(relPosixPath);
 }

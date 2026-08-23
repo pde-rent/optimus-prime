@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 /** Stable per-source fingerprint: `<source>:<sha256(source\0material)>`. */
-export function fingerprintAuthSource(source: string, material: string): string {
+function fingerprintAuthSource(source: string, material: string): string {
 	const digest = createHash("sha256").update(source).update("\0").update(material).digest("hex");
 	return `${source}:${digest}`;
 }

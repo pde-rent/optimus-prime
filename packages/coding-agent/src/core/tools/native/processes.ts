@@ -244,7 +244,7 @@ export function parseDarwinPsLine(line: string): ProcRow | null {
 	};
 }
 
-export async function listProcessesDarwin(sortBy: "cpu" | "mem"): Promise<ProcRow[]> {
+async function listProcessesDarwin(sortBy: "cpu" | "mem"): Promise<ProcRow[]> {
 	const result = await runBinary("ps", ["-axo", "pid=,ppid=,user=,%cpu=,rss=,state=,command="]);
 	const rows = result.stdout
 		.split("\n")

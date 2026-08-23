@@ -49,12 +49,6 @@ export function agentStatusIndicator(status: AgentDisplayStatus): AgentStatusInd
 	return INDICATORS[status];
 }
 
-export function agentStatusIndicatorFor(
-	child: Pick<AgentConnectionRlmChildAgentSnapshot, "status" | "activity" | "activeSessionId">,
-): AgentStatusIndicator {
-	return INDICATORS[agentDisplayStatus(child)];
-}
-
 /**
  * True while a child still needs the fan-out panel visible: in flight, queued,
  * or streaming a follow-up turn after its run finished.

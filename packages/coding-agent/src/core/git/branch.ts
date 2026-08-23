@@ -112,7 +112,7 @@ export function checkout(repo: GitRepository, targetRefish: string): { sha: stri
 		if (!sameTreeFile(before.get(path), after.get(path))) changedPaths.add(path);
 	}
 	assertNoLocalEdits(repo, changedPaths, "checkout");
-	materializeTree(repo, sha); // reads the OLD head tree as its baseline, so run before moving HEAD
+	materializeTree(repo, repo.commitTree(sha)); // reads the OLD head tree as its baseline, so run before moving HEAD
 	writeFileSync(join(repo.gitDir, "HEAD"), branchRef === null ? `${sha}\n` : `ref: ${branchRef}\n`);
 	return { sha, branch: branchRef };
 }

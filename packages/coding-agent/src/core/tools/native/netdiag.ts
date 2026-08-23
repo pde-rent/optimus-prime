@@ -222,7 +222,7 @@ const TCP_STATES = new Map([
 ]);
 
 /** Decode a /proc/net hex address ("0100007F:1F90") into "ip:port". */
-export function decodeProcNetAddress(hexAddress: string, ipv6: boolean): string {
+function decodeProcNetAddress(hexAddress: string, ipv6: boolean): string {
 	const separator = hexAddress.lastIndexOf(":");
 	const ipHex = hexAddress.slice(0, separator);
 	const port = Number.parseInt(hexAddress.slice(separator + 1), 16);

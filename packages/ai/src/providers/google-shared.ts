@@ -89,7 +89,7 @@ function resolveThoughtSignature(isSameProviderAndModel: boolean, signature: str
 }
 
 /** Whether this Google API model requires tool-call IDs on function calls and responses. */
-export function requiresToolCallId(modelId: string): boolean {
+function requiresToolCallId(modelId: string): boolean {
 	return modelId.startsWith("claude-") || modelId.startsWith("gpt-oss-");
 }
 

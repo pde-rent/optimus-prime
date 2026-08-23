@@ -19,5 +19,7 @@ export function createAgentConnectionToolDefinition(
 		...(definition.replayBuiltInToolName !== undefined
 			? { replayBuiltInToolName: definition.replayBuiltInToolName }
 			: {}),
+		...(definition.kind !== undefined ? { kind: definition.kind } : {}),
+		...(definition.read_only !== undefined ? { read_only: definition.read_only } : {}),
 	};
 }

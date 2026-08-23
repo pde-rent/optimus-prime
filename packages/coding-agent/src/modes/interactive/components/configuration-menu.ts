@@ -16,7 +16,7 @@ import { getMenuPanelInnerWidth } from "./menu-panel.js";
 import { ModelSelectorComponent } from "./model-selector.js";
 import { type AuthSelectorProvider, OAuthSelectorComponent } from "./oauth-selector.js";
 
-export const CONFIGURATION_MENU_TABS = ["providers", "models", "mcp-connections"] as const;
+const CONFIGURATION_MENU_TABS = ["providers", "models", "mcp-connections"] as const;
 
 export type ConfigurationMenuTab = (typeof CONFIGURATION_MENU_TABS)[number];
 

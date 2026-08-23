@@ -26,7 +26,7 @@ export interface RlmSpawnHandle {
 	effort_refused?: RlmEffortRefusal;
 }
 
-export type RlmSubagentRegistryStatus = "running" | "completed" | "error";
+export type RlmSubagentRegistryStatus = "running" | "completed" | "error" | "stalled";
 
 export interface RlmSubagentRegistryEntry {
 	rlm_child_id: string;
@@ -65,8 +65,8 @@ export type RlmDeleteSubagentHandler = (target: string) => Promise<RlmDeleteSuba
 export type RlmFindModelsHandler = (query: string, limit: number) => RlmFindModelsResult | Promise<RlmFindModelsResult>;
 
 const RLM_SUBAGENT_SESSION_NAME_MAX_LENGTH = 64;
-export const DEFAULT_RLM_MODEL_SEARCH_LIMIT = 8;
-export const MAX_RLM_MODEL_SEARCH_LIMIT = 20;
+const DEFAULT_RLM_MODEL_SEARCH_LIMIT = 8;
+const MAX_RLM_MODEL_SEARCH_LIMIT = 20;
 
 /**
  * Validate an orchestrator-supplied peer list: the siblings this child may message.
@@ -128,7 +128,7 @@ export function normalizeRequestedRlmSubagentModel(value: unknown): string | und
 }
 
 /** Reasoning-effort levels the model may name; a subset is supported per model. */
-export const RLM_EFFORT_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const RLM_EFFORT_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
  * Validate an orchestrator-supplied effort level. An unknown name throws so a

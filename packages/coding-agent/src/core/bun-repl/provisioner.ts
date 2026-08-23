@@ -5,7 +5,7 @@ import { snapshotExists } from "./state-snapshot.js";
 const log = getLogger("coding-agent.bun-repl");
 
 /** How long a kernel may sit idle before it is disposed and its state snapshotted. */
-export const DEFAULT_REPL_IDLE_TIMEOUT_MS = 600_000;
+const DEFAULT_REPL_IDLE_TIMEOUT_MS = 600_000;
 
 /**
  * Time source for idle reaping, injectable so tests can drive the timer deterministically.
@@ -16,7 +16,7 @@ export interface IdleReapClock {
 	clearTimeout(handle: unknown): void;
 }
 
-export const defaultIdleReapClock: IdleReapClock = {
+const defaultIdleReapClock: IdleReapClock = {
 	now: () => Date.now(),
 	setTimeout,
 	clearTimeout,

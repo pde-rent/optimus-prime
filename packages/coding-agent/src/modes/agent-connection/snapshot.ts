@@ -152,9 +152,9 @@ export function createAgentConnectionResourceSnapshot(session: AgentSession): Ag
 	};
 }
 
-export function toConnectionModel(model: Model<Api>): AgentConnectionModel;
-export function toConnectionModel(model: Model<Api> | undefined): AgentConnectionModel | undefined;
-export function toConnectionModel(model: Model<Api> | undefined): AgentConnectionModel | undefined {
+function toConnectionModel(model: Model<Api>): AgentConnectionModel;
+function toConnectionModel(model: Model<Api> | undefined): AgentConnectionModel | undefined;
+function toConnectionModel(model: Model<Api> | undefined): AgentConnectionModel | undefined {
 	return model;
 }
 

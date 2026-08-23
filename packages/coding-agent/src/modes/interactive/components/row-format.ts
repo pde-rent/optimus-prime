@@ -49,8 +49,3 @@ export function formatTwoSidedRow(
 export function formatCell(text: string, width: number, ellipsis = ""): string {
 	return padEndAnsi(truncateToWidth(text, width, ellipsis), width);
 }
-
-/** A fixed-width cell aligned to the right edge. */
-export function formatRightCell(text: string, width: number, ellipsis = ""): string {
-	return padStartAnsi(truncateToWidth(text, width, ellipsis), width);
-}

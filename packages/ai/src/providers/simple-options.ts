@@ -75,7 +75,7 @@ export function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRet
 	return "short";
 }
 
-export function clampReasoning(effort: ThinkingLevel | undefined): Exclude<ThinkingLevel, "xhigh" | "max"> | undefined {
+function clampReasoning(effort: ThinkingLevel | undefined): Exclude<ThinkingLevel, "xhigh" | "max"> | undefined {
 	return effort === "xhigh" || effort === "max" ? "high" : effort;
 }
 

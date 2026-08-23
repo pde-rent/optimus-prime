@@ -110,11 +110,6 @@ export function playIgnitionSound(): void {
 	}
 }
 
-/** Reset for tests; production never restarts the sound within one process. */
-export function resetIgnitionSoundForTests(): void {
-	soundStarted = false;
-}
-
 /** The theme's bright green, and the dim green it blinks down to. */
 const EYE_HOT = "#2ADB5C";
 const EYE_DIM = "#1a5c2c";

@@ -17,7 +17,7 @@ export interface OnboardingStartupState {
 	model: Model<Api> | undefined;
 }
 
-export function isOnboardingModelReady(state: OnboardingStartupState): boolean {
+function isOnboardingModelReady(state: OnboardingStartupState): boolean {
 	return state.model !== undefined && state.modelRegistry.hasConfiguredAuth(state.model);
 }
 

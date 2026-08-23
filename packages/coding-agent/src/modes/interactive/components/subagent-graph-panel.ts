@@ -24,7 +24,7 @@ export const SUBAGENT_GRAPH_MAX_RUNNING = 6;
 /** Hard ceiling on rows below the root: six running rows + overflow + done summary. */
 export const SUBAGENT_GRAPH_MAX_ROWS = 8;
 /** Column budget for a row's lean agent name; task text never renders. */
-export const SUBAGENT_GRAPH_NAME_WIDTH = 24;
+const SUBAGENT_GRAPH_NAME_WIDTH = 24;
 
 const GAP = 2;
 /** The panel is told the root's id, never its name; see setChildren. */
@@ -34,7 +34,7 @@ const ROOT_LABEL = "main";
 export type SubagentGraphRow = AgentTreePosition<ChildSnapshotNode>;
 
 /** Tree assembly lives in the shared agents-tree model; the panel only renders it. */
-export function buildSubagentGraphRows(
+function buildSubagentGraphRows(
 	children: Iterable<AgentConnectionRlmChildAgentSnapshot>,
 	rootId: string | undefined,
 ): SubagentGraphRow[] {

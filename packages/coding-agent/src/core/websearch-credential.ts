@@ -8,4 +8,3 @@ export const SERPER_ENV_VAR = "SERPER_API_KEY";
 // SearXNG has no key, but its base URL is stored the same way so a daemon started
 // before SEARXNG_URL was exported still resolves a configured backend.
 export const SEARXNG_CREDENTIAL_ID = "searxng";
-export const SEARXNG_ENV_VAR = "SEARXNG_URL";

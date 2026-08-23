@@ -31,8 +31,8 @@ export function setClickTargetsEnabled(enabled: boolean): void {
 	clickTargetsEnabled = enabled;
 }
 
-export const CHEVRON_COLLAPSED = "▸";
-export const CHEVRON_EXPANDED = "▾";
+const CHEVRON_COLLAPSED = "▸";
+const CHEVRON_EXPANDED = "▾";
 
 /** Collapse chevron for a header, clickable when the block declares an id. */
 export function collapseChevron(expanded: boolean, targetId?: string): string {

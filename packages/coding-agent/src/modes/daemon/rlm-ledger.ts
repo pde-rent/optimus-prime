@@ -38,7 +38,7 @@ import { readFirstLineSync } from "../../utils/file-lines.js";
  * internal queue.
  */
 
-export const RLM_LEDGER_DIR = "rlm-ledger";
+const RLM_LEDGER_DIR = "rlm-ledger";
 
 /** Bounded read: a ledger beyond these limits fails closed loudly. */
 export const RLM_LEDGER_MAX_BYTES = 32 * 1024 * 1024;

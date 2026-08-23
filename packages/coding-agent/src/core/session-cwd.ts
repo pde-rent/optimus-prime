@@ -32,7 +32,7 @@ export function getMissingSessionCwdIssue(
 	};
 }
 
-export function formatMissingSessionCwdError(issue: SessionCwdIssue): string {
+function formatMissingSessionCwdError(issue: SessionCwdIssue): string {
 	const sessionFile = issue.sessionFile ? `\nSession file: ${issue.sessionFile}` : "";
 	return `Stored session working directory does not exist: ${issue.sessionCwd}${sessionFile}\nCurrent working directory: ${issue.fallbackCwd}`;
 }

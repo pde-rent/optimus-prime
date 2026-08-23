@@ -433,6 +433,10 @@ export interface AgentConnectionToolDefinition {
 	parameters: unknown;
 	renderShell?: "default" | "self";
 	replayBuiltInToolName?: ReplayBuiltInToolName;
+	/** Machine-readable tool class mirroring ToolDefinition.kind. */
+	kind?: string;
+	/** True when the tool cannot mutate state; mirrors ToolDefinition.read_only. */
+	read_only?: boolean;
 }
 
 /** Only confirmed cancellation makes prompt-admission failure retry-safe. */

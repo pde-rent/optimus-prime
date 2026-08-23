@@ -6,11 +6,11 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 import { acquireLockSyncWithRetry } from "./file-lock.js";
 import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverLevel } from "./graph-resolver.js";
-import type { MaxRunningAgentsSetting } from "./resources/agent-admission.js";
+export type MaxRunningAgentsSetting = "auto" | number;
 
 const RECENT_MODELS_LIMIT = 20;
-export const DEFAULT_IDLE_EVICTION_MINUTES = 90;
-export const DEFAULT_REPL_IDLE_TIMEOUT_MINUTES = 10;
+const DEFAULT_IDLE_EVICTION_MINUTES = 90;
+const DEFAULT_REPL_IDLE_TIMEOUT_MINUTES = 10;
 
 export interface ToolTimeoutsSettings {
 	/** Default repl cell timeout in ms; a call-level timeout overrides it. default: 120000 */
@@ -142,7 +142,7 @@ export type McpServerConfig =
  */
 export type DynamicEffortMode = "off" | "banded" | "free";
 
-export const DEFAULT_DYNAMIC_EFFORT_MODE: DynamicEffortMode = "banded";
+const DEFAULT_DYNAMIC_EFFORT_MODE: DynamicEffortMode = "banded";
 
 export interface Settings {
 	onboardingShown?: boolean;
@@ -265,7 +265,7 @@ export interface SettingsError {
 	error: Error;
 }
 
-export class FileSettingsStorage implements SettingsStorage {
+class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
 
@@ -301,7 +301,7 @@ export class FileSettingsStorage implements SettingsStorage {
 	}
 }
 
-export class InMemorySettingsStorage implements SettingsStorage {
+class InMemorySettingsStorage implements SettingsStorage {
 	private global: string | undefined;
 	private project: string | undefined;
 

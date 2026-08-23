@@ -374,7 +374,7 @@ export function getChangelogPath(): string {
  * - For Node.js (dist/): dist/modes/interactive/assets/
  * - For source runs (src/): src/modes/interactive/assets/
  */
-export function getInteractiveAssetsDir(): string {
+function getInteractiveAssetsDir(): string {
 	if (isBunBinary) {
 		return join(getPackageDir(), "assets");
 	}

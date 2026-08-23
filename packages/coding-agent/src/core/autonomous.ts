@@ -47,16 +47,14 @@ export interface AgentAutonomousStatus {
 export const DEFAULT_AUTONOMOUS_CONTINUATION_PROMPT =
 	"No human input is available in autonomous mode. Continue working until the host evaluator, verifier, or configured autonomous limits stop the run. If you were asking the user a question, make a reasonable assumption and verify it. If you believe you are blocked, prove it with host-observable evidence, preserve that evidence, and keep looking for safe progress while budget remains. Do not end the session yourself; the verifier/evaluator decides completion when configured gates pass.";
 
-export const DEFAULT_AUTONOMOUS_LIMITS: Required<
-	Omit<AgentAutonomousConfig, "enabled" | "continuationPrompt" | "gates">
-> = {
+const DEFAULT_AUTONOMOUS_LIMITS: Required<Omit<AgentAutonomousConfig, "enabled" | "continuationPrompt" | "gates">> = {
 	maxContinuations: 3,
 	maxTurns: 12,
 	maxTokens: 80_000,
 	timeoutMs: 30 * 60 * 1000,
 };
 
-export const DEFAULT_AUTONOMOUS_GATES: Required<AgentAutonomousGateConfig> = {
+const DEFAULT_AUTONOMOUS_GATES: Required<AgentAutonomousGateConfig> = {
 	commands: [],
 	maxRetries: 3,
 	timeoutMs: 5 * 60 * 1000,
@@ -66,7 +64,7 @@ const MAX_GATE_OUTPUT_CHARS = 6000;
 const MAX_CHILD_PROCESS_OUTPUT_CHARS = 1024 * 1024;
 
 /** Consecutive no-progress turns after which blind autonomous continuation is refused. */
-export const AUTONOMOUS_NO_PROGRESS_TURN_LIMIT = 2;
+const AUTONOMOUS_NO_PROGRESS_TURN_LIMIT = 2;
 
 export interface AutonomousRuntimeState {
 	enabled: boolean;

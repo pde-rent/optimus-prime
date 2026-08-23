@@ -22,7 +22,7 @@ export function createSessionSearchText(parts: readonly (string | undefined | nu
 	return parts.filter((part): part is string => typeof part === "string" && part.length > 0).join(" ");
 }
 
-export function parseSearchQuery(query: string): ParsedSearchQuery {
+function parseSearchQuery(query: string): ParsedSearchQuery {
 	const trimmed = query.trim();
 	if (!trimmed) {
 		return { mode: "tokens", tokens: [], regex: null };
@@ -102,7 +102,7 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
 const STRICT_FUZZY_MAX_TOKEN_SCORE = 25;
 
 /** Match any precomputed search corpus using the resume picker's query language. */
-export function matchSearchText(text: string, parsed: ParsedSearchQuery): MatchResult {
+function matchSearchText(text: string, parsed: ParsedSearchQuery): MatchResult {
 	if (parsed.mode === "regex") {
 		if (!parsed.regex) {
 			return { matches: false, score: 0 };

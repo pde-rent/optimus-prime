@@ -10,7 +10,7 @@ export interface CommandSpec {
 	examples?: readonly string[];
 }
 
-export const COMMAND_SPECS: readonly CommandSpec[] = [
+const COMMAND_SPECS: readonly CommandSpec[] = [
 	{
 		path: ["help"],
 		usage: "help [command]",

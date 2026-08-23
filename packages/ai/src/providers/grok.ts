@@ -31,7 +31,7 @@ import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./opena
 import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
 import { runProviderStream } from "./stream-runner.js";
 
-export const GROK_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
+const GROK_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 const GROK_CLIENT_IDENTIFIER = "grok-shell";
 const GROK_CLIENT_VERSION = "0.2.101";
 // The proxy only accepts reasoning effort for these model families.

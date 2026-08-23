@@ -66,7 +66,7 @@ export function openaiDefaultHeaders(clientName: "OpenAI" | "AzureOpenAI"): Reco
  * `requestID`, `code`/`type` and no HTTP `status` — so `utils/stream-failure.ts`
  * classifies it exactly as it classified the SDK's error.
  */
-export class OpenAIStreamError extends Error {
+class OpenAIStreamError extends Error {
 	readonly error: unknown;
 	readonly headers?: Headers;
 	readonly requestID?: string;

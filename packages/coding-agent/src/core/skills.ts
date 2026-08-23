@@ -498,7 +498,7 @@ export type SkillRosterMode = "summary" | "full";
  * a stated path to a file cannot run an agent loop here at all, so there is no config
  * in which `full` is the safer default -- only ones where it is the cheaper trade.
  */
-export const DEFAULT_SKILL_ROSTER_MODE: SkillRosterMode = "summary";
+const DEFAULT_SKILL_ROSTER_MODE: SkillRosterMode = "summary";
 
 /**
  * Format skills for inclusion in a system prompt.

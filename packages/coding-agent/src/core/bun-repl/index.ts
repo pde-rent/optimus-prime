@@ -64,7 +64,7 @@ export const MAX_ATTACHMENT_DATA_CHARS = 10_000_000;
  * clears the artifacts anyone actually injects while keeping a mistaken reference to a
  * multi-megabyte buffer out of a transcript that is permanent and replayed every turn.
  */
-export const MAX_INJECTED_REF_CHARS = 32_768;
+const MAX_INJECTED_REF_CHARS = 32_768;
 
 /** The same ceiling applied to a whole message, so ten references cannot do what one may not. */
 export const MAX_INJECTED_MESSAGE_CHARS = 65_536;
@@ -200,7 +200,7 @@ export function scanInjectionRefs(text: string): InjectionRefSite[] {
 }
 
 /** What the user reads in place of a reference that could not be resolved. */
-export function injectionFailureMarker(name: string, reason: string): string {
+function injectionFailureMarker(name: string, reason: string): string {
 	return `[repl:${name} unavailable: ${reason}]`;
 }
 

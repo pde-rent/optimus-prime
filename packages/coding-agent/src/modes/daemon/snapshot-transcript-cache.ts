@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export const SNAPSHOT_TARGET_CHUNK_BYTES = 512 * 1024;
-export const SNAPSHOT_MEMORY_CACHE_BYTES = 4 * 1024 * 1024;
+const SNAPSHOT_MEMORY_CACHE_BYTES = 4 * 1024 * 1024;
 
 interface SnapshotTranscriptChunk {
 	buffer?: Buffer;

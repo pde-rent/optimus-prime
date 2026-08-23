@@ -49,18 +49,6 @@ export function formatTokenCount(count: number): string {
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
-export function normalizeUnicodeSpaces(str: string): string {
-	return str.replace(UNICODE_SPACES, " ");
-}
-
-export function normalizePath(input: string): string {
-	const trimmed = input.trim();
-	if (trimmed === "~") return homedir();
-	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
-	return trimmed;
-}
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -128,14 +116,6 @@ export function formatTable<T extends Record<string, string>>(
 export function readJsonFile<T = unknown>(path: string): T | undefined {
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as T;
-	} catch {
-		return undefined;
-	}
-}
-
-export function safeJsonParse<T = unknown>(text: string): T | undefined {
-	try {
-		return JSON.parse(text) as T;
 	} catch {
 		return undefined;
 	}

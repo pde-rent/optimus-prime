@@ -10,7 +10,7 @@ import { serializeConversation } from "../compaction/utils.js";
 import { convertToLlm } from "../messages.js";
 import type { CustomEntry } from "../session-manager.js";
 
-export const REFINEMENT_CUSTOM_TYPE = "optimus.refinement";
+const REFINEMENT_CUSTOM_TYPE = "optimus.refinement";
 
 export const REFINE_SKILL_NAME = "refine";
 const HARNESS_STATE_DIR_NAME = "harness";
@@ -865,7 +865,7 @@ function memoryEvictionOrder(left: HarnessEntry, right: HarnessEntry): number {
  * evictions so they are visible in history and rollbackable context. Returns the
  * evicted ids.
  */
-export function enforceMemoryBudget(state: HarnessState, budget?: MemoryBudget): string[] {
+function enforceMemoryBudget(state: HarnessState, budget?: MemoryBudget): string[] {
 	const byScope = new Map<HarnessScope, HarnessEntry[]>();
 	for (const entry of Object.values(state.entries.memory)) {
 		const scope = entry.scope ?? "local";

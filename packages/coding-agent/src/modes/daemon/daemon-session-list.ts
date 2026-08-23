@@ -288,7 +288,7 @@ function latestMessageActivityAt(messages: readonly AgentMessage[]): string | un
 	return latest === undefined ? undefined : new Date(latest).toISOString();
 }
 
-export function isSummaryCurrent(activeSession: ActiveSessionState): boolean {
+function isSummaryCurrent(activeSession: ActiveSessionState): boolean {
 	const status = activeSession.summaryState;
 	return status !== undefined && status.basedOnMessageCount === activeSession.runtime.session.messages.length;
 }
@@ -456,7 +456,7 @@ export function isActiveSessionBusy(activeSession: ActiveSessionState): boolean 
 	return session.isSessionActive || session.hasRunningRlmChildren();
 }
 
-export function activeActivityForSession(activeSession: ActiveSessionState): SessionActivity {
+function activeActivityForSession(activeSession: ActiveSessionState): SessionActivity {
 	if (isActiveSessionBusy(activeSession)) {
 		return "working";
 	}
@@ -485,7 +485,7 @@ export function inactiveLifecycleForSession(session: SessionInfo): SessionLifecy
 	return session.messageCount > 0 ? "live" : "draft";
 }
 
-export function activeLifecycleForSession(activeSession: ActiveSessionState): SessionLifecycle {
+function activeLifecycleForSession(activeSession: ActiveSessionState): SessionLifecycle {
 	// Lifecycle drives agents-view visibility and is message-based: a session
 	// becomes live once a message is sent. A message-less session is a draft (hidden
 	// from the view) even if the user changed its model/name first — that config is

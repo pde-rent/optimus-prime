@@ -14,7 +14,7 @@ import type {
 import { headersToRecord } from "../utils/headers.js";
 import { runProviderStream } from "./stream-runner.js";
 
-export const CURSOR_API_BASE_URL = "https://api2.cursor.sh";
+const CURSOR_API_BASE_URL = "https://api2.cursor.sh";
 // Legacy chat endpoint: best documented of the Cursor wire surfaces. Switch
 // paths here if the agent hosts (agent.api5.cursor.sh) become required.
 export const CURSOR_CHAT_ENDPOINT = `${CURSOR_API_BASE_URL}/aiserver.v1.ChatService/StreamUnifiedChatWithTools`;
@@ -76,7 +76,7 @@ function textOf(content: Textish): string {
 		.join("\n");
 }
 
-export function convertCursorMessages(context: Context): CursorWireMessage[] {
+function convertCursorMessages(context: Context): CursorWireMessage[] {
 	const messages: CursorWireMessage[] = [];
 
 	for (const message of context.messages) {
@@ -97,7 +97,7 @@ export function convertCursorMessages(context: Context): CursorWireMessage[] {
 	return messages;
 }
 
-export function convertCursorTools(tools: Tool[]): CursorWireTool[] {
+function convertCursorTools(tools: Tool[]): CursorWireTool[] {
 	return tools.map((tool) => ({
 		name: tool.name,
 		description: tool.description,
@@ -156,7 +156,7 @@ function uuidToBytes(uuid: string): Uint8Array {
 	);
 }
 
-export async function uuidV5(name: string, namespace: string = UUID_NAMESPACE_DNS): Promise<string> {
+async function uuidV5(name: string, namespace: string = UUID_NAMESPACE_DNS): Promise<string> {
 	const digest = new Uint8Array(
 		await crypto.subtle.digest(
 			"SHA-1",

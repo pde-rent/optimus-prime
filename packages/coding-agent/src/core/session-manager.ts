@@ -803,7 +803,7 @@ function sessionHeaderMatchesCwd(header: Partial<SessionHeader> | undefined, cwd
 	);
 }
 
-export function findMostRecentSessionForCwd(sessionDir: string, cwd: string): string | null {
+function findMostRecentSessionForCwd(sessionDir: string, cwd: string): string | null {
 	try {
 		const files = readdirSync(sessionDir)
 			.filter((f) => f.endsWith(".jsonl"))

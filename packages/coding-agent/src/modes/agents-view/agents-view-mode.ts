@@ -611,7 +611,7 @@ export function createReplyComposerAutocompleteProvider(cwd: string, fdPath?: st
 	return new CombinedAutocompleteProvider([...sessionCommands, ...agentsViewSlashCommands()], cwd, fdPath ?? null);
 }
 
-export function resolveCurrentReplyTargetSummary(
+function resolveCurrentReplyTargetSummary(
 	records: readonly UnifiedSessionRecord[],
 	target: { key: string; summary: SessionSummary },
 	findLive: (activeSessionId: string) => SessionSummary | undefined,

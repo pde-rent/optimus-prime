@@ -337,7 +337,7 @@ export function verifyHelloSupervisorPid(
 }
 
 /** Discover every daemon on the machine and probe each for version + session count. */
-export async function discoverDaemons(): Promise<DaemonInfo[]> {
+async function discoverDaemons(): Promise<DaemonInfo[]> {
 	const processBySocket = new Map<string, DiscoveredDaemonProcess>();
 	for (const daemon of scanListeningDaemons()) {
 		if (isWorkerSocketPath(daemon.socketPath)) {

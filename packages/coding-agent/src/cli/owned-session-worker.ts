@@ -191,7 +191,7 @@ function forwardSignal(child: ChildProcess, signal: NodeJS.Signals): void {
 	}
 }
 
-export async function runOwnedSessionWorkerFrontend(
+async function runOwnedSessionWorkerFrontend(
 	args: readonly string[],
 	profile: OwnedSessionWorkerProfile,
 ): Promise<number> {

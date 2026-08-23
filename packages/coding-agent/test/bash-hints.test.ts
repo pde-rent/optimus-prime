@@ -17,7 +17,7 @@ async function run(command: string): Promise<string> {
 }
 
 function tipFor(tool: string): RegExp {
-	return new RegExp(`tip: ${tool} does this natively, cross-platform - try it next time$`);
+	return new RegExp(`tip: the ${tool} tool is the default and fastest path for this - in-process, cross-platform; try it next time$`);
 }
 
 describe("bash native-tool hints", () => {

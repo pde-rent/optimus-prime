@@ -7,7 +7,7 @@ export interface PrivateFrameLimits {
 	maxPayloadBytes: number;
 }
 
-export const DEFAULT_PRIVATE_FRAME_LIMITS: PrivateFrameLimits = {
+const DEFAULT_PRIVATE_FRAME_LIMITS: PrivateFrameLimits = {
 	maxHeaderBytes: 1024 * 1024,
 	maxPayloadBytes: 1024 * 1024 * 1024,
 };

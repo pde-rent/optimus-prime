@@ -84,6 +84,7 @@ import type {
 	AgentConnectionSwitchSessionOptions,
 	AgentConnectionToolDefinition,
 	AgentConnectionUserMessage,
+	AgentConnectionReplCellResult,
 } from "./types.js";
 import { AgentConnectionPromptAdmissionError } from "./types.js";
 
@@ -109,8 +110,8 @@ interface DaemonSnapshotAssembly {
 
 export const DAEMON_REFINE_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const DAEMON_LONG_RUNNING_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-export const DAEMON_RECONNECT_TIMEOUT_MS = 60_000;
-export const DAEMON_SNAPSHOT_TIMEOUT_MS = 30_000;
+const DAEMON_RECONNECT_TIMEOUT_MS = 60_000;
+const DAEMON_SNAPSHOT_TIMEOUT_MS = 30_000;
 const MAX_IGNORED_SNAPSHOT_IDS = 128;
 const UPDATE_RECONNECT_TIMEOUT_MS = 120000;
 const UPDATE_RECONNECT_RETRY_MS = 100;
@@ -188,7 +189,7 @@ export interface DaemonAgentConnectionOptions {
  * InteractiveMode depends only on AgentConnection; local socket ownership and
  * daemon command details stay inside this adapter.
  */
-export function buildSessionTreeFromFlatNodes(
+function buildSessionTreeFromFlatNodes(
 	flatNodes: readonly AgentConnectionSessionTreeFlatNode[],
 ): AgentConnectionSessionTreeNode[] {
 	const byId = new Map<string, AgentConnectionSessionTreeNode>();
@@ -555,6 +556,50 @@ export class DaemonAgentConnection implements AgentConnection {
 		}
 	}
 
+	async executeReplCell(code: string, options?: { timeoutSeconds?: number }): Promise<AgentConnectionReplCellResult> {
+		try {
+			return await this.requestData<AgentConnectionReplCellResult>({
+				type: "repl_execute",
+				activeSessionId: this.activeSessionId,
+				code,
+				timeoutSeconds: options?.timeoutSeconds,
+			});
+		} catch (error) {
+			if (isUnknownDaemonCommandError(error, "repl_execute")) {
+				throw new Error("the daemon is running an older build; restart the daemon and try again");
+			}
+			throw error;
+		}
+	}
+
+	async listReplVariables(): Promise<{ names: string[]; types: Record<string, string> }> {
+		try {
+			return await this.requestData<{ names: string[]; types: Record<string, string> }>({
+				type: "repl_list_names",
+				activeSessionId: this.activeSessionId,
+			});
+		} catch (error) {
+			if (isUnknownDaemonCommandError(error, "repl_list_names")) {
+				return { names: [], types: {} };
+			}
+			throw error;
+		}
+	}
+
+	async clearReplVariables(): Promise<number> {
+		try {
+			const data = await this.requestData<{ cleared: number }>({
+				type: "repl_clear_names",
+				activeSessionId: this.activeSessionId,
+			});
+			return data.cleared;
+		} catch (error) {
+			if (isUnknownDaemonCommandError(error, "repl_clear_names")) {
+				return 0;
+			}
+			throw error;
+		}
+	}
 	async listCronJobs(options: { includeInactive?: boolean } = {}): Promise<AgentCronJob[]> {
 		const data = await this.requestData<{ jobs: AgentCronJob[] }>({
 			type: "cron_list",

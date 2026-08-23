@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { blobBytes, flatTree, type TreeFile } from "./diff.js";
+import { blobBytes, flatTree, sameTreeFile, type TreeFile } from "./diff.js";
 import type { GitIndex } from "./index.js";
 import { hashRawObject } from "./objects.js";
 import type { GitRepository } from "./repository.js";
@@ -14,10 +14,12 @@ import type { GitRepository } from "./repository.js";
 export function hasLocalEdits(repo: GitRepository, paths: Iterable<string>): boolean {
 	const index = repo.loadIndex();
 	for (const path of paths) {
-		const absolute = join(repo.workdir, path);
-		if (!existsSync(absolute)) return true;
+		// Only currently-tracked paths can carry uncommitted edits; a path that is
+		// merely present in the target snapshot but not yet checked out is fine.
 		const entry = index.get(path);
 		if (!entry) continue;
+		const absolute = join(repo.workdir, path);
+		if (!existsSync(absolute)) return true;
 		if (hashRawObject("blob", new Uint8Array(readFileSync(absolute))) !== entry.sha) return true;
 	}
 	return false;
@@ -58,7 +60,9 @@ export function applyTreeChanges(
 	for (const path of [...paths].sort()) {
 		const before = beforeFiles.get(path) ?? null;
 		const after = afterFiles.get(path) ?? null;
-		if (before?.sha === after?.sha && before?.mode === after?.mode) continue;
+		// Snapshot agreement is not enough: a prior operation may have removed or
+		// corrupted the worktree copy (e.g. a landed conflict), so verify presence.
+		if (sameTreeFile(before, after) && existsSync(join(repo.workdir, path))) continue;
 		touched.push(path);
 		const absolute = join(repo.workdir, path);
 		if (existsSync(absolute)) {

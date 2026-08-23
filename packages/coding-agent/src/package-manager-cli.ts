@@ -392,7 +392,7 @@ function updateTargetIncludesExtensions(target: UpdateTarget): boolean {
 	return target.type === "all" || target.type === "extensions";
 }
 
-export function resolveUpdateDaemonSocketPath(explicitSocketPath?: string): string {
+function resolveUpdateDaemonSocketPath(explicitSocketPath?: string): string {
 	return normalizeSocketPath(
 		explicitSocketPath ?? process.env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV] ?? defaultDaemonSocketPath(),
 	);

@@ -90,7 +90,7 @@ export function rebase(
 	for (const step of replay) {
 		const baseTree = step.parents.length > 0 ? repo.commitTree(step.parents[0]) : null;
 		const ourMap = flatTree(repo, repo.commitTree(tip));
-		const outcome = threeWayApply(repo, baseTree, ourMap, repo.commitTree(step.tree));
+		const outcome = threeWayApply(repo, baseTree, ourMap, step.tree); // step.tree is already a tree sha
 		if (!outcome.clean) {
 			repo.saveIndex(outcome.index);
 			return { status: "conflict", commit: null, stoppedAt: step.sha, conflicts: outcome.conflicts };

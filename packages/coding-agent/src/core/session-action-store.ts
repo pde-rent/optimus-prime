@@ -173,7 +173,7 @@ function createDeferred<T>(): Deferred<T> {
 	};
 }
 
-export class ActionTicketController {
+class ActionTicketController {
 	readonly ticket: ActionTicket;
 	private readonly accepted = createDeferred<SubmissionOutcome>();
 	private readonly delivered = createDeferred<DeliveryOutcome>();

@@ -281,6 +281,40 @@ export class GitRepository {
 		};
 	}
 
+	/**
+	 * Index entry for a conflicted stage (1/2/3): uses worktree stat data when
+	 * the file exists; modify/delete conflicts leave no worktree file, so those
+	 * entries carry zeroed stat data like git does.
+	 */
+	makeStageIndexEntry(relPath: string, sha: string, stage: number): IndexEntry {
+		const pathLength = Buffer.byteLength(relPath);
+		if (pathLength >= 0xfff) throw new Error(`path too long for index v2: ${relPath}`);
+		assertSafeIndexPath(relPath);
+		let entry: IndexEntry;
+		try {
+			entry = this.makeIndexEntry(relPath, sha);
+		} catch {
+			entry = {
+				ctimeSeconds: 0,
+				ctimeNanoseconds: 0,
+				mtimeSeconds: 0,
+				mtimeNanoseconds: 0,
+				dev: 0,
+				ino: 0,
+				mode: MODE_FILE,
+				uid: 0,
+				gid: 0,
+				fileSize: 0,
+				sha,
+				flags: Math.min(pathLength, 0xfff),
+				extendedFlags: 0,
+				path: relPath,
+			};
+		}
+		entry.flags = (Buffer.byteLength(relPath) & 0xfff) | (stage << 12);
+		return entry;
+	}
+
 	/** Hash a worktree file, store its blob loose, and upsert its stage-0 index entry. */
 	addToIndex(relPath: string): void {
 		const content = readWorktreeBytes(this.workdir, relPath);

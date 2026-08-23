@@ -1,7 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export const AGENT_OBSERVE_SKILL_NAME = "agent-observe";
-export const AGENT_OBSERVE_IMPORT_NAME = "agent_observe";
 export const ORCHESTRATION_HEARTBEAT_SKILL_NAME = "orchestration-heartbeat";
 
 export interface AgentObserveAgentSummary {

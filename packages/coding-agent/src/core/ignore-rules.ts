@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import type { IgnoreMatcher } from "../utils/ignore-matcher.js";
 import { toPosixPath } from "../utils/shared.js";
 
-export const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
+const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 
 export type { IgnoreMatcher };
 
