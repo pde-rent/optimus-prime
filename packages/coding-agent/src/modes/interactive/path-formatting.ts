@@ -1,7 +1,8 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseGitUrl } from "../../utils/git.js";
-import type { AgentConnectionSourceInfo } from "../agent-connection/index.js";
+import { getCwdRelativePath } from "../../utils/paths.js";
+import type { AgentConnectionResourceDiagnostic, AgentConnectionSourceInfo } from "../agent-connection/index.js";
 import { theme } from "./theme/theme.js";
 
 function replaceHomeDirectory(p: string, home: string): string {
@@ -29,7 +30,7 @@ export function formatExtensionDisplayPath(pathStr: string): string {
 	return result;
 }
 
-function isPackageSource(sourceInfo?: AgentConnectionSourceInfo): boolean {
+export function isPackageSource(sourceInfo?: AgentConnectionSourceInfo): boolean {
 	const source = sourceInfo?.source ?? "";
 	return source.startsWith("npm:") || source.startsWith("git:");
 }
@@ -291,4 +292,94 @@ export function buildScopeGroups(items: Array<{ path: string; sourceInfo?: Agent
 	return [groups.project, groups.user, groups.path].filter(
 		(group) => group.paths.length > 0 || group.packages.size > 0,
 	);
+}
+
+export function formatContextPath(p: string, cwd: string): string {
+	const resolvedCwd = path.resolve(cwd);
+	const absolutePath = path.isAbsolute(p) ? path.resolve(p) : path.resolve(resolvedCwd, p);
+	const relativePath = getCwdRelativePath(absolutePath, cwd);
+	if (relativePath !== undefined) {
+		return relativePath;
+	}
+
+	return formatDisplayPath(absolutePath);
+}
+
+export function findSourceInfoForPath(
+	p: string,
+	sourceInfos: Map<string, AgentConnectionSourceInfo>,
+): AgentConnectionSourceInfo | undefined {
+	const exact = sourceInfos.get(p);
+	if (exact) return exact;
+
+	let current = p;
+	while (current.includes("/")) {
+		current = current.substring(0, current.lastIndexOf("/"));
+		const parent = sourceInfos.get(current);
+		if (parent) return parent;
+	}
+
+	return undefined;
+}
+
+export function formatDiagnostics(
+	diagnostics: readonly AgentConnectionResourceDiagnostic[],
+	sourceInfos: Map<string, AgentConnectionSourceInfo>,
+): string {
+	const lines: string[] = [];
+
+	// Group collision diagnostics by name
+	const collisions = new Map<string, AgentConnectionResourceDiagnostic[]>();
+	const otherDiagnostics: AgentConnectionResourceDiagnostic[] = [];
+
+	for (const d of diagnostics) {
+		if (d.type === "collision" && d.collision) {
+			const list = collisions.get(d.collision.name) ?? [];
+			list.push(d);
+			collisions.set(d.collision.name, list);
+		} else {
+			otherDiagnostics.push(d);
+		}
+	}
+
+	// Format collision diagnostics grouped by name
+	for (const [name, collisionList] of collisions) {
+		const first = collisionList[0]?.collision;
+		if (!first) continue;
+		lines.push(theme.fg("warning", `  "${name}" collision:`));
+		lines.push(
+			theme.fg(
+				"dim",
+				`    ${theme.fg("success", "✓")} ${formatPathWithSource(first.winnerPath, findSourceInfoForPath(first.winnerPath, sourceInfos))}`,
+			),
+		);
+		for (const d of collisionList) {
+			if (d.collision) {
+				lines.push(
+					theme.fg(
+						"dim",
+						`    ${theme.fg("warning", "✗")} ${formatPathWithSource(d.collision.loserPath, findSourceInfoForPath(d.collision.loserPath, sourceInfos))} (skipped)`,
+					),
+				);
+			}
+		}
+	}
+
+	const formatMessageLines = (diagnostic: AgentConnectionResourceDiagnostic, indent: number): string[] => {
+		const color = diagnostic.type === "error" ? "error" : "warning";
+		const prefix = " ".repeat(indent);
+		return diagnostic.message.split("\n").map((line) => theme.fg(color, `${prefix}${line}`));
+	};
+
+	for (const d of otherDiagnostics) {
+		if (d.path) {
+			const formattedPath = formatPathWithSource(d.path, findSourceInfoForPath(d.path, sourceInfos));
+			lines.push(theme.fg(d.type === "error" ? "error" : "warning", `  ${formattedPath}`));
+			lines.push(...formatMessageLines(d, 4));
+		} else {
+			lines.push(...formatMessageLines(d, 2));
+		}
+	}
+
+	return lines.join("\n");
 }

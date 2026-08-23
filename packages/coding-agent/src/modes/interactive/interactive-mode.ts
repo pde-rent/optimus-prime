@@ -268,9 +268,6 @@ import type {
 	InteractiveModeUiServices,
 } from "./interactive-mode-services.js";
 import { type OnboardingStartupState, shouldRunOnboarding } from "./onboarding.js";
-import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
-import { type QueueCheckout, QueueSelection } from "./queue-selection.js";
-import { formatResumeHint } from "./resume-hint.js";
 import {
 	buildScopeGroups,
 	formatContextPath,
@@ -281,7 +278,10 @@ import {
 	getCompactExtensionLabels,
 	getCompactPathLabel,
 	getShortPath,
-} from "./source-labels.js";
+} from "./path-formatting.js";
+import type { ClientPromptStashStore, PromptStash, PromptStashState } from "./prompt-stash-state.js";
+import { type QueueCheckout, QueueSelection } from "./queue-selection.js";
+import { formatResumeHint } from "./resume-hint.js";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
