@@ -19,7 +19,7 @@ export const GRAPH_RESOLVER_LEVELS: readonly GraphResolverLevel[] = ["off", "low
  * Reference cost of one solo run, in tokens. A fixed constant, not a measurement: the ceiling is a
  * multiple of what one agent would have cost, and that run never happens.
  */
-const GRAPH_BASELINE_TOKENS = 60_000;
+const GRAPH_BASELINE_TOKENS = 250_000;
 
 export interface GraphResolverBudget {
 	ceilingTokens: number;
