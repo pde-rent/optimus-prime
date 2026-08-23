@@ -499,34 +499,16 @@ function makeConnection(options: Record<string, unknown> & { activeSessionId: st
 	return { client, connection };
 }
 
-/** Emits a sequenced session_event through the fake client (no cursor variant). */
-function emitSessionEvent(
-	client: FakeDaemonClient,
-	activeSessionId: string,
-	event: Record<string, unknown>,
-	sequence: number,
-): void {
-	client.emitMessage({
-		type: "session_event",
-		activeSessionId,
-		event: event as never,
-		meta: {
-			id: `${activeSessionId}:${sequence}`,
-			protocol: DAEMON_PROTOCOL_INFO,
-			activeSessionId,
-			sequence,
-			emittedAt: "2026-01-01T00:00:00.000Z",
-		},
-	});
-}
-
-/** Emits a sequenced session_event that carries an explicit generation cursor. */
+/**
+ * Emits a sequenced session_event through the fake client. Pass a generation string to
+ * attach an explicit generation cursor; pass null to emit the cursorless legacy variant.
+ */
 function emitSequencedEvent(
 	client: FakeDaemonClient,
 	activeSessionId: string,
 	event: Record<string, unknown>,
 	sequence: number,
-	generation = `generation-${activeSessionId}`,
+	generation: string | null = `generation-${activeSessionId}`,
 ): void {
 	client.emitMessage({
 		type: "session_event",
@@ -537,12 +519,11 @@ function emitSequencedEvent(
 			protocol: DAEMON_PROTOCOL_INFO,
 			activeSessionId,
 			sequence,
-			cursor: { generation, sequence },
+			...(generation === null ? {} : { cursor: { generation, sequence } }),
 			emittedAt: "2026-01-01T00:00:00.000Z",
 		},
 	});
 }
-
 /** Standard update-restart row advertised by the fake daemon's session list. */
 function restoredRow(sessionId: string, id = "active-restored") {
 	return {
@@ -2239,132 +2220,126 @@ describe("DaemonAgentConnection", () => {
 		);
 	});
 
-	it("loads resource snapshots through the daemon protocol", async () => {
-		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
-		await connection.attach();
-
-		await expect(connection.getResourceSnapshot()).resolves.toMatchObject({
-			contextFiles: [{ path: "/tmp/AGENTS.md" }],
-			skills: [{ name: "demo-skill", filePath: "/tmp/skills/demo-skill/SKILL.md" }],
-			diagnostics: { skills: [], prompts: [], extensions: [], themes: [] },
-		});
-
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_resource_snapshot",
-			activeSessionId: "active-1",
-		});
-	});
-
-	it("loads the full model catalog through the daemon protocol", async () => {
-		const fakeClient = new FakeDaemonClient();
-		fakeClient.serverCapabilities.add("model_catalog");
-		const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
-		await connection.attach();
-
-		const catalog = await connection.getModelCatalog();
-
-		expect(catalog.configuredProviders).toEqual(["openai"]);
-		expect(catalog.models[0]).toMatchObject({ provider: "openai", id: "gpt-5.1" });
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_model_catalog",
-			activeSessionId: "active-1",
-		});
-	});
-
-	it("falls back to configured models when the daemon lacks model catalog support", async () => {
-		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
-		await connection.attach();
-
-		const catalog = await connection.getModelCatalog();
-
-		expect(catalog.configuredProviders).toEqual(["openai"]);
-		expect(catalog.models[0]).toMatchObject({ provider: "openai", id: "gpt-5.1" });
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_available_models",
-			activeSessionId: "active-1",
-		});
-	});
-
-	it("loads session context through the daemon protocol", async () => {
-		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
-		await connection.attach();
-		emitSessionEvent(
-			fakeClient,
-			"active-1",
-			{
-				type: "session_action_update",
-				actions: { queuedCount: 0, steering: [], followUps: [] },
+	// Table over read-only protocol loads: each call must resolve with the daemon payload
+	// and stamp activeSessionId on the outgoing command.
+	const protocolLoadCases = [
+		{
+			name: "loads resource snapshots through the daemon protocol",
+			call: (connection: DaemonAgentConnection) => connection.getResourceSnapshot(),
+			matcher: "toMatchObject" as const,
+			expected: {
+				contextFiles: [{ path: "/tmp/AGENTS.md" }],
+				skills: [{ name: "demo-skill", filePath: "/tmp/skills/demo-skill/SKILL.md" }],
+				diagnostics: { skills: [], prompts: [], extensions: [], themes: [] },
 			},
-			13,
-		);
-
-		await expect(connection.getSessionContext()).resolves.toEqual({
-			messages: [{ role: "user", content: "context prompt", timestamp: 3 }],
-			thinkingLevel: "medium",
-			model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
-		});
-
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_session_context",
-			activeSessionId: "active-1",
-		});
-	});
-
-	it("loads session trees through the daemon protocol", async () => {
-		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
-		await connection.attach();
-		emitSessionEvent(
-			fakeClient,
-			"active-1",
-			{
-				type: "session_action_update",
-				actions: { queuedCount: 0, steering: [], followUps: [] },
+			requestType: "get_resource_snapshot",
+		},
+		{
+			name: "loads session context through the daemon protocol",
+			emitQueueUpdate: true,
+			call: (connection: DaemonAgentConnection) => connection.getSessionContext(),
+			matcher: "toEqual" as const,
+			expected: {
+				messages: [{ role: "user", content: "context prompt", timestamp: 3 }],
+				thinkingLevel: "medium",
+				model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
 			},
-			13,
-		);
-
-		await expect(connection.getSessionTree()).resolves.toEqual({
-			tree: [
-				{
-					entry: {
-						type: "message",
-						id: "user-1",
-						parentId: null,
-						timestamp: "2026-01-01T00:00:00.000Z",
-						message: { role: "user", content: "hello", timestamp: 1 },
+			requestType: "get_session_context",
+		},
+		{
+			name: "loads session trees through the daemon protocol",
+			emitQueueUpdate: true,
+			call: (connection: DaemonAgentConnection) => connection.getSessionTree(),
+			matcher: "toEqual" as const,
+			expected: {
+				tree: [
+					{
+						entry: {
+							type: "message",
+							id: "user-1",
+							parentId: null,
+							timestamp: "2026-01-01T00:00:00.000Z",
+							message: { role: "user", content: "hello", timestamp: 1 },
+						},
+						children: [],
 					},
-					children: [],
-				},
-			],
-			leafId: "user-1",
-		});
+				],
+				leafId: "user-1",
+			},
+			requestType: "get_session_tree",
+		},
+		{
+			name: "loads serializable tool metadata through the daemon protocol",
+			call: (connection: DaemonAgentConnection) => connection.getToolDefinition("custom_tool"),
+			matcher: "toEqual" as const,
+			expected: {
+				name: "custom_tool",
+				label: "custom_tool",
+				description: "custom_tool description",
+				promptSnippet: "custom_tool prompt",
+				promptGuidelines: ["Use custom_tool"],
+				parameters: { type: "object" },
+				renderShell: "self",
+			},
+			requestType: "get_tool_definition",
+			requestExtra: { name: "custom_tool" },
+		},
+	];
+	for (const loadCase of protocolLoadCases) {
+		it(loadCase.name, async () => {
+			const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
+			await connection.attach();
+			if (loadCase.emitQueueUpdate) {
+				emitSequencedEvent(
+					fakeClient,
+					"active-1",
+					{
+						type: "session_action_update",
+						actions: { queuedCount: 0, steering: [], followUps: [] },
+					},
+					13,
+					null,
+				);
+			}
 
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_session_tree",
-			activeSessionId: "active-1",
-		});
-	});
+			await expect(loadCase.call(connection)).resolves[loadCase.matcher](loadCase.expected);
 
-	it("loads serializable tool metadata through the daemon protocol", async () => {
-		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
-		await connection.attach();
-
-		await expect(connection.getToolDefinition("custom_tool")).resolves.toEqual({
-			name: "custom_tool",
-			label: "custom_tool",
-			description: "custom_tool description",
-			promptSnippet: "custom_tool prompt",
-			promptGuidelines: ["Use custom_tool"],
-			parameters: { type: "object" },
-			renderShell: "self",
+			expect(fakeClient.requests[1]).toMatchObject({
+				type: loadCase.requestType,
+				activeSessionId: "active-1",
+				...(loadCase.requestExtra ?? {}),
+			});
 		});
+	}
 
-		expect(fakeClient.requests[1]).toMatchObject({
-			type: "get_tool_definition",
-			activeSessionId: "active-1",
-			name: "custom_tool",
+	// Table over the model-catalog pair: identical payloads, different capability negotiation.
+	for (const catalogCase of [
+		{
+			name: "loads the full model catalog through the daemon protocol",
+			serverCapability: true,
+			requestType: "get_model_catalog",
+		},
+		{
+			name: "falls back to configured models when the daemon lacks model catalog support",
+			serverCapability: false,
+			requestType: "get_available_models",
+		},
+	]) {
+		it(catalogCase.name, async () => {
+			const fakeClient = new FakeDaemonClient();
+			if (catalogCase.serverCapability) {
+				fakeClient.serverCapabilities.add("model_catalog");
+			}
+			const connection = new DaemonAgentConnection(asDaemonClient(fakeClient), "active-1");
+			await connection.attach();
+
+			const catalog = await connection.getModelCatalog();
+
+			expect(catalog.configuredProviders).toEqual(["openai"]);
+			expect(catalog.models[0]).toMatchObject({ provider: "openai", id: "gpt-5.1" });
+			expect(fakeClient.requests[1]).toMatchObject({ type: catalogCase.requestType, activeSessionId: "active-1" });
 		});
-	});
+	}
 
 	it("forwards daemon session events through the connection boundary", async () => {
 		const { client: fakeClient, connection } = makeConnection({ activeSessionId: "active-1" });
@@ -2374,7 +2349,7 @@ describe("DaemonAgentConnection", () => {
 		});
 		await connection.attach();
 
-		emitSessionEvent(
+		emitSequencedEvent(
 			fakeClient,
 			"active-1",
 			{
@@ -2382,6 +2357,7 @@ describe("DaemonAgentConnection", () => {
 				actions: { queuedCount: 2, steering: ["interrupt"], followUps: ["later"] },
 			},
 			14,
+			null,
 		);
 		fakeClient.emitMessage({
 			type: "session_event",
