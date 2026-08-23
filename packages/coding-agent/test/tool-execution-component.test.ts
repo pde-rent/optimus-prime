@@ -458,8 +458,8 @@ describe("ToolExecutionComponent parity", () => {
 		expect(summaryIndex).toBeGreaterThanOrEqual(0);
 		expect(withDiffLines[summaryIndex]).toContain("to collapse");
 		const textColumn = withDiffLines[summaryIndex].indexOf("README.md");
-		const removed = withDiffLines.find((line) => line.includes("-1 before"));
-		const added = withDiffLines.find((line) => line.includes("+1 after"));
+		const removed = withDiffLines.find((line) => line.includes("1 - before"));
+		const added = withDiffLines.find((line) => line.includes("1 + after"));
 		expect(removed?.startsWith(" ".repeat(textColumn))).toBe(true);
 		expect(added?.startsWith(" ".repeat(textColumn))).toBe(true);
 
@@ -564,12 +564,14 @@ describe("ToolExecutionComponent parity", () => {
 		for (let i = summaryIndex + 1; i < lines.length && lines[i].trim() !== ""; i++) {
 			diffRows.push(lines[i]);
 		}
-		// The single logical diff line wraps; every continuation row stays anchored at the text column.
+		// The single logical diff line wraps; every row stays anchored at or beyond
+		// the summary's text column, the rich gutter leads the first row, and the
+		// wrapped content survives intact.
 		expect(diffRows.length).toBeGreaterThan(1);
 		for (const row of diffRows) {
 			expect(row.startsWith(" ".repeat(textColumn))).toBe(true);
-			expect(row[textColumn]).not.toBe(" ");
 		}
+		expect(diffRows[0]?.trimStart()).toMatch(/^1 \+ alpha/);
 		expect(diffRows.join(" ")).toContain("tau");
 	});
 
@@ -877,19 +879,18 @@ describe("ToolExecutionComponent parity", () => {
 		expect(collapsed).not.toMatch(/1 - before/);
 		expect(collapsed).not.toMatch(/1 \+ after/);
 
-		// Tool expansion shows the full source but never the diff; that belongs to ctrl+j.
+		// Edit cells never surface their raw call source, even expanded (the diff
+		// block below is the content); expansion attaches only output.
 		component.setExpanded(true);
 		const expanded = stripAnsi(component.render(120).join("\n"));
-		expect(expanded).toContain('const hiddenSideEffect = "only in full source"');
+		expect(expanded).not.toContain("hiddenSideEffect");
 		expect(expanded).toContain("╰─ README.md +1 -1");
 		expect(expanded).not.toMatch(/1 - before/);
 
+		// ctrl+j reveals the diff rows under the same single summary line.
 		component.setEditDiffsExpanded(true);
 		const withDiffs = stripAnsi(component.render(120).join("\n"));
 		const withDiffLines = withDiffs.split("\n");
-		expect(withDiffLines.findIndex((line) => line.includes("const hiddenSideEffect ="))).toBeLessThan(
-			withDiffLines.findIndex((line) => line.includes("╰─ README.md +1 -1")),
-		);
 		// Exactly one summary line — the cell owns the block; no extra component doubles it.
 		expect(withDiffLines.filter((line) => line.includes("╰─ README.md +1 -1")).length).toBe(1);
 		expect(withDiffs).toMatch(/1 - before/);
