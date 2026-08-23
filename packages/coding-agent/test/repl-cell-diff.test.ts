@@ -60,7 +60,9 @@ describe("ReplCellComponent diff rendering", () => {
 		expect(out).toMatch(/11 \+ .*GAMMA/);
 		expect(out).toMatch(/10 .*alpha/);
 		expect(out.split("\n").some((line) => /^\s*'?Edited sample\.ts'?\s*$/.test(line.trim()))).toBe(false);
-		expect(out).toContain('await edit("sample.ts", "gamma", "GAMMA")');
+		// The call source is never rendered for a diff cell — the header replaces it.
+		expect(out).not.toContain('await edit("sample.ts"');
+		expect(out).toContain("edit.patch sample.ts (+1/-1)");
 	});
 
 	it("shows diffs on collapsed cells when edit diffs are expanded", () => {
@@ -89,7 +91,8 @@ describe("ReplCellComponent diff rendering", () => {
 
 		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: false });
 		expect(expanded).not.toMatch(/11 - .*gamma/);
-		expect(expanded).toContain('console.log("edit-done-marker")');
+		// Expanding attaches output, never the call source.
+		expect(expanded).not.toContain('console.log("edit-done-marker")');
 	});
 
 	it("renders diff rows as full-width colored blocks", () => {
@@ -299,7 +302,7 @@ describe("ReplCellComponent diff rendering", () => {
 		expect(addedRows.slice(1).every((line) => !line.includes("+"))).toBe(true);
 	});
 
-	it("renders expanded source before the always-visible diff", () => {
+	it("renders a compact edit header instead of the call source, before the diff", () => {
 		const out = renderCell({
 			code: "await edit(...)",
 			details: { status: "ok", durationMs: 4, diffs: [{ path: "a.ts", oldStr: "x", newStr: "X", startLine: 1 }] },
@@ -308,10 +311,9 @@ describe("ReplCellComponent diff rendering", () => {
 			expanded: true,
 			editDiffsExpanded: true,
 		}).split("\n");
-		expect(out[0]).toContain("to collapse");
-		expect(out[1].trim()).toBe("");
-		expect(out[2]).toContain("await edit(...)");
-		expect(out.findIndex((line) => line.includes("a.ts"))).toBeGreaterThan(2);
+		expect(out[0]).toContain("edit.patch a.ts (+1/-1)");
+		expect(out.join("\n")).not.toContain("await edit");
+		expect(out.findIndex((line) => line.includes("╰─ a.ts"))).toBeGreaterThan(0);
 	});
 
 	it("keeps the summary line but hides diff rows when edit diffs are collapsed", () => {
@@ -328,7 +330,7 @@ describe("ReplCellComponent diff rendering", () => {
 		expect(collapsed).not.toContain("NEW");
 	});
 
-	it("hides edit source when collapsed and shows it when globally expanded", () => {
+	it("hides the edit call source whether collapsed or expanded", () => {
 		const state = {
 			code: 'const hiddenSideEffect = "only in full source"\nawait edit("a.ts", "old", "new")',
 			details: { status: "ok", diffs: [{ path: "a.ts", oldStr: "old", newStr: "new", startLine: 1 }] },
@@ -339,13 +341,10 @@ describe("ReplCellComponent diff rendering", () => {
 		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: true });
 
 		expect(collapsed).not.toContain("hiddenSideEffect");
-		expect(collapsed).toContain("a.ts");
-		expect(expanded).toContain('const hiddenSideEffect = "only in full source"');
-		expect(expanded).toContain("a.ts");
-		const expandedLines = expanded.split("\n");
-		expect(expandedLines.findIndex((line) => line.includes("const hiddenSideEffect ="))).toBeLessThan(
-			expandedLines.findIndex((line) => /╰─ a\.ts \+1 -1/.test(line)),
-		);
+		expect(collapsed).toContain("edit.patch a.ts (+1/-1)");
+		expect(expanded).not.toContain('const hiddenSideEffect = "only in full source"');
+		expect(expanded).toContain("edit.patch a.ts (+1/-1)");
+		expect(expanded).toMatch(/╰─ a\.ts \+1 -1/);
 	});
 
 	it("keeps non-edit cells collapsed to a single summary line", () => {
@@ -377,7 +376,9 @@ describe("ReplCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 		});
-		expect(out.split("\n").filter((l) => l.includes("app.ts")).length).toBe(1);
+		// One diff block: a single ╰─ summary line (plus the compact edit header).
+		expect(out.split("\n").filter((l) => l.includes("app.ts"))).toHaveLength(2);
+		expect(out.split("\n").filter((l) => l.includes("╰─ app.ts"))).toHaveLength(1);
 		expect(out).toMatch(/app\.ts\s+\+3\s+-3/);
 		expect((out.match(/⋮/g) ?? []).length).toBe(2);
 	});

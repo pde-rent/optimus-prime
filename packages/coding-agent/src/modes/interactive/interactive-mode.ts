@@ -642,7 +642,9 @@ export class InteractiveMode {
 
 	private toolOutputExpanded = false;
 	private agentMessagesExpanded = false;
-	private editDiffsExpanded = false;
+	// Edit diffs start expanded so a repl edit.patch cell shows the +/− rows inline;
+	// ctrl+j collapses them (per-cell state lives on the component).
+	private editDiffsExpanded = true;
 
 	// Per-block expansion keyed by click-target id, so a user's toggles survive
 	// transcript rebuilds (compaction resync, reconnect, thinking-toggle, reload).

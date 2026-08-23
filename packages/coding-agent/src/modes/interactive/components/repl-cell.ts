@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import {
 	type Component,
 	truncateToWidth,
@@ -362,7 +363,10 @@ export class ReplCellComponent implements Component {
 		// Cached by state version so unrelated repaints don't re-render (flicker).
 		const lines = [truncateToWidth(` ${this.collapsedLine(details)}`, safeWidth, "")];
 
-		const hasCode = this.state.expanded ? this.renderCode(lines, safeWidth) : false;
+		// Edit cells never surface their raw call source — the diff block below is
+		// the content. Expanding only attaches output (stdout, errors) beneath it.
+		const hasDiffs = (details.diffs?.length ?? 0) > 0;
+		const hasCode = !hasDiffs && this.state.expanded ? this.renderCode(lines, safeWidth) : false;
 		if ((details.diffs?.length ?? 0) > 0) {
 			this.renderDiffs(lines, safeWidth, details.diffs ?? [], hasCode);
 		}
@@ -384,18 +388,25 @@ export class ReplCellComponent implements Component {
 		const preview = previewReplCode(code);
 		const languageLabel = isBashCell && preview.language !== "bash" ? `bash · ${preview.language}` : preview.language;
 		const chevron = theme.fg("dim", collapseChevron(this.state.expanded === true));
-		const head = `${chevron} ${this.marker(details)} ${theme.fg("muted", languageLabel)}`;
+		const diffs = details.diffs ?? [];
+		// Edit cells replace both the language label and the call-source preview with
+		// one compact `edit.patch <file> (+N/-M)` summary — the raw JS invocation
+		// must never surface in the transcript.
+		const label = diffs.length > 0 ? this.editTargetSummary(diffs) : theme.fg("muted", languageLabel);
+		const head = `${chevron} ${this.marker(details)} ${label}`;
 		const parts = [head];
 
-		if (preview.text) {
-			parts.push(this.highlightInputLine(preview.text, preview.language === "bash"));
-		} else if (!this.state.executionStarted) {
-			parts.push(theme.fg("muted", "waiting for code"));
-		}
+		if (diffs.length === 0) {
+			if (preview.text) {
+				parts.push(this.highlightInputLine(preview.text, preview.language === "bash"));
+			} else if (!this.state.executionStarted) {
+				parts.push(theme.fg("muted", "waiting for code"));
+			}
 
-		const counts = this.lineCounts(details);
-		if (counts) {
-			parts.push(theme.fg("muted", counts));
+			const counts = this.lineCounts(details);
+			if (counts) {
+				parts.push(theme.fg("muted", counts));
+			}
 		}
 
 		if (details.durationMs !== undefined) {
@@ -411,6 +422,22 @@ export class ReplCellComponent implements Component {
 			parts.push(expandCollapseHint("app.tools.expand", this.state.expanded === true));
 		}
 		return parts.join(theme.fg("dim", " · "));
+	}
+
+	/** Compact edit-cell summary replacing the call-source preview:
+	 * `edit.patch <file> (+N/-M)` — one file by basename, else a file count. */
+	private editTargetSummary(diffs: readonly DiffDisplay[]): string {
+		const paths = new Set(diffs.map((diff) => diff.path));
+		const target = paths.size === 1 ? basename(diffs[0]?.path ?? "") : `${paths.size} files`;
+		let added = 0;
+		let removed = 0;
+		for (const edit of diffs) {
+			const { diff } = generateDiffString(edit.oldStr, edit.newStr, 4, edit.startLine ?? 1);
+			const counts = countChangedLines(diff);
+			added += counts.added;
+			removed += counts.removed;
+		}
+		return `${theme.fg("muted", "edit.patch")} ${target} ${theme.fg("muted", `(+${added}/-${removed})`)}`;
 	}
 
 	/** Status marker — color carries running/done/error; ✓/✗ once finished. */

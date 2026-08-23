@@ -21,6 +21,14 @@ Target: <=250,000 total. Numbers always reported split by category.
 - supervisor-core step 4 (command dispatch): DEFERRED per stop conditions - handlers share only the parse/envelope shell; real convergence is the 2.2 one-runtime end state, needs root sequencing
 - interactive residuals: external-editor flow dedup (-35), ctrl-c-hint controller shared with agents-view (InteractiveMode full convergence pending T fake update), bun-repl audited at floor (@344f00ed7)
 
+## Repl edit-cell diff rendering defaults (product fix, 2026-08-23)
+
+Product-owner complaint: a repl `edit.patch` cell rendered the raw JS invocation source in the TUI and hid the diff behind ctrl+j. Fix in `coding-agent`:
+- `components/repl-cell.ts`: cells whose details carry diffs never render their input source; the fixed top line becomes a compact `edit.patch <basename> (+N/-M)` summary (multi-file: `N files`). Expanding now attaches output only. Diff rows render under the per-file ╰─ summary as before.
+- `interactive-mode.ts`: `editDiffsExpanded` defaults to true, so +/− rows show inline on arrival; ctrl+j collapses (per-cell state preserved across rebuilds via the existing component flag).
+- Output suppression unchanged; non-edit repl cells unchanged.
+- Tests: test/repl-cell-diff.test.ts expectations updated (source-never-rendered, header format, coalesce count includes header line). biome + tsgo clean on touched files.
+
 ## In flight
 - E2: daemon trio scenario tables (15,231 -> 14,294 so far)
 - S: selector boilerplate + dead-export sweep
