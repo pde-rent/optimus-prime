@@ -3,6 +3,7 @@ import os from "node:os";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
 import { clampInt, formatTable, runBinary } from "./sysutil.js";
@@ -286,7 +287,7 @@ export function createSysinfoToolDefinition(cwd: string): ToolDefinition<typeof 
 			input: SysinfoToolInput,
 			signal?: AbortSignal,
 		): Promise<{ content: Array<{ type: "text"; text: string }>; details: SysinfoToolDetails }> {
-			if (signal?.aborted) throw new Error("Operation aborted");
+			throwIfAborted(signal);
 			const cpus = os.cpus();
 			let memTotalBytes = os.totalmem();
 			let memFreeBytes = os.freemem();

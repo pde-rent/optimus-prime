@@ -3,6 +3,7 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { detectLineEnding, generateDiffString, normalizeToLF, restoreLineEndings, stripBom } from "../edit-diff.js";
 import { withFileMutationQueue } from "../file-mutation-queue.js";
 import { resolveToCwd } from "../path-utils.js";
@@ -201,9 +202,7 @@ export function createSedToolDefinition(cwd: string): ToolDefinition<typeof sedS
 				return run();
 			}
 			return withFileMutationQueue(absolutePath, async () => {
-				if (signal?.aborted) {
-					throw new Error("Operation aborted");
-				}
+				throwIfAborted(signal);
 				return run();
 			});
 		},

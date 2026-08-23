@@ -1,11 +1,12 @@
-import { readFileSync, type Stats, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { resolveToCwd } from "../path-utils.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
-import { walkFiles } from "./walk.js";
+import { statSearchRoot, walkFiles } from "./walk.js";
 
 const wcSchema = Type.Object(
 	{
@@ -78,18 +79,10 @@ export function createWcToolDefinition(
 			input: WcToolInput,
 			signal?: AbortSignal,
 		): Promise<{ content: Array<{ type: "text"; text: string }>; details: WcToolDetails }> {
-			if (signal?.aborted) {
-				throw new Error("Operation aborted");
-			}
+			throwIfAborted(signal);
 
 			const rootPath = resolveToCwd(input.path ?? ".", cwd);
-			let stats: Stats;
-			try {
-				stats = statSync(rootPath);
-			} catch (error: unknown) {
-				const code = error instanceof Error && "code" in error ? String(error.code) : String(error);
-				throw new Error(`Could not search path: ${input.path ?? "."}. Error code: ${code}.`);
-			}
+			const stats = statSearchRoot(rootPath, input.path ?? ".");
 
 			const targets = stats.isFile()
 				? [{ absPath: rootPath, relPath: input.path ?? "." }]
@@ -101,9 +94,7 @@ export function createWcToolDefinition(
 			let totalBytes = 0;
 
 			for (const target of targets) {
-				if (signal?.aborted) {
-					throw new Error("Operation aborted");
-				}
+				throwIfAborted(signal);
 				let buffer: Buffer;
 				try {
 					buffer = readFileSync(target.absPath);

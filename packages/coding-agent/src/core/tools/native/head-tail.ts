@@ -2,6 +2,7 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { resolveToCwd } from "../path-utils.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
@@ -94,7 +95,7 @@ async function executeWindow(
 	input: HeadToolInput | TailToolInput,
 	signal?: AbortSignal,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; details: WindowToolDetails }> {
-	if (signal?.aborted) throw new Error("Operation aborted");
+	throwIfAborted(signal);
 	const absPath = resolveToCwd(input.path, cwd);
 	let fileBytes: number;
 	try {

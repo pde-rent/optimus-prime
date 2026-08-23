@@ -2,10 +2,11 @@ import { type Stats, statSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { resolveToCwd } from "../path-utils.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
-import { walkTree } from "./walk.js";
+import { statSearchRoot, walkTree } from "./walk.js";
 
 const findSchema = Type.Object(
 	{
@@ -107,9 +108,7 @@ export function createFindToolDefinition(
 			input: FindToolInput,
 			signal?: AbortSignal,
 		): Promise<{ content: Array<{ type: "text"; text: string }>; details: FindToolDetails }> {
-			if (signal?.aborted) {
-				throw new Error("Operation aborted");
-			}
+			throwIfAborted(signal);
 
 			let minTime: number | undefined;
 			let maxTime: number | undefined;
@@ -124,13 +123,7 @@ export function createFindToolDefinition(
 				input.name !== undefined ? globToRegExp(input.name, input.caseInsensitive === true) : undefined;
 
 			const rootPath = resolveToCwd(input.path ?? ".", cwd);
-			let stats: Stats;
-			try {
-				stats = statSync(rootPath);
-			} catch (error: unknown) {
-				const code = error instanceof Error && "code" in error ? String(error.code) : String(error);
-				throw new Error(`Could not search path: ${input.path ?? "."}. Error code: ${code}.`);
-			}
+			const stats = statSearchRoot(rootPath, input.path ?? ".");
 
 			const matches: string[] = [];
 			const hasSizeFilter = input.minSize !== undefined || input.maxSize !== undefined;
@@ -151,9 +144,7 @@ export function createFindToolDefinition(
 			if (stats.isDirectory()) {
 				const seenDirs = new Set<string>([""]);
 				for (const file of walkTree(rootPath)) {
-					if (signal?.aborted) {
-						throw new Error("Operation aborted");
-					}
+					throwIfAborted(signal);
 					// Re-derive the ancestor directories of each walked file so type=dir works.
 					const segments = file.relPath.split("/");
 					segments.pop();

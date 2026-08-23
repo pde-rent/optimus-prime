@@ -104,3 +104,13 @@ export function walkTree(rootAbs: string, options: WalkOptions = {}): WalkedEntr
 export function walkFiles(rootAbs: string, options: WalkOptions = {}): WalkedEntry[] {
 	return walkTree(rootAbs, options).filter((entry) => entry.isFile);
 }
+
+/** Resolve + stat a search root; missing/broken paths fail with the shared native-tool message. */
+export function statSearchRoot(rootPath: string, displayPath: string): Stats {
+	try {
+		return statSync(rootPath);
+	} catch (error: unknown) {
+		const code = error instanceof Error && "code" in error ? String(error.code) : String(error);
+		throw new Error(`Could not search path: ${displayPath}. Error code: ${code}.`);
+	}
+}

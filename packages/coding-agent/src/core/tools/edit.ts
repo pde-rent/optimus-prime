@@ -11,6 +11,7 @@ import {
 } from "../../modes/interactive/components/edit-summary.js";
 import type { theme } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";
+import { runWithAbortSignal } from "./abortable.js";
 import {
 	applyEditsToNormalizedContent,
 	computeEditsDiff,
@@ -358,100 +359,50 @@ export function createEditToolDefinition(
 			const { path, edits } = validateEditInput(input);
 			const absolutePath = resolveToCwd(path, cwd);
 
-			return withFileMutationQueue(
-				absolutePath,
-				() =>
-					new Promise<{
-						content: Array<{ type: "text"; text: string }>;
-						details: EditToolDetails | undefined;
-					}>((resolve, reject) => {
-						if (signal?.aborted) {
-							reject(new Error("Operation aborted"));
-							return;
-						}
+			return withFileMutationQueue(absolutePath, () =>
+				runWithAbortSignal<{
+					content: Array<{ type: "text"; text: string }>;
+					details: EditToolDetails | undefined;
+				}>(signal, async (guard) => {
+					try {
+						await ops.access(absolutePath);
+					} catch (error: unknown) {
+						const errorMessage =
+							error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
+						throw new Error(`Could not edit file: ${path}. ${errorMessage}.`);
+					}
 
-						let aborted = false;
+					guard.bail();
 
-						const onAbort = () => {
-							aborted = true;
-							reject(new Error("Operation aborted"));
-						};
+					const buffer = await ops.readFile(absolutePath);
+					const rawContent = buffer.toString("utf-8");
 
-						if (signal) {
-							signal.addEventListener("abort", onAbort, { once: true });
-						}
+					guard.bail();
 
-						void (async () => {
-							try {
-								try {
-									await ops.access(absolutePath);
-								} catch (error: unknown) {
-									const errorMessage =
-										error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
-									if (signal) {
-										signal.removeEventListener("abort", onAbort);
-									}
-									reject(new Error(`Could not edit file: ${path}. ${errorMessage}.`));
-									return;
-								}
+					// Strip BOM before matching. The model will not include an invisible BOM in oldText.
+					const { bom, text: content } = stripBom(rawContent);
+					const originalEnding = detectLineEnding(content);
+					const normalizedContent = normalizeToLF(content);
+					const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
 
-								if (aborted) {
-									return;
-								}
+					guard.bail();
 
-								const buffer = await ops.readFile(absolutePath);
-								const rawContent = buffer.toString("utf-8");
+					const finalContent = bom + restoreLineEndings(newContent, originalEnding);
+					await ops.writeFile(absolutePath, finalContent);
 
-								if (aborted) {
-									return;
-								}
+					guard.bail();
 
-								// Strip BOM before matching. The model will not include an invisible BOM in oldText.
-								const { bom, text: content } = stripBom(rawContent);
-								const originalEnding = detectLineEnding(content);
-								const normalizedContent = normalizeToLF(content);
-								const { baseContent, newContent } = applyEditsToNormalizedContent(
-									normalizedContent,
-									edits,
-									path,
-								);
-
-								if (aborted) {
-									return;
-								}
-
-								const finalContent = bom + restoreLineEndings(newContent, originalEnding);
-								await ops.writeFile(absolutePath, finalContent);
-
-								if (aborted) {
-									return;
-								}
-
-								if (signal) {
-									signal.removeEventListener("abort", onAbort);
-								}
-
-								const diffResult = generateDiffString(baseContent, newContent);
-								resolve({
-									content: [
-										{
-											type: "text",
-											text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
-										},
-									],
-									details: { diff: diffResult.diff, firstChangedLine: diffResult.firstChangedLine },
-								});
-							} catch (error: unknown) {
-								if (signal) {
-									signal.removeEventListener("abort", onAbort);
-								}
-
-								if (!aborted) {
-									reject(error instanceof Error ? error : new Error(String(error)));
-								}
-							}
-						})();
-					}),
+					const diffResult = generateDiffString(baseContent, newContent);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
+							},
+						],
+						details: { diff: diffResult.diff, firstChangedLine: diffResult.firstChangedLine },
+					};
+				}),
 			);
 		},
 		renderCall(args, theme, context) {

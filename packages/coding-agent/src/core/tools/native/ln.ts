@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { link as fsLink, symlink as fsSymlink } from "fs/promises";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { withFileMutationQueue } from "../file-mutation-queue.js";
 import { resolveToCwd } from "../path-utils.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
@@ -55,9 +56,7 @@ export function createLnToolDefinition(cwd: string): ToolDefinition<typeof lnSch
 			input: LnToolInput,
 			signal?: AbortSignal,
 		): Promise<{ content: Array<{ type: "text"; text: string }>; details: LnToolDetails }> {
-			if (signal?.aborted) {
-				throw new Error("Operation aborted");
-			}
+			throwIfAborted(signal);
 
 			const targetAbs = resolveToCwd(input.target, cwd);
 			const linkAbs = resolveToCwd(input.linkPath, cwd);

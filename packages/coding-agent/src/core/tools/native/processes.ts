@@ -3,6 +3,7 @@ import os from "node:os";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
+import { throwIfAborted } from "../abortable.js";
 import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
 import { clampInt, formatTable, runBinary, sleep } from "./sysutil.js";
@@ -194,7 +195,7 @@ async function sampleFromCumulativeSnapshots(
 	const beforeWall = Date.now();
 	const before = await takeSnapshot();
 	await sleep(intervalMs);
-	if (signal?.aborted) throw new Error("Operation aborted");
+	throwIfAborted(signal);
 	const deltaWallSec = Math.max((Date.now() - beforeWall) / 1000, 0.001);
 	const after = await takeSnapshot();
 	const deltas: CpuDelta[] = [];
@@ -517,7 +518,7 @@ export function createProcessesToolDefinition(
 			input: ProcessesToolInput,
 			signal?: AbortSignal,
 		): Promise<{ content: Array<{ type: "text"; text: string }>; details: ProcessesToolDetails }> {
-			if (signal?.aborted) throw new Error("Operation aborted");
+			throwIfAborted(signal);
 
 			if (input.op === "kill") {
 				if (input.pid === undefined || !Number.isInteger(input.pid) || input.pid <= 0) {
