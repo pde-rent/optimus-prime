@@ -58,11 +58,7 @@ import {
 	VERSION,
 } from "../../config.js";
 
-import {
-	AGENT_MESSAGE_RECEIVED_PREVIEW_LABEL,
-	isAgentSessionMessage,
-	startsAgentRun,
-} from "../../core/agent-messages.js";
+import { isAgentSessionMessage, startsAgentRun } from "../../core/agent-messages.js";
 
 import { isNoModelsAvailableMessage } from "../../core/auth-guidance.js";
 import {
@@ -85,7 +81,7 @@ import type {
 	ExtensionWidgetOptions,
 } from "../../core/extensions/index.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
-import { emptyGoalState, formatGoalUsage, GOAL_CONTEXT_PREVIEW_LABEL, type GoalState } from "../../core/goals.js";
+import { emptyGoalState, type GoalState } from "../../core/goals.js";
 import {
 	GRAPH_RESOLVER_LEVELS,
 	type GraphResolverLevel,
@@ -98,7 +94,6 @@ import {
 	bashOutputToText,
 	COMPACTION_OUTCOME_CUSTOM_TYPE,
 	createHeartbeatPromptMessage,
-	HEARTBEAT_PROMPT_PREVIEW_LABEL,
 	isCompactionOutcomeMessage,
 	isSessionSlashCommandMessage,
 	isSessionSlashCommandResultMessage,
@@ -122,7 +117,6 @@ import {
 } from "../../core/slash-commands.js";
 import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
 import { formatSize, type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
-import { OPTIMUS_LOGO, OPTIMUS_LOGO_META_MAX_ROWS } from "../../themes/optimus-logo.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { readClipboardImage } from "../../utils/clipboard-image.js";
@@ -164,7 +158,7 @@ import {
 } from "../shared/startup-notices.js";
 import { AGENT_ACTIVITY_LABELS, AgentActivityTracker, formatTokenCount } from "./agent-activity.js";
 import { getAnthropicSubscriptionAuthWarning, ProviderAuthFlows } from "./auth-flows.js";
-import { BrandSplashHeader, truncatePathMiddle } from "./brand-splash.js";
+import { BrandSplashHeader } from "./brand-splash.js";
 import { AgentMessageComponent } from "./components/agent-message.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
@@ -197,6 +191,7 @@ import { type FileChangeSummary, formatTotalChangeSummary, mergeTurnFileChanges 
 import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
+import { runExternalEditor } from "./components/external-editor.js";
 import { FeatureHintComponent } from "./components/feature-hint.js";
 import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
@@ -207,11 +202,7 @@ import { SelectModalComponent } from "./components/select-modal.js";
 import { SettingsSelectorComponent, THINKING_LEVEL_DESCRIPTIONS } from "./components/settings-selector.js";
 import { SideQuestionComponent } from "./components/side-question.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
-import {
-	isLeadingSlashCommand,
-	SlashCommandMessageComponent,
-	styleSlashCommandText,
-} from "./components/slash-command-message.js";
+import { SlashCommandMessageComponent } from "./components/slash-command-message.js";
 import { SlashCommandResultMessageComponent } from "./components/slash-command-result-message.js";
 import { SubagentGraphPanel } from "./components/subagent-graph-panel.js";
 import { countDirectSubagentStatuses, SubagentSummaryLine } from "./components/subagent-summary-line.js";
@@ -234,24 +225,15 @@ import {
 	getPayloadWorkingIndicatorOptions,
 } from "./extension-payload.js";
 import { FeatureHintDeck } from "./feature-hints.js";
-import {
-	formatGoalDetailSuffix,
-	formatGoalStatus,
-	type GoalAnnouncementSnapshot,
-	goalAnnouncementSnapshot,
-} from "./goal-tray.js";
+import { formatGoalStatus, type GoalAnnouncementSnapshot, goalAnnouncementSnapshot } from "./goal-tray.js";
 import { buildHotkeysGuide, buildShortcutGuide } from "./guides.js";
 import {
 	HEARTBEAT_ARGUMENT_COMPLETIONS,
-	HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS,
-	HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS,
-	heartbeatLegacyPromptToleranceMs,
 	isLikelyHeartbeatPromptTimestamp,
 	isTextOnlyUserMessage,
 } from "./heartbeat-support.js";
-import { formatSplashCwd } from "./path-formatting.js";
-import { formatQueuedMessagePreview, styleQueuedMessagePreview } from "./queue-preview.js";
-import { initialRenderMessages, omitOrphanToolResults } from "./transcript-render.js";
+import { styleQueuedMessagePreview } from "./queue-preview.js";
+import { initialRenderMessages } from "./transcript-render.js";
 import {
 	buildUpdateChildArgs,
 	buildUpdateRelaunchArgs,
@@ -271,7 +253,7 @@ export {
 } from "./update-relaunch.js";
 
 import { scopeHeartbeatsToSession } from "./heartbeat-scope.js";
-import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, ignitionCellColor, playIgnitionSound } from "./ignition.js";
+import { IGNITION_DURATION_MS, IGNITION_FRAME_MS, playIgnitionSound } from "./ignition.js";
 import {
 	collectMarkedImages,
 	evictImagesToBudget,
@@ -301,7 +283,6 @@ import {
 	getShortPath,
 } from "./source-labels.js";
 import {
-	fgAnsiFor,
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
 	getEditorTheme,
@@ -5298,10 +5279,6 @@ export class InteractiveMode {
 		return formatGoalStatus(goal, this.ui.terminal.columns);
 	}
 
-	private formatGoalDetailSuffix(value: string | undefined, prefixWidth: number): string {
-		return formatGoalDetailSuffix(value, prefixWidth, this.ui.terminal.columns);
-	}
-
 	private seedSubagentSummary(children: readonly AgentConnectionRlmChildAgentSnapshot[] | undefined): void {
 		for (const child of children ?? []) {
 			// Live updates can arrive before the initial snapshot; do not replace them
@@ -5593,10 +5570,6 @@ export class InteractiveMode {
 
 	private isLikelyHeartbeatPromptTimestamp(job: AgentCronJob, timestamp: number): boolean {
 		return isLikelyHeartbeatPromptTimestamp(job, timestamp);
-	}
-
-	private heartbeatLegacyPromptToleranceMs(job: AgentCronJob): number {
-		return heartbeatLegacyPromptToleranceMs(job);
 	}
 
 	/**
@@ -6858,47 +6831,23 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
 
-		try {
-			// Write current content to temp file
-			fs.writeFileSync(tmpFile, currentText, "utf-8");
-
-			// Stop TUI to release terminal
-			this.ui.stop();
-
-			// Split by space to support editor arguments (e.g., "code --wait")
-			const [editor, ...editorArgs] = editorCmd.split(" ");
-
-			// Spawn editor synchronously with inherited stdio for interactive editing
-			const result = spawnSync(editor, [...editorArgs, tmpFile], {
-				stdio: "inherit",
-				shell: process.platform === "win32",
-			});
-
-			// On successful exit (status 0), replace editor content
-			if (result.status === 0) {
-				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
-				this.editor.setText(newContent);
-			}
-			// On non-zero exit, keep original text (no action needed)
-		} finally {
-			// Clean up temp file
-			try {
-				fs.unlinkSync(tmpFile);
-			} catch {
-				// Ignore cleanup errors
-			}
-
-			// Restart TUI
-			this.ui.start();
-			// ui.stop() left fullscreen so the editor got a clean terminal
-			if (this.fullscreenEnabled) {
-				this.applyFullscreen(true);
-			}
-			// Force full re-render since external editor uses alternate screen
-			this.ui.requestRender(true);
+		// Stop TUI to release terminal; the helper writes/spawns/cleans up.
+		this.ui.stop();
+		const newContent = runExternalEditor(currentText, { tmpPrefix: "pi-editor" });
+		// On non-zero exit, keep original text (no action needed)
+		if (newContent !== undefined) {
+			this.editor.setText(newContent);
 		}
+
+		// Restart TUI
+		this.ui.start();
+		// ui.stop() left fullscreen so the editor got a clean terminal
+		if (this.fullscreenEnabled) {
+			this.applyFullscreen(true);
+		}
+		// Force full re-render since external editor uses alternate screen
+		this.ui.requestRender(true);
 	}
 
 	private clearInputBar(): void {

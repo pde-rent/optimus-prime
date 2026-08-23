@@ -46,6 +46,7 @@ import {
 	listDaemonSavedSessions,
 	renameDaemonSavedSession,
 } from "../daemon/saved-session-catalog.js";
+import { CtrlCExitHintController } from "../interactive/components/ctrl-c-hint.js";
 import { CustomEditor } from "../interactive/components/custom-editor.js";
 import { keyText } from "../interactive/components/keybinding-hints.js";
 import { formatTwoSidedRow } from "../interactive/components/row-format.js";
@@ -647,8 +648,7 @@ export class AgentsViewMode implements Component, Focusable {
 	private pollTimer: NodeJS.Timeout | undefined;
 	private heartbeatPollTimer: NodeJS.Timeout | undefined;
 	private animationTimer: NodeJS.Timeout | undefined;
-	private ctrlCExitHintExpiresAt = 0;
-	private ctrlCExitHintTimer: ReturnType<typeof setTimeout> | undefined;
+	private readonly ctrlCExitHint: CtrlCExitHintController;
 	private deleteConfirmExpiresAt = 0;
 	private deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined;
 	private workingIconFrame = 0;
@@ -732,6 +732,7 @@ export class AgentsViewMode implements Component, Focusable {
 		initTheme(options.uiServices.settingsManager.getTheme(), true);
 
 		this.ui = new TUI(new ProcessTerminal(), options.uiServices.settingsManager.getShowHardwareCursor());
+		this.ctrlCExitHint = new CtrlCExitHintController(this.ui, EXIT_HINT_DURATION_MS);
 		this.ui.setClearOnShrink(options.uiServices.settingsManager.getClearOnShrink());
 		this.ui.terminal.setTitle(`${APP_TITLE} - Agents`);
 		this.editor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
@@ -917,11 +918,11 @@ export class AgentsViewMode implements Component, Focusable {
 			return;
 		}
 		if (this.editor.getText().length === 0 && this.keybindings.matches(data, "app.agents.delete")) {
-			this.clearCtrlCExitHint({ render: false });
+			this.ctrlCExitHint.clear({ render: false });
 			void this.handleDeleteSelected();
 			return;
 		}
-		this.clearCtrlCExitHint({ render: false });
+		this.ctrlCExitHint.clear({ render: false });
 		this.clearDeleteConfirmation({ render: false });
 		if (this.keybindings.matches(data, "app.agents.reply") && this.editor.getText().length === 0) {
 			void this.toggleReplyTarget();
@@ -1071,45 +1072,11 @@ export class AgentsViewMode implements Component, Focusable {
 	}
 
 	private handleCtrlC(): void {
-		if (this.isCtrlCExitHintVisible()) {
+		if (this.ctrlCExitHint.isVisible()) {
 			this.finish({ type: "exit" });
 			return;
 		}
-		this.showCtrlCExitHint();
-	}
-
-	private showCtrlCExitHint(): void {
-		if (this.ctrlCExitHintTimer) {
-			clearTimeout(this.ctrlCExitHintTimer);
-		}
-		this.ctrlCExitHintExpiresAt = Date.now() + EXIT_HINT_DURATION_MS;
-		this.ctrlCExitHintTimer = setTimeout(() => {
-			this.ctrlCExitHintTimer = undefined;
-			if (!this.isCtrlCExitHintVisible()) {
-				this.ctrlCExitHintExpiresAt = 0;
-				this.ui.requestRender();
-			}
-		}, EXIT_HINT_DURATION_MS);
-		this.ctrlCExitHintTimer.unref?.();
-		this.ui.requestRender();
-	}
-
-	private clearCtrlCExitHint(options: { render?: boolean } = {}): void {
-		if (!this.ctrlCExitHintTimer && this.ctrlCExitHintExpiresAt === 0) {
-			return;
-		}
-		if (this.ctrlCExitHintTimer) {
-			clearTimeout(this.ctrlCExitHintTimer);
-			this.ctrlCExitHintTimer = undefined;
-		}
-		this.ctrlCExitHintExpiresAt = 0;
-		if (options.render !== false) {
-			this.ui.requestRender();
-		}
-	}
-
-	private isCtrlCExitHintVisible(): boolean {
-		return this.ctrlCExitHintExpiresAt > Date.now();
+		this.ctrlCExitHint.show();
 	}
 
 	private showDeleteConfirmation(): void {
@@ -2367,7 +2334,7 @@ export class AgentsViewMode implements Component, Focusable {
 			clearInterval(this.animationTimer);
 			this.animationTimer = undefined;
 		}
-		this.clearCtrlCExitHint({ render: false });
+		this.ctrlCExitHint.clear({ render: false });
 		this.clearDeleteConfirmation({ render: false });
 		this.setStatusMessage(undefined, { render: false });
 		this.ui.stop({
@@ -2642,7 +2609,7 @@ export class AgentsViewMode implements Component, Focusable {
 	}
 
 	private renderHints(width: number): string {
-		if (this.isCtrlCExitHintVisible()) {
+		if (this.ctrlCExitHint.isVisible()) {
 			const clearKey = keyText("app.clear");
 			const hint = clearKey ? `Press ${clearKey} again to exit` : "Press again to exit";
 			return truncateToWidth(theme.fg("muted", hint), width);
