@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "bun:test";
 import type { ActiveSessionState } from "../src/modes/daemon/active-session-state.js";
 import { DaemonSessionSummarizer } from "../src/modes/daemon/daemon-session-summarizer.js";
+import { waitFor } from "./helpers/wait.js";
 
 function makeState(
 	opts: { working?: boolean; messages?: number; kind?: "top-level" | "subagent"; persisted?: unknown } = {},
@@ -32,19 +33,6 @@ function makeState(
 
 function sleep(ms: number): Promise<void> {
 	return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 4500): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) throw error;
-			await sleep(10);
-		}
-	}
 }
 
 // Real timers: waits out the actual 2s settle debounce.

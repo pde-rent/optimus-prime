@@ -8,6 +8,7 @@ import { computeEditsDiff, type Edit } from "../src/core/tools/edit-diff.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { flushAsyncWork } from "./helpers/wait.js";
 
 class FakeTerminal implements Terminal {
 	columns = 80;
@@ -46,10 +47,6 @@ class FakeTerminal implements Terminal {
 	}
 }
 
-async function waitForRender(): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 async function waitForRenderedText(
 	getRender: () => string,
 	expectedText: string,
@@ -60,7 +57,7 @@ async function waitForRenderedText(
 	let lastRender = "";
 	while (Date.now() < deadline) {
 		onRetry?.();
-		await waitForRender();
+		await flushAsyncWork();
 		lastRender = getRender();
 		if (stripAnsi(lastRender).includes(expectedText)) {
 			return lastRender;
@@ -124,13 +121,13 @@ describe("edit tool TUI rendering", () => {
 		root.addChild(component);
 		tui.addChild(root);
 		tui.start();
-		await waitForRender();
+		await flushAsyncWork();
 
 		component.setEditDiffsExpanded(true);
 		component.setArgsComplete();
 		tui.requestRender();
-		await waitForRender();
-		await waitForRender();
+		await flushAsyncWork();
+		await flushAsyncWork();
 
 		const callOnlyRender = await waitForRenderedText(
 			() => component.render(80).join("\n"),
@@ -152,7 +149,7 @@ describe("edit tool TUI rendering", () => {
 			false,
 		);
 		tui.requestRender();
-		await waitForRender();
+		await flushAsyncWork();
 
 		expect(tui.fullRedraws).toBe(redrawsBeforeResult);
 		expect(terminal.fullClearCount).toBe(clearsBeforeResult);
@@ -194,7 +191,7 @@ describe("edit tool TUI rendering", () => {
 		);
 		tui.addChild(component);
 		tui.start();
-		await waitForRender();
+		await flushAsyncWork();
 
 		component.setEditDiffsExpanded(true);
 		component.updateResult(
@@ -205,8 +202,8 @@ describe("edit tool TUI rendering", () => {
 			},
 			false,
 		);
-		await waitForRender();
-		await waitForRender();
+		await flushAsyncWork();
+		await flushAsyncWork();
 
 		const rendered = stripAnsi(component.render(80).join("\n"));
 		expect(rendered).toContain("line 50 changed");
@@ -232,12 +229,12 @@ describe("edit tool TUI rendering", () => {
 		);
 		tui.addChild(component);
 		tui.start();
-		await waitForRender();
+		await flushAsyncWork();
 
 		component.setArgsComplete();
 		tui.requestRender();
-		await waitForRender();
-		await waitForRender();
+		await flushAsyncWork();
+		await flushAsyncWork();
 
 		const rendered = await waitForRenderedText(
 			() => component.render(80).join("\n"),

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, vi } from "bun:test";
 import { resetCapabilitiesCache, setCapabilities, setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "../src/utils/ansi.js";
+import { waitFor } from "./helpers/wait.js";
 
 const mocks = {
 	copyToClipboard: vi.fn(),
@@ -34,21 +35,6 @@ afterAll(() => {
  * `bun:test` exposes a `vi` compat object but not `vi.waitFor`. Poll instead of
  * sleeping a fixed amount: a sleep either flakes under load or wastes the slack.
  */
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	let lastError: unknown;
-	while (Date.now() < deadline) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			lastError = error;
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
-	}
-	throw lastError ?? new Error("waitFor timed out");
-}
-
 function createFakeTui(): TUI {
 	return {
 		requestRender: vi.fn(),

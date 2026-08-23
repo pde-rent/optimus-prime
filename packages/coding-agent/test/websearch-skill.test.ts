@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 // @ts-expect-error - bundled skill is plain JS with JSDoc types, no .d.ts
 import * as websearch from "../skills/websearch/skill.js";
+import { stubRawFetch } from "./helpers/fetch.js";
 
 const {
 	default: createSkill,
@@ -21,16 +22,6 @@ afterEach(() => {
 	clearReadCache(); // the read cache is module scope: keep tests independent
 });
 
-/** Stub `fetch`, recording every request made. */
-function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
-	const calls: { url: string; init?: RequestInit }[] = [];
-	globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-		calls.push({ url: String(url), init });
-		return handler(String(url), init);
-	}) as unknown as typeof fetch;
-	return calls;
-}
-
 function response(body: unknown, { status = 200, contentType = "application/json" } = {}) {
 	return {
 		ok: status >= 200 && status < 300,
@@ -46,7 +37,7 @@ const SERPER_HIT = { organic: [{ title: "Serper hit", link: "https://y.test/b", 
 
 describe("websearch: backend selection", () => {
 	it("returns setup instructions naming both options when nothing is configured", async () => {
-		const calls = stubFetch(() => response({}));
+		const calls = stubRawFetch(() => response({}));
 		const out = await createSkill({ env: {} }).run("q");
 		expect(out).toBe(NOT_CONFIGURED_MESSAGE);
 		expect(out).toContain("SEARXNG_URL");
@@ -55,13 +46,13 @@ describe("websearch: backend selection", () => {
 	});
 
 	it("never falls back to a public SearXNG instance", async () => {
-		const calls = stubFetch(() => response({}));
+		const calls = stubRawFetch(() => response({}));
 		await createSkill({ env: {} }).run("q");
 		expect(calls.some((c) => c.url.includes("searx.space"))).toBe(false);
 	});
 
 	it("prefers SEARXNG_URL when both backends are configured", async () => {
-		const calls = stubFetch(() => response(SEARX_HIT));
+		const calls = stubRawFetch(() => response(SEARX_HIT));
 		const out = await createSkill({ env: { SEARXNG_URL: "http://localhost:8888", SERPER_API_KEY: "k" } }).run("q");
 		expect(out).toContain("SearXNG hit");
 		expect(calls[0].url.startsWith("http://localhost:8888/search")).toBe(true);
@@ -69,21 +60,21 @@ describe("websearch: backend selection", () => {
 	});
 
 	it("uses Serper when only a key is configured", async () => {
-		const calls = stubFetch(() => response(SERPER_HIT));
+		const calls = stubRawFetch(() => response(SERPER_HIT));
 		const out = await createSkill({ env: { SERPER_API_KEY: "k" } }).run("q");
 		expect(out).toContain("Serper hit");
 		expect(calls[0].url).toContain("google.serper.dev");
 	});
 
 	it("honours an explicit backend choice over the default order", async () => {
-		const calls = stubFetch((url) => response(url.includes("serper") ? SERPER_HIT : SEARX_HIT));
+		const calls = stubRawFetch((url) => response(url.includes("serper") ? SERPER_HIT : SEARX_HIT));
 		const env = { SEARXNG_URL: "http://localhost:8888", SERPER_API_KEY: "k" };
 		expect(await createSkill({ env }).run("q", { backend: "serper" })).toContain("Serper hit");
 		expect(calls[0].url).toContain("google.serper.dev");
 	});
 
 	it("honours OPTIMUS_WEBSEARCH_BACKEND", async () => {
-		const calls = stubFetch((url) => response(url.includes("serper") ? SERPER_HIT : SEARX_HIT));
+		const calls = stubRawFetch((url) => response(url.includes("serper") ? SERPER_HIT : SEARX_HIT));
 		const env = {
 			SEARXNG_URL: "http://localhost:8888",
 			SERPER_API_KEY: "k",
@@ -94,13 +85,13 @@ describe("websearch: backend selection", () => {
 	});
 
 	it("does not silently switch backends when the explicit choice is unconfigured", async () => {
-		stubFetch(() => response(SERPER_HIT));
+		stubRawFetch(() => response(SERPER_HIT));
 		const out = await createSkill({ env: { SERPER_API_KEY: "k" } }).run("q", { backend: "searxng" });
 		expect(out).toBe(NOT_CONFIGURED_MESSAGE);
 	});
 
 	it("passes language and time_range through to SearXNG", async () => {
-		const calls = stubFetch(() => response(SEARX_HIT));
+		const calls = stubRawFetch(() => response(SEARX_HIT));
 		await createSkill({ env: { SEARXNG_URL: "http://localhost:8888" } }).run("q", {
 			language: "en",
 			time_range: "week",
@@ -112,26 +103,26 @@ describe("websearch: backend selection", () => {
 
 describe("websearch: backend errors", () => {
 	it("explains how to enable the JSON API when SearXNG returns HTML", async () => {
-		stubFetch(() => response("<html/>", { contentType: "text/html" }));
+		stubRawFetch(() => response("<html/>", { contentType: "text/html" }));
 		const out = await createSkill({ env: { SEARXNG_URL: "http://localhost:8888" } }).run("q");
 		expect(out).toContain("search.formats");
 	});
 
 	it("points at the bot limiter on a 403", async () => {
-		stubFetch(() => response("", { status: 403, contentType: "text/html" }));
+		stubRawFetch(() => response("", { status: 403, contentType: "text/html" }));
 		const out = await createSkill({ env: { SEARXNG_URL: "http://localhost:8888" } }).run("q");
 		expect(out).toContain("limiter");
 	});
 
 	it("reports a Serper API error without throwing", async () => {
-		stubFetch(() => response("quota exceeded", { status: 429, contentType: "text/plain" }));
+		stubRawFetch(() => response("quota exceeded", { status: 429, contentType: "text/plain" }));
 		const out = await createSkill({ env: { SERPER_API_KEY: "k" } }).run("q");
 		expect(out).toContain("Web search failed");
 		expect(out).toContain("429");
 	});
 
 	it("survives an offline machine", async () => {
-		stubFetch(() => {
+		stubRawFetch(() => {
 			throw new Error("getaddrinfo ENOTFOUND");
 		});
 		const out = await createSkill({ env: { SEARXNG_URL: "http://localhost:8888" } }).run("q");
@@ -323,7 +314,7 @@ describe("websearch: character budget", () => {
 	});
 
 	it("applies the budget end to end through run()", async () => {
-		stubFetch(() =>
+		stubRawFetch(() =>
 			response({
 				results: Array.from({ length: 30 }, (_, i) => ({
 					title: `T${i} ${"x".repeat(200)}`,
@@ -339,7 +330,7 @@ describe("websearch: character budget", () => {
 
 describe("websearch: read()", () => {
 	it("returns bounded readable text", async () => {
-		stubFetch(() => ({
+		stubRawFetch(() => ({
 			ok: true,
 			status: 200,
 			headers: { get: () => "text/html; charset=utf-8" },
@@ -352,12 +343,12 @@ describe("websearch: read()", () => {
 	});
 
 	it("refuses non-text content", async () => {
-		stubFetch(() => ({ ok: true, status: 200, headers: { get: () => "image/png" }, text: async () => "" }));
+		stubRawFetch(() => ({ ok: true, status: 200, headers: { get: () => "image/png" }, text: async () => "" }));
 		expect(await createSkill({ env: {} }).read("https://x.test/a.png")).toContain("unsupported content-type");
 	});
 
 	it("reports an HTTP error without throwing", async () => {
-		stubFetch(() => response("", { status: 404, contentType: "text/html" }));
+		stubRawFetch(() => response("", { status: 404, contentType: "text/html" }));
 		expect(await createSkill({ env: {} }).read("https://x.test/missing")).toContain("404");
 	});
 });
@@ -444,7 +435,7 @@ describe("websearch: main-content extraction", () => {
 	});
 
 	it("reads a page through read() without the chrome", async () => {
-		stubFetch(() => response(WIKI_HTML, { contentType: "text/html; charset=utf-8" }));
+		stubRawFetch(() => response(WIKI_HTML, { contentType: "text/html; charset=utf-8" }));
 		const out = await createSkill({ env: {} }).read("https://en.wikipedia.test/wiki/Decentralized_finance");
 		for (const chrome of CHROME) expect(out).not.toContain(chrome);
 		expect(out).toContain("permissionless blockchain");
@@ -468,7 +459,7 @@ function nextOffset(out: string): number | null {
 
 describe("websearch: read() continuation", () => {
 	it("returns the next slice instead of repeating the first", async () => {
-		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 
 		const first = await skill.read("https://x.test/long", { maxChars: 600 });
@@ -489,13 +480,13 @@ describe("websearch: read() continuation", () => {
 	});
 
 	it("states the range and total in the marker", async () => {
-		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const out = await createSkill({ env: {} }).read("https://x.test/long", { maxChars: 600 });
 		expect(out).toMatch(/\[chars 0-\d+ of \d+ — continue with \{ offset: \d+ \}\]$/);
 	});
 
 	it("marks the end of the document only when it is exhausted", async () => {
-		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 
 		let out = await skill.read("https://x.test/long", { maxChars: 900 });
@@ -513,7 +504,7 @@ describe("websearch: read() continuation", () => {
 	});
 
 	it("does not claim a continuation when the whole page fits", async () => {
-		stubFetch(() =>
+		stubRawFetch(() =>
 			response("<html><body><main><p>Short page.</p></main></body></html>", { contentType: "text/html" }),
 		);
 		const out = await createSkill({ env: {} }).read("https://x.test/short");
@@ -523,7 +514,7 @@ describe("websearch: read() continuation", () => {
 	});
 
 	it("still caps output at maxChars on every slice", async () => {
-		stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 		for (const offset of [0, 1000, 4000]) {
 			const out = await skill.read("https://x.test/long", { maxChars: 400, offset });
@@ -534,7 +525,7 @@ describe("websearch: read() continuation", () => {
 
 describe("websearch: read() cache", () => {
 	it("does not re-fetch for a continuation", async () => {
-		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const calls = stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 		const first = await skill.read("https://x.test/long", { maxChars: 600 });
 		await skill.read("https://x.test/long", { maxChars: 600, offset: nextOffset(first) });
@@ -544,7 +535,7 @@ describe("websearch: read() cache", () => {
 
 	it("re-fetches when refresh is set", async () => {
 		let body = "<html><body><main><p>First version.</p></main></body></html>";
-		const calls = stubFetch(() => response(body, { contentType: "text/html" }));
+		const calls = stubRawFetch(() => response(body, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 
 		expect(await skill.read("https://x.test/live")).toContain("First version.");
@@ -557,7 +548,7 @@ describe("websearch: read() cache", () => {
 	});
 
 	it("keys the cache by cleaned URL, so tracking params do not split it", async () => {
-		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const calls = stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 		await skill.read("https://x.test/long?utm_source=a");
 		await skill.read("https://x.test/long");
@@ -565,7 +556,7 @@ describe("websearch: read() cache", () => {
 	});
 
 	it("evicts old entries rather than growing without bound", async () => {
-		const calls = stubFetch(() => response(LONG_HTML, { contentType: "text/html" }));
+		const calls = stubRawFetch(() => response(LONG_HTML, { contentType: "text/html" }));
 		const skill = createSkill({ env: {} });
 		for (let i = 0; i < 6; i++) await skill.read(`https://x.test/p${i}`);
 		expect(calls).toHaveLength(6);

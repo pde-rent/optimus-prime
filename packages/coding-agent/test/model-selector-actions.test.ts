@@ -4,16 +4,13 @@ import { KeybindingsManager } from "../src/core/keybindings.js";
 import { ModelSelectorComponent } from "../src/modes/interactive/components/model-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { flushAsyncWork } from "./helpers/wait.js";
 import { createHarness, type Harness } from "./suite/harness.js";
 
 function createFakeTui(): TUI {
 	return {
 		requestRender: () => {},
 	} as unknown as TUI;
-}
-
-async function waitForAsyncRender(): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function getFauxModels(harness: Harness, count: number) {
@@ -59,7 +56,7 @@ describe("ModelSelectorComponent", () => {
 			},
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		const output = stripAnsi(selector.render(120).join("\n"));
 		expect(output).toContain("Choose a Prime model, or add another provider.");
@@ -126,7 +123,7 @@ describe("ModelSelectorComponent", () => {
 			},
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 		expect(stripAnsi(selector.render(120).join("\n"))).not.toContain("Beta");
 
 		await selector.updateAvailableModels([beta]);
@@ -157,7 +154,7 @@ describe("ModelSelectorComponent", () => {
 			},
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 		expect(stripAnsi(selector.render(120).join("\n"))).toContain("Alpha");
 
 		await selector.updateAvailableModels([]);
@@ -188,7 +185,7 @@ describe("ModelSelectorComponent", () => {
 			{ availableModels: getFauxModels(harness, 12), getRows: () => 12 },
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		expect(selector.render(120)).toHaveLength(12);
 
@@ -229,7 +226,7 @@ describe("ModelSelectorComponent", () => {
 			},
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		const lines = stripAnsi(selector.render(120).join("\n")).split("\n");
 		const signedInExactRow = lines.findIndex((line) => line.includes("z-ai/glm-5.2"));
@@ -264,7 +261,7 @@ describe("ModelSelectorComponent", () => {
 			},
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		const lines = stripAnsi(selector.render(120).join("\n")).split("\n");
 		const exactRow = lines.findIndex(
@@ -300,7 +297,7 @@ describe("ModelSelectorComponent", () => {
 			{ recentModels: [`${provider}/glm-5.2`] },
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		const lines = stripAnsi(selector.render(120).join("\n")).split("\n");
 		const currentRow = lines.findIndex((line) => /glm-5\.1/.test(line));
@@ -335,7 +332,7 @@ describe("ModelSelectorComponent", () => {
 			{ recentModels: [`${provider}/glm-5.2`, `${provider}/glm-5.1`] },
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		const lines = stripAnsi(selector.render(120).join("\n")).split("\n");
 		const firstRow = lines.findIndex((line) => /glm-5/.test(line));
@@ -367,7 +364,7 @@ describe("ModelSelectorComponent", () => {
 			{ availableModels: getFauxModels(harness, 12), getRows: () => 16 },
 		);
 
-		await waitForAsyncRender();
+		await flushAsyncWork();
 
 		let lines = selector.render(120);
 		let output = stripAnsi(lines.join("\n"));

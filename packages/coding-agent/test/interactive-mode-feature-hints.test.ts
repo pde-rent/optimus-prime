@@ -4,6 +4,7 @@ import { FEATURE_HINTS, FeatureHintDeck } from "../src/modes/interactive/feature
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { waitFor } from "./helpers/wait.js";
 
 class FakeLoader implements Component {
 	readonly stop = vi.fn();
@@ -17,21 +18,6 @@ class FakeLoader implements Component {
 
 function callPrivate(mode: object, name: string): void {
 	Reflect.get(InteractiveMode.prototype, name).call(mode);
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 2_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
 }
 
 function createMode() {

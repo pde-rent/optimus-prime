@@ -49,44 +49,8 @@ import { formatSplashCwd, InteractiveMode, truncatePathMiddle } from "../src/mod
 import type { PromptStashState } from "../src/modes/interactive/prompt-stash-state.js";
 import { QueueSelection } from "../src/modes/interactive/queue-selection.js";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
-
-function renderLastLine(container: Container, width = 120): string {
-	const last = container.children[container.children.length - 1];
-	if (!last) return "";
-	return last.render(width).join("\n");
-}
-
-function renderAll(container: Container, width = 120): string {
-	return container.children.flatMap((child) => child.render(width)).join("\n");
-}
-
-function normalizeRenderedOutput(container: Container, width = 220): string {
-	return renderAll(container, width)
-		.replace(/\u001b\[[0-9;]*m/g, "")
-		.replace(/\\/g, "/")
-		.split("\n")
-		.map((line) => line.replace(/\s+$/g, ""))
-		.join("\n")
-		.trim();
-}
-
-function createDeferred<T>(): {
-	promise: Promise<T>;
-	resolve(value: T): void;
-	reject(error: unknown): void;
-} {
-	let resolve!: (value: T) => void;
-	let reject!: (error: unknown) => void;
-	const promise = new Promise<T>((nextResolve, nextReject) => {
-		resolve = nextResolve;
-		reject = nextReject;
-	});
-	return { promise, resolve, reject };
-}
-
-async function flushAsyncWork(): Promise<void> {
-	await new Promise((resolve) => setTimeout(resolve, 0));
-}
+import { normalizeRenderedOutput, renderAll, renderLastLine } from "./helpers/render.js";
+import { createDeferred, flushAsyncWork } from "./helpers/wait.js";
 
 function createConnectionState(overrides: Partial<AgentConnectionState> = {}): AgentConnectionState {
 	return {

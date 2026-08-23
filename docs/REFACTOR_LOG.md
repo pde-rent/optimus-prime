@@ -17,6 +17,7 @@ Target: <=250,000 total. Numbers always reported split by category.
 - S: selector boilerplate + dead-export sweep
 - N: net stack SMTP/SSH delivery finalization
 - T: harness rollout across big suites
+- T DONE wave 1 (uncommitted->commit pending): helpers/{wait,temp,table,render,fetch}.ts canonical layer; 10 tool suites (getTextOutput x10 + temp rituals), stripAnsi x4, interactive-mode-status 5 private helpers, waitFor x10 files, fetch-stub x5 sections. Tests: ~-330 lines, production: 0. All touched suites green (web3+websearch 215 pass, interactive-status 131 pass).
 
 ## Behavior evidence policy
 Each migration records which suites verify it; pre-existing baseline failures

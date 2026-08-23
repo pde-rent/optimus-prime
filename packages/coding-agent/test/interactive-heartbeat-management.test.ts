@@ -5,6 +5,7 @@ import type {
 	AgentConnectionRlmChildAgentSnapshot,
 } from "../src/modes/agent-connection/types.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { waitFor } from "./helpers/wait.js";
 
 interface HeartbeatManagementHarness {
 	heartbeatCatalog: AgentConnectionHeartbeat[];
@@ -47,21 +48,6 @@ interface HeartbeatRefreshHarness {
 	heartbeatManagerRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 	refreshHeartbeatCatalog(): Promise<void>;
 	scheduleHeartbeatManagerRefresh(): void;
-}
-
-async function waitFor(assertion: () => void, timeoutMs = 2_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
 }
 
 function heartbeat(overrides: Partial<AgentCronJob> = {}): AgentCronJob {

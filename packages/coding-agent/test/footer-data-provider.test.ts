@@ -3,6 +3,7 @@ import { execFile, spawnSync } from "child_process";
 import { existsSync, type FSWatcher, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { waitForCondition } from "./helpers/wait.js";
 
 let resolvedBranch = "main";
 
@@ -79,16 +80,6 @@ function createReftableWorktree(tempDir: string): WorktreeFixture {
 	writeFileSync(join(reftableDir, "tables.list"), "0\n");
 
 	return { worktreeDir, reftableDir };
-}
-
-async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
-	const startedAt = Date.now();
-	while (!condition()) {
-		if (Date.now() - startedAt > timeoutMs) {
-			throw new Error("Timed out waiting for condition");
-		}
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
 }
 
 describe("FooterDataProvider reftable branch detection", () => {
@@ -183,7 +174,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
-			await waitFor(() => mockedExecFile.mock.calls.length === 1);
+			await waitForCondition(() => mockedExecFile.mock.calls.length === 1, 3000);
 
 			expect(mockedExecFile).toHaveBeenCalledTimes(1);
 			expect(mockedSpawnSync).not.toHaveBeenCalled();
@@ -206,7 +197,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
 			writeFileSync(join(reftableDir, "tables.list"), "2\n");
 			writeFileSync(join(reftableDir, "tables.list"), "3\n");
-			await waitFor(() => mockedExecFile.mock.calls.length === 1);
+			await waitForCondition(() => mockedExecFile.mock.calls.length === 1, 3000);
 			await new Promise((resolve) => setTimeout(resolve, 650));
 
 			expect(mockedExecFile).toHaveBeenCalledTimes(1);
@@ -227,8 +218,8 @@ describe("FooterDataProvider reftable branch detection", () => {
 			provider.onBranchChange(onBranchChange);
 
 			writeFileSync(join(reftableDir, "tables.list"), "1\n");
-			await waitFor(() => mockedExecFile.mock.calls.length === 1);
-			await waitFor(() => provider.getGitBranch() === "foo");
+			await waitForCondition(() => mockedExecFile.mock.calls.length === 1, 3000);
+			await waitForCondition(() => provider.getGitBranch() === "foo", 3000);
 
 			expect(mockedExecFile).toHaveBeenCalledTimes(1);
 			expect(provider.getGitBranch()).toBe("foo");
@@ -257,7 +248,7 @@ describe("FooterDataProvider reftable branch detection", () => {
 			// Real-timer conversion: the retry is scheduled at FS_WATCH_RETRY_DELAY_MS (5s).
 			// The 4999ms/5000ms boundary split cannot be reproduced without fake timers,
 			// so poll for the recreated watcher past the retry deadline.
-			await waitFor(
+			await waitForCondition(
 				() => providerWithInternals.headWatcher !== null && providerWithInternals.headWatcher !== originalWatcher,
 				10_000,
 			);

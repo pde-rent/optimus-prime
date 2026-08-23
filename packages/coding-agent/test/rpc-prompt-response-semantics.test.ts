@@ -11,6 +11,7 @@ import {
 	type Model,
 } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
+import { waitFor } from "./helpers/wait.js";
 import { createAssistantMessage } from "./test-helpers.js";
 
 const rpcIo = {
@@ -88,21 +89,6 @@ function getPromptResponses(outputLines: string[], id: string): ParsedOutputLine
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitFor(assert: () => void): Promise<void> {
-	const deadline = Date.now() + 5000;
-	let lastError: unknown;
-	while (Date.now() < deadline) {
-		try {
-			assert();
-			return;
-		} catch (error) {
-			lastError = error;
-			await sleep(25);
-		}
-	}
-	throw lastError;
 }
 
 function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): {

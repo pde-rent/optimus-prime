@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { waitFor } from "./helpers/wait.js";
 
 const netMock = (() => {
 	type Listener = (...args: unknown[]) => void;
@@ -910,21 +911,6 @@ describe("DaemonClient", () => {
 		client.close();
 	});
 });
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}
 
 async function captureRejection(promise: Promise<unknown>): Promise<Error> {
 	try {

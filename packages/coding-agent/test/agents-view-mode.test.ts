@@ -4,6 +4,7 @@ import type { ModelRegistry } from "../src/core/model-registry.js";
 import type { AgentConnectionSavedSessionInfo } from "../src/modes/agent-connection/types.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import type { InteractiveModeUiServices } from "../src/modes/interactive/interactive-mode-services.js";
+import { waitFor } from "./helpers/wait.js";
 
 const modeMocks = {
 	interactiveRun: mock<() => Promise<never>>(),
@@ -835,18 +836,3 @@ describe("agents view startup notices", () => {
 		expect(runs).toBe(2);
 	});
 });
-
-async function waitFor(assertion: () => void, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		try {
-			assertion();
-			return;
-		} catch (error) {
-			if (Date.now() > deadline) {
-				throw error;
-			}
-			await new Promise<void>((resolve) => setTimeout(resolve, 5));
-		}
-	}
-}

@@ -9,6 +9,7 @@ import * as portfolioModule from "../skills/web3/portfolio.js";
 import * as rpcModule from "../skills/web3/rpc.js";
 // @ts-expect-error - bundled skills are plain JS with JSDoc types, no .d.ts
 import * as web3Skill from "../skills/web3/skill.js";
+import { stubJsonFetch, stubUrlFetch } from "./helpers/fetch.js";
 
 /**
  * One suite for the merged `web3` skill, three sections that do not share fixtures.
@@ -72,17 +73,6 @@ describe("web3.rpc", () => {
 		clearRpcCache();
 	});
 
-	/** Stub `fetch`, recording every request made. No test here touches the network. */
-	function stubFetch(handler: (url: string, body: any, init?: RequestInit) => unknown) {
-		const calls: { url: string; body: any; init?: RequestInit }[] = [];
-		globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-			const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-			calls.push({ url: String(url), body, init });
-			return handler(String(url), body, init);
-		}) as unknown as typeof fetch;
-		return calls;
-	}
-
 	function response(body: unknown, { status = 200, json = true, headers = {} as Record<string, string> } = {}) {
 		return {
 			ok: status >= 200 && status < 300,
@@ -98,7 +88,7 @@ describe("web3.rpc", () => {
 
 	describe("rpc.call", () => {
 		it("posts a JSON-RPC 2.0 envelope and returns the result field", async () => {
-			const calls = stubFetch((_url, body) => response({ jsonrpc: "2.0", id: body.id, result: "0x10" }));
+			const calls = stubJsonFetch((_url, body) => response({ jsonrpc: "2.0", id: body.id, result: "0x10" }));
 			const out = await rpc.call(URL_, "eth_blockNumber");
 
 			expect(out).toBe("0x10");
@@ -112,18 +102,18 @@ describe("web3.rpc", () => {
 		});
 
 		it("passes params through unchanged", async () => {
-			const calls = stubFetch((_url, body) => response({ id: body.id, result: null }));
+			const calls = stubJsonFetch((_url, body) => response({ id: body.id, result: null }));
 			await rpc.call(URL_, "eth_call", [{ to: "0xabc", data: "0x01" }, "latest"]);
 			expect(calls[0].body.params).toEqual([{ to: "0xabc", data: "0x01" }, "latest"]);
 		});
 
 		it("returns a null result rather than treating it as missing", async () => {
-			stubFetch((_url, body) => response({ id: body.id, result: null }));
+			stubJsonFetch((_url, body) => response({ id: body.id, result: null }));
 			expect(await rpc.call(URL_, "eth_getTransactionByHash", ["0x00"])).toBeNull();
 		});
 
 		it("returns the RPC error as a value, with its code and data", async () => {
-			stubFetch((_url, body) =>
+			stubJsonFetch((_url, body) =>
 				response({ id: body.id, error: { code: -32000, message: "execution reverted", data: "0xdead" } }),
 			);
 			const out = (await rpc.call(URL_, "eth_call", [])) as ErrorValue;
@@ -135,7 +125,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("returns an HTTP failure as a value carrying the status", async () => {
-			stubFetch(() => response("rate limited", { status: 429 }));
+			stubJsonFetch(() => response("rate limited", { status: 429 }));
 			const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
 
 			expect(out.status).toBe(429);
@@ -144,7 +134,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("returns a network failure as a value instead of throwing", async () => {
-			stubFetch(() => {
+			stubJsonFetch(() => {
 				throw new Error("ECONNREFUSED");
 			});
 			const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
@@ -152,7 +142,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("names the timeout option when the request times out", async () => {
-			stubFetch(() => {
+			stubJsonFetch(() => {
 				const e = new Error("The operation was aborted");
 				e.name = "TimeoutError";
 				throw e;
@@ -163,19 +153,19 @@ describe("web3.rpc", () => {
 		});
 
 		it("returns a value for a non-JSON body", async () => {
-			stubFetch(() => response("<html>proxy error</html>", { json: false }));
+			stubJsonFetch(() => response("<html>proxy error</html>", { json: false }));
 			const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
 			expect(out.error).toContain("non-JSON");
 		});
 
 		it("returns a value when the response has neither result nor error", async () => {
-			stubFetch((_url, body) => response({ id: body.id, jsonrpc: "2.0" }));
+			stubJsonFetch((_url, body) => response({ id: body.id, jsonrpc: "2.0" }));
 			const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
 			expect(out.error).toContain("malformed");
 		});
 
 		it("sends an AbortSignal and merges extra headers", async () => {
-			const calls = stubFetch((_url, body) => response({ id: body.id, result: 1 }));
+			const calls = stubJsonFetch((_url, body) => response({ id: body.id, result: 1 }));
 			await rpc.call(URL_, "m", [], { timeout: 3, headers: { "X-API-Key": "k" } });
 
 			const headers = calls[0].init?.headers as Record<string, string>;
@@ -193,7 +183,7 @@ describe("web3.rpc", () => {
 
 	describe("rpc.batch", () => {
 		it("sends one request for N calls and returns results in call order", async () => {
-			const calls = stubFetch((_url, body) =>
+			const calls = stubJsonFetch((_url, body) =>
 				// Answer out of order on purpose: matching must be by id, not position.
 				response([...body].reverse().map((r: any) => ({ id: r.id, result: `${r.method}-ok` }))),
 			);
@@ -210,7 +200,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("isolates a single failing call - siblings keep their results", async () => {
-			stubFetch((_url, body) =>
+			stubJsonFetch((_url, body) =>
 				response(
 					body.map((r: any) =>
 						r.method === "bad"
@@ -228,7 +218,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("fills every entry with the same error when the request itself fails", async () => {
-			stubFetch(() => response("boom", { status: 500 }));
+			stubJsonFetch(() => response("boom", { status: 500 }));
 			const out = (await rpc.batch(URL_, ["a", "b"])) as ErrorValue[];
 
 			expect(out).toHaveLength(2); // shape never changes
@@ -237,7 +227,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("flags a call with no matching response", async () => {
-			stubFetch((_url, body) => response([{ id: body[0].id, result: 1 }]));
+			stubJsonFetch((_url, body) => response([{ id: body[0].id, result: 1 }]));
 			const out = (await rpc.batch(URL_, ["a", "b"])) as [number, ErrorValue];
 
 			expect(out[0]).toBe(1);
@@ -245,7 +235,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("handles a server that answers a batch with a bare object", async () => {
-			stubFetch(() => response({ error: { code: -32600, message: "batch unsupported" } }));
+			stubJsonFetch(() => response({ error: { code: -32600, message: "batch unsupported" } }));
 			const out = (await rpc.batch(URL_, ["a", "b"])) as ErrorValue[];
 
 			expect(out).toHaveLength(2);
@@ -253,7 +243,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("returns [] for no calls without touching the network", async () => {
-			const calls = stubFetch(() => response([]));
+			const calls = stubJsonFetch(() => response([]));
 			expect(await rpc.batch(URL_, [])).toEqual([]);
 			expect(calls).toHaveLength(0);
 		});
@@ -449,7 +439,7 @@ describe("web3.rpc", () => {
 	 * answers `0x1`, i.e. a healthy Ethereum node.
 	 */
 	function stubChain(replies: Record<string, unknown> = {}) {
-		return stubFetch(async (url, body) => {
+		return stubJsonFetch(async (url, body) => {
 			if (url === CHAINLIST) return response(REGISTRY);
 			const reply = replies[url];
 			if (typeof reply === "function") return (reply as (b: any) => unknown)(body);
@@ -563,7 +553,7 @@ describe("web3.rpc", () => {
 
 		it("returns a registry failure as a value without poisoning the session", async () => {
 			let attempt = 0;
-			stubFetch(async (url, body) => {
+			stubJsonFetch(async (url, body) => {
 				if (url !== CHAINLIST) return response({ id: body?.id, result: "0x1" });
 				attempt += 1;
 				return attempt === 1 ? response("upstream down", { status: 503 }) : response(REGISTRY);
@@ -575,7 +565,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("probes Solana seeds with getSlot and never reads the registry", async () => {
-			const calls = stubFetch((_url, body) => response({ id: body.id, result: 315_000_000 }));
+			const calls = stubJsonFetch((_url, body) => response({ id: body.id, result: 315_000_000 }));
 			const out = (await rpc.endpoints("solana", { limit: 2 })) as Probe[];
 
 			expect(calls.some((c) => c.url === CHAINLIST)).toBe(false);
@@ -585,7 +575,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("probes Tron seeds over REST and never reads the registry", async () => {
-			const calls = stubFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
+			const calls = stubJsonFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
 			const out = (await rpc.endpoints("tron", { limit: 1 })) as Probe[];
 
 			expect(calls.some((c) => c.url === CHAINLIST)).toBe(false);
@@ -596,7 +586,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("reports an unusable Tron reply as unhealthy", async () => {
-			stubFetch(() => response({ Error: "nope" }));
+			stubJsonFetch(() => response({ Error: "nope" }));
 			const out = (await rpc.endpoints("tron", { limit: 1 })) as Probe[];
 			expect(out[0]).toMatchObject({ ok: false, detail: "no block in reply" });
 		});
@@ -663,14 +653,14 @@ describe("web3.rpc", () => {
 		});
 
 		it("passes a registry error straight through", async () => {
-			stubFetch(() => response("gone", { status: 503 }));
+			stubJsonFetch(() => response("gone", { status: 503 }));
 			expect(((await rpc.pick(1)) as ErrorValue).error).toContain("chain registry");
 		});
 	});
 
 	describe("rpc.tron", () => {
 		it("posts a JSON body to the wallet REST path and returns the parsed reply", async () => {
-			const calls = stubFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
+			const calls = stubJsonFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
 			const block = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as any;
 
 			expect(calls[0].url).toBe("https://api.trongrid.io/wallet/getnowblock");
@@ -680,7 +670,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("normalises slashes and passes the body and headers through", async () => {
-			const calls = stubFetch(() => response({ balance: 1 }));
+			const calls = stubJsonFetch(() => response({ balance: 1 }));
 			await rpc.tron(
 				"https://api.trongrid.io/",
 				"/wallet/getaccount",
@@ -694,7 +684,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("returns transport and HTTP failures as values, and throws on bad arguments", async () => {
-			stubFetch(() => response("rate limited", { status: 429 }));
+			stubJsonFetch(() => response("rate limited", { status: 429 }));
 			const out = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as ErrorValue;
 			expect(out.status).toBe(429);
 
@@ -703,7 +693,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("leaves Tron's EVM-compatible /jsonrpc to rpc.call", async () => {
-			const calls = stubFetch((_url, body) => response({ id: body.id, result: "0x2b6653dc" }));
+			const calls = stubJsonFetch((_url, body) => response({ id: body.id, result: "0x2b6653dc" }));
 			const chainId = await rpc.call("https://api.trongrid.io/jsonrpc", "eth_chainId");
 
 			expect(calls[0].url).toBe("https://api.trongrid.io/jsonrpc");
@@ -721,7 +711,7 @@ describe("web3.rpc", () => {
 	 * is exactly how a public endpoint degrades mid-session.
 	 */
 	function stubLadder(answers: Record<string, (body: any) => unknown> = {}) {
-		return stubFetch(async (url, body) => {
+		return stubJsonFetch(async (url, body) => {
 			if (url === CHAINLIST) return response(REGISTRY);
 			const one = Array.isArray(body) ? body[0] : body;
 			if (one?.method === "eth_chainId") return response({ id: one.id, result: "0x1" });
@@ -885,7 +875,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("resolves solana through its seed list, never touching the registry", async () => {
-			const calls = stubFetch((_url, body) =>
+			const calls = stubJsonFetch((_url, body) =>
 				body?.method === "getSlot"
 					? response({ id: body.id, result: 315_000_000 })
 					: response({ id: body.id, result: { value: 42 } }),
@@ -899,7 +889,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("resolves tron to the EVM-compatible /jsonrpc its REST base hosts", async () => {
-			stubFetch((url, body) =>
+			stubJsonFetch((url, body) =>
 				url.endsWith("/wallet/getnowblock")
 					? response({ block_header: { raw_data: { number: 71_000_000 } } })
 					: response({ id: body.id, result: "0x2b6653dc" }),
@@ -911,7 +901,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("gives rpc.tron the same chain argument and the same rollover", async () => {
-			stubFetch((url) => {
+			stubJsonFetch((url) => {
 				if (url.endsWith("/wallet/getnowblock"))
 					return response({ block_header: { raw_data: { number: 71_000_000 } } });
 				return url.startsWith(TRON_SEED) ? response("rate limited", { status: 429 }) : response({ balance: 5 });
@@ -935,7 +925,7 @@ describe("web3.rpc", () => {
 		});
 
 		it("leaves an explicit URL alone - no discovery, no rollover", async () => {
-			const calls = stubFetch(() => response("rate limited", { status: 429 }));
+			const calls = stubJsonFetch(() => response("rate limited", { status: 429 }));
 			const out = (await rpc.call(URL_, "eth_blockNumber")) as ErrorValue;
 
 			expect(out.status).toBe(429); // the endpoint's own error, unwrapped
@@ -1010,16 +1000,6 @@ describe("web3.portfolio", () => {
 		// The response memo lives at module scope, i.e. for the whole session.
 		clearPortfolioCache();
 	});
-
-	/** Stub `fetch`, recording every request made. No test here touches the network. */
-	function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
-		const calls: string[] = [];
-		globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-			calls.push(String(url));
-			return handler(String(url), init);
-		}) as unknown as typeof fetch;
-		return calls;
-	}
 
 	function response(body: unknown, { status = 200, json = true } = {}) {
 		return {
@@ -1234,7 +1214,7 @@ describe("web3.portfolio", () => {
 
 	/** Answer whichever upstream the address routed to, so one stub serves every family. */
 	function stubAll() {
-		return stubFetch((url) => {
+		return stubUrlFetch((url) => {
 			if (url.startsWith("https://api.rabby.io/")) return response(RABBY_TOKENS);
 			if (url.startsWith("https://api.phantom.app/")) return response(PHANTOM_RESPONSE);
 			if (url.startsWith("https://api.trongrid.io/")) return response(TRON_RESPONSE);
@@ -1403,7 +1383,7 @@ describe("web3.portfolio", () => {
 		});
 
 		it("returns an error value when Phantom answers 200 with success false", async () => {
-			stubFetch(() => response({ success: false, message: "error", id: "ca7bc294" }));
+			stubUrlFetch(() => response({ success: false, message: "error", id: "ca7bc294" }));
 			const out = (await portfolio.balances(SOLANA)) as ErrorValue;
 			expect(out.error).toContain("Phantom declined");
 		});
@@ -1457,7 +1437,7 @@ describe("web3.portfolio", () => {
 		});
 
 		it("emits a zero TRX row for an account TronGrid reports with no balance key", async () => {
-			stubFetch(() => response({ data: [{ address: "41..." }], success: true }));
+			stubUrlFetch(() => response({ data: [{ address: "41..." }], success: true }));
 			const items = (await portfolio.balances(TRON)) as Item[];
 
 			expect(items).toHaveLength(1);
@@ -1466,7 +1446,9 @@ describe("web3.portfolio", () => {
 		});
 
 		it("returns an error value when TronGrid rejects the account", async () => {
-			stubFetch(() => response({ success: false, error: "A valid account address is required." }, { status: 400 }));
+			stubUrlFetch(() =>
+				response({ success: false, error: "A valid account address is required." }, { status: 400 }),
+			);
 			const out = (await portfolio.balances(TRON)) as ErrorValue;
 			expect(out.status).toBe(400);
 			expect(out.error).toContain("HTTP 400");
@@ -1575,7 +1557,7 @@ describe("web3.portfolio", () => {
 		});
 
 		it("returns the error value, not the payload, when the request failed", async () => {
-			stubFetch(() => response("rate limited", { status: 429 }));
+			stubUrlFetch(() => response("rate limited", { status: 429 }));
 			const out = (await portfolio.raw(EVM)) as ErrorValue;
 			expect(out.status).toBe(429);
 		});
@@ -1583,7 +1565,7 @@ describe("web3.portfolio", () => {
 
 	describe("portfolio - failures come back as values", () => {
 		it("returns an HTTP failure carrying the status instead of throwing", async () => {
-			stubFetch(() => response("rate limited", { status: 429 }));
+			stubUrlFetch(() => response("rate limited", { status: 429 }));
 			const out = (await portfolio.balances(EVM)) as ErrorValue;
 
 			expect(out.status).toBe(429);
@@ -1593,7 +1575,7 @@ describe("web3.portfolio", () => {
 		});
 
 		it("returns a network failure as a value", async () => {
-			stubFetch(() => {
+			stubUrlFetch(() => {
 				throw new Error("ECONNREFUSED");
 			});
 			const out = (await portfolio.balances(SOLANA)) as ErrorValue;
@@ -1602,7 +1584,7 @@ describe("web3.portfolio", () => {
 		});
 
 		it("names the timeout option when the request times out", async () => {
-			stubFetch(() => {
+			stubUrlFetch(() => {
 				const e = new Error("The operation was aborted");
 				e.name = "TimeoutError";
 				throw e;
@@ -1613,14 +1595,14 @@ describe("web3.portfolio", () => {
 		});
 
 		it("returns a value for a non-JSON body", async () => {
-			stubFetch(() => response("<html>proxy error</html>", { json: false }));
+			stubUrlFetch(() => response("<html>proxy error</html>", { json: false }));
 			const out = (await portfolio.balances(EVM)) as ErrorValue;
 			expect(out.error).toContain("non-JSON");
 		});
 
 		it("does not cache a failure, so an immediate retry really retries", async () => {
 			let attempt = 0;
-			const calls = stubFetch(() => {
+			const calls = stubUrlFetch(() => {
 				attempt += 1;
 				return attempt === 1 ? response("rate limited", { status: 429 }) : response(RABBY_TOKENS);
 			});
@@ -1633,7 +1615,7 @@ describe("web3.portfolio", () => {
 
 	describe("portfolio - empty portfolios", () => {
 		it("returns an empty array for each family rather than an error", async () => {
-			stubFetch((url) => {
+			stubUrlFetch((url) => {
 				if (url.startsWith("https://api.rabby.io/")) return response([]);
 				if (url.startsWith("https://api.phantom.app/")) return response({ success: true, data: [] });
 				return response({ data: [], success: true, meta: { page_size: 0 } });
@@ -1853,19 +1835,9 @@ describe("web3.defi", () => {
 		};
 	}
 
-	/** Stub `fetch`, recording every URL requested. No test here touches the network. */
-	function stubFetch(handler: (url: string) => unknown) {
-		const calls: string[] = [];
-		globalThis.fetch = (async (url: string | URL) => {
-			calls.push(String(url));
-			return handler(String(url));
-		}) as unknown as typeof fetch;
-		return calls;
-	}
-
 	/** The happy path every test starts from. */
 	function stubAll(overrides: Record<string, unknown> = {}) {
-		return stubFetch((url) => {
+		return stubUrlFetch((url) => {
 			if (url in overrides) return overrides[url];
 			if (url === CHAINS_URL) return response(LLAMA_CHAINS);
 			if (url === GECKO_URL) return response(GECKO_NETWORKS);
@@ -2165,7 +2137,7 @@ describe("web3.defi", () => {
 
 		it("does not cache a failed response", async () => {
 			let status = 500;
-			const calls = stubFetch((url) =>
+			const calls = stubUrlFetch((url) =>
 				url === CHAINS_URL ? response(LLAMA_CHAINS, { status }) : response(GECKO_NETWORKS),
 			);
 			expect((await defi.chains()) as ErrorValue).toHaveProperty("status", 500);
@@ -2231,17 +2203,6 @@ describe("web3.hypersync", () => {
 		else process.env.HYPERSYNC_API_KEY = realKey;
 	});
 
-	/** Stub `fetch`, recording every request. No test here touches the network. */
-	function stubFetch(handler: (url: string, body: any, init?: RequestInit) => unknown) {
-		const calls: { url: string; body: any; init?: RequestInit }[] = [];
-		globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-			const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-			calls.push({ url: String(url), body, init });
-			return handler(String(url), body, init);
-		}) as unknown as typeof fetch;
-		return calls;
-	}
-
 	function httpResponse(body: unknown, { status = 200 } = {}) {
 		return {
 			ok: status >= 200 && status < 300,
@@ -2263,7 +2224,7 @@ describe("web3.hypersync", () => {
 
 	it("returns a missing-key error value without touching the network", async () => {
 		delete process.env.HYPERSYNC_API_KEY;
-		const calls = stubFetch(() => httpResponse({}));
+		const calls = stubJsonFetch(() => httpResponse({}));
 		for (const out of [
 			await hs.height("eth"),
 			await hs.chains(),
@@ -2277,7 +2238,7 @@ describe("web3.hypersync", () => {
 
 	it("flattens rows out of the nested data[i].logs envelope", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubFetch(() => page([row(0), row(1)], null, 5_000_000));
+		stubJsonFetch(() => page([row(0), row(1)], null, 5_000_000));
 		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
 
 		expect(out.rows).toHaveLength(2);
@@ -2290,7 +2251,7 @@ describe("web3.hypersync", () => {
 
 	it("paginates on next_block until the range completes", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch((_url, body) =>
+		const calls = stubJsonFetch((_url, body) =>
 			body.from_block === 0 ? page([row(0)], 200) : page([row(1), row(2)], null),
 		);
 		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
@@ -2304,7 +2265,7 @@ describe("web3.hypersync", () => {
 
 	it("stops at the maxRows budget and hands back the cursor to resume from", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubFetch((_url, body) => page([row(body.from_block), row(body.from_block + 1)], body.from_block + 100));
+		stubJsonFetch((_url, body) => page([row(body.from_block), row(body.from_block + 1)], body.from_block + 100));
 		const out = (await hs.logs("eth", { fromBlock: 0, maxRows: 3 })) as any;
 
 		// Two pages of 2 rows overshoot the budget of 3 - the server completes block groups.
@@ -2315,7 +2276,7 @@ describe("web3.hypersync", () => {
 
 	it("treats to_block as exclusive", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch(() => page([row(0)], 2_000_000));
+		const calls = stubJsonFetch(() => page([row(0)], 2_000_000));
 		const out = (await hs.logs("eth", { fromBlock: 0, toBlock: 2_000_000 })) as any;
 
 		expect(calls).toHaveLength(1);
@@ -2325,7 +2286,7 @@ describe("web3.hypersync", () => {
 
 	it("builds a flat topic0..3 field selection and never a topics array", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch(() => page([], null));
+		const calls = stubJsonFetch(() => page([], null));
 		await hs.logs("eth", {
 			fromBlock: 10,
 			address: "0xABC",
@@ -2360,7 +2321,7 @@ describe("web3.hypersync", () => {
 
 	it("accepts filter arrays and batches multiple selections into ONE body", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch(() => page([], null));
+		const calls = stubJsonFetch(() => page([], null));
 		await hs.logs("eth", {
 			fromBlock: 0,
 			selections: [{ address: "0xa", topic0: "0xs0" }, { address: ["0xb", "0xc"] }],
@@ -2372,7 +2333,7 @@ describe("web3.hypersync", () => {
 
 	it("returns HTTP failures as {error, status} values that never carry the key", async () => {
 		process.env.HYPERSYNC_API_KEY = "sekrit";
-		stubFetch(() => httpResponse("quota exceeded", { status: 429 }));
+		stubJsonFetch(() => httpResponse("quota exceeded", { status: 429 }));
 		const out = (await hs.query("eth", { from_block: 0 })) as ErrorValue;
 
 		expect(out.status).toBe(429);
@@ -2383,7 +2344,9 @@ describe("web3.hypersync", () => {
 
 	it("returns a mid-scan failure with the rows already collected and the resume cursor", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubFetch((_url, body) => (body.from_block === 0 ? page([row(0)], 500) : httpResponse("boom", { status: 500 })));
+		stubJsonFetch((_url, body) =>
+			body.from_block === 0 ? page([row(0)], 500) : httpResponse("boom", { status: 500 }),
+		);
 		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
 
 		expect(out.error).toContain("500");
@@ -2393,7 +2356,7 @@ describe("web3.hypersync", () => {
 
 	it("height returns the number and query passes the response through verbatim", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch((url) =>
+		const calls = stubJsonFetch((url) =>
 			url.endsWith("/height") ? httpResponse({ height: 1_234_567 }) : page([row(0)], null),
 		);
 
@@ -2407,7 +2370,7 @@ describe("web3.hypersync", () => {
 
 	it("chains() probes candidates via /height, memoises, and refreshes on demand", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubFetch((url) =>
+		const calls = stubJsonFetch((url) =>
 			url.includes("bb.hypersync") || url.includes("cc.hypersync")
 				? httpResponse({ height: 1 })
 				: httpResponse("nope", { status: 404 }),
@@ -2424,7 +2387,7 @@ describe("web3.hypersync", () => {
 
 	it("chains() returns an error value when nothing answers", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubFetch(() => httpResponse("unreachable", { status: 503 }));
+		stubJsonFetch(() => httpResponse("unreachable", { status: 503 }));
 		const out = (await hs.chains({ candidates: ["aa", "bb"] })) as ErrorValue;
 
 		expect(out.error).toContain("none of 2");

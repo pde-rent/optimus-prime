@@ -9,7 +9,11 @@ Living document: every worker extends it before broad slices (mission section 4)
 | Tool execution | ToolDefinition factories x~20 tools + wrapper | src/core/tools | scaffolding duplication (S slice 3 collapsed abort/stat patterns) | canonical runner (7) | medium | mid |
 | Provider streams | packages/ai providers/ decoders | ai | compat quirks per provider - normalization boundary already exists | provider normalization boundary | medium | mid |
 | OAuth device flow | common.ts factory (was 2 hand-rolled) | ai/utils/oauth | DONE @4aaad6bf0 | createDeviceFlowOAuthProvider | done | done |
-| Test harness | suite/harness.ts, helpers/daemon-harness.ts, helpers/{wait,temp,table,render}.ts | test/** | session vs daemon vs generic | one helpers/ layer | low | now (T/E2) |
+| Test harness | suite/harness.ts, helpers/daemon-harness.ts + helpers/{wait,temp,table,render,fetch}.ts | test/** | session vs daemon vs generic vs fetch stubs | one helpers/ layer | low | now (T/E2) |
+| waitFor polling | 16 private copies in test/*.test.ts -> helpers/wait.ts | test/** | assertion-poll vs condition-poll variants kept as two fns | helpers/wait.ts | low | DONE wave 1 (7 files) |
+| temp-dir fixture | ~12 mkdtemp+rmSync rituals in tool/session suites -> helpers/temp.ts makeTempDirs | test/** | tracked-afterEach vs withTempDir scoping | helpers/temp.ts | low | partial (tool suites done) |
+| getTextOutput/result reader | 10 literal copies in tool suites -> helpers/render.ts | test/core/tools suites | identical | helpers/render.ts | low | DONE |
+| fetch stub family | web3 x4 sections + websearch private stubFetch/response -> helpers/fetch.ts | skill suites | response() semantics differ per service (json-throw, contentType, text-mode) - only stubs unified, response shapes stay local where contracts differ | helpers/fetch.ts | low | DONE web3/websearch; other fetch-stubbing suites pending |
 | stripAnsi/ANSI helpers | tui + coding-agent copies | several | identical | one home (S audit 1/5) | low | now |
 | File-lock retry | auth-storage + settings-manager private copies | 2 | DONE afdd9352e | core/file-lock.ts | done | done |
 | Auth source fingerprint | auth-storage + model-registry | 2 | DONE afdd9352e | core/auth-source-fingerprint.ts | done | done |
