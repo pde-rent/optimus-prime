@@ -23,6 +23,95 @@ import { getTextOutput, invalidArgText, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.js";
 
+/** Maps bash commands to the in-process native tools that cover them. */
+const NATIVE_COMMAND_TOOLS: Record<string, string> = {
+	grep: "grep tool",
+	cat: "read_file",
+	sed: "sed tool",
+	find: "find tool",
+	wc: "wc tool",
+	head: "head tool",
+	tail: "tail tool",
+	ln: "ln tool",
+	ps: "sysinfo",
+	top: "sysinfo",
+	df: "sysinfo",
+	free: "sysinfo",
+	uname: "sysinfo",
+	ss: "netdiag",
+	netstat: "netdiag",
+	ifconfig: "netdiag",
+};
+
+const hintedNativeCommands = new Set<string>();
+
+/** Clears the once-per-session memory of shown native-tool hints. Test hook. */
+export function resetNativeCommandHints(): void {
+	hintedNativeCommands.clear();
+}
+
+interface SimpleCommand {
+	token: string;
+	redirectsToFile: boolean;
+}
+
+/**
+ * Parses a command that must be a single simple command: no pipes, chaining, or
+ * backgrounding. Redirections are allowed and reported.
+ */
+function parseSimpleCommand(command: string): SimpleCommand | undefined {
+	const text = command.trim();
+	let quote: string | undefined;
+	let redirectsToFile = false;
+	let token = "";
+	let tokenEnded = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (quote !== undefined) {
+			if (ch === quote) {
+				quote = undefined;
+			} else if (!tokenEnded) {
+				token += ch;
+			}
+			continue;
+		}
+		if (ch === '"' || ch === "'") {
+			quote = ch;
+			continue;
+		}
+		if (ch === "|" || ch === ";" || ch === "&" || ch === "\n" || ch === "`") {
+			return undefined;
+		}
+		if (ch === ">") {
+			redirectsToFile = true;
+			if (text[i + 1] === ">") i++;
+			tokenEnded = true;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			tokenEnded = true;
+			continue;
+		}
+		if (!tokenEnded) token += ch;
+	}
+	if (!token) return undefined;
+	return { token: token.split("/").pop() ?? token, redirectsToFile };
+}
+
+function getNativeCommandTip(command: string): string | undefined {
+	const parsed = parseSimpleCommand(command);
+	if (!parsed) return undefined;
+	let nativeTool: string | undefined;
+	if (parsed.token === "echo") {
+		nativeTool = parsed.redirectsToFile ? "write_file" : undefined;
+	} else {
+		nativeTool = NATIVE_COMMAND_TOOLS[parsed.token];
+	}
+	if (!nativeTool || hintedNativeCommands.has(parsed.token)) return undefined;
+	hintedNativeCommands.add(parsed.token);
+	return `tip: ${nativeTool} does this natively, cross-platform - try it next time`;
+}
+
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
@@ -281,7 +370,7 @@ export function createBashToolDefinition(
 	const definition: ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> = {
 		name: "bash",
 		label: "bash",
-		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. If the command is covered by a native tool (grep, read_file, write_file, sed, find, wc, head, tail, ln, sysinfo, netdiag), a one-time tip is appended to the result.`,
 		promptSnippet:
 			"Run shell commands; for plain file search/count/substitution prefer the native grep/find/sed/wc tools",
 		parameters: bashSchema,
@@ -419,7 +508,9 @@ export function createBashToolDefinition(
 				if (exitCode !== 0 && exitCode !== null) {
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}
-				return { content: [{ type: "text", text: outputText }], details };
+				const tip = getNativeCommandTip(command);
+				const text = tip ? `${outputText}\n${tip}` : outputText;
+				return { content: [{ type: "text", text }], details };
 			} finally {
 				clearUpdateTimer();
 			}
