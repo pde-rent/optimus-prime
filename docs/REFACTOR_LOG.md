@@ -19,6 +19,7 @@ Target: <=250,000 total. Numbers always reported split by category.
 - supervisor-core step 2: makeDaemonHello identity block + defaultClientCapabilities shared (@9c6dc0fe8)
 - supervisor-core step 3: socketWriteWithBackpressure single owner (@f055ea9cd)
 - supervisor-core step 4 (command dispatch): DEFERRED per stop conditions - handlers share only the parse/envelope shell; real convergence is the 2.2 one-runtime end state, needs root sequencing
+- interactive residuals: external-editor flow dedup (-35), ctrl-c-hint controller shared with agents-view (InteractiveMode full convergence pending T fake update), bun-repl audited at floor (@344f00ed7)
 
 ## In flight
 - E2: daemon trio scenario tables (15,231 -> 14,294 so far)
