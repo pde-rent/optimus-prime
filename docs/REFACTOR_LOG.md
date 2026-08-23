@@ -11,7 +11,9 @@ Target: <=250,000 total. Numbers always reported split by category.
 - tool abort/stat scaffolding collapse (@afdd9352e, 001825592)
 - daemon test harness wave 1 (@0b9e70d6a)
 - auth-source fingerprint + file-lock retry dedup (@001825592)
-- menu selector state machine: MenuSelector<T> replaces duplicated selection/layout/windowing in extension-selector + oauth-selector; physical LOC +48 in the three files (controller API surface), semantic win = one state machine where two divergent copies existed; adopters under audit (S slice 4)
+- menu selector state machine: MenuSelector<T> replaces duplicated selection/layout/windowing in extension-selector + oauth-selector; physical LOC +48 in the three files (controller API surface), semantic win = one state machine where two divergent copies existed; config/tree selector adoption audited and CLOSED (different contracts)
+- dead-export sweep: ~841 production LOC (proxy.ts module 350, resources/ dir 260, 20 dead decls, 98 unexports); 240 test-only symbols flagged not deleted (S slice 5, @e3c547202)
+- responses-wire factory: createResponsesWireStream collapses 3 copies of the OpenAI Responses request/stream skeleton (openai-responses/grok/azure), net -96 (@6b9591081)
 
 ## In flight
 - E2: daemon trio scenario tables (15,231 -> 14,294 so far)
