@@ -92,11 +92,7 @@ describe("daemon mode helpers", () => {
 		});
 		const setSessionName = vi.fn();
 		const state = makeState("active");
-		state.runtime = {
-			...state.runtime,
-			metadata: { kind: "top-level", createdAt: 1 },
-			session: { setSessionName },
-		} as never;
+		applySession(state, { kind: "top-level", session: { setSessionName } });
 		const assertStateSessionNameAvailable = vi.fn(async () => {});
 		const internals = daemonInternals(daemon);
 		internals.assertStateSessionNameAvailable = assertStateSessionNameAvailable;
@@ -334,26 +330,24 @@ describe("daemon mode helpers", () => {
 		});
 		const first = makeState("first", "parent-a");
 		const second = makeState("second", "parent-b");
-		first.runtime = {
-			...first.runtime,
-			metadata: { ...first.runtime.metadata, parentSessionId: "parent-session-a" },
+		applySession(first, {
+			parentSessionId: "parent-session-a",
 			session: {
 				sessionId: "first-session",
 				rlmDepth: 1,
 				sessionManager: { getHeader: vi.fn(() => undefined) },
 				setSessionName: vi.fn(),
 			},
-		} as never;
-		second.runtime = {
-			...second.runtime,
-			metadata: { ...second.runtime.metadata, parentSessionId: "parent-session-b" },
+		});
+		applySession(second, {
+			parentSessionId: "parent-session-b",
 			session: {
 				sessionId: "second-session",
 				rlmDepth: 1,
 				sessionManager: { getHeader: vi.fn(() => undefined) },
 				setSessionName: vi.fn(),
 			},
-		} as never;
+		});
 		let releaseValidation!: () => void;
 		const validationGate = new Promise<void>((resolve) => {
 			releaseValidation = resolve;
@@ -546,13 +540,9 @@ describe("daemon mode helpers", () => {
 				return Promise.resolve(message);
 			},
 		);
-		subagentState.runtime = {
-			...subagentState.runtime,
+		applySession(subagentState, {
 			cwd: "/tmp",
-			metadata: {
-				...subagentState.runtime.metadata,
-				rlmChildId: "child-1",
-			},
+			metadata: { rlmChildId: "child-1" },
 			session: {
 				sessionId: "session-child",
 				sessionName: defaultSubagentName,
@@ -560,7 +550,7 @@ describe("daemon mode helpers", () => {
 				sessionActions: { queuedCount: 0, steering: [], followUps: [] },
 				acceptAgentMessagePrompt,
 			},
-		} as never;
+		});
 		const internals = daemonInternals(daemon);
 		internals.sessions.set(parentState.activeSessionId, parentState);
 		// A successfully completed RLM child remains idle in this daemon registry.
@@ -970,16 +960,8 @@ describe("daemon mode helpers", () => {
 		const foreignSession = {
 			disposeAsync: vi.fn(async () => {}),
 		} as unknown as ActiveSessionState["runtime"]["session"];
-		childState.runtime = {
-			...childState.runtime,
-			metadata: { ...childState.runtime.metadata, rlmChildId: "child-1" },
-			session: childSession,
-		} as ActiveSessionState["runtime"];
-		foreignChildState.runtime = {
-			...foreignChildState.runtime,
-			metadata: { ...foreignChildState.runtime.metadata, rlmChildId: "child-1" },
-			session: foreignSession,
-		} as ActiveSessionState["runtime"];
+		applySession(childState, { metadata: { rlmChildId: "child-1" }, session: childSession as never });
+		applySession(foreignChildState, { metadata: { rlmChildId: "child-1" }, session: foreignSession as never });
 		const closeSession = vi.fn(async () => {});
 		const internals = daemonInternals(daemon);
 		internals.sessions.set(childState.activeSessionId, childState);
@@ -1073,16 +1055,12 @@ describe("daemon mode helpers", () => {
 			});
 
 			const parentState = makeState("parent");
-			parentState.runtime = {
-				...parentState.runtime,
-				session: makeRuntimeSession(parentManager),
-			} as ActiveSessionState["runtime"];
+			applySession(parentState, { session: makeRuntimeSession(parentManager) as never });
 			const childState = makeState("child", parentState.activeSessionId);
-			childState.runtime = {
-				...childState.runtime,
-				metadata: { ...childState.runtime.metadata, rlmChildId: "child-1" },
+			applySession(childState, {
+				metadata: { rlmChildId: "child-1" },
 				session: { disposeAsync: vi.fn(async () => {}) },
-			} as unknown as ActiveSessionState["runtime"];
+			});
 			const closeSession = vi.fn(async () => {});
 			const internals = daemonInternals(daemon);
 			internals.sessions.set(childState.activeSessionId, childState);
@@ -1859,8 +1837,7 @@ describe("daemon mode helpers", () => {
 			pending += 1;
 			return true;
 		});
-		targetState.runtime = {
-			...targetState.runtime,
+		applySession(targetState, {
 			cwd: "/tmp",
 			session: {
 				sessionId: "session-target",
@@ -1871,7 +1848,7 @@ describe("daemon mode helpers", () => {
 				},
 				queueAgentMessagePrompt,
 			},
-		} as never;
+		});
 		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
 		// Distinct senders so the per-sender rate limit stays out of the way.
@@ -1950,8 +1927,7 @@ describe("daemon mode helpers", () => {
 
 		const makeBusyState = (name: string) => {
 			const state = makeState(name);
-			state.runtime = {
-				...state.runtime,
+			applySession(state, {
 				cwd: "/tmp",
 				session: {
 					sessionId: `session-${name}`,
@@ -1962,7 +1938,7 @@ describe("daemon mode helpers", () => {
 					// Neither turn ends while both sessions block inside their own send.
 					waitForAgentMessagePromptDelivery: vi.fn(() => new Promise<void>(() => {})),
 				},
-			} as never;
+			});
 			return state;
 		};
 		const stateA = makeBusyState("alpha");
@@ -2092,20 +2068,17 @@ describe("daemon mode helpers", () => {
 			});
 			const parent = makeState("parent");
 			const child = makeState("child", "parent");
-			parent.runtime = {
-				...parent.runtime,
-				metadata: { ...parent.runtime.metadata, kind: "top-level" },
+			applySession(parent, {
+				kind: "top-level",
 				session: { sessionId: "session-parent", sessionFile: join(realDir, "parent.jsonl") },
-			} as never;
-			child.runtime = {
-				...child.runtime,
+			});
+			applySession(child, {
 				metadata: {
-					...child.runtime.metadata,
 					parentSessionId: "session-parent",
 					parentSessionFile: join(aliasDir, "parent.jsonl"),
 				},
 				session: { sessionId: "session-child", sessionFile: join(realDir, "child.jsonl") },
-			} as never;
+			});
 			const internals = daemonInternals(daemon);
 
 			expect(() => internals.assertAgentFamilyReachable(parent, child)).not.toThrow();
@@ -2438,148 +2411,71 @@ describe("daemon mode helpers", () => {
 		await expect(second).resolves.toMatchObject({ message: "second" });
 	});
 
-	it("queues agent messages behind an idle target with a pending retry", async () => {
-		const daemon = stubDaemon();
+	// Table over idle-target queueing: each busy flag must route the message into
+	// queueAgentMessagePrompt with steering behavior instead of direct delivery.
+	for (const queueCase of [
+		{
+			name: "queues agent messages behind an idle target with a pending retry",
+			busyFlags: { isRetrying: true },
+			directFns: { prompt: () => vi.fn(async () => {}), followUp: () => vi.fn(async () => true) },
+		},
+		{
+			name: "queues agent messages behind existing pending work on an idle target",
+			busyFlags: { unfinishedActionCount: 1 },
+			directFns: { prompt: () => vi.fn(async () => {}), followUp: () => vi.fn(async () => true) },
+		},
+		{
+			name: "queues agent messages while the target is compacting",
+			busyFlags: { isCompacting: true },
+			directFns: { prompt: () => vi.fn(async () => {}) },
+		},
+		{
+			name: "queues agent messages while target bash is running",
+			busyFlags: { isBashRunning: true },
+			directFns: { acceptAgentMessagePrompt: () => vi.fn(async () => {}) },
+		},
+	]) {
+		it(queueCase.name, async () => {
+			const daemon = stubDaemon();
+			const fromState = makeState("source");
+			const targetState = makeState("target");
+			applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
+			const directDelivery: Record<string, ReturnType<typeof vi.fn>> = {};
+			for (const [fn, makeFn] of Object.entries(queueCase.directFns)) {
+				directDelivery[fn] = makeFn();
+			}
+			const queueAgentMessagePrompt = vi.fn(
+				async (_message: string, _streamingBehavior: "steer" | "followUp") => true,
+			);
+			applySession(targetState, {
+				cwd: "/tmp",
+				sessionId: "session-target",
+				sessionName: "Target",
+				isStreaming: false,
+				unfinishedActionCount: 0,
+				...queueCase.busyFlags,
+				session: { ...directDelivery, queueAgentMessagePrompt },
+			});
+			const internals = daemonInternals(daemon);
+			internals.sessions.set(fromState.activeSessionId, fromState);
+			internals.sessions.set(targetState.activeSessionId, targetState);
 
-		const fromState = makeState("source");
-		const targetState = makeState("target");
-		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
-		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
-		const followUp = vi.fn(async () => true);
-		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		applySession(targetState, {
-			cwd: "/tmp",
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			isRetrying: true,
-			unfinishedActionCount: 0,
-			session: { prompt, followUp, queueAgentMessagePrompt },
+			await expect(
+				internals.sendAgentSessionMessage({
+					targetSelector: targetState.activeSessionId,
+					message: "queued message",
+					fromState,
+					origin: "agent",
+				}),
+			).resolves.toMatchObject({ target: { activeSessionId: targetState.activeSessionId } });
+
+			expect(queueAgentMessagePrompt).toHaveBeenCalledOnce();
+			expect(queueAgentMessagePrompt.mock.calls[0]?.[1]).toBe("steer");
+			for (const mock of Object.values(directDelivery)) {
+				expect(mock).not.toHaveBeenCalled();
+			}
 		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(fromState.activeSessionId, fromState);
-		internals.sessions.set(targetState.activeSessionId, targetState);
-
-		await expect(
-			internals.sendAgentSessionMessage({
-				targetSelector: targetState.activeSessionId,
-				message: "queued behind retry",
-				fromState,
-				origin: "agent",
-			}),
-		).resolves.toMatchObject({ target: { activeSessionId: targetState.activeSessionId } });
-
-		expect(queueAgentMessagePrompt).toHaveBeenCalledOnce();
-		expect(queueAgentMessagePrompt.mock.calls[0]?.[1]).toBe("steer");
-		expect(followUp).not.toHaveBeenCalled();
-		expect(prompt).not.toHaveBeenCalled();
-	});
-
-	it("queues agent messages behind existing pending work on an idle target", async () => {
-		const daemon = stubDaemon();
-
-		const fromState = makeState("source");
-		const targetState = makeState("target");
-		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
-		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
-		const followUp = vi.fn(async () => true);
-		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		applySession(targetState, {
-			cwd: "/tmp",
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			unfinishedActionCount: 1,
-			session: { prompt, followUp, queueAgentMessagePrompt },
-		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(fromState.activeSessionId, fromState);
-		internals.sessions.set(targetState.activeSessionId, targetState);
-
-		await expect(
-			internals.sendAgentSessionMessage({
-				targetSelector: targetState.activeSessionId,
-				message: "queued behind existing work",
-				fromState,
-				origin: "agent",
-			}),
-		).resolves.toMatchObject({ target: { activeSessionId: targetState.activeSessionId } });
-
-		expect(queueAgentMessagePrompt).toHaveBeenCalledOnce();
-		expect(queueAgentMessagePrompt.mock.calls[0]?.[1]).toBe("steer");
-		expect(followUp).not.toHaveBeenCalled();
-		expect(prompt).not.toHaveBeenCalled();
-	});
-
-	it("queues agent messages while the target is compacting", async () => {
-		const daemon = stubDaemon();
-
-		const fromState = makeState("source");
-		const targetState = makeState("target");
-		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
-		const prompt = vi.fn(async (_message: string, _options?: { streamingBehavior?: "steer" | "followUp" }) => {});
-		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		applySession(targetState, {
-			cwd: "/tmp",
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			isCompacting: true,
-			unfinishedActionCount: 0,
-			session: { prompt, queueAgentMessagePrompt },
-		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(fromState.activeSessionId, fromState);
-		internals.sessions.set(targetState.activeSessionId, targetState);
-
-		await expect(
-			internals.sendAgentSessionMessage({
-				targetSelector: targetState.activeSessionId,
-				message: "queued behind compaction",
-				fromState,
-				origin: "agent",
-			}),
-		).resolves.toMatchObject({ target: { activeSessionId: targetState.activeSessionId } });
-
-		expect(queueAgentMessagePrompt).toHaveBeenCalledOnce();
-		expect(queueAgentMessagePrompt.mock.calls[0]?.[1]).toBe("steer");
-		expect(prompt).not.toHaveBeenCalled();
-	});
-
-	it("queues agent messages while target bash is running", async () => {
-		const daemon = stubDaemon();
-
-		const fromState = makeState("source");
-		const targetState = makeState("target");
-		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
-		const acceptAgentMessagePrompt = vi.fn(async () => {});
-		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => true);
-		applySession(targetState, {
-			cwd: "/tmp",
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			isBashRunning: true,
-			unfinishedActionCount: 0,
-			session: { acceptAgentMessagePrompt, queueAgentMessagePrompt },
-		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(fromState.activeSessionId, fromState);
-		internals.sessions.set(targetState.activeSessionId, targetState);
-
-		await expect(
-			internals.sendAgentSessionMessage({
-				targetSelector: targetState.activeSessionId,
-				message: "queued behind bash",
-				fromState,
-				origin: "agent",
-			}),
-		).resolves.toMatchObject({ target: { activeSessionId: targetState.activeSessionId } });
-
-		expect(queueAgentMessagePrompt).toHaveBeenCalledOnce();
-		expect(queueAgentMessagePrompt.mock.calls[0]?.[1]).toBe("steer");
-		expect(acceptAgentMessagePrompt).not.toHaveBeenCalled();
-	});
+	}
 
 	it("acknowledges queued agent messages after queue insertion", async () => {
 		const daemon = stubDaemon();
@@ -3094,9 +2990,10 @@ describe("daemon mode helpers", () => {
 		expect(clearQueuedUserMessagesMatching).toHaveBeenCalledOnce();
 	});
 
-	it("rejects agent messages when pause wins the target lock", async () => {
+	// Shared fixture: an idle target whose queued-clear step blocks until released, so a
+	// concurrent pause / switch / close can win the race against message delivery.
+	function makeBlockedClearTarget() {
 		const daemon = stubDaemon();
-
 		const targetState = makeState("target");
 		let resolveBlockedClear: () => void = () => {};
 		const clearQueuedUserMessagesMatching = vi.fn(
@@ -3116,6 +3013,16 @@ describe("daemon mode helpers", () => {
 		});
 		const internals = daemonInternals(daemon);
 		internals.sessions.set(targetState.activeSessionId, targetState);
+		return {
+			targetState,
+			internals,
+			acceptAgentMessagePrompt,
+			clearQueuedUserMessagesMatching,
+			releaseClear: () => resolveBlockedClear(),
+		};
+	}
+	it("rejects agent messages when pause wins the target lock", async () => {
+		const { targetState, internals, acceptAgentMessagePrompt, releaseClear } = makeBlockedClearTarget();
 
 		const pause = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
 			id: "command-1",
@@ -3132,34 +3039,14 @@ describe("daemon mode helpers", () => {
 		await Promise.resolve();
 		expect(acceptAgentMessagePrompt).not.toHaveBeenCalled();
 
-		resolveBlockedClear();
+		releaseClear();
 		await pause;
 		await expect(send).rejects.toThrow("Agent messaging is paused");
 		expect(acceptAgentMessagePrompt).not.toHaveBeenCalled();
 	});
 
 	it("rejects agent messages when the target session changes before delivery", async () => {
-		const daemon = stubDaemon();
-
-		const targetState = makeState("target");
-		let resolveBlockedClear: () => void = () => {};
-		const clearQueuedUserMessagesMatching = vi.fn(
-			() =>
-				new Promise<{ steering: string[]; followUp: string[] }>((resolve) => {
-					resolveBlockedClear = () => resolve({ steering: [], followUp: [] });
-				}),
-		);
-		const acceptAgentMessagePrompt = vi.fn(async () => {});
-		applySession(targetState, {
-			cwd: "/tmp",
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			unfinishedActionCount: 0,
-			session: { acceptAgentMessagePrompt, clearQueuedUserMessagesMatching },
-		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(targetState.activeSessionId, targetState);
+		const { targetState, internals, acceptAgentMessagePrompt, releaseClear } = makeBlockedClearTarget();
 
 		const clear = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
 			id: "command-1",
@@ -3176,7 +3063,7 @@ describe("daemon mode helpers", () => {
 		});
 		await Promise.resolve();
 		(targetState.runtime.session as { sessionId: string }).sessionId = "session-replacement";
-		resolveBlockedClear();
+		releaseClear();
 		await clear;
 
 		await expect(send).rejects.toThrow("Target session changed before agent message delivery");
@@ -3184,27 +3071,13 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when the target session closes before delivery", async () => {
-		const daemon = stubDaemon();
-
-		const targetState = makeState("target");
+		const { targetState, internals, acceptAgentMessagePrompt, clearQueuedUserMessagesMatching, releaseClear } =
+			makeBlockedClearTarget();
 		targetState.extensionUiRequests = new Map();
-		let resolveBlockedClear: () => void = () => {};
-		const clearQueuedUserMessagesMatching = vi.fn(
-			() =>
-				new Promise<{ steering: string[]; followUp: string[] }>((resolve) => {
-					resolveBlockedClear = () => resolve({ steering: [], followUp: [] });
-				}),
-		);
-		const acceptAgentMessagePrompt = vi.fn(async () => {});
 		const dispose = vi.fn(async () => {});
 		applySession(targetState, {
-			cwd: "/tmp",
 			kind: "subagent",
 			metadata: { createdAt: 1 },
-			sessionId: "session-target",
-			sessionName: "Target",
-			isStreaming: false,
-			unfinishedActionCount: 0,
 			session: {
 				messages: [],
 				acceptAgentMessagePrompt,
@@ -3215,8 +3088,6 @@ describe("daemon mode helpers", () => {
 			},
 			runtime: { dispose },
 		});
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(targetState.activeSessionId, targetState);
 
 		const clear = internals.handleCommand(makeClient("client-1", targetState.activeSessionId), {
 			id: "command-1",
@@ -3241,7 +3112,7 @@ describe("daemon mode helpers", () => {
 		await close;
 		expect(dispose).toHaveBeenCalledOnce();
 
-		resolveBlockedClear();
+		releaseClear();
 		await clear;
 		await expect(send).rejects.toThrow("Target session is closing before agent message delivery");
 		expect(acceptAgentMessagePrompt).not.toHaveBeenCalled();
@@ -6285,14 +6156,10 @@ describe("daemon mode helpers", () => {
 			const rootState = await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
 			const nestedState = await internals.createRuntime({ type: "create", sessionPath: fixture.childSessionFile });
 			const nestedSession = nestedState.runtime.session;
-			nestedState.runtime = {
-				...nestedState.runtime,
-				metadata: {
-					...nestedState.runtime.metadata,
-					parentActiveSessionId: "intermediate-active",
-				},
-				session: nestedSession,
-			} as ActiveSessionState["runtime"];
+			applySession(nestedState, {
+				metadata: { parentActiveSessionId: "intermediate-active" },
+				session: nestedSession as never,
+			});
 			Object.defineProperty(nestedState.runtime.session, "isStreaming", { get: () => true });
 			Object.defineProperty(nestedState.runtime.session, "unfinishedActionCount", { get: () => 0 });
 			const rootSession = rootState.runtime.session as unknown as {
@@ -6615,17 +6482,16 @@ describe("daemon mode helpers", () => {
 			expect(sessionNamesDuringBind[1]).toBeUndefined();
 
 			const grandchildState = makeState("grandchild", childActiveSessionId);
-			grandchildState.runtime = {
-				...grandchildState.runtime,
+			applySession(grandchildState, {
 				cwd: tempDir,
-				metadata: { ...grandchildState.runtime.metadata, rlmChildId: "grandchild-1" },
+				metadata: { rlmChildId: "grandchild-1" },
 				session: {
 					sessionId: "session-grandchild",
 					sessionName: "Grandchild",
 					isStreaming: false,
 					sessionActions: { queuedCount: 0, steering: [], followUps: [] },
 				},
-			} as never;
+			});
 			internals.sessions.set(grandchildState.activeSessionId, grandchildState);
 			expect((await childController?.listAgents())?.agents).toContainEqual(
 				expect.objectContaining({
@@ -6951,72 +6817,91 @@ describe("daemon mode helpers", () => {
 		});
 	});
 
-	it("applies killed effects when kill joins a passivation close", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-kill-passivation-race-"));
-		let releaseDispose!: () => void;
-		const disposeGate = new Promise<void>((resolve) => {
-			releaseDispose = resolve;
-		});
-		let markDisposeStarted!: () => void;
-		const disposeStarted = new Promise<void>((resolve) => {
-			markDisposeStarted = resolve;
-		});
-		try {
-			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+	// Table over kill joining an in-flight close: whichever close wins the race, kill
+	// must still cancel scheduled jobs and archive the session exactly once.
+	for (const killJoinCase of [
+		{
+			name: "applies killed effects when kill joins a passivation close",
+			label: "optimus-daemon-kill-passivation-race-",
+			closeReason: "shutdown" as const,
+			prompt: "check long run",
+		},
+		{
+			name: "does not duplicate effects when kill joins a completed close",
+			label: "optimus-daemon-kill-completed-race-",
+			closeReason: "completed" as const,
+			prompt: "check completed run",
+		},
+	]) {
+		it(killJoinCase.name, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), killJoinCase.label));
+			let releaseDispose!: () => void;
+			const disposeGate = new Promise<void>((resolve) => {
+				releaseDispose = resolve;
+			});
+			let markDisposeStarted!: () => void;
+			const disposeStarted = new Promise<void>((resolve) => {
+				markDisposeStarted = resolve;
+			});
+			try {
+				const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
 
-			const sessionFile = join(tempDir, "session.jsonl");
-			const appendSessionState = vi.fn();
-			const state = makeState("active-1");
-			state.extensionUiRequests = new Map();
-			state.runtime = {
-				metadata: { kind: "subagent", createdAt: 1 },
-				cwd: tempDir,
-				dispose: vi.fn(async () => {
-					markDisposeStarted();
-					await disposeGate;
-				}),
-				session: {
+				const appendSessionState = vi.fn();
+				const state = makeState("active-1");
+				state.extensionUiRequests = new Map();
+				state.runtime = {
+					metadata: { kind: "subagent", createdAt: 1 },
+					cwd: tempDir,
+					dispose: vi.fn(async () => {
+						markDisposeStarted();
+						await disposeGate;
+					}),
+					session: {
+						sessionId: "session-1",
+						sessionFile: join(tempDir, "session.jsonl"),
+						messages: ["user message"],
+						isBashRunning: false,
+						sessionManager: { appendSessionState, hasUserContent: () => true },
+						abort: vi.fn(async () => {}),
+					},
+				} as never;
+				const internals = daemonInternals(daemon);
+				internals.sessions.set(state.activeSessionId, state);
+				const cron = internals.cronStore.create({
+					activeSessionId: state.activeSessionId,
 					sessionId: "session-1",
-					sessionFile,
-					messages: ["user message"],
-					isBashRunning: false,
-					sessionManager: { appendSessionState, hasUserContent: () => true },
-					abort: vi.fn(async () => {}),
-				},
-			} as never;
-			const internals = daemonInternals(daemon);
-			internals.sessions.set(state.activeSessionId, state);
-			const cron = internals.cronStore.create({
-				activeSessionId: state.activeSessionId,
-				sessionId: "session-1",
-				sessionFile,
-				cwd: tempDir,
-				scheduleText: "in 1h",
-				prompt: "check long run",
-				now: new Date("2026-01-01T12:00:00.000Z"),
-			});
+					sessionFile: join(tempDir, "session.jsonl"),
+					cwd: tempDir,
+					scheduleText: "in 1h",
+					prompt: killJoinCase.prompt,
+					now: new Date("2026-01-01T12:00:00.000Z"),
+				});
 
-			const passivationClose = internals.closeSession(state, "shutdown", true, false);
-			await disposeStarted;
-			const kill = internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-				id: "command-1",
-				type: "kill",
-				activeSessionId: state.activeSessionId,
-			});
-			releaseDispose();
+				// Passivating closes skip descendant cascading; a completed close does not.
+				const joinedClose =
+					killJoinCase.closeReason === "shutdown"
+						? internals.closeSession(state, "shutdown", true, false)
+						: internals.closeSession(state, "completed");
+				await disposeStarted;
+				const kill = internals.handleCommand(makeClient("client-1", state.activeSessionId), {
+					id: "command-1",
+					type: "kill",
+					activeSessionId: state.activeSessionId,
+				});
+				releaseDispose();
 
-			await expect(Promise.all([passivationClose, kill])).resolves.toBeDefined();
-			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
-				status: "cancelled",
-			});
-			expect(appendSessionState).toHaveBeenCalledOnce();
-			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
-		} finally {
-			releaseDispose();
-			rmSync(tempDir, { recursive: true, force: true });
-		}
-	});
-
+				await expect(Promise.all([joinedClose, kill])).resolves.toBeDefined();
+				expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+					status: "cancelled",
+				});
+				expect(appendSessionState).toHaveBeenCalledOnce();
+				expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
+			} finally {
+				releaseDispose();
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
 	it("applies a stronger reason after the joined close rejects", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-kill-failed-close-race-"));
 		let rejectClose!: (error: Error) => void;
@@ -7167,69 +7052,6 @@ describe("daemon mode helpers", () => {
 			expect(SessionManager.open(fixture.childSessionFile).getSessionState()).toEqual({ status: "archived" });
 		} finally {
 			releaseParentDispose();
-			rmSync(tempDir, { recursive: true, force: true });
-		}
-	});
-
-	it("does not duplicate effects when kill joins a completed close", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "optimus-daemon-kill-completed-race-"));
-		let releaseDispose!: () => void;
-		const disposeGate = new Promise<void>((resolve) => {
-			releaseDispose = resolve;
-		});
-		let markDisposeStarted!: () => void;
-		const disposeStarted = new Promise<void>((resolve) => {
-			markDisposeStarted = resolve;
-		});
-		try {
-			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
-
-			const appendSessionState = vi.fn();
-			const state = makeState("active-1");
-			state.extensionUiRequests = new Map();
-			state.runtime = {
-				metadata: { kind: "subagent", createdAt: 1 },
-				cwd: tempDir,
-				dispose: vi.fn(async () => {
-					markDisposeStarted();
-					await disposeGate;
-				}),
-				session: {
-					sessionId: "session-1",
-					sessionFile: join(tempDir, "session.jsonl"),
-					messages: ["user message"],
-					isBashRunning: false,
-					sessionManager: { appendSessionState, hasUserContent: () => true },
-				},
-			} as never;
-			const internals = daemonInternals(daemon);
-			internals.sessions.set(state.activeSessionId, state);
-			const cron = internals.cronStore.create({
-				activeSessionId: state.activeSessionId,
-				sessionId: "session-1",
-				sessionFile: join(tempDir, "session.jsonl"),
-				cwd: tempDir,
-				scheduleText: "in 1h",
-				prompt: "check completed run",
-			});
-
-			const completedClose = internals.closeSession(state, "completed");
-			await disposeStarted;
-			const kill = internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-				id: "command-1",
-				type: "kill",
-				activeSessionId: state.activeSessionId,
-			});
-			releaseDispose();
-
-			await expect(Promise.all([completedClose, kill])).resolves.toBeDefined();
-			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
-				status: "cancelled",
-			});
-			expect(appendSessionState).toHaveBeenCalledOnce();
-			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
-		} finally {
-			releaseDispose();
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
