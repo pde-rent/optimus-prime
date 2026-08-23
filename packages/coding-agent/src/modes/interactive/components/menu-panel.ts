@@ -2,7 +2,11 @@ import {
 	type Component,
 	Container,
 	type Focusable,
+	getKeybindings,
 	Input,
+	listWindow,
+	moveSelection,
+	scrollPositionText,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -213,6 +217,134 @@ function surfaceLine(text: string, width: number, paddingX = PANEL_PADDING_X): s
 function surfaceWrappedLines(text: string, width: number, paddingX = PANEL_PADDING_X): string[] {
 	const innerWidth = Math.max(1, width - paddingX * 2);
 	return wrapTextWithAnsi(text, innerWidth).map((content) => surfaceLine(content, width, paddingX));
+}
+
+/**
+ * Shared selection + windowing controller for the menu-based selectors
+ * (extension-selector, oauth-selector): owns the selected index, the reactive
+ * list layout, keyboard navigation, and the windowed row rendering.
+ */
+export interface MenuSelectorConfig extends MenuViewportProvider {
+	preferredVisibleItems: number;
+	comfortableItemRows: number;
+	compactItemRows?: number;
+	scrollIndicatorRows?: number;
+	/** Dynamic reserved-row count (headers, tab bars, descriptions). */
+	reservedRows: () => number;
+}
+
+export class MenuSelector<T> {
+	private selectedIndex = 0;
+	private layout: MenuListLayout;
+
+	constructor(
+		private readonly listContainer: Container,
+		private readonly config: MenuSelectorConfig,
+	) {
+		this.layout = getMenuListLayout({
+			preferredVisibleItems: config.preferredVisibleItems,
+			reservedRows: config.reservedRows(),
+			comfortableItemRows: config.comfortableItemRows,
+			compactItemRows: config.compactItemRows,
+		});
+	}
+
+	get visibleItems(): number {
+		return this.layout.visibleItems;
+	}
+
+	isCompact(): boolean {
+		return this.layout.compact;
+	}
+
+	getSelectedIndex(): number {
+		return this.selectedIndex;
+	}
+
+	setSelectedIndex(index: number): void {
+		this.selectedIndex = index;
+	}
+
+	clampSelectedIndex(totalItems: number): void {
+		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, totalItems - 1)));
+	}
+
+	/** Re-run the layout for `totalItems`; true when compact/visibleItems changed. */
+	relayout(totalItems: number): boolean {
+		const previous = this.layout;
+		this.layout = getMenuListLayout({
+			getRows: this.config.getRows,
+			preferredVisibleItems: this.config.preferredVisibleItems,
+			totalItems,
+			reservedRows: this.config.reservedRows(),
+			comfortableItemRows: this.config.comfortableItemRows,
+			compactItemRows: this.config.compactItemRows,
+			scrollIndicatorRows: this.config.scrollIndicatorRows,
+		});
+		return previous.compact !== this.layout.compact || previous.visibleItems !== this.layout.visibleItems;
+	}
+
+	/** Move the selection by `delta`; true when the selection changed. */
+	moveBy(delta: number, totalItems: number): boolean {
+		const next = moveSelection(this.selectedIndex, totalItems, delta);
+		if (next === this.selectedIndex) return false;
+		this.selectedIndex = next;
+		return true;
+	}
+
+	/**
+	 * Consume the shared navigation keys (up/down/pageUp/pageDown/confirm/cancel).
+	 * Returns true when the key was handled.
+	 */
+	handleKey(
+		keyData: string,
+		options: {
+			totalItems: number;
+			rerender: () => void;
+			onConfirm: (index: number) => void;
+			onCancel: () => void;
+		},
+	): boolean {
+		const kb = getKeybindings();
+		if (kb.matches(keyData, "tui.select.up")) return this.applyMove(-1, options);
+		if (kb.matches(keyData, "tui.select.down")) return this.applyMove(1, options);
+		if (kb.matches(keyData, "tui.select.pageUp")) return this.applyMove(-this.layout.visibleItems, options);
+		if (kb.matches(keyData, "tui.select.pageDown")) return this.applyMove(this.layout.visibleItems, options);
+		if (kb.matches(keyData, "tui.select.confirm")) {
+			options.onConfirm(this.selectedIndex);
+			return true;
+		}
+		if (kb.matches(keyData, "tui.select.cancel")) {
+			options.onCancel();
+			return true;
+		}
+		return false;
+	}
+
+	private applyMove(delta: number, options: { totalItems: number; rerender: () => void }): boolean {
+		if (!this.moveBy(delta, options.totalItems)) return true;
+		options.rerender();
+		return true;
+	}
+
+	/** Clear and render the windowed rows plus the shared scroll-position indicator. */
+	renderWindow(
+		items: readonly T[],
+		makeRow: (item: T | undefined, selected: boolean) => Component,
+		makeScrollIndicator?: (text: string) => Component,
+	): { start: number; end: number } {
+		this.listContainer.clear();
+		const { start, end } = listWindow(this.selectedIndex, items.length, this.layout.visibleItems);
+		for (let i = start; i < end; i++) {
+			this.listContainer.addChild(makeRow(items[i], i === this.selectedIndex));
+		}
+		if ((start > 0 || end < items.length) && makeScrollIndicator) {
+			this.listContainer.addChild(
+				makeScrollIndicator(theme.fg("muted", scrollPositionText(this.selectedIndex, items.length))),
+			);
+		}
+		return { start, end };
+	}
 }
 
 export class MenuPanel extends Container {

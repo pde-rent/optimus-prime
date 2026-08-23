@@ -10,6 +10,8 @@ Target: <=250,000 total. Numbers always reported split by category.
 - interactive decomposition wave 1: 9 modules out of the god object (@220509f74)
 - tool abort/stat scaffolding collapse (@afdd9352e, 001825592)
 - daemon test harness wave 1 (@0b9e70d6a)
+- auth-source fingerprint + file-lock retry dedup (@001825592)
+- menu selector state machine: MenuSelector<T> replaces duplicated selection/layout/windowing in extension-selector + oauth-selector; physical LOC +48 in the three files (controller API surface), semantic win = one state machine where two divergent copies existed; adopters under audit (S slice 4)
 
 ## In flight
 - G: git client consolidation Batch B (cross-module commit-builder/tree-sync)

@@ -3,20 +3,10 @@
  * Displays a list of string options with keyboard navigation.
  */
 
-import {
-	Container,
-	getKeybindings,
-	listWindow,
-	moveSelection,
-	Spacer,
-	scrollPositionText,
-	Text,
-	type TUI,
-} from "@earendil-works/pi-tui";
-import { theme } from "../theme/theme.js";
+import { Container, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { CountdownTimer } from "./countdown-timer.js";
 import { keyHint, rawKeyHint } from "./keybinding-hints.js";
-import { getMenuListLayout, MenuList, MenuPanel, MenuRow, type MenuViewportProvider } from "./menu-panel.js";
+import { MenuList, MenuPanel, MenuRow, MenuSelector, type MenuViewportProvider } from "./menu-panel.js";
 
 export interface ExtensionSelectorOptions {
 	tui?: TUI;
@@ -43,21 +33,13 @@ function splitTitleAndDescription(value: string): { title: string; description?:
 
 export class ExtensionSelectorComponent extends Container {
 	private options: string[];
-	private selectedIndex = 0;
+	private selector: MenuSelector<string>;
 	private listContainer: Container;
 	private onSelectCallback: (option: string) => void;
 	private onCancelCallback: () => void;
 	private baseTitle: string;
 	private countdown: CountdownTimer | undefined;
 	private panel: MenuPanel;
-	private readonly reservedRows: number;
-	private listLayout = getMenuListLayout({
-		preferredVisibleItems: PREFERRED_VISIBLE_OPTIONS,
-		reservedRows: OPTION_LIST_RESERVED_BASE_ROWS,
-		comfortableItemRows: 1,
-		compactItemRows: 1,
-	});
-	private readonly viewport: MenuViewportProvider;
 
 	constructor(
 		title: string,
@@ -73,9 +55,9 @@ export class ExtensionSelectorComponent extends Container {
 		this.onCancelCallback = onCancel;
 		const header = splitTitleAndDescription(title);
 		this.baseTitle = header.title;
-		this.reservedRows = OPTION_LIST_RESERVED_BASE_ROWS + header.descriptionRows;
 		const tui = opts?.tui;
-		this.viewport = { getRows: opts?.getRows ?? (tui ? () => tui.terminal.rows : undefined) };
+		const viewport: MenuViewportProvider = { getRows: opts?.getRows ?? (tui ? () => tui.terminal.rows : undefined) };
+		const reservedRows = OPTION_LIST_RESERVED_BASE_ROWS + header.descriptionRows;
 
 		this.panel = new MenuPanel({
 			title: header.title,
@@ -94,6 +76,14 @@ export class ExtensionSelectorComponent extends Container {
 
 		this.listContainer = new MenuList({ compact: true });
 		this.panel.addChild(this.listContainer);
+		this.selector = new MenuSelector<string>(this.listContainer, {
+			...viewport,
+			preferredVisibleItems: PREFERRED_VISIBLE_OPTIONS,
+			reservedRows: () => reservedRows,
+			comfortableItemRows: 1,
+			compactItemRows: 1,
+			scrollIndicatorRows: OPTION_SCROLL_INDICATOR_ROWS,
+		});
 		this.panel.addChild(new Spacer(1));
 		this.panel.addChild(
 			new Text(
@@ -111,77 +101,46 @@ export class ExtensionSelectorComponent extends Container {
 	}
 
 	override render(width: number): string[] {
-		const previousLayout = this.listLayout;
-		this.updateLayout();
-		if (
-			this.listLayout.compact !== previousLayout.compact ||
-			this.listLayout.visibleItems !== previousLayout.visibleItems
-		) {
+		if (this.selector.relayout(this.options.length)) {
 			this.updateList();
 		}
 		return super.render(width);
 	}
 
 	private updateList(): void {
-		this.updateLayout();
-		this.listContainer.clear();
-		const { start: startIndex, end: endIndex } = listWindow(
-			this.selectedIndex,
-			this.options.length,
-			this.listLayout.visibleItems,
-		);
-		for (let i = startIndex; i < endIndex; i++) {
-			const isSelected = i === this.selectedIndex;
-			this.listContainer.addChild(
+		this.selector.renderWindow(
+			this.options,
+			(option, selected) =>
 				new MenuRow({
-					primary: this.options[i] ?? "",
-					selected: isSelected,
+					primary: option ?? "",
+					selected,
 				}),
-			);
-		}
-		if (startIndex > 0 || endIndex < this.options.length) {
-			this.listContainer.addChild(
-				new Text(theme.fg("muted", scrollPositionText(this.selectedIndex, this.options.length)), 0, 0),
-			);
-		}
+			(text) => new Text(text, 0, 0),
+		);
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.up") || keyData === "k") {
-			this.moveBy(-1);
-		} else if (kb.matches(keyData, "tui.select.down") || keyData === "j") {
-			this.moveBy(1);
-		} else if (kb.matches(keyData, "tui.select.pageUp")) {
-			this.moveBy(-this.listLayout.visibleItems);
-		} else if (kb.matches(keyData, "tui.select.pageDown")) {
-			this.moveBy(this.listLayout.visibleItems);
-		} else if (kb.matches(keyData, "tui.select.confirm") || keyData === "\n") {
-			const selected = this.options[this.selectedIndex];
-			if (selected) this.onSelectCallback(selected);
-		} else if (kb.matches(keyData, "tui.select.cancel")) {
-			this.onCancelCallback();
+		if (keyData === "k" || keyData === "j") {
+			if (this.selector.moveBy(keyData === "k" ? -1 : 1, this.options.length)) this.updateList();
+			return;
 		}
-	}
-
-	private moveBy(delta: number): void {
-		this.selectedIndex = moveSelection(this.selectedIndex, this.options.length, delta);
-		this.updateList();
+		if (keyData === "\n") {
+			const selected = this.options[this.selector.getSelectedIndex()];
+			if (selected) this.onSelectCallback(selected);
+			return;
+		}
+		this.selector.handleKey(keyData, {
+			totalItems: this.options.length,
+			rerender: () => this.updateList(),
+			onConfirm: (index) => {
+				const selected = this.options[index];
+				if (selected) this.onSelectCallback(selected);
+			},
+			onCancel: () => this.onCancelCallback(),
+		});
 	}
 
 	dispose(): void {
 		this.countdown?.dispose();
-	}
-
-	private updateLayout(): void {
-		this.listLayout = getMenuListLayout({
-			getRows: this.viewport.getRows,
-			preferredVisibleItems: PREFERRED_VISIBLE_OPTIONS,
-			totalItems: this.options.length,
-			reservedRows: this.reservedRows,
-			comfortableItemRows: 1,
-			compactItemRows: 1,
-			scrollIndicatorRows: OPTION_SCROLL_INDICATOR_ROWS,
-		});
 	}
 }
