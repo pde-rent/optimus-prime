@@ -65,4 +65,24 @@ describe("CenteredOverlayComponent", () => {
 
 		expect(overlay?.render(120)[0]).toContain("content 120");
 	});
+
+	it("shows sized dialogs as centered overlays with a dimmed backdrop", () => {
+		let overlay: Component | undefined;
+		let options: Record<string, unknown> | undefined;
+		const ui = {
+			terminal: { rows: 10 },
+			showOverlay: (component: Component, overlayOptions: Record<string, unknown>) => {
+				overlay = component;
+				options = overlayOptions;
+				return {};
+			},
+		} as unknown as TUI;
+
+		const component = new TestComponent();
+		showFullPaneOverlay(ui, component, 80);
+
+		expect(options).toMatchObject({ width: 80, anchor: "center", dimBackdrop: true });
+		// The component itself is shown, not the blank-padded wrapper.
+		expect(overlay).toBe(component);
+	});
 });

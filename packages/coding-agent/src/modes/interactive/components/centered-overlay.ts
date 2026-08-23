@@ -42,23 +42,27 @@ export function showFullPaneOverlay(
 					maxContentWidth: options.fullWidth ? undefined : (options.maxContentWidth ?? 80),
 					suspendFullscreenMouse: options.suspendFullscreenMouse,
 				};
+	// Full-width panes keep the blank-padded wrapper; sized dialogs are centered by
+	// the TUI itself with a dimmed backdrop so they read as a separate layer.
+	if (maxContentWidth === undefined) {
+		const fullOptions: OverlayOptions = { width: "100%", maxHeight: "100%", row: 0, col: 0 };
+		if (suspendFullscreenMouse) {
+			fullOptions.suspendFullscreenMouse = true;
+		}
+		return ui.showOverlay(new CenteredOverlayComponent(component, { getRows: () => ui.terminal.rows }), fullOptions);
+	}
+
 	const overlayOptions: OverlayOptions = {
-		width: "100%",
+		width: maxContentWidth,
 		maxHeight: "100%",
-		row: 0,
-		col: 0,
+		anchor: "center",
+		dimBackdrop: true,
 	};
 	if (suspendFullscreenMouse) {
 		overlayOptions.suspendFullscreenMouse = true;
 	}
 
-	return ui.showOverlay(
-		new CenteredOverlayComponent(component, {
-			getRows: () => ui.terminal.rows,
-			maxContentWidth,
-		}),
-		overlayOptions,
-	);
+	return ui.showOverlay(component, overlayOptions);
 }
 
 export class CenteredOverlayComponent implements Component, Focusable {

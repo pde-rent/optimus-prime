@@ -271,6 +271,8 @@ export interface OverlayOptions {
 	nonCapturing?: boolean;
 	/** If true, temporarily disable fullscreen mouse tracking while the overlay is visible. */
 	suspendFullscreenMouse?: boolean;
+	/** Dim the base content behind this overlay so the dialog reads as a separate layer. */
+	dimBackdrop?: boolean;
 }
 
 /**
@@ -1403,6 +1405,14 @@ export class TUI extends Container {
 		// Extend result with empty lines if content is too short for overlay placement or working area
 		while (result.length < workingHeight) {
 			result.push("");
+		}
+
+		if (visibleEntries.some((e) => e.options?.dimBackdrop === true)) {
+			for (let i = 0; i < result.length; i++) {
+				const line = result[i];
+				if (line.length === 0 || stripAnsi(line).trim().length === 0) continue;
+				result[i] = `\x1b[2m${line}\x1b[22m`;
+			}
 		}
 
 		const viewportStart = Math.max(0, workingHeight - termHeight);
