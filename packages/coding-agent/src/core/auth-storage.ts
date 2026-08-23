@@ -6,7 +6,6 @@
  * try to refresh tokens simultaneously.
  */
 
-import { createHash } from "node:crypto";
 import {
 	findEnvKeys,
 	getEnvApiKey,
@@ -17,8 +16,10 @@ import {
 import { getOAuthApiKey, getOAuthProvider, getOAuthProviders } from "@earendil-works/pi-ai/oauth";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.js";
+import { createAuthSourceFingerprints } from "./auth-source-fingerprint.js";
+import lockfile from "proper-lockfile";
+import { acquireLockSyncWithRetry } from "./file-lock.js";
 import { resolveConfigValue, resolveConfigValueUncached } from "./resolve-config-value.js";
 
 export type ApiKeyCredential = {
@@ -103,40 +104,13 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		}
 	}
 
-	private acquireLockSyncWithRetry(path: string): () => void {
-		const maxAttempts = 10;
-		const delayMs = 20;
-		let lastError: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				return lockfile.lockSync(path, { realpath: false });
-			} catch (error) {
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? String((error as { code?: unknown }).code)
-						: undefined;
-				if (code !== "ELOCKED" || attempt === maxAttempts) {
-					throw error;
-				}
-				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
-			}
-		}
-
-		throw (lastError as Error) ?? new Error("Failed to acquire auth storage lock");
-	}
-
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T {
 		this.ensureParentDir();
 		this.ensureFileExists();
 
 		let release: (() => void) | undefined;
 		try {
-			release = this.acquireLockSyncWithRetry(this.authPath);
+			release = acquireLockSyncWithRetry(this.authPath, "auth storage");
 			const current = existsSync(this.authPath) ? readFileSync(this.authPath, "utf-8") : undefined;
 			const { result, next } = fn(current);
 			if (next !== undefined) {
@@ -285,11 +259,6 @@ export class AuthStorage {
 		this.errors.push(normalizedError);
 	}
 
-	private fingerprintAuthSource(source: ActiveAuthStatusSource, material: string): string {
-		const digest = createHash("sha256").update(source).update("\0").update(material).digest("hex");
-		return `${source}:${digest}`;
-	}
-
 	private createAuthSourceCandidate(options: {
 		source: ActiveAuthStatusSource;
 		configured: boolean;
@@ -298,33 +267,7 @@ export class AuthStorage {
 		label?: string;
 		resolveValueMaterial?: () => string | undefined;
 	}): AuthSourceCandidate {
-		return {
-			configured: options.configured,
-			source: options.source,
-			...(options.label ? { label: options.label } : {}),
-			identityFingerprint: this.fingerprintAuthSource(options.source, `identity:${options.identityMaterial}`),
-			...(options.valueMaterial !== undefined
-				? {
-						valueFingerprint: this.fingerprintAuthSource(
-							options.source,
-							`value:${options.identityMaterial}\0${options.valueMaterial}`,
-						),
-					}
-				: {}),
-			...(options.resolveValueMaterial
-				? {
-						resolveValueFingerprint: () => {
-							const valueMaterial = options.resolveValueMaterial?.();
-							return valueMaterial === undefined
-								? undefined
-								: this.fingerprintAuthSource(
-										options.source,
-										`value:${options.identityMaterial}\0${valueMaterial}`,
-									);
-						},
-					}
-				: {}),
-		};
+		return createAuthSourceFingerprints(options);
 	}
 
 	private getStoredCredentialValueMaterial(providerId: string, credential: AuthCredential): string | undefined {

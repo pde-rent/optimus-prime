@@ -30,6 +30,7 @@ import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-a
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { getAgentDir } from "../config.js";
+import { createAuthSourceFingerprints } from "./auth-source-fingerprint.js";
 import type { AuthSourceToken, AuthStatus, AuthStorage } from "./auth-storage.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.js";
 import {
@@ -1084,11 +1085,6 @@ export class ModelRegistry {
 		return this.authStorage.hasAuth(provider) || this.hasConfiguredProviderRequestAuth(provider);
 	}
 
-	private fingerprintProviderRequestAuthSource(source: ProviderRequestAuthSource["source"], material: string): string {
-		const digest = createHash("sha256").update(source).update("\0").update(material).digest("hex");
-		return `${source}:${digest}`;
-	}
-
 	private createProviderRequestAuthSource(options: {
 		source: ProviderRequestAuthSource["source"];
 		identityMaterial: string;
@@ -1096,36 +1092,7 @@ export class ModelRegistry {
 		label?: string;
 		resolveValueMaterial?: () => string | undefined;
 	}): ProviderRequestAuthSource {
-		return {
-			configured: true,
-			source: options.source,
-			...(options.label ? { label: options.label } : {}),
-			identityFingerprint: this.fingerprintProviderRequestAuthSource(
-				options.source,
-				`identity:${options.identityMaterial}`,
-			),
-			...(options.valueMaterial !== undefined
-				? {
-						valueFingerprint: this.fingerprintProviderRequestAuthSource(
-							options.source,
-							`value:${options.identityMaterial}\0${options.valueMaterial}`,
-						),
-					}
-				: {}),
-			...(options.resolveValueMaterial
-				? {
-						resolveValueFingerprint: () => {
-							const valueMaterial = options.resolveValueMaterial?.();
-							return valueMaterial === undefined
-								? undefined
-								: this.fingerprintProviderRequestAuthSource(
-										options.source,
-										`value:${options.identityMaterial}\0${valueMaterial}`,
-									);
-						},
-					}
-				: {}),
-		};
+		return createAuthSourceFingerprints({ ...options, configured: true });
 	}
 
 	private getProviderRequestAuthSource(
