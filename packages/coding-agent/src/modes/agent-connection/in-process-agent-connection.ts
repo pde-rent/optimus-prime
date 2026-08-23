@@ -49,6 +49,7 @@ import type {
 	AgentConnectionQueuedMessageMutationStatus,
 	AgentConnectionQueueMode,
 	AgentConnectionQueueState,
+	AgentConnectionReplCellResult,
 	AgentConnectionResourceSnapshot,
 	AgentConnectionSavedSessionInfo,
 	AgentConnectionSavedSessionScope,
@@ -406,6 +407,25 @@ export class InProcessAgentConnection implements AgentConnection {
 
 	async abortBash(): Promise<void> {
 		this.session.abortBash();
+	}
+
+	async executeReplCell(code: string, options?: { timeoutSeconds?: number }): Promise<AgentConnectionReplCellResult> {
+		const cell = await this.session.executeUserReplCell(code, options);
+		return {
+			stdout: cell.stdout,
+			stderr: cell.stderr,
+			...(cell.result !== undefined ? { result: cell.result } : {}),
+			status: cell.status,
+			...(cell.error !== undefined ? { error: cell.error } : {}),
+		};
+	}
+
+	async listReplVariables(): Promise<{ names: string[]; types: Record<string, string> }> {
+		return this.session.listReplNamespace();
+	}
+
+	async clearReplVariables(): Promise<number> {
+		return this.session.clearReplNamespace();
 	}
 
 	async setModel(provider: string, modelId: string): Promise<AgentConnectionModel> {

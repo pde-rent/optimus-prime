@@ -459,6 +459,14 @@ export interface AgentConnectionPromptOptions {
 	signal?: AbortSignal;
 }
 
+/** Result of a user-initiated REPL kernel cell (/js, /ts); never enters message history. */
+export interface AgentConnectionReplCellResult {
+	stdout: string;
+	stderr: string;
+	result?: string;
+	status: "ok" | "error" | "aborted";
+	error?: { ename: string; evalue: string; traceback: string[] };
+}
 export interface AgentConnectionSideQuestionEvent {
 	id: string;
 	question: string;
@@ -712,6 +720,16 @@ export interface AgentConnection {
 	 */
 	executeBash(command: string, options?: AgentConnectionExecuteBashOptions): Promise<void>;
 	executeBashAndWait(command: string): Promise<BashResult>;
+
+	/**
+	 * Evaluate code in the focused session's REPL kernel (/js, /ts). Serialized with agent
+	 * cells by the kernel's execution queue; safe while the agent streams.
+	 */
+	executeReplCell(code: string, options?: { timeoutSeconds?: number }): Promise<AgentConnectionReplCellResult>;
+	/** Top-level REPL variables with type badges (/vars). */
+	listReplVariables(): Promise<{ names: string[]; types: Record<string, string> }>;
+	/** Clear all user-defined REPL variables (/clear-vars); returns how many were removed. */
+	clearReplVariables(): Promise<number>;
 	abortBash(): Promise<void>;
 
 	setModel(provider: string, modelId: string): Promise<AgentConnectionModel>;

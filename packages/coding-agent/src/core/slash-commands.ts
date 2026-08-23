@@ -204,6 +204,32 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "login", description: "Configure provider authentication" },
 	{ name: "logout", description: "Remove provider authentication" },
 	{
+		name: "js",
+		description: "Evaluate JavaScript in the running agent's REPL kernel",
+		argumentHint: "<expression>",
+		takesArgument: true,
+	},
+	{
+		name: "ts",
+		description: "Evaluate TypeScript in the running agent's REPL kernel",
+		argumentHint: "<expression>",
+		takesArgument: true,
+	},
+	{ name: "vars", description: "List the REPL kernel's top-level variables with type badges" },
+	{ name: "clear-vars", description: "Clear the REPL kernel's user-defined variables" },
+	{
+		name: "bash",
+		description: "Run a shell command inside the REPL kernel (via its bash shim)",
+		argumentHint: "<command>",
+		takesArgument: true,
+	},
+	{
+		name: "python",
+		description: "Run Python inside the REPL kernel (via its python shim)",
+		argumentHint: "<code>",
+		takesArgument: true,
+	},
+	{
 		name: "mcp",
 		description: "Open MCP Connections or manage MCP integrations",
 		argumentHint: "[list|login <name>|logout <name>]",

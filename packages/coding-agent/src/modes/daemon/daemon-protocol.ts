@@ -66,8 +66,11 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // the revision, so a stale daemon is relaunched rather than left speaking the old wire names.
 // Revision 18 adds set_graph_resolver, so a session's graph budget can be changed from a client
 // that is not the process holding the session.
-export const DAEMON_SCHEMA_REVISION = 18;
-export const DAEMON_SCHEMA_ID = "protocol-7-schema-18-5d84c474b7e2";
+// Revision 19 adds repl_execute, repl_list_names, and repl_clear_names, so a client can
+// evaluate code in and clear the focused session's REPL kernel (/js, /ts, /vars, /clear-vars)
+// without routing through the model.
+export const DAEMON_SCHEMA_REVISION = 19;
+export const DAEMON_SCHEMA_ID = "protocol-7-schema-19-b378911d260f";
 
 export type DaemonProtocolName = typeof DAEMON_PROTOCOL_NAME;
 export type DaemonProtocolVersion = number;
@@ -603,6 +606,9 @@ export type DaemonCommand =
 	| { id?: string; type: "get_rlm_max_depth_status"; activeSessionId: string }
 	| { id?: string; type: "set_rlm_max_depth"; activeSessionId: string; maxDepth: number; global?: boolean }
 	| { id?: string; type: "set_graph_resolver"; activeSessionId: string; level: GraphResolverLevel }
+	| { id?: string; type: "repl_execute"; activeSessionId: string; code: string; timeoutSeconds?: number }
+	| { id?: string; type: "repl_list_names"; activeSessionId: string }
+	| { id?: string; type: "repl_clear_names"; activeSessionId: string }
 	| { id?: string; type: "rename_saved_session"; activeSessionId?: string; sessionPath: string; name: string }
 	| { id?: string; type: "delete_saved_session"; activeSessionId?: string; sessionPath: string }
 	| { id?: string; type: "get_session_context"; activeSessionId: string }
@@ -741,6 +747,9 @@ export const DAEMON_COMMAND_COMPATIBILITY = {
 	get_rlm_max_depth_status: RLM_MAX_DEPTH_COMMAND,
 	set_rlm_max_depth: RLM_MAX_DEPTH_COMMAND,
 	set_graph_resolver: { minProtocol: 7, minSchemaRevision: 18 },
+	repl_execute: { minProtocol: 7, minSchemaRevision: 19 },
+	repl_list_names: { minProtocol: 7, minSchemaRevision: 19 },
+	repl_clear_names: { minProtocol: 7, minSchemaRevision: 19 },
 	rename_saved_session: LEGACY_DAEMON_COMMAND,
 	delete_saved_session: LEGACY_DAEMON_COMMAND,
 	get_session_context: LEGACY_DAEMON_COMMAND,

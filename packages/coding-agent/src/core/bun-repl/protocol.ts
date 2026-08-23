@@ -36,6 +36,11 @@ export interface BunReplRestoreRequest {
 	data?: Record<string, unknown>;
 }
 
+export interface BunReplClearNamespaceRequest {
+	id: string;
+	type: "clearNamespace";
+}
+
 export interface BunReplListNamesRequest {
 	id: string;
 	type: "listNames";
@@ -56,6 +61,7 @@ export type BunReplHostToRepl =
 	| BunReplShutdownRequest
 	| BunReplSnapshotRequest
 	| BunReplRestoreRequest
+	| BunReplClearNamespaceRequest
 	| BunReplListNamesRequest
 	| BunReplResolveRefsRequest
 	| BunReplHostResponse;
@@ -128,6 +134,17 @@ export interface BunReplListNamesResult {
 	id: string;
 	type: "listNamesResult";
 	names: string[];
+	/** Per-name type badge (`string`, `map`, …) for user-facing variable listings. */
+	types?: Record<string, string>;
+}
+
+export interface BunReplClearNamespaceResult {
+	id: string;
+	type: "clearNamespaceResult";
+	status: "ok" | "error";
+	/** Number of user-defined names removed from the namespace. */
+	cleared?: number;
+	error?: string;
 }
 
 /**
@@ -182,4 +199,5 @@ export type BunReplReplToHost =
 	| BunReplResolveRefsResult
 	| BunReplLateSentAgentMessage
 	| BunReplHostRequest
-	| BunReplHostResponse;
+	| BunReplHostResponse
+	| BunReplClearNamespaceResult;

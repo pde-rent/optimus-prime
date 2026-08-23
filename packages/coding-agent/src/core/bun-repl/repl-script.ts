@@ -1119,6 +1119,41 @@ function restoreState(input: { dataB64?: string; data?: Record<string, unknown> 
 function listNames(): string[] {
 	return Object.keys(context).filter((k) => !k.startsWith("__") && !INJECTED.has(k));
 }
+/**
+ * Type badge per defined name, for user-facing variable listings.
+ *
+ * `typeof` crosses realms safely; for objects the constructor name is more useful than a
+ * bare `object` (`map`, `date`, a class instance's own class). A throwing getter degrades
+ * to `unknown` instead of failing the listing.
+ */
+function nameTypes(): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const name of listNames()) {
+		let value: unknown;
+		try {
+			value = context[name];
+		} catch {
+			out[name] = "unknown";
+			continue;
+		}
+		if (value === null) {
+			out[name] = "null";
+			continue;
+		}
+		if (Array.isArray(value)) {
+			out[name] = "array";
+			continue;
+		}
+		const base = typeof value;
+		if (base === "object") {
+			const ctor = (value as object).constructor?.name;
+			out[name] = ctor && ctor !== "Object" ? ctor.toLowerCase() : "object";
+			continue;
+		}
+		out[name] = base;
+	}
+	return out;
+}
 
 /** `Object.prototype.toString`'s output: the absence of a render, not a render. */
 const DEFAULT_OBJECT_TEXT = /^\[object [A-Za-z]+\]$/;
@@ -1260,7 +1295,29 @@ process.stdin.on("data", (chunk: string) => {
 				break;
 			}
 			case "listNames": {
-				send({ id: msg.id, type: "listNamesResult", names: listNames() });
+				send({ id: msg.id, type: "listNamesResult", names: listNames(), types: nameTypes() });
+				break;
+			}
+			case "clearNamespace": {
+				try {
+					// Deletion must run inside the vm: removing a key from the host-side sandbox
+					// object does not remove it from the contextified global, so a host-side
+					// `delete` would empty the listing while every value stayed reachable.
+					const names = listNames();
+					if (names.length > 0) {
+						const source = names.map((key) => `delete globalThis[${JSON.stringify(key)}];`).join("");
+						runInContext(source, context, { timeout: 5000 });
+					}
+					const cleared = names.length;
+					send({ id: msg.id, type: "clearNamespaceResult", status: "ok", cleared });
+				} catch (err: unknown) {
+					send({
+						id: msg.id,
+						type: "clearNamespaceResult",
+						status: "error",
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
 				break;
 			}
 			case "resolveRefs": {

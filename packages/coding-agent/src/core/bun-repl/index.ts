@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { recordOrphanProcessState } from "../orphan-process-journal.js";
 import type { KernelAttachment, KernelDiffDisplay, KernelSentAgentMessage } from "../tools/repl-types.js";
 import type {
+	BunReplClearNamespaceResult,
 	BunReplExecuteRequest,
 	BunReplHostRequest,
 	BunReplHostResponse,
@@ -19,7 +20,7 @@ import type {
 	BunReplResult,
 	BunReplSnapshotResult,
 } from "./protocol.js";
-import { loadSnapshot, saveSnapshot } from "./state-snapshot.js";
+import { clearSnapshot, loadSnapshot, saveSnapshot } from "./state-snapshot.js";
 
 /** Rolling tail kept from the child's stderr, matching the old kernel's diagnostic tail. */
 const CHILD_STDERR_TAIL_CHARS = 4096;
@@ -998,7 +999,8 @@ export class BunReplManager {
 		return { restoredNames, failed };
 	}
 
-	async listNamespaceNames(): Promise<string[] | null> {
+	/** Names plus type badges from the live namespace; null when the kernel is not running. */
+	async listNamespace(): Promise<{ names: string[]; types: Record<string, string> } | null> {
 		if (!this.isRunning) return null;
 
 		const result = await this._sendAndWait<BunReplListNamesResult>({
@@ -1006,7 +1008,30 @@ export class BunReplManager {
 			type: "listNames",
 		});
 
-		return result.names;
+		return { names: result.names, types: result.types ?? {} };
+	}
+
+	async listNamespaceNames(): Promise<string[] | null> {
+		return (await this.listNamespace())?.names ?? null;
+	}
+
+	/**
+	 * Remove every user-defined name from the live namespace and drop the on-disk snapshot,
+	 * so a later kernel restart cannot restore what was cleared. Returns the number of names
+	 * removed.
+	 */
+	async clearNamespace(): Promise<number> {
+		const result = await this._sendAndWait<BunReplClearNamespaceResult>({
+			id: randomUUID(),
+			type: "clearNamespace",
+		});
+		if (result.status === "error") {
+			throw new Error(result.error ?? "clearNamespace failed");
+		}
+		if (this._options.snapshotDir) {
+			await clearSnapshot(this._options.snapshotDir).catch(() => {});
+		}
+		return result.cleared ?? 0;
 	}
 
 	/**

@@ -95,6 +95,7 @@ import {
 } from "./autonomous.js";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
 import {
+	type BunReplExecuteResult,
 	expandInjectionRefs,
 	type InjectionRefSite,
 	isPlainInjectionName,
@@ -11143,6 +11144,46 @@ export class AgentSession {
 		} finally {
 			this._bashAbortController = undefined;
 		}
+	}
+
+	/**
+	 * Run a user-initiated REPL cell (/js, /ts). Never enters message history.
+	 *
+	 * The kernel serializes cells through its own execution queue, so this is safe while an
+	 * agent turn is streaming; a user cell simply waits for the running cell to settle.
+	 */
+	async executeUserReplCell(code: string, options?: { timeoutSeconds?: number }): Promise<BunReplExecuteResult> {
+		const provisioner = this._replKernelProvisioner;
+		if (!provisioner) {
+			throw new Error("The REPL kernel is not available in this session");
+		}
+		const manager = await provisioner.ensure();
+		return manager.execute(code, {
+			internal: true,
+			...(options?.timeoutSeconds !== undefined && options.timeoutSeconds > 0
+				? { timeout: options.timeoutSeconds * 1000 }
+				: {}),
+		});
+	}
+
+	/** Names plus type badges of the live REPL namespace, for /vars. */
+	async listReplNamespace(): Promise<{ names: string[]; types: Record<string, string> }> {
+		const provisioner = this._replKernelProvisioner;
+		if (!provisioner) {
+			throw new Error("The REPL kernel is not available in this session");
+		}
+		const manager = await provisioner.ensure();
+		return (await manager.listNamespace()) ?? { names: [], types: {} };
+	}
+
+	/** Remove every user-defined REPL variable (/clear-vars). Returns how many were removed. */
+	async clearReplNamespace(): Promise<number> {
+		const provisioner = this._replKernelProvisioner;
+		if (!provisioner) {
+			throw new Error("The REPL kernel is not available in this session");
+		}
+		const manager = await provisioner.ensure();
+		return manager.clearNamespace();
 	}
 
 	/**

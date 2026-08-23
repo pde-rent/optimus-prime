@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface SnapshotManifest {
@@ -111,4 +111,16 @@ export async function snapshotExists(dir: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Drop the snapshot so a later kernel restart cannot restore cleared state.
+ * Missing files are fine: there was nothing to clear.
+ */
+export async function clearSnapshot(dir: string): Promise<void> {
+	await Promise.all([
+		rm(join(dir, MANIFEST_FILE), { force: true }),
+		rm(join(dir, DATA_FILE), { force: true }),
+		rm(join(dir, LEGACY_DATA_FILE), { force: true }),
+	]);
 }

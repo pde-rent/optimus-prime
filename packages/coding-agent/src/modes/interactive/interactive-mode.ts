@@ -140,6 +140,7 @@ import type {
 	AgentConnectionModelCatalog,
 	AgentConnectionQueuedMessageMutationStatus,
 	AgentConnectionQueueState,
+	AgentConnectionReplCellResult,
 	AgentConnectionResourceDiagnostic,
 	AgentConnectionResourceSnapshot,
 	AgentConnectionRlmChildAgentSnapshot,
@@ -493,6 +494,28 @@ export interface InteractiveModeRunResult {
 	source: Pick<AgentConnectionState, "activeSessionId" | "sessionFile" | "sessionId" | "sessionName" | "cwd">;
 	/** Set when the user clicked a subagent row; the agents view preselects that child. */
 	focusChildActiveSessionId?: string;
+}
+
+/** Ceiling on one /js or /ts result pane; a runaway print must not flood the transcript. */
+const REPL_OUTPUT_MAX_CHARS = 20_000;
+
+function formatReplCellOutput(cell: AgentConnectionReplCellResult): string {
+	const parts: string[] = [];
+	if (cell.stdout) parts.push(cell.stdout.replace(/\n$/, ""));
+	if (cell.stderr) parts.push(cell.stderr.replace(/\n$/, ""));
+	if (cell.result !== undefined && cell.result !== "") parts.push(`${theme.fg("dim", "=> ")}${cell.result}`);
+	let text = parts.join("\n");
+	if (!text) text = theme.fg("dim", "(no output)");
+	if (cell.status === "error") {
+		const detail = cell.error
+			? [`${cell.error.ename}: ${cell.error.evalue}`, ...cell.error.traceback].join("\n")
+			: "unknown error";
+		text += `\n${theme.fg("error", detail)}`;
+	}
+	if (text.length > REPL_OUTPUT_MAX_CHARS) {
+		text = `${text.slice(0, REPL_OUTPUT_MAX_CHARS)}\n${theme.fg("dim", `… truncated (${text.length} chars total)`)}`;
+	}
+	return text;
 }
 
 export function formatAgentDepthLabel(depth: number | undefined, hasChildren: boolean): string | undefined {
@@ -4219,6 +4242,26 @@ export class InteractiveMode {
 				if (commandName === "mcp") {
 					this.editor.setText("");
 					await this.handleMcpCommand(commandArgs);
+					return;
+				}
+				if (commandName === "js" || commandName === "ts") {
+					this.editor.setText("");
+					await this.handleReplEvalCommand(commandName, canonicalCommandText, commandArgs);
+					return;
+				}
+				if (commandName === "vars" && !commandArgs) {
+					this.editor.setText("");
+					await this.handleVarsCommand(canonicalCommandText);
+					return;
+				}
+				if (commandName === "clear-vars" && !commandArgs) {
+					this.editor.setText("");
+					await this.handleClearVarsCommand(canonicalCommandText);
+					return;
+				}
+				if (commandName === "bash" || commandName === "python") {
+					this.editor.setText("");
+					this.handleKernelShimCommand(commandName, canonicalCommandText);
 					return;
 				}
 				if (slashCommand?.name === "clear") {
@@ -8800,6 +8843,77 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * User REPL-kernel commands (/js, /ts, /vars, /clear-vars, /bash, /python).
+	 *
+	 * Like side questions, these never enter the model's message history: they are handled
+	 * in the submit pipeline before any prompt admission and render only as local panes.
+	 */
+	private async handleReplEvalCommand(kind: string, canonicalText: string, code: string): Promise<void> {
+		const trimmed = code.trim();
+		if (!trimmed) {
+			this.showError(`Usage: /${kind} <expression>`);
+			return;
+		}
+		this.echoLocalCommand(canonicalText);
+		let cell: AgentConnectionReplCellResult;
+		try {
+			cell = await this.agentConnection.executeReplCell(trimmed);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(formatReplCellOutput(cell), 1, 0));
+		this.ui.requestRender();
+	}
+
+	private async handleVarsCommand(canonicalText: string): Promise<void> {
+		this.echoLocalCommand(canonicalText);
+		let listing: { names: string[]; types: Record<string, string> };
+		try {
+			listing = await this.agentConnection.listReplVariables();
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+		let info: string;
+		if (listing.names.length === 0) {
+			info = theme.fg("dim", "No variables defined.");
+		} else {
+			const width = Math.max(...listing.names.map((name) => name.length));
+			const rows = [...listing.names]
+				.sort()
+				.map((name) => `  ${name.padEnd(width)}  ${theme.fg("dim", listing.types[name] ?? "?")}`);
+			info = `${theme.bold("REPL variables")} (${listing.names.length})\n${rows.join("\n")}`;
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private async handleClearVarsCommand(canonicalText: string): Promise<void> {
+		this.echoLocalCommand(canonicalText);
+		let cleared: number;
+		try {
+			cleared = await this.agentConnection.clearReplVariables();
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(
+			new Text(theme.fg("dim", `Cleared ${cleared} variable${cleared === 1 ? "" : "s"}.`), 1, 0),
+		);
+		this.ui.requestRender();
+	}
+
+	private handleKernelShimCommand(name: string, canonicalText: string): void {
+		this.echoLocalCommand(canonicalText);
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(theme.fg("dim", `The kernel ${name} shim is not yet available.`), 1, 0));
+		this.ui.requestRender();
+	}
 	private async handleContextCommand(): Promise<void> {
 		let info: string;
 		try {

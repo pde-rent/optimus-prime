@@ -33,6 +33,7 @@ export type {
 	AgentConnectionQueueState,
 	AgentConnectionReplayInfo,
 	AgentConnectionReplayStatus,
+	AgentConnectionReplCellResult,
 	AgentConnectionResourceCollision,
 	AgentConnectionResourceContextFile,
 	AgentConnectionResourceDiagnostic,

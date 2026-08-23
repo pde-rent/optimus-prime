@@ -4281,6 +4281,31 @@ export class AgentDaemon {
 				return success(command.id, "abort_bash");
 			}
 
+			case "repl_execute": {
+				const state = this.getSessionState(command.activeSessionId);
+				const cell = await state.runtime.session.executeUserReplCell(command.code, {
+					...(command.timeoutSeconds !== undefined ? { timeoutSeconds: command.timeoutSeconds } : {}),
+				});
+				return success(command.id, "repl_execute", {
+					stdout: cell.stdout,
+					stderr: cell.stderr,
+					...(cell.result !== undefined ? { result: cell.result } : {}),
+					status: cell.status,
+					...(cell.error !== undefined ? { error: cell.error } : {}),
+				});
+			}
+
+			case "repl_list_names": {
+				const state = this.getSessionState(command.activeSessionId);
+				return success(command.id, "repl_list_names", await state.runtime.session.listReplNamespace());
+			}
+
+			case "repl_clear_names": {
+				const state = this.getSessionState(command.activeSessionId);
+				const cleared = await state.runtime.session.clearReplNamespace();
+				return success(command.id, "repl_clear_names", { cleared });
+			}
+
 			case "cancel_rlm_child": {
 				const state = this.getSessionState(command.activeSessionId);
 				const cancelled = state.runtime.session.cancelRlmChildRun(command.childId);
