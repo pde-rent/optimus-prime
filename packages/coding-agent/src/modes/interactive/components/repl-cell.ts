@@ -717,7 +717,7 @@ export class ReplCellComponent implements Component {
 				rows.push(`${indent}${renderDiffSeparator(contentWidth)}`);
 			}
 			// Append, not spread: a huge edit's diff can exceed the JS arg-count limit.
-			for (const row of renderRichDiff(diffText, contentWidth, { language })) {
+			for (const row of renderRichDiff(diffText, contentWidth, { view: "auto", language })) {
 				rows.push(`${indent}${row}`);
 			}
 		});

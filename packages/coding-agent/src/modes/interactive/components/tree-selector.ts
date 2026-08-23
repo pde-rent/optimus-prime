@@ -14,7 +14,7 @@ import {
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConnectionSessionEntry, AgentConnectionSessionTreeNode } from "../../agent-connection/index.js";
-import { theme } from "../theme/theme.js";
+import { getLanguageFromPath, theme } from "../theme/theme.js";
 import { renderRichDiff } from "./diff.js";
 import {
 	FILE_CHANGE_DIFF_INDENT,
@@ -756,8 +756,9 @@ class TreeList implements Component {
 		const rows: string[] = [];
 		for (const change of this.getEntryDiffs(entry)) {
 			rows.push(truncateToWidth(`${indent}${theme.fg("muted", change.path)}`, width));
-			for (const line of renderRichDiff(change.diff, contentWidth)) {
-				rows.push(truncateToWidth(`${indent}${line}`, width));
+			const language = getLanguageFromPath(change.path);
+			for (const row of renderRichDiff(change.diff, contentWidth, { view: "auto", language })) {
+				rows.push(`${indent}${row}`);
 			}
 		}
 		return rows;

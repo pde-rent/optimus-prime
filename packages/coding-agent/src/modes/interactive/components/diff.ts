@@ -208,6 +208,20 @@ function buildRichDiffLine(spec: DiffLineSpec): string[] {
 export interface RichDiffOptions {
 	/** Language id for syntax highlighting the diff content (e.g. "typescript"). */
 	language?: string;
+	/**
+	 * Layout: "unified" (default) stacks -/+ rows; "split" shows them side by side;
+	 * "auto" picks split once the available width reaches SPLIT_MIN_WIDTH.
+	 */
+	view?: "auto" | "split" | "unified";
+}
+
+/** Minimum total width at which "auto" selects the side-by-side layout. */
+export const SPLIT_MIN_WIDTH = 120;
+
+interface ParsedLine {
+	prefix: "+" | "-" | " ";
+	lineNum: string;
+	content: string;
 }
 
 /** A dim `⋮` row separating non-adjacent hunks of one file's diff. */
@@ -218,70 +232,156 @@ export function renderDiffSeparator(contentWidth: number): string {
 	return theme.bg("toolPanelBg", marker + " ".repeat(pad));
 }
 
-/** Render a unified diff as full-width rows: green/red blocks, syntax-highlighted. */
+function plainSpec(content: string, width: number, language: string | undefined): DiffLineSpec {
+	return {
+		bg: "toolPanelBg",
+		gutterFg: "toolDiffContext",
+		// Leading space keeps the text off the edge while the bg still reaches it.
+		gutter: " ",
+		content,
+		language,
+		width,
+	};
+}
+
+/** Parse every line; unparsable lines (headers, separators) come back as null. */
+function parseAllLines(diffText: string): (ParsedLine | null)[] {
+	return diffText.split("\n").map((line) => {
+		const parsed = parseDiffLine(line);
+		if (!parsed || (parsed.prefix !== "+" && parsed.prefix !== "-" && parsed.prefix !== " ")) return null;
+		return { prefix: parsed.prefix, lineNum: parsed.lineNum, content: parsed.content };
+	});
+}
+
+function specForParsedLine(
+	line: ParsedLine,
+	width: number,
+	language: string | undefined,
+	useBlocks: boolean,
+): DiffLineSpec {
+	const gutter = ` ${line.lineNum} ${line.prefix === " " ? " " : line.prefix} `;
+	if (line.prefix === "+") {
+		return {
+			bg: useBlocks ? "toolDiffAddedBg" : "toolPanelBg",
+			gutterFg: "toolDiffAdded",
+			gutter,
+			content: replaceTabs(line.content),
+			language,
+			width,
+			contentFg: useBlocks ? undefined : "toolDiffAdded",
+		};
+	}
+	if (line.prefix === "-") {
+		return {
+			bg: useBlocks ? "toolDiffRemovedBg" : "toolPanelBg",
+			gutterFg: "toolDiffRemoved",
+			gutter,
+			content: replaceTabs(line.content),
+			language,
+			width,
+			contentFg: useBlocks ? undefined : "toolDiffRemoved",
+		};
+	}
+	return {
+		bg: "toolPanelBg",
+		gutterFg: "toolDiffContext",
+		gutter,
+		content: replaceTabs(line.content),
+		language,
+		width,
+	};
+}
+
+function blankHalfCell(width: number): string {
+	return theme.bg("toolPanelBg", " ".repeat(width));
+}
+
+/** One paired side-by-side row (left removed/context, right added/context), padded to equal height. */
+function pushSplitPair(
+	rows: string[],
+	left: ParsedLine | undefined,
+	right: ParsedLine | undefined,
+	halfWidth: number,
+	language: string | undefined,
+	useBlocks: boolean,
+): void {
+	const leftRows = left
+		? buildRichDiffLine(specForParsedLine(left, halfWidth, language, useBlocks))
+		: [blankHalfCell(halfWidth)];
+	const rightRows = right
+		? buildRichDiffLine(specForParsedLine(right, halfWidth, language, useBlocks))
+		: [blankHalfCell(halfWidth)];
+	const height = Math.max(leftRows.length, rightRows.length);
+	for (let i = 0; i < height; i++) {
+		rows.push((leftRows[i] ?? blankHalfCell(halfWidth)) + (rightRows[i] ?? blankHalfCell(halfWidth)));
+	}
+}
+
+/** Side-by-side layout: -/+ groups pair row-wise; context lines repeat on both halves. */
+function buildSplitDiff(
+	diffText: string,
+	width: number,
+	halfWidth: number,
+	language: string | undefined,
+	useBlocks: boolean,
+): string[] {
+	const rawLines = diffText.split("\n");
+	const parsed = parseAllLines(diffText);
+	const rows: string[] = [];
+	let i = 0;
+	while (i < parsed.length) {
+		const line = parsed[i];
+		if (!line) {
+			rows.push(...buildRichDiffLine(plainSpec(replaceTabs(rawLines[i] ?? ""), width, language)));
+			i++;
+			continue;
+		}
+		if (line.prefix === "-") {
+			const removed: ParsedLine[] = [];
+			while (parsed[i]?.prefix === "-") removed.push(parsed[i++] as ParsedLine);
+			const added: ParsedLine[] = [];
+			while (parsed[i]?.prefix === "+") added.push(parsed[i++] as ParsedLine);
+			const count = Math.max(removed.length, added.length);
+			for (let k = 0; k < count; k++) {
+				pushSplitPair(rows, removed[k], added[k], halfWidth, language, useBlocks);
+			}
+			continue;
+		}
+		if (line.prefix === "+") {
+			pushSplitPair(rows, undefined, line, halfWidth, language, useBlocks);
+			i++;
+			continue;
+		}
+		pushSplitPair(rows, line, line, halfWidth, language, useBlocks);
+		i++;
+	}
+	return rows;
+}
+
+/**
+ * Render a unified diff as full-width rows: green/red blocks, syntax-highlighted.
+ * With `view: "split"` (or `"auto"` at SPLIT_MIN_WIDTH+), removed and added lines
+ * render side by side like OpenCode's diff view.
+ */
 export function renderRichDiff(diffText: string, contentWidth: number, options: RichDiffOptions = {}): string[] {
 	const width = Math.max(1, contentWidth);
 	const language = options.language;
 	// 256-color can't render subtle tints (a dark block quantizes to black), so
 	// color the text instead of the background there.
 	const useBlocks = theme.colorMode === "truecolor";
+	const split = options.view === "split" || (options.view === "auto" && width >= SPLIT_MIN_WIDTH);
+	if (split) {
+		return buildSplitDiff(diffText, width, Math.floor(width / 2), language, useBlocks);
+	}
 	const rows: string[] = [];
 
 	for (const rawLine of diffText.split("\n")) {
 		const parsed = parseDiffLine(rawLine);
 		if (!parsed) {
-			rows.push(
-				...buildRichDiffLine({
-					bg: "toolPanelBg",
-					gutterFg: "toolDiffContext",
-					// Leading space keeps the text off the edge while the bg still reaches it.
-					gutter: " ",
-					content: replaceTabs(rawLine),
-					language,
-					width,
-				}),
-			);
+			rows.push(...buildRichDiffLine(plainSpec(replaceTabs(rawLine), width, language)));
 			continue;
 		}
-		const { prefix, lineNum, content } = parsed;
-		const gutter = ` ${lineNum} ${prefix === " " ? " " : prefix} `;
-		const text = replaceTabs(content);
-		if (prefix === "+") {
-			rows.push(
-				...buildRichDiffLine({
-					bg: useBlocks ? "toolDiffAddedBg" : "toolPanelBg",
-					gutterFg: "toolDiffAdded",
-					gutter,
-					content: text,
-					language,
-					width,
-					contentFg: useBlocks ? undefined : "toolDiffAdded",
-				}),
-			);
-		} else if (prefix === "-") {
-			rows.push(
-				...buildRichDiffLine({
-					bg: useBlocks ? "toolDiffRemovedBg" : "toolPanelBg",
-					gutterFg: "toolDiffRemoved",
-					gutter,
-					content: text,
-					language,
-					width,
-					contentFg: useBlocks ? undefined : "toolDiffRemoved",
-				}),
-			);
-		} else {
-			rows.push(
-				...buildRichDiffLine({
-					bg: "toolPanelBg",
-					gutterFg: "toolDiffContext",
-					gutter,
-					content: text,
-					language,
-					width,
-				}),
-			);
-		}
+		rows.push(...buildRichDiffLine(specForParsedLine(parsed as ParsedLine, width, language, useBlocks)));
 	}
 
 	return rows;

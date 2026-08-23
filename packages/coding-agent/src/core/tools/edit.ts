@@ -1,15 +1,15 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { Box, type Component, Container, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Box, type Component, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
-import { renderDiff } from "../../modes/interactive/components/diff.js";
+import { renderDiff, renderRichDiff } from "../../modes/interactive/components/diff.js";
 import {
 	countChangedLines,
 	FILE_CHANGE_DIFF_INDENT,
 	formatFileChangeSummaryLine,
 } from "../../modes/interactive/components/edit-summary.js";
-import type { theme } from "../../modes/interactive/theme/theme.js";
+import { getLanguageFromPath, type theme } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import { runWithAbortSignal } from "./abortable.js";
 import {
@@ -251,26 +251,27 @@ function getEditHeaderBg(
 }
 
 // Width-aware `╰─ <path> +N -M` summary plus optional indented diff rows: the
-// summary truncates to one row and wrapped diff lines keep the indent column.
+// summary truncates to one row and diff rows keep the indent column. Diff rows
+// are the full-width rich blocks (syntax-highlighted, split on wide terminals),
+// so they are built at render time when the real width is known.
 export class EditChangeSummaryComponent implements Component {
 	constructor(
 		private readonly rawPath: string,
 		private readonly cwd: string,
 		private readonly change: { added: number; removed: number },
 		private readonly diffsExpanded: boolean | undefined,
-		private readonly diffLines: readonly string[] | undefined,
+		private readonly diffText: string | undefined,
 	) {}
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const lines = [formatFileChangeSummaryLine(this.rawPath, this.cwd, this.change, this.diffsExpanded, safeWidth)];
-		if (this.diffLines !== undefined) {
+		if (this.diffText !== undefined) {
 			const indent = FILE_CHANGE_DIFF_INDENT.slice(0, Math.max(0, safeWidth - 1));
 			const contentWidth = Math.max(1, safeWidth - indent.length);
-			for (const line of this.diffLines) {
-				for (const row of wrapTextWithAnsi(line, contentWidth)) {
-					lines.push(`${indent}${row}`);
-				}
+			const language = getLanguageFromPath(this.rawPath);
+			for (const row of renderRichDiff(this.diffText, contentWidth, { view: "auto", language })) {
+				lines.push(`${indent}${row}`);
 			}
 		}
 		return lines;
@@ -314,7 +315,7 @@ function buildEditCallComponent(
 			// hint, which the latest tool row owns), matching thinking and
 			// agent-message hints.
 			expanded,
-			expanded ? renderDiff(component.preview.diff).split("\n") : undefined,
+			expanded ? component.preview.diff : undefined,
 		),
 	);
 	return component;

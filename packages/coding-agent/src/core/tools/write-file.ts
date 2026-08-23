@@ -3,7 +3,6 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
 import { access as fsAccess, mkdir as fsMkdir, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
-import { renderDiff } from "../../modes/interactive/components/diff.js";
 import { countChangedLines } from "../../modes/interactive/components/edit-summary.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import { runWithAbortSignal } from "./abortable.js";
@@ -111,7 +110,7 @@ export function createWriteFileToolDefinition(
 				context.cwd,
 				countChangedLines(diff),
 				context.expanded,
-				context.expanded ? renderDiff(diff).split("\n") : undefined,
+				context.expanded ? diff : undefined,
 			);
 		},
 		async execute(
