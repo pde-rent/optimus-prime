@@ -31,6 +31,10 @@ export {
 	type FindToolDetails,
 	type FindToolInput,
 } from "./native/find.js";
+
+import { createGitTool, createGitToolDefinition } from "./native/git.js";
+import { createGrepTool, createGrepToolDefinition } from "./native/grep.js";
+
 export {
 	createGrepTool,
 	createGrepToolDefinition,
@@ -89,6 +93,12 @@ export {
 	type SysinfoToolDetails,
 	type SysinfoToolInput,
 } from "./native/sysinfo.js";
+export {
+	createTodoTool,
+	createTodoToolDefinition,
+	type TodoToolDetails,
+	type TodoToolInput,
+} from "./native/todo.js";
 export { walkFiles, walkTree } from "./native/walk.js";
 export {
 	createWcTool,
@@ -137,8 +147,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type BunReplToolOptions, createBunReplTool, createBunReplToolDefinition } from "../bun-repl/tool.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
+import { createEditTool, createEditToolDefinition } from "./edit.js";
 import { createFindTool, createFindToolDefinition } from "./native/find.js";
-import { createGrepTool, createGrepToolDefinition } from "./native/grep.js";
 import {
 	createHeadTool,
 	createHeadToolDefinition,
@@ -147,26 +157,45 @@ import {
 } from "./native/head-tail.js";
 import { createLnTool, createLnToolDefinition } from "./native/ln.js";
 import { createMailTool, createMailToolDefinition } from "./native/mail.js";
+import { createNetdiagTool, createNetdiagToolDefinition } from "./native/netdiag.js";
+import { createProcessesTool, createProcessesToolDefinition } from "./native/processes.js";
 import { createSedTool, createSedToolDefinition } from "./native/sed.js";
 import { createSshTool, createSshToolDefinition } from "./native/ssh.js";
+import { createSysinfoTool, createSysinfoToolDefinition } from "./native/sysinfo.js";
+import { createTodoTool, createTodoToolDefinition } from "./native/todo.js";
 import { createWcTool, createWcToolDefinition } from "./native/wc.js";
+import { createReadFileTool, createReadFileToolDefinition } from "./read-file.js";
 import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } from "./skill.js";
+import { createWriteFileTool, createWriteFileToolDefinition } from "./write-file.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
+/**
+ * Priority-ordered: agents should pick the first tool that fits the job and
+ * treat bash as the last resort (mission rule - natives run in-process on
+ * every OS; bash assumes a Unix shell).
+ */
 export type ToolName =
-	| "bash"
-	| "repl"
-	| "skill"
+	| "read_file"
+	| "write_file"
+	| "edit"
+	| "todo"
 	| "grep"
 	| "find"
 	| "sed"
 	| "wc"
-	| "ln"
 	| "head"
 	| "tail"
+	| "ln"
+	| "processes"
+	| "sysinfo"
+	| "netdiag"
 	| "mail"
-	| "ssh";
+	| "ssh"
+	| "skill"
+	| "repl"
+	| "git"
+	| "bash";
 export interface ToolsOptions {
 	repl?: BunReplToolOptions;
 	/** Skill provider; defaults to an empty roster (every lookup reports no skills). */
@@ -177,34 +206,50 @@ export interface ToolsOptions {
 
 export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
-		repl: createBunReplToolDefinition(options?.repl ?? {}),
-		skill: createSkillToolDefinition(_cwd, options?.skill ?? {}),
-		bash: createBashToolDefinition(_cwd, options?.bash),
+		read_file: createReadFileToolDefinition(_cwd),
+		write_file: createWriteFileToolDefinition(_cwd),
+		edit: createEditToolDefinition(_cwd),
+		todo: createTodoToolDefinition(_cwd),
 		grep: createGrepToolDefinition(_cwd),
 		find: createFindToolDefinition(_cwd),
+		git: createGitToolDefinition(_cwd),
 		sed: createSedToolDefinition(_cwd),
 		wc: createWcToolDefinition(_cwd),
 		head: createHeadToolDefinition(_cwd),
 		tail: createTailToolDefinition(_cwd),
 		ln: createLnToolDefinition(_cwd),
+		processes: createProcessesToolDefinition(_cwd),
+		sysinfo: createSysinfoToolDefinition(_cwd),
+		netdiag: createNetdiagToolDefinition(_cwd),
 		mail: createMailToolDefinition(_cwd),
 		ssh: createSshToolDefinition(_cwd),
+		skill: createSkillToolDefinition(_cwd, options?.skill ?? {}),
+		repl: createBunReplToolDefinition(options?.repl ?? {}),
+		bash: createBashToolDefinition(_cwd, options?.bash),
 	};
 }
 
 export function createAllTools(_cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
-		repl: createBunReplTool(options?.repl ?? {}),
-		bash: createBashTool(_cwd, options?.bash),
-		skill: createSkillTool(_cwd, options?.skill ?? {}),
+		read_file: createReadFileTool(_cwd),
+		write_file: createWriteFileTool(_cwd),
+		edit: createEditTool(_cwd),
+		todo: createTodoTool(_cwd),
 		grep: createGrepTool(_cwd),
 		find: createFindTool(_cwd),
+		git: createGitTool(_cwd),
 		sed: createSedTool(_cwd),
 		wc: createWcTool(_cwd),
 		head: createHeadTool(_cwd),
 		tail: createTailTool(_cwd),
 		ln: createLnTool(_cwd),
+		processes: createProcessesTool(_cwd),
+		sysinfo: createSysinfoTool(_cwd),
+		netdiag: createNetdiagTool(_cwd),
 		mail: createMailTool(_cwd),
 		ssh: createSshTool(_cwd),
+		skill: createSkillTool(_cwd, options?.skill ?? {}),
+		repl: createBunReplTool(options?.repl ?? {}),
+		bash: createBashTool(_cwd, options?.bash),
 	};
 }
