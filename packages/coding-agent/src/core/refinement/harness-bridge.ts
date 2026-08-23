@@ -223,8 +223,13 @@ function applySingleEdit(
 	}
 	// Ids in the prompt overview may carry a display-only `local:`/`global:` prefix.
 	const bareId = id?.replace(/^(?:local|global):/, "");
-	const existing = bareId ? state.entries[kind][bareId] : undefined;
-	if (action !== "create" && !existing) {
+	let existing = bareId ? state.entries[kind][bareId] : undefined;
+	// Update acts as an upsert for memory-kind entries: persisting campaign state
+	// should never hard-fail because an id is not present yet.
+	if (action === "update" && !existing && type === "memory") {
+		action = "create";
+		existing = undefined;
+	} else if (action !== "create" && !existing) {
 		throw new Error(`${type} entry not found in ${scope} harness state: ${bareId}`);
 	}
 	if (action === "create" && bareId && state.entries[kind][bareId]) {

@@ -150,7 +150,7 @@ describe("todo watchdog scheduling", () => {
 		await harness.session.prompt("go");
 		await waitFor(() => expect(watchdogMessages(harness).length).toBeGreaterThan(0), 2000);
 		const [message] = watchdogMessages(harness);
-		expect(JSON.stringify(message.content)).toContain("t1: unfinished");
+		expect(JSON.stringify((message as any).content)).toContain("t1: unfinished");
 		harness.cleanup();
 	});
 
@@ -219,7 +219,7 @@ describe("rlm terminal auto-report autopsy", () => {
 			{
 				messages: [],
 				sessionManager: { getBranch: () => [] },
-				_cwd: import.meta.dir,
+				_cwd: process.cwd(),
 				sessionName: undefined,
 				sessionId: "test-session",
 			},
