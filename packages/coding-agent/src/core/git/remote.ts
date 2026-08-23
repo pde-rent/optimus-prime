@@ -1,20 +1,11 @@
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	rmdirSync,
-	rmSync,
-	statSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseConfigText } from "./config.js";
-import { parseCommit, parseTree, TREE_MODE_DIR, TREE_MODE_EXEC, TREE_MODE_SYMLINK } from "./objects.js";
+import { flatTree } from "./diff.js";
+import { parseCommit, parseTree, TREE_MODE_DIR } from "./objects.js";
 import type { PackableObject } from "./pack-write.js";
 import { buildPackBuffer, scanPack, writePackFiles } from "./pack-write.js";
+import { listRefNames, readRawRef } from "./refs.js";
 import { GitRepository } from "./repository.js";
 import {
 	buildReceivePackRequest,
@@ -28,6 +19,7 @@ import {
 	UPLOAD_PACK_SERVICE,
 	ZERO_OID,
 } from "./transport-http.js";
+import { rebuildIndexFromTree, writeBlobToWorktree } from "./worktree.js";
 
 /**
  * High-level remote operations over smart HTTP: persisted remote config,
@@ -101,31 +93,26 @@ interface LocalRefSource {
 /** Enumerate all local refs (loose under refs/ plus packed-refs). */
 export function listLocalRefs(repo: GitRepository): LocalRefSource[] {
 	const refs: LocalRefSource[] = [];
-	const refsDir = join(repo.gitDir, "refs");
-	const visit = (dir: string): void => {
-		if (!existsSync(dir)) return;
-		for (const name of readdirSync(dir)) {
-			const path = join(dir, name);
-			if (statSync(path).isDirectory()) visit(path);
-			else {
-				const refName = relative(repo.gitDir, path).split("\\").join("/");
-				const sha = readFileSync(path, "utf8").trim();
-				if (/^[0-9a-f]{40}$/.test(sha)) refs.push({ name: refName, sha });
-			}
-		}
-	};
-	visit(refsDir);
-	try {
-		const packed = readFileSync(join(repo.gitDir, "packed-refs"), "utf8");
-		for (const line of packed.split("\n")) {
-			if (!line || line.startsWith("#") || line.startsWith("^")) continue;
-			const space = line.indexOf(" ");
-			refs.push({ name: line.slice(space + 1), sha: line.slice(0, space) });
-		}
-	} catch {
-		// no packed-refs
+	for (const name of listRefNames(repo.gitDir, "refs")) {
+		const sha = readRawRef(repo.gitDir, name);
+		if (sha !== null && /^[0-9a-f]{40}$/.test(sha)) refs.push({ name, sha });
 	}
 	return refs;
+}
+
+/**
+ * Default ref mapping for fetches: tags verbatim, heads under refs/remotes/<remote>/;
+ * keepBranch pins one head at its canonical refs/heads name (clone's checked-out branch).
+ */
+function trackingMapRef(remoteName: string, keepBranch?: string): (refName: string) => string | undefined {
+	return (refName: string): string | undefined => {
+		if (refName.startsWith("refs/tags/")) return refName;
+		if (refName.startsWith("refs/heads/")) {
+			const short = refName.slice("refs/heads/".length);
+			return short === keepBranch ? refName : `refs/remotes/${remoteName}/${short}`;
+		}
+		return undefined;
+	};
 }
 
 /** Bounded ancestry walk from ref tips; used as the "have" set during negotiation. */
@@ -244,7 +231,7 @@ async function fetchFromUrl(repo: GitRepository, url: string, options: FetchOpti
 		const peeledTarget = advertisement.peeled.get(tagRef) ?? tagOid;
 		if (repo.hasObject(peeledTarget)) repo.updateRef(tagRef, tagOid);
 	}
-	writeFetchHead(repo.gitDir, selected, auth.url);
+	writeFetchHead(repo, selected, auth.url);
 	return { refs: advertisement.refs, packChecksum: checksum, shallowOids };
 }
 
@@ -255,15 +242,7 @@ export async function fetchRemote(
 ): Promise<FetchResult> {
 	const url = resolveRemoteSpec(repo, remoteNameOrUrl);
 	const remoteName = /^https?:\/\//.test(remoteNameOrUrl) ? "origin" : remoteNameOrUrl;
-	const mapRef =
-		options.mapRef ??
-		((refName: string): string | undefined => {
-			if (refName.startsWith("refs/tags/")) return refName;
-			if (refName.startsWith("refs/heads/")) {
-				return `refs/remotes/${remoteName}/${refName.slice("refs/heads/".length)}`;
-			}
-			return undefined;
-		});
+	const mapRef = options.mapRef ?? trackingMapRef(remoteName);
 	return fetchFromUrl(repo, url, { ...options, mapRef });
 }
 
@@ -271,8 +250,8 @@ function shortName(refName: string): string {
 	return refName.replace(/^refs\/(heads|tags|remotes)\//, "");
 }
 
-function writeFetchHead(gitDir: string, selected: Array<[string, string]>, url: string): void {
-	const currentBranch = readCurrentBranch(gitDir);
+function writeFetchHead(repo: GitRepository, selected: Array<[string, string]>, url: string): void {
+	const currentBranch = repo.headBranch()?.slice("refs/heads/".length) ?? null;
 	const lines = selected
 		.filter(([refName]) => refName !== "HEAD")
 		.map(([refName, sha]) => {
@@ -282,16 +261,7 @@ function writeFetchHead(gitDir: string, selected: Array<[string, string]>, url: 
 			const isMerged = currentBranch !== null && refName === `refs/heads/${currentBranch}`;
 			return `${sha}\t${isMerged ? "" : "not-for-merge"}\t${kind} of ${url}`;
 		});
-	writeFileSync(join(gitDir, "FETCH_HEAD"), `${lines.join("\n")}\n`);
-}
-
-function readCurrentBranch(gitDir: string): string | null {
-	try {
-		const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
-		return head.startsWith("ref: refs/heads/") ? head.slice("ref: refs/heads/".length) : null;
-	} catch {
-		return null;
-	}
+	writeFileSync(join(repo.gitDir, "FETCH_HEAD"), `${lines.join("\n")}\n`);
 }
 
 // -- shallow ------------------------------------------------------------------
@@ -339,19 +309,11 @@ export async function cloneRepository(
 
 	const repo = GitRepository.init(destDir, { defaultBranch: branch });
 	if (advertisement.refs.size > 0) {
-		const mapRef = (refName: string): string | undefined => {
-			if (refName.startsWith("refs/tags/")) return refName;
-			if (refName.startsWith("refs/heads/")) {
-				const short = refName.slice("refs/heads/".length);
-				return short === branch ? refName : `refs/remotes/${remoteName}/${short}`;
-			}
-			return undefined;
-		};
 		await fetchFromUrl(repo, url, {
 			depth: options.depth,
 			credentials: options.credentials,
 			onProgress: options.onProgress,
-			mapRef,
+			mapRef: trackingMapRef(remoteName, branch),
 		});
 		remoteAdd(repo, remoteName, auth.url);
 		checkoutWorktree(repo);
@@ -365,31 +327,10 @@ export async function cloneRepository(
 export function checkoutWorktree(repo: GitRepository): void {
 	const treeSha = repo.headTreeSha();
 	if (treeSha === null) return;
-	const walk = (sha: string, prefix: string): void => {
-		const raw = repo.readObject(sha);
-		if (!raw || raw.type !== "tree") throw new Error(`tree ${sha} missing during checkout`);
-		for (const entry of parseTree(raw.body)) {
-			const path = prefix + entry.name;
-			if (entry.mode === TREE_MODE_DIR) {
-				walk(entry.sha, `${path}/`);
-				continue;
-			}
-			const object = repo.readObject(entry.sha);
-			if (!object || object.type !== "blob") throw new Error(`blob ${entry.sha} missing during checkout (${path})`);
-			const absolute = join(repo.workdir, path);
-			mkdirSync(join(absolute, ".."), { recursive: true });
-			if (entry.mode === TREE_MODE_SYMLINK) {
-				rmSync(absolute, { force: true });
-				symlinkSync(new TextDecoder().decode(object.body), absolute);
-			} else {
-				writeFileSync(absolute, object.body);
-				if (entry.mode === TREE_MODE_EXEC) chmodSync(absolute, 0o755);
-			}
-		}
-	};
+	const files = flatTree(repo, treeSha);
+	for (const [path, file] of files) writeBlobToWorktree(repo, path, file.sha, file.mode);
+	// Drop tracked files that no longer exist in the target tree (pruning empty dirs).
 	const previousPaths = new Set(repo.loadIndex().entries.map((entry) => entry.path));
-	walk(treeSha, "");
-	// Drop tracked files that no longer exist in the target tree.
 	const kept = new Set((repo.flatHeadTree() ?? new Map<string, string>()).keys());
 	for (const path of previousPaths) {
 		if (kept.has(path)) continue;
@@ -407,11 +348,7 @@ export function checkoutWorktree(repo: GitRepository): void {
 			parent = join(parent, "..");
 		}
 	}
-	const index = repo.loadIndex();
-	index.entries = [];
-	const files = repo.flatHeadTree();
-	if (files) for (const [path, blobSha] of files) index.add(repo.makeIndexEntry(path, blobSha));
-	repo.saveIndex(index);
+	rebuildIndexFromTree(repo, repo.loadIndex(), files);
 }
 
 // -- pull ---------------------------------------------------------------------

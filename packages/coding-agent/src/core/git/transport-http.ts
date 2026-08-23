@@ -156,7 +156,7 @@ function serviceUrl(url: string, service: PackService, query: string): string {
 
 /** Shared smart-HTTP POST: service headers, auth, non-OK -> GitHttpError with a body snippet. */
 async function postService(
-	url: string,
+	_url: string,
 	service: PackService,
 	body: Uint8Array,
 	auth: ResolvedAuth,
@@ -300,22 +300,7 @@ export async function postUploadPack(
 	for (const oid of request.haves) lines.push(encodePktLine(`have ${oid}\n`));
 	lines.push(encodePktLine("done\n"));
 
-	const response = await fetch(`${auth.url.replace(/\/+$/, "")}/git-upload-pack`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-upload-pack-request",
-			Accept: "application/x-git-upload-pack-result",
-			"Git-Protocol": "version=1",
-			...(auth.authorization ? { Authorization: auth.authorization } : {}),
-		},
-		body: new Blob([concatBytes(...lines)]),
-	});
-	if (!response.ok) {
-		const body = new Uint8Array(await response.arrayBuffer());
-		throw new GitHttpError(`git-upload-pack failed with HTTP ${response.status}`, response.status, snippet(body));
-	}
-	const data = new Uint8Array(await response.arrayBuffer());
-	const reader = new PktLineReader(data);
+	const reader = new PktLineReader(await postService(_url, "git-upload-pack", concatBytes(...lines), auth));
 
 	const shallow: string[] = [];
 	const unshallow: string[] = [];
@@ -408,26 +393,7 @@ export async function postReceivePack(
 	auth: ResolvedAuth,
 	_options: { onProgress?: (text: string) => void } = {},
 ): Promise<PushReport> {
-	const response = await fetch(`${auth.url.replace(/\/+$/, "")}/git-receive-pack`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-git-receive-pack-request",
-			Accept: "application/x-git-receive-pack-result",
-			"Git-Protocol": "version=1",
-			...(auth.authorization ? { Authorization: auth.authorization } : {}),
-		},
-		body: new Blob([body]),
-	});
-	if (!response.ok) {
-		const responseBody = new Uint8Array(await response.arrayBuffer());
-		throw new GitHttpError(
-			`git-receive-pack failed with HTTP ${response.status}`,
-			response.status,
-			snippet(responseBody),
-		);
-	}
-	const data = new Uint8Array(await response.arrayBuffer());
-	const reader = new PktLineReader(data);
+	const reader = new PktLineReader(await postService(_url, "git-receive-pack", body, auth));
 	// We never request side-band-64k for push, so the report-status reply is
 	// plain pkt-lines: "unpack ok|ng <reason>", then "ok|ng <ref> [<reason>]".
 	const report: PushReport = { unpackOk: true, commands: [] };

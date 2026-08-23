@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 import type { GitObjectType, RawObject } from "./objects.js";
 import { bytesToHex, concatBytes, hashRawObject, hexToBytes, PACK_TYPE_NAMES } from "./objects.js";
-import { applyDelta } from "./pack-read.js";
+import { applyDelta, decodeOfsDistance, packEntryHeader } from "./pack-read.js";
 
 /**
  * Packfile WRITE side: build .pack v2 + .idx v2 from object lists, and index a
@@ -374,37 +374,24 @@ export function scanPack(pack: Uint8Array): { entries: ScannedEntry[]; objects: 
 	let at = 12;
 	for (let i = 0; i < count; i++) {
 		const entryOffset = at;
-		let byte = pack[at];
-		let at2 = at + 1;
-		const typeNumber = (byte >> 4) & 0x7;
-		let size = byte & 0x0f;
-		let shift = 4;
-		while (byte & 0x80) {
-			byte = pack[at2++];
-			size |= (byte & 0x7f) << shift;
-			shift += 7;
-		}
+		const header = packEntryHeader(pack, at);
+		const typeNumber = header.typeNumber;
 		let object: RawObject;
-		let dataStart = at2;
+		let dataStart = header.dataOffset;
 		if (typeNumber >= 1 && typeNumber <= 4) {
-			const body = inflateSync(pack.subarray(at2));
-			if (body.length !== size) throw new Error(`pack entry at ${entryOffset}: inflated size mismatch`);
+			const body = inflateSync(pack.subarray(header.dataOffset));
+			if (body.length !== header.size) throw new Error(`pack entry at ${entryOffset}: inflated size mismatch`);
 			object = { type: PACK_TYPE_NAMES[typeNumber], body };
 		} else if (typeNumber === 6 || typeNumber === 7) {
 			let base: RawObject | undefined;
 			if (typeNumber === 6) {
-				byte = pack[at2++];
-				let distance = byte & 0x7f;
-				while (byte & 0x80) {
-					byte = pack[at2++];
-					distance = ((distance + 1) << 7) | (byte & 0x7f);
-				}
-				dataStart = at2;
+				const { distance, next } = decodeOfsDistance(pack, header.dataOffset);
+				dataStart = next;
 				base = byOffset.get(entryOffset - distance) ?? undefined;
 				if (!base) throw new Error(`ofs-delta base at ${entryOffset - distance} not found before entry`);
 			} else {
-				const baseSha = bytesToHex(pack.subarray(at2, at2 + 20));
-				dataStart = at2 + 20;
+				const baseSha = bytesToHex(pack.subarray(header.dataOffset, header.dataOffset + 20));
+				dataStart = header.dataOffset + 20;
 				base = objects.get(baseSha);
 				if (!base) throw new Error(`ref-delta base ${baseSha} not in pack (thin packs unsupported)`);
 			}
@@ -428,6 +415,17 @@ export function scanPack(pack: Uint8Array): { entries: ScannedEntry[]; objects: 
  * Build the canonical .idx v2 for a pack buffer. Byte-identical to
  * `git index-pack -o` output for the same pack (v2, no large offsets).
  */
+/** .idx v2 section: big-endian u32 array. */
+function u32Section(values: ArrayLike<number>, guard?: (value: number) => void): Uint8Array {
+	const bytes = new Uint8Array(values.length * 4);
+	const view = new DataView(bytes.buffer);
+	for (let i = 0; i < values.length; i++) {
+		if (guard) guard(values[i]);
+		view.setUint32(i * 4, values[i]);
+	}
+	return bytes;
+}
+
 export function buildPackIdx(pack: Uint8Array): Uint8Array {
 	const { entries } = scanPack(pack);
 	const sorted = [...entries].sort((a, b) => (a.sha < b.sha ? -1 : 1));
@@ -441,22 +439,17 @@ export function buildPackIdx(pack: Uint8Array): Uint8Array {
 	magicView.setUint32(0, 0xff744f63);
 	magicView.setUint32(4, 2);
 	chunks.push(magic);
-	const fanoutBytes = new Uint8Array(256 * 4);
-	const fanoutView = new DataView(fanoutBytes.buffer);
-	for (let i = 0; i < 256; i++) fanoutView.setUint32(i * 4, fanout[i]);
-	chunks.push(fanoutBytes);
+	chunks.push(u32Section(fanout));
 	for (const entry of sorted) chunks.push(hexToBytes(entry.sha));
-	const crcBytes = new Uint8Array(sorted.length * 4);
-	const crcView = new DataView(crcBytes.buffer);
-	for (let i = 0; i < sorted.length; i++) crcView.setUint32(i * 4, sorted[i].crc32);
-	chunks.push(crcBytes);
-	const offsetBytes = new Uint8Array(sorted.length * 4);
-	const offsetView = new DataView(offsetBytes.buffer);
-	for (let i = 0; i < sorted.length; i++) {
-		if (sorted[i].offset >= 0x80000000) throw new Error("packs >= 2 GiB are unsupported (large offsets)");
-		offsetView.setUint32(i * 4, sorted[i].offset);
-	}
-	chunks.push(offsetBytes);
+	chunks.push(u32Section(sorted.map((entry) => entry.crc32)));
+	chunks.push(
+		u32Section(
+			sorted.map((entry) => entry.offset),
+			(offset) => {
+				if (offset >= 0x80000000) throw new Error("packs >= 2 GiB are unsupported (large offsets)");
+			},
+		),
+	);
 	chunks.push(pack.subarray(pack.length - 20));
 
 	const body = concatBytes(...chunks);

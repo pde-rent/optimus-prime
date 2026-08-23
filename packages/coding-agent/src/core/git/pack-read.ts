@@ -8,6 +8,38 @@ import { bytesToHex, concatBytes, hexToBytes, PACK_TYPE_NAMES, sha1Hex } from ".
  * Spec: Documentation/gitformat-pack.txt in git.git; checksums are verified lazily.
  */
 
+/**
+ * Pack entry header: 3-bit type number plus a little-endian base-128 size
+ * (first byte holds the low 4 bits). Shared by the reader and the pack scanner.
+ */
+export function packEntryHeader(
+	data: Uint8Array,
+	offset: number,
+): { typeNumber: number; size: number; dataOffset: number } {
+	let byte = data[offset];
+	let at = offset + 1;
+	const typeNumber = (byte >> 4) & 0x7;
+	let size = byte & 0x0f;
+	let shift = 4;
+	while (byte & 0x80) {
+		byte = data[at++];
+		size |= (byte & 0x7f) << shift;
+		shift += 7;
+	}
+	return { typeNumber, size, dataOffset: at };
+}
+
+/** OFS_DELTA negative offset: continuation encoding acc = ((acc + 1) << 7) | byte. */
+export function decodeOfsDistance(data: Uint8Array, at: number): { distance: number; next: number } {
+	let byte = data[at++];
+	let distance = byte & 0x7f;
+	while (byte & 0x80) {
+		byte = data[at++];
+		distance = ((distance + 1) << 7) | (byte & 0x7f);
+	}
+	return { distance, next: at };
+}
+
 /** git repack defaults to depth <= 50; treat deeper chains as corrupt/cyclic (spec §2.4). */
 export const MAX_DELTA_DEPTH = 50;
 
@@ -153,17 +185,7 @@ export class PackReader {
 	}
 
 	private entryHeader(offset: number): { typeNumber: number; size: number; dataOffset: number } {
-		let byte = this.pack[offset];
-		let at = offset + 1;
-		const typeNumber = (byte >> 4) & 0x7;
-		let size = byte & 0x0f;
-		let shift = 4;
-		while (byte & 0x80) {
-			byte = this.pack[at++];
-			size |= (byte & 0x7f) << shift;
-			shift += 7;
-		}
-		return { typeNumber, size, dataOffset: at };
+		return packEntryHeader(this.pack, offset);
 	}
 
 	private resolveAt(offset: number, depthLeft: number): RawObject {
@@ -178,15 +200,9 @@ export class PackReader {
 		let baseOffset: number;
 		let deltaStart: number;
 		if (header.typeNumber === 6) {
-			let byte = this.pack[header.dataOffset];
-			let at = header.dataOffset + 1;
-			let distance = byte & 0x7f;
-			while (byte & 0x80) {
-				byte = this.pack[at++];
-				distance = ((distance + 1) << 7) | (byte & 0x7f);
-			}
+			const { distance, next } = decodeOfsDistance(this.pack, header.dataOffset);
 			baseOffset = offset - distance;
-			deltaStart = at;
+			deltaStart = next;
 			if (baseOffset < 0 || baseOffset >= offset) throw new Error("ofs-delta base offset out of range");
 		} else if (header.typeNumber === 7) {
 			const baseSha = bytesToHex(this.pack.subarray(header.dataOffset, header.dataOffset + 20));

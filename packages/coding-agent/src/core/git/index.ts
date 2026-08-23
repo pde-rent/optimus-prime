@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { bytesToHex } from "./objects.js";
+import { bytesToHex, concatBytes } from "./objects.js";
 
 /**
  * The dircache (.git/index), format versions 2 and 3.
@@ -181,15 +181,7 @@ export class GitIndex {
 			extension.set(this.treeExtension, 8);
 			chunks.push(extension);
 		}
-		let length = 0;
-		for (const chunk of chunks) length += chunk.length;
-		const out = new Uint8Array(length + 20);
-		let at = 0;
-		for (const chunk of chunks) {
-			out.set(chunk, at);
-			at += chunk.length;
-		}
-		out.set(createHash("sha1").update(out.subarray(0, at)).digest(), at);
-		return out;
+		const body = concatBytes(...chunks);
+		return concatBytes(body, createHash("sha1").update(body).digest());
 	}
 }
