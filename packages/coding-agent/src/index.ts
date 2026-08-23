@@ -358,7 +358,6 @@ export {
 // UI components for extensions
 export {
 	AgentMessageComponent,
-	ArminComponent,
 	AssistantMessageComponent,
 	BashExecutionComponent,
 	BorderedLoader,

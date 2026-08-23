@@ -160,7 +160,6 @@ import { AGENT_ACTIVITY_LABELS, AgentActivityTracker, formatTokenCount } from ".
 import { getAnthropicSubscriptionAuthWarning, ProviderAuthFlows } from "./auth-flows.js";
 import { BrandSplashHeader } from "./brand-splash.js";
 import { AgentMessageComponent } from "./components/agent-message.js";
-import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
@@ -184,9 +183,7 @@ import { isCompactAgentMessageNeighbor } from "./components/conversation-compone
 import { CountdownTimer } from "./components/countdown-timer.js";
 import { CustomEditor } from "./components/custom-editor.js";
 import { CustomMessageComponent } from "./components/custom-message.js";
-import { DaxnutsComponent } from "./components/daxnuts.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
-import { EarendilAnnouncementComponent } from "./components/earendil-announcement.js";
 import { type FileChangeSummary, formatTotalChangeSummary, mergeTurnFileChanges } from "./components/edit-summary.js";
 import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
@@ -4321,16 +4318,6 @@ export class InteractiveMode {
 					this.editor.setText("");
 					return;
 				}
-				if (text === "/arminsayshi") {
-					this.handleArminSaysHi();
-					this.editor.setText("");
-					return;
-				}
-				if (text === "/dementedelves") {
-					this.handleDementedDelves();
-					this.editor.setText("");
-					return;
-				}
 				if (text === "/quit") {
 					this.editor.setText("");
 					await this.shutdown();
@@ -5714,16 +5701,13 @@ export class InteractiveMode {
 				}
 				break;
 			}
-			case "compactionSummary": {
-				this.chatContainer.addChild(new Spacer(1));
-				const component = new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
-				component.setExpanded(this.toolOutputExpanded);
-				this.chatContainer.addChild(component);
-				break;
-			}
+			case "compactionSummary":
 			case "branchSummary": {
 				this.chatContainer.addChild(new Spacer(1));
-				const component = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
+				const component =
+					message.role === "compactionSummary"
+						? new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings())
+						: new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(component);
 				break;
@@ -7242,7 +7226,6 @@ export class InteractiveMode {
 		await this.applySelectedModel(model);
 		this.showStatus(`Model: ${model.id}`);
 		void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
-		this.checkDaxnutsEasterEgg(model);
 	}
 
 	private async ensureModelProviderConfigured(
@@ -9266,30 +9249,6 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			this.showError(`Failed to write debug log: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	private handleArminSaysHi(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new ArminComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private handleDementedDelves(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new EarendilAnnouncementComponent());
-		this.ui.requestRender();
-	}
-
-	private handleDaxnuts(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DaxnutsComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private checkDaxnutsEasterEgg(model: { provider: string; id: string }): void {
-		if (model.provider === "opencode" && model.id.toLowerCase().includes("kimi-k2.5")) {
-			this.handleDaxnuts();
 		}
 	}
 

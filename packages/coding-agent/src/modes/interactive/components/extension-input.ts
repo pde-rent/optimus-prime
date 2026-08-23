@@ -1,7 +1,3 @@
-/**
- * Simple text input component for extensions.
- */
-
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
 import { CountdownTimer } from "./countdown-timer.js";
@@ -21,7 +17,6 @@ export class ExtensionInputComponent extends Container implements Focusable {
 	private baseTitle: string;
 	private countdown: CountdownTimer | undefined;
 
-	// Focusable implementation - propagate to input for IME cursor positioning
 	private _focused = false;
 	get focused(): boolean {
 		return this._focused;
@@ -39,14 +34,12 @@ export class ExtensionInputComponent extends Container implements Focusable {
 		opts?: ExtensionInputOptions,
 	) {
 		super();
-
 		this.onSubmitCallback = onSubmit;
 		this.onCancelCallback = onCancel;
 		this.baseTitle = title;
 
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
-
 		this.titleText = new Text(theme.fg("accent", title), 1, 0);
 		this.addChild(this.titleText);
 		this.addChild(new Spacer(1));

@@ -1,8 +1,9 @@
-import { type Component, type Focusable, getKeybindings, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, type Focusable, getKeybindings, truncateToWidth } from "@earendil-works/pi-tui";
 import { isChildAgentActive } from "../../agent-connection/agent-status.js";
 import type { AgentConnectionRlmChildAgentSnapshot } from "../../agent-connection/index.js";
 import { theme } from "../theme/theme.js";
 import { keyText } from "./keybinding-hints.js";
+import { formatTwoSidedRow } from "./row-format.js";
 
 export interface SubagentSummaryCounts {
 	total: number;
@@ -98,15 +99,7 @@ export class SubagentSummaryLine implements Component, Focusable {
 		const contextLabel = this.getContextLabel()?.trim();
 		const left = overrideLabel || locationLabel || "";
 		if (!left && !contextLabel) return [];
-		const safeWidth = Math.max(1, width);
-		const right = contextLabel ?? "";
-		const gap = left && right ? 2 : 0;
-		const rightWidth = Math.min(visibleWidth(right), Math.max(0, safeWidth - gap));
-		const leftWidth = Math.max(0, safeWidth - rightWidth - gap);
-		const renderedLeft = truncateToWidth(left, leftWidth, "…");
-		const renderedRight = truncateToWidth(right, rightWidth, "…");
-		const padding = Math.max(0, safeWidth - visibleWidth(renderedLeft) - visibleWidth(renderedRight));
-		return [theme.fg("muted", `${renderedLeft}${" ".repeat(padding)}${renderedRight}`)];
+		return [formatTwoSidedRow(theme.fg("muted", left), theme.fg("muted", contextLabel ?? ""), width)];
 	}
 
 	invalidate(): void {

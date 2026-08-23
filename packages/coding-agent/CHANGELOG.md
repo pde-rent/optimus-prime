@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+- Removed the /arminsayshi, /dementedelves, and daxnuts model easter eggs.
+- Added compact one-line call summaries for the find, grep, ln, todo, and wc tools.
+- Changed expanded edit, write, sed, and repl diffs to use the rich renderer with syntax highlighting and a side-by-side split layout on wide terminals.
+- Changed modal dialogs (settings, selectors, auth flows) to float over a dimmed backdrop instead of blanking the screen, matching OpenCode's layered look.
+- Added a startup websearch health check that warns once per process when no Serper API key or reachable SearXNG instance is configured, with setup links.
 - Added `/rewind` to return to an earlier session-tree point without summarizing or changing later branches.
 - Changed automatic retry defaults to five attempts and added capped exponential backoff with full jitter for provider outages.
 - Added user REPL-kernel slash commands: `/js` and `/ts` evaluate code in the focused session's running kernel and render the result as a pane, `/vars` lists top-level kernel variables with type badges, and `/clear-vars` clears user-defined variables (including the on-disk snapshot so a restart cannot restore them); like side questions these never enter the model's message history and work while the agent streams. `/bash` and `/python` are registered but report their kernel shim is not yet available.
