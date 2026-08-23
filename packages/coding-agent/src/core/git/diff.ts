@@ -3,7 +3,14 @@ import { join } from "node:path";
 import { diffLines } from "../../utils/diff.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage } from "./index.js";
-import { parseTree, TREE_MODE_DIR } from "./objects.js";
+import {
+	type GitTreeEntry,
+	parseCommit,
+	parseTree,
+	serializeTree,
+	TREE_MODE_DIR,
+	writeLooseObject,
+} from "./objects.js";
 import type { GitRepository } from "./repository.js";
 
 /**
@@ -61,6 +68,58 @@ export function flatTree(repo: GitRepository, treeSha: string): Map<string, Tree
 	return files;
 }
 
+/** Parse the commit object at `sha`; throws when absent or not a commit. */
+export function sameTreeFile(a: TreeFile | null | undefined, b: TreeFile | null | undefined): boolean {
+	return a?.sha === b?.sha && a?.mode === b?.mode;
+}
+
+/** Parents of a commit; [] for absent or non-commit objects (tolerant history-walk helper). */
+export function commitParents(repo: GitRepository, sha: string): string[] {
+	const raw = repo.readObject(sha);
+	if (raw === null || raw.type !== "commit") return [];
+	return parseCommit(raw.body).parents;
+}
+
+/** HEAD's flattened tree; empty before the first commit. */
+export function headTreeFiles(repo: GitRepository): Map<string, TreeFile> {
+	const headTree = repo.headTreeSha();
+	return headTree === null ? new Map<string, TreeFile>() : flatTree(repo, headTree);
+}
+
+/**
+ * Write nested tree objects covering a flat path map (tree sort treats directory
+ * names as "/"-suffixed); returns the root tree sha.
+ */
+export function writeTreeFromFiles(repo: GitRepository, files: Map<string, TreeFile>): string {
+	const build = (prefix: string): string => {
+		const direct: GitTreeEntry[] = [];
+		const dirs = new Map<string, Map<string, TreeFile>>();
+		for (const [path, file] of files) {
+			if (!path.startsWith(prefix)) continue;
+			const rest = path.slice(prefix.length);
+			const slash = rest.indexOf("/");
+			if (slash === -1) direct.push({ mode: file.mode, name: rest, sha: file.sha });
+			else {
+				const name = rest.slice(0, slash);
+				if (!dirs.has(name)) dirs.set(name, new Map());
+				dirs.get(name)?.set(path, file);
+			}
+		}
+		for (const [name] of dirs) {
+			direct.push({ mode: TREE_MODE_DIR, name, sha: build(`${prefix + name}/`) });
+		}
+		direct.sort(compareTreeEntries);
+		return writeLooseObject(repo.gitDir, "tree", serializeTree(direct));
+	};
+	return build("");
+}
+
+function compareTreeEntries(a: GitTreeEntry, b: GitTreeEntry): number {
+	const aKey = a.mode === TREE_MODE_DIR ? `${a.name}/` : a.name;
+	const bKey = b.mode === TREE_MODE_DIR ? `${b.name}/` : b.name;
+	return Buffer.compare(Buffer.from(aKey), Buffer.from(bKey));
+}
+
 /** Index contents as path -> { mode, sha } over stage-0 entries only. */
 export function flatIndex(entries: IndexEntry[]): Map<string, TreeFile> {
 	const files = new Map<string, TreeFile>();
@@ -79,7 +138,8 @@ export function flatWorktree(repo: GitRepository): Map<string, Uint8Array> {
 	return files;
 }
 
-function readWorktreeBytes(workdir: string, relPath: string): Uint8Array {
+/** Read file content for hashing/indexing; symlinks contribute their target text. */
+export function readWorktreeBytes(workdir: string, relPath: string): Uint8Array {
 	const absolute = join(workdir, relPath);
 	if (lstatSync(absolute).isSymbolicLink()) {
 		return new TextEncoder().encode(readFileSync(absolute, "latin1"));
@@ -290,7 +350,7 @@ export function diffSnapshots(
 	for (const path of [...paths].sort()) {
 		const before = beforeFiles.get(path) ?? null;
 		const after = afterFiles.get(path) ?? null;
-		if (before?.sha === after?.sha && before?.mode === after?.mode) continue;
+		if (sameTreeFile(before, after)) continue;
 		out.push(renderFileDiff(repo, path, before, after, options));
 	}
 	return out;
@@ -300,21 +360,13 @@ export function diffSnapshots(
 export function diffWorktree(repo: GitRepository, options: DiffOptions = {}): FileDiff[] {
 	const indexed = flatIndex(repo.loadIndex().entries);
 	const content = flatWorktree(repo);
-	const paths = new Set<string>([...indexed.keys(), ...content.keys()]);
-	const out: FileDiff[] = [];
-	for (const path of [...paths].sort()) {
-		const entry = indexed.get(path);
+	// Deleted paths simply drop out of the after-map, so diffSnapshots renders them.
+	const after = new Map<string, TreeFile>();
+	for (const [path, entry] of indexed) {
 		const bytes = content.get(path);
-		if (!entry) continue;
-		if (!bytes) {
-			out.push(renderFileDiff(repo, path, entry, null, options));
-			continue;
-		}
-		const workSha = repo.hashBlob(bytes);
-		if (workSha === entry.sha) continue;
-		out.push(renderFileDiff(repo, path, entry, { mode: entry.mode, sha: workSha }, options));
+		if (bytes !== undefined) after.set(path, { mode: entry.mode, sha: repo.hashBlob(bytes) });
 	}
-	return out;
+	return diffSnapshots(repo, indexed, after, options);
 }
 
 /** "git diff --cached": HEAD vs index. */

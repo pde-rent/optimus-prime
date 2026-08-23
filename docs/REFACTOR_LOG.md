@@ -14,7 +14,9 @@ Target: <=250,000 total. Numbers always reported split by category.
 - menu selector state machine: MenuSelector<T> replaces duplicated selection/layout/windowing in extension-selector + oauth-selector; physical LOC +48 in the three files (controller API surface), semantic win = one state machine where two divergent copies existed; adopters under audit (S slice 4)
 
 ## In flight
-- G: git client consolidation Batch B (cross-module commit-builder/tree-sync)
+- git commit-builder: 5 private serializers -> objects.serializeCommitMessage (+shared header builder) (@G Batch B)
+- git tree-sync vocabulary: hardResetTo -> worktree.materializeTree; landMergeConflicts + rebuildIndexFromTree + assertNoLocalEdits shared by merge/stash/rebase/branch/checkout (@G Batch B)
+- git shared walkers: repo.parseCommitAt/commitTree replace 5 private treeOfCommit copies; commitParents replaces 2; writeTreeFromFiles replaces 2 tree builders; listRefNames replaces 2 ref walkers (@G Batch B)
 - E2: daemon trio scenario tables (15,231 -> 14,294 so far)
 - S: selector boilerplate + dead-export sweep
 - N: net stack SMTP/SSH delivery finalization

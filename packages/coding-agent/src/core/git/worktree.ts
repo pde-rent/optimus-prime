@@ -12,15 +12,22 @@ import type { GitRepository } from "./repository.js";
 
 /** True when any of these paths differ between worktree and index (uncommitted local edits). */
 export function hasLocalEdits(repo: GitRepository, paths: Iterable<string>): boolean {
+	const index = repo.loadIndex();
 	for (const path of paths) {
 		const absolute = join(repo.workdir, path);
 		if (!existsSync(absolute)) return true;
-		const onDisk = new Uint8Array(readFileSync(absolute));
-		const entry = repo.loadIndex().get(path);
+		const entry = index.get(path);
 		if (!entry) continue;
-		if (hashRawObject("blob", onDisk) !== entry.sha) return true;
+		if (hashRawObject("blob", new Uint8Array(readFileSync(absolute))) !== entry.sha) return true;
 	}
 	return false;
+}
+
+/** Refuse when uncommitted local edits sit on any of these paths (git's "would be overwritten"). */
+export function assertNoLocalEdits(repo: GitRepository, paths: Iterable<string>, action?: string): void {
+	if (hasLocalEdits(repo, paths)) {
+		throw new Error(`Your local changes to the following files would be overwritten${action ? ` by ${action}` : ""}`);
+	}
 }
 
 /** Write one blob into the worktree with its mode (exec bit / symlink honoured). */
@@ -69,6 +76,16 @@ export function applyTreeChanges(
 	return touched;
 }
 
+/** Replace an index's entries wholesale with a tree snapshot and save it. */
+export function rebuildIndexFromTree(repo: GitRepository, index: GitIndex, files: Map<string, TreeFile>): void {
+	// Rebuild wholesale so entries absent from the target tree cannot linger.
+	index.entries = [];
+	for (const [path, file] of [...files].sort()) {
+		index.add(repo.makeIndexEntry(path, file.sha));
+	}
+	repo.saveIndex(index);
+}
+
 /**
  * Make the worktree and index exactly match a tree (full checkout; safety checks are
  * the caller's job). The index is rebuilt from scratch, dropping stale entries.
@@ -79,10 +96,5 @@ export function materializeTree(repo: GitRepository, treeSha: string | null): vo
 	const current: Map<string, TreeFile> = headTreeSha === null ? new Map() : flatTree(repo, headTreeSha);
 	const index = repo.loadIndex();
 	applyTreeChanges(repo, current, target, index);
-	// Rebuild the index wholesale so entries absent from both trees cannot linger.
-	index.entries = [];
-	for (const [path, file] of [...target].sort()) {
-		index.add(repo.makeIndexEntry(path, file.sha));
-	}
-	repo.saveIndex(index);
+	rebuildIndexFromTree(repo, index, target);
 }

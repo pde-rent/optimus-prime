@@ -1,4 +1,3 @@
-import { parseCommit } from "./objects.js";
 import type { GitRepository } from "./repository.js";
 
 /**
@@ -59,9 +58,7 @@ function commitTime(repo: GitRepository, sha: string): number {
 }
 
 export function readLogEntry(repo: GitRepository, sha: string): LogEntry {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
-	const commit = parseCommit(raw.body);
+	const commit = repo.parseCommitAt(sha);
 	return {
 		sha,
 		parents: commit.parents,

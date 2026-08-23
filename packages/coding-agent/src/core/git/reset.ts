@@ -5,7 +5,6 @@ import { flatTree } from "./diff.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage } from "./index.js";
 import { hardResetTo } from "./merge.js";
-import { parseCommit } from "./objects.js";
 import type { GitRepository } from "./repository.js";
 import { resolveRevision } from "./revision.js";
 
@@ -33,7 +32,7 @@ export function reset(repo: GitRepository, targetRefish = "HEAD", mode: ResetMod
 		return sha;
 	}
 	// mixed: index matches the target tree; worktree untouched.
-	const treeSha = treeOfCommit(repo, sha);
+	const treeSha = repo.commitTree(sha);
 	const files = flatTree(repo, treeSha);
 	const index = repo.loadIndex();
 	index.entries = [];
@@ -104,10 +103,4 @@ export function isIgnored(repo: GitRepository, relPath: string): boolean {
 	}
 	addIgnoreRules(matcher, repo.workdir, repo.workdir);
 	return matcher.ignores(relPath);
-}
-
-function treeOfCommit(repo: GitRepository, sha: string): string {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
-	return parseCommit(raw.body).tree;
 }

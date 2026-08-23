@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { Dirent } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
@@ -115,6 +116,27 @@ export function savePackedRefs(gitDir: string, refs: Map<string, string>): void 
 	const names = [...refs.keys()].sort();
 	const body = `# pack-refs with: peeled fully-peeled sorted \n${names.map((name) => `${refs.get(name)} ${name}\n`).join("")}`;
 	writeFileSync(join(gitDir, "packed-refs"), body);
+}
+
+/** Every ref name under prefix (loose walk plus packed-refs), sorted. */
+export function listRefNames(gitDir: string, prefix: string): string[] {
+	const names = new Set<string>(loadPackedRefs(gitDir).keys());
+	const base = join(gitDir, ...prefix.split("/"));
+	const walk = (dir: string, rel: string): void => {
+		let items: Dirent[];
+		try {
+			items = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const item of items) {
+			const relName = rel ? `${rel}/${item.name}` : item.name;
+			if (item.isDirectory()) walk(join(dir, item.name), relName);
+			else names.add(`${prefix}/${relName}`);
+		}
+	};
+	walk(base, "");
+	return [...names].filter((name) => name.startsWith(`${prefix}/`)).sort();
 }
 
 export function refExists(gitDir: string, refName: string): boolean {

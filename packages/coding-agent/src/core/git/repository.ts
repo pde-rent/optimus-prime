@@ -1,20 +1,12 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { GitConfig } from "./config.js";
+import { flatTree, readWorktreeBytes, type TreeFile, writeTreeFromFiles } from "./diff.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage, GitIndex } from "./index.js";
 import { writeFileLocked } from "./lock.js";
-import type { GitObjectType, GitTreeEntry, RawObject } from "./objects.js";
-import {
-	hashRawObject,
-	parseCommit,
-	parseTree,
-	readLooseObject,
-	serializeCommit,
-	serializeTree,
-	TREE_MODE_DIR,
-	writeLooseObject,
-} from "./objects.js";
+import type { GitObjectType, ParsedCommit, RawObject } from "./objects.js";
+import { hashRawObject, parseCommit, readLooseObject, serializeCommit, writeLooseObject } from "./objects.js";
 import { PackReader } from "./pack-read.js";
 import { headRefName, resolveHead, resolveRef, writeRef } from "./refs.js";
 
@@ -248,10 +240,19 @@ export class GitRepository {
 
 	headTreeSha(): string | null {
 		const head = this.headCommitSha();
-		if (head === null) return null;
-		const raw = this.readObject(head);
-		if (raw === null) throw new Error(`HEAD commit ${head} not found in object store`);
-		return parseCommit(raw.body).tree;
+		return head === null ? null : this.parseCommitAt(head).tree;
+	}
+
+	/** Parse the commit object at sha; throws when the object is absent or not a commit. */
+	parseCommitAt(sha: string): ParsedCommit {
+		const raw = this.readObject(sha);
+		if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
+		return parseCommit(raw.body);
+	}
+
+	/** Tree sha of the commit object at sha. */
+	commitTree(sha: string): string {
+		return this.parseCommitAt(sha).tree;
 	}
 
 	/** Flatten HEAD's tree into path -> blob sha. Returns null before the first commit. */
@@ -259,48 +260,18 @@ export class GitRepository {
 		const treeSha = this.headTreeSha();
 		if (treeSha === null) return null;
 		const files = new Map<string, string>();
-		const walk = (sha: string, prefix: string): void => {
-			const raw = this.readObject(sha);
-			if (raw === null || raw.type !== "tree") throw new Error(`tree ${sha} not found`);
-			for (const entry of parseTree(raw.body)) {
-				const path = prefix + entry.name;
-				if (entry.mode === TREE_MODE_DIR) walk(entry.sha, `${path}/`);
-				else files.set(path, entry.sha);
-			}
-		};
-		walk(treeSha, "");
+		for (const [path, file] of flatTree(this, treeSha)) files.set(path, file.sha);
 		return files;
 	}
 
 	/** Write tree objects covering all stage-0 index entries; returns the root tree sha. */
 	writeTreeFromIndex(): string {
-		const stageZero = this.loadIndex().entries.filter((entry) => entryStage(entry) === 0);
-		return this.writeTreeLevel(stageZero, "");
-	}
-
-	private writeTreeLevel(entries: IndexEntry[], prefix: string): string {
-		const direct = new Map<string, IndexEntry>();
-		const subtrees = new Map<string, IndexEntry[]>();
-		for (const entry of entries) {
-			const rest = entry.path.slice(prefix.length);
-			const slash = rest.indexOf("/");
-			if (slash === -1) direct.set(rest, entry);
-			else subtrees.set(rest.slice(0, slash), [...(subtrees.get(rest.slice(0, slash)) ?? []), entry]);
+		const files = new Map<string, TreeFile>();
+		for (const entry of this.loadIndex().entries) {
+			if (entryStage(entry) !== 0) continue;
+			files.set(entry.path, { mode: entry.mode.toString(8), sha: entry.sha });
 		}
-		const treeEntries: GitTreeEntry[] = [...direct].map(([name, entry]) => ({
-			mode: entry.mode.toString(8),
-			name,
-			sha: entry.sha,
-		}));
-		for (const [dir, children] of subtrees) {
-			treeEntries.push({
-				mode: TREE_MODE_DIR,
-				name: dir,
-				sha: this.writeTreeLevel(children, `${prefix + dir}/`),
-			});
-		}
-		treeEntries.sort(compareTreeEntries);
-		return writeLooseObject(this.gitDir, "tree", serializeTree(treeEntries));
+		return writeTreeFromFiles(this, files);
 	}
 
 	/** Stage everything currently in the index as one commit on top of HEAD. */
@@ -389,22 +360,6 @@ function normalizeSignature(sig: GitSignatureLike, fallbackTime: number) {
 		time: sig.time ?? fallbackTime,
 		timezoneOffset: sig.timezoneOffset ?? "+0000",
 	};
-}
-
-/** Read file content for hashing/indexing; symlinks contribute their target text. */
-function readWorktreeBytes(workdir: string, relPath: string): Uint8Array {
-	const absolute = join(workdir, relPath);
-	if (lstatSync(absolute).isSymbolicLink()) {
-		return new TextEncoder().encode(readFileSync(absolute, "latin1"));
-	}
-	return new Uint8Array(readFileSync(absolute));
-}
-
-/** Tree sort order compares directory names as if suffixed with "/" (spec §5). */
-function compareTreeEntries(a: GitTreeEntry, b: GitTreeEntry): number {
-	const aKey = a.mode === TREE_MODE_DIR ? `${a.name}/` : a.name;
-	const bKey = b.mode === TREE_MODE_DIR ? `${b.name}/` : b.name;
-	return Buffer.compare(Buffer.from(aKey), Buffer.from(bKey));
 }
 
 /** Reject index paths that could escape the worktree (isomorphic-git UnsafeFilepathError). */

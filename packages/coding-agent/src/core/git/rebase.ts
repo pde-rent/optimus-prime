@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TreeFile } from "./diff.js";
-import { flatTree } from "./diff.js";
-import { allAncestors, hardResetTo, isAncestor, mergeTrees } from "./merge.js";
-import { parseCommit, serializeCommit, writeLooseObject } from "./objects.js";
+import { commitParents, flatTree } from "./diff.js";
+import { allAncestors, committerNow, hardResetTo, isAncestor, landMergeConflicts, mergeTrees } from "./merge.js";
+import { type parseCommit, serializeCommit, writeLooseObject } from "./objects.js";
 import type { GitRepository } from "./repository.js";
 import { resolveRevision } from "./revision.js";
-import { applyTreeChanges, hasLocalEdits, writeBlobToWorktree } from "./worktree.js";
+import { applyTreeChanges, hasLocalEdits } from "./worktree.js";
 
 /**
  * Linear rebase (git rebase <upstream>): replay the first-parent range upstream..HEAD
@@ -41,21 +41,13 @@ function collectReplayRange(repo: GitRepository, head: string, upstreamAncestors
 	let current: string | null = head;
 	while (current !== null && !upstreamAncestors.has(current)) {
 		shas.push(current);
-		current = parentsOf(repo, current)[0] ?? null;
+		current = commitParents(repo, current)[0] ?? null;
 	}
 	return shas.reverse().map((sha) => describeCommit(repo, sha));
 }
 
-function parentsOf(repo: GitRepository, sha: string): string[] {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") return [];
-	return parseCommit(raw.body).parents;
-}
-
 function describeCommit(repo: GitRepository, sha: string): ReplayStep {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
-	const commit = parseCommit(raw.body);
+	const commit = repo.parseCommitAt(sha);
 	return {
 		sha,
 		parents: commit.parents,
@@ -66,29 +58,11 @@ function describeCommit(repo: GitRepository, sha: string): ReplayStep {
 	};
 }
 
-function treeOf(repo: GitRepository, sha: string): string {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`missing commit: ${sha}`);
-	return parseCommit(raw.body).tree;
-}
-
 function replayCommitter(
 	repo: GitRepository,
 	options: { committer?: { name: string; email: string } },
-): {
-	name: string;
-	email: string;
-	time: number;
-	timezoneOffset: string;
-} {
-	if (options.committer) return { ...options.committer, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" };
-	const config = repo.config();
-	return {
-		name: config.get("user.name") ?? "BTR Git Client",
-		email: config.get("user.email") ?? "git@btr.local",
-		time: Math.floor(Date.now() / 1000),
-		timezoneOffset: "+0000",
-	};
+): { name: string; email: string; time: number; timezoneOffset: string } {
+	return { ...committerNow(repo, options), time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" };
 }
 
 export function rebase(
@@ -115,9 +89,9 @@ export function rebase(
 	writeFileSync(join(repo.gitDir, STATE_FILE), JSON.stringify({ origHead: head }));
 	let tip = upstream;
 	for (const step of replay) {
-		const baseTree = step.parents.length > 0 ? treeOf(repo, step.parents[0]) : null;
-		const ourMap = flatTree(repo, treeOf(repo, tip));
-		const outcome = threeWayApply(repo, baseTree, ourMap, treeOf(repo, step.tree));
+		const baseTree = step.parents.length > 0 ? repo.commitTree(step.parents[0]) : null;
+		const ourMap = flatTree(repo, repo.commitTree(tip));
+		const outcome = threeWayApply(repo, baseTree, ourMap, repo.commitTree(step.tree));
 		if (!outcome.clean) {
 			repo.saveIndex(outcome.index);
 			return { status: "conflict", commit: null, stoppedAt: step.sha, conflicts: outcome.conflicts };
@@ -165,19 +139,10 @@ function threeWayApply(
 	const baseMap = baseTreeSha === null ? new Map<string, TreeFile>() : flatTree(repo, baseTreeSha);
 	const theirMap = flatTree(repo, theirTreeSha);
 	const paths = new Set<string>([...ourMap.keys(), ...theirMap.keys()]);
-	if (hasLocalEdits(repo, paths)) throw new Error("local changes would be overwritten by rebase");
+	if (hasLocalEdits(repo, paths)) throw new Error("local changes would be overwritten by rebase"); // distinct wording on purpose
 	const merged = mergeTrees(repo, baseMap, ourMap, theirMap, "HEAD", "UPSTREAM");
 	const index = repo.loadIndex();
 	applyTreeChanges(repo, ourMap, merged.files, index);
-	for (const conflict of merged.conflicts) {
-		index.remove(conflict.path);
-		for (const [stageText, file] of Object.entries(conflict.stages)) {
-			const entry = repo.makeIndexEntry(conflict.path, (file as TreeFile).sha);
-			entry.flags = (Buffer.byteLength(conflict.path) & 0xfff) | (Number(stageText) << 12);
-			index.add(entry);
-		}
-		if (conflict.worktree) writeBlobToWorktree(repo, conflict.path, conflict.worktree.sha, conflict.worktree.mode);
-		else if (existsSync(join(repo.workdir, conflict.path))) rmSync(join(repo.workdir, conflict.path));
-	}
+	landMergeConflicts(repo, index, merged.conflicts);
 	return { clean: merged.clean, index, conflicts: merged.conflicts.map((conflict) => conflict.path) };
 }

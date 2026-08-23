@@ -1,12 +1,12 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TreeFile } from "./diff.js";
-import { flatIndex, flatTree, flatWorktree } from "./diff.js";
-import { mergeTrees } from "./merge.js";
-import { parseCommit, serializeTree, TREE_MODE_DIR, writeLooseObject } from "./objects.js";
+import { flatIndex, flatTree, flatWorktree, headTreeFiles, writeTreeFromFiles } from "./diff.js";
+import { landMergeConflicts, mergeTrees } from "./merge.js";
+import { formatSignature, parseCommit, serializeCommitMessage, writeLooseObject, ZERO_SHA } from "./objects.js";
 import { deleteRef, writeRef } from "./refs.js";
 import type { GitRepository } from "./repository.js";
-import { applyTreeChanges, writeBlobToWorktree } from "./worktree.js";
+import { applyTreeChanges, rebuildIndexFromTree } from "./worktree.js";
 
 /**
  * Stash: the refs/stash stack. Each entry is a worktree commit W with parents
@@ -16,7 +16,6 @@ import { applyTreeChanges, writeBlobToWorktree } from "./worktree.js";
 
 const STASH_REF = "refs/stash";
 const STASH_LOG = join("logs", "refs", "stash");
-const ZERO_SHA = "0000000000000000000000000000000000000000";
 
 export interface StashEntry {
 	sha: string;
@@ -34,51 +33,8 @@ function stashIdentity(repo: GitRepository): { name: string; email: string; time
 	};
 }
 
-function identLine(identity: { name: string; email: string; time: number; timezoneOffset: string }): string {
-	return `${identity.name} <${identity.email}> ${identity.time} ${identity.timezoneOffset}`;
-}
-
-function serializeStashCommit(options: {
-	tree: string;
-	parents: string[];
-	message: string;
-	identity: ReturnType<typeof stashIdentity>;
-}): Uint8Array {
-	const ident = identLine(options.identity);
-	const lines = [`tree ${options.tree}`];
-	for (const parent of options.parents) lines.push(`parent ${parent}`);
-	lines.push(`author ${ident}`, `committer ${ident}`);
-	const message = options.message.endsWith("\n") ? options.message : `${options.message}\n`;
-	return new TextEncoder().encode(`${lines.join("\n")}\n\n${message}`);
-}
-
-/** Build tree objects for an arbitrary flat path map (used for the worktree snapshot). */
-export function writeTreeFromFiles(repo: GitRepository, files: Map<string, TreeFile>): string {
-	const build = (prefix: string): string => {
-		const direct: Array<{ mode: string; name: string; sha: string }> = [];
-		const dirs = new Map<string, Map<string, TreeFile>>();
-		for (const [path, file] of files) {
-			if (!path.startsWith(prefix)) continue;
-			const rest = path.slice(prefix.length);
-			const slash = rest.indexOf("/");
-			if (slash === -1) direct.push({ mode: file.mode, name: rest, sha: file.sha });
-			else {
-				const name = rest.slice(0, slash);
-				if (!dirs.has(name)) dirs.set(name, new Map());
-				dirs.get(name)?.set(path, file);
-			}
-		}
-		for (const [name] of dirs) {
-			direct.push({ mode: TREE_MODE_DIR, name, sha: build(`${prefix + name}/`) });
-		}
-		direct.sort((a, b) => {
-			const keyA = a.mode === TREE_MODE_DIR ? `${a.name}/` : a.name;
-			const keyB = b.mode === TREE_MODE_DIR ? `${b.name}/` : b.name;
-			return Buffer.compare(Buffer.from(keyA), Buffer.from(keyB));
-		});
-		return writeLooseObject(repo.gitDir, "tree", serializeTree(direct));
-	};
-	return build("");
+function identLine(identity: ReturnType<typeof stashIdentity>): string {
+	return formatSignature(identity);
 }
 
 function headSubject(repo: GitRepository): string {
@@ -111,11 +67,11 @@ export function stashPush(repo: GitRepository, options: { message?: string } = {
 	const indexSha = writeLooseObject(
 		repo.gitDir,
 		"commit",
-		serializeStashCommit({
+		serializeCommitMessage({
 			tree: indexTree,
 			parents: [head],
 			message: `index on ${branch}: ${shortHead} ${subject}`,
-			identity,
+			author: identity,
 		}),
 	);
 	const customMessage = options.message
@@ -124,11 +80,11 @@ export function stashPush(repo: GitRepository, options: { message?: string } = {
 	const stashSha = writeLooseObject(
 		repo.gitDir,
 		"commit",
-		serializeStashCommit({
+		serializeCommitMessage({
 			tree: worktreeTree,
 			parents: [indexSha, head],
 			message: customMessage,
-			identity,
+			author: identity,
 		}),
 	);
 	appendStashReflog(repo, stashSha, customMessage);
@@ -138,13 +94,10 @@ export function stashPush(repo: GitRepository, options: { message?: string } = {
 	for (const path of trackedPaths) {
 		if (worktreeMap.has(path)) before.set(path, worktreeMap.get(path) as TreeFile);
 	}
-	const headTree = repo.headTreeSha();
-	const target = headTree === null ? new Map<string, TreeFile>() : flatTree(repo, headTree);
+	const target = headTreeFiles(repo);
 	const index = repo.loadIndex();
 	applyTreeChanges(repo, before, target, index);
-	index.entries = [];
-	for (const [path, file] of [...target].sort()) index.add(repo.makeIndexEntry(path, file.sha));
-	repo.saveIndex(index);
+	rebuildIndexFromTree(repo, index, target);
 	return stashSha;
 }
 
@@ -212,22 +165,13 @@ export function stashApply(repo: GitRepository, nth = 0): StashApplyResult {
 	const baseSha = stashCommit.parents[1];
 	const head = repo.headCommitSha();
 	if (head === null) throw new Error("stash apply needs a HEAD commit");
-	const baseMap = flatTree(repo, treeOfCommit(repo, baseSha));
-	const ourMap = flatTree(repo, treeOfCommit(repo, head));
+	const baseMap = flatTree(repo, repo.commitTree(baseSha));
+	const ourMap = flatTree(repo, repo.commitTree(head));
 	const theirMap = flatTree(repo, stashCommit.tree);
 	const merged = mergeTrees(repo, baseMap, ourMap, theirMap, "Updated upstream", "Stashed changes");
 	const index = repo.loadIndex();
 	const touched = applyTreeChanges(repo, ourMap, merged.files, index);
-	for (const conflict of merged.conflicts) {
-		index.remove(conflict.path);
-		for (const [stageText, file] of Object.entries(conflict.stages)) {
-			const stageEntry = repo.makeIndexEntry(conflict.path, (file as TreeFile).sha);
-			stageEntry.flags = (Buffer.byteLength(conflict.path) & 0xfff) | (Number(stageText) << 12);
-			index.add(stageEntry);
-		}
-		if (conflict.worktree) writeBlobToWorktree(repo, conflict.path, conflict.worktree.sha, conflict.worktree.mode);
-		else if (existsSync(join(repo.workdir, conflict.path))) rmSync(join(repo.workdir, conflict.path));
-	}
+	landMergeConflicts(repo, index, merged.conflicts);
 	// git stash apply leaves restored changes UNSTAGED: undo the index side for clean touches.
 	const headMap = ourMap;
 	for (const path of touched) {
@@ -264,12 +208,4 @@ export function stashDrop(repo: GitRepository, nth = 0): boolean {
 	writeRef(repo.gitDir, STASH_REF, newTip);
 	writeFileSync(logPath, `${lines.join("\n")}\n`);
 	return true;
-}
-
-// -- tiny local aliases so the flow above stays readable --
-
-function treeOfCommit(repo: GitRepository, sha: string): string {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
-	return parseCommit(raw.body).tree;
 }

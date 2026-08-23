@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { diffLines } from "../../utils/diff.js";
-import { blobBytes, flatTree, type TreeFile } from "./diff.js";
-import type { IndexEntry } from "./index.js";
+import { blobBytes, commitParents, flatTree, headTreeFiles, type TreeFile } from "./diff.js";
+import type { GitIndex, IndexEntry } from "./index.js";
 import { entryStage } from "./index.js";
-import { formatSignature, type GitSignature, parseCommit, writeLooseObject } from "./objects.js";
+import { parentsOf, parseCommit, serializeCommitMessage, writeLooseObject, ZERO_SHA } from "./objects.js";
 import type { GitRepository } from "./repository.js";
 import { resolveRevision } from "./revision.js";
-import { applyTreeChanges, hasLocalEdits, writeBlobToWorktree } from "./worktree.js";
+import { applyTreeChanges, assertNoLocalEdits, materializeTree, writeBlobToWorktree } from "./worktree.js";
 
 /**
  * Merge family (spec §8): merge-base finding, optional recursive virtual base,
@@ -28,14 +28,10 @@ export function allAncestors(repo: GitRepository, sha: string): Set<string> {
 		const current = queue.pop() as string;
 		if (out.has(current)) continue;
 		out.add(current);
-		const raw = repo.readObject(current);
-		if (raw === null || raw.type !== "commit") continue;
-		queue.push(...parseCommit(raw.body).parents);
+		queue.push(...commitParents(repo, current));
 	}
 	return out;
 }
-
-const ZERO_SHA = "0000000000000000000000000000000000000000";
 
 export function isAncestor(repo: GitRepository, ancestorSha: string, descendantSha: string): boolean {
 	return ancestorSha === descendantSha || allAncestors(repo, descendantSha).has(ancestorSha);
@@ -61,12 +57,6 @@ export function findMergeBases(repo: GitRepository, aSha: string, bSha: string):
 		for (const parent of parentsOf(repo, sha)) markDominated(parent);
 	}
 	return [...commonSet].filter((sha) => !dominated.has(sha)).sort();
-}
-
-function parentsOf(repo: GitRepository, sha: string): string[] {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") return [];
-	return parseCommit(raw.body).parents;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +121,14 @@ export function mergeFileContent(
 			out.push(line);
 		}
 	};
+	const emitConflict = (ourLines: string[], theirLines: string[]): void => {
+		clean = false;
+		emit([`<<<<<<< ${ourLabel}\n`]);
+		emit(ourLines);
+		emit(["=======\n"]);
+		emit(theirLines);
+		emit([`>>>>>>> ${theirLabel}\n`]);
+	};
 	const baseCount = base.length;
 	const toOurs = lineMap(baseText, ourText);
 	const toTheirs = lineMap(baseText, theirText);
@@ -139,14 +137,7 @@ export function mergeFileContent(
 		if (joinSlice(ours) === joinSlice(theirs)) emit(ours);
 		else if (ourText === "") emit(theirs);
 		else if (theirText === "") emit(ours);
-		else {
-			clean = false;
-			emit([`<<<<<<< ${ourLabel}\n`]);
-			emit(ours);
-			emit(["=======\n"]);
-			emit(theirs);
-			emit([`>>>>>>> ${theirLabel}\n`]);
-		}
+		else emitConflict(ours, theirs);
 		return { content: out.join(""), clean };
 	}
 	let i = 0;
@@ -169,14 +160,7 @@ export function mergeFileContent(
 		if (joinSlice(ourSlice) === joinSlice(theirSlice)) emit(ourSlice);
 		else if (joinSlice(ourSlice) === joinSlice(baseSlice)) emit(theirSlice);
 		else if (joinSlice(theirSlice) === joinSlice(baseSlice)) emit(ourSlice);
-		else {
-			clean = false;
-			emit([`<<<<<<< ${ourLabel}\n`]);
-			emit(ourSlice);
-			emit(["=======\n"]);
-			emit(theirSlice);
-			emit([`>>>>>>> ${theirLabel}\n`]);
-		}
+		else emitConflict(ourSlice, theirSlice);
 		i = j;
 	}
 	return { content: out.join(""), clean };
@@ -208,6 +192,19 @@ export interface TreeMergeResult {
  * through mergeFileContent; everything else (modify/delete, mode clashes, symlinks,
  * gitlinks) conflicts outright per spec §8.
  */
+/** Conflict stages keyed 1 (base), 2 (ours), 3 (theirs), keeping only present sides. */
+function stageTriplet(
+	baseEntry: TreeFile | null,
+	ourEntry: TreeFile | null,
+	theirEntry: TreeFile | null,
+): Partial<Record<1 | 2 | 3, TreeFile>> {
+	const stages: Partial<Record<1 | 2 | 3, TreeFile>> = {};
+	if (baseEntry) stages[1] = baseEntry;
+	if (ourEntry) stages[2] = ourEntry;
+	if (theirEntry) stages[3] = theirEntry;
+	return stages;
+}
+
 export function mergeTrees(
 	repo: GitRepository,
 	baseMap: Map<string, TreeFile>,
@@ -253,22 +250,14 @@ export function mergeTrees(
 			} else {
 				conflicts.push({
 					path,
-					stages: {
-						...(baseEntry ? { 1: baseEntry } : {}),
-						2: ourEntry,
-						3: theirEntry,
-					},
+					stages: stageTriplet(baseEntry, ourEntry, theirEntry),
 					worktree: { mode, sha: mergedSha },
 				});
 			}
 			continue;
 		}
 		// Structural conflict: modify/delete, mode clash, symlink or gitlink divergence.
-		const stages: Partial<Record<1 | 2 | 3, TreeFile>> = {};
-		if (baseEntry) stages[1] = baseEntry;
-		if (ourEntry) stages[2] = ourEntry;
-		if (theirEntry) stages[3] = theirEntry;
-		conflicts.push({ path, stages, worktree: ourEntry ?? theirEntry });
+		conflicts.push({ path, stages: stageTriplet(baseEntry, ourEntry, theirEntry), worktree: ourEntry ?? theirEntry });
 	}
 	return { files, conflicts, clean: conflicts.length === 0 };
 }
@@ -280,10 +269,10 @@ export function mergeTrees(
  */
 export function virtualBaseTree(repo: GitRepository, bases: string[], depth = 0): Map<string, TreeFile> {
 	if (bases.length === 0) return new Map();
-	if (bases.length === 1 || depth >= 8) return flatTree(repo, treeOfCommit(repo, bases[0]));
-	const current = flatTree(repo, treeOfCommit(repo, bases[0]));
+	if (bases.length === 1 || depth >= 8) return flatTree(repo, repo.commitTree(bases[0]));
+	const current = flatTree(repo, repo.commitTree(bases[0]));
 	for (let i = 1; i < bases.length; i++) {
-		const next = flatTree(repo, treeOfCommit(repo, bases[i]));
+		const next = flatTree(repo, repo.commitTree(bases[i]));
 		const merged = mergeTrees(
 			repo,
 			virtualBaseTree(repo, findMergeBases(repo, bases[0], bases[i]), depth + 1),
@@ -302,12 +291,6 @@ export function virtualBaseTree(repo: GitRepository, bases: string[], depth = 0)
 		for (const [path, file] of merged.files) current.set(path, file);
 	}
 	return current;
-}
-
-function treeOfCommit(repo: GitRepository, sha: string): string {
-	const raw = repo.readObject(sha);
-	if (raw === null || raw.type !== "commit") throw new Error(`not a commit: ${sha}`);
-	return parseCommit(raw.body).tree;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +326,10 @@ function defaultMergeMessage(repo: GitRepository, theirsRefish: string): string 
 	return branch === null ? `Merge commit '${sourceName}'` : `Merge branch '${sourceName}'`;
 }
 
-function committerNow(repo: GitRepository, options?: MergeOptions): { name: string; email: string } {
+export function committerNow(
+	repo: GitRepository,
+	options?: { committer?: { name: string; email: string } },
+): { name: string; email: string } {
 	if (options?.committer) return options.committer;
 	const config = repo.config();
 	return {
@@ -354,13 +340,9 @@ function committerNow(repo: GitRepository, options?: MergeOptions): { name: stri
 
 /** Move the current branch (or detached HEAD) to targetSha and make worktree+index match its tree. */
 export function fastForward(repo: GitRepository, targetSha: string): void {
-	const headTree = repo.headTreeSha();
-	const before = headTree === null ? new Map<string, TreeFile>() : flatTree(repo, headTree);
-	const after = flatTree(repo, treeOfCommit(repo, targetSha));
-	const paths = new Set<string>([...before.keys(), ...after.keys()]);
-	if (hasLocalEdits(repo, paths)) {
-		throw new Error("Your local changes to the following files would be overwritten by merge");
-	}
+	const before = headTreeFiles(repo);
+	const after = flatTree(repo, repo.commitTree(targetSha));
+	assertNoLocalEdits(repo, [...before.keys(), ...after.keys()], "merge");
 	const index = repo.loadIndex();
 	applyTreeChanges(repo, before, after, index);
 	repo.saveIndex(index);
@@ -386,7 +368,7 @@ export function mergeInto(repo: GitRepository, theirsRefish: string, options: Me
 		if (head !== null) fastForward(repo, theirs);
 		else {
 			const index = repo.loadIndex();
-			for (const [path, file] of flatTree(repo, treeOfCommit(repo, theirs))) {
+			for (const [path, file] of flatTree(repo, repo.commitTree(theirs))) {
 				index.add(repo.makeIndexEntry(path, file.sha));
 			}
 			repo.saveIndex(index);
@@ -399,30 +381,24 @@ export function mergeInto(repo: GitRepository, theirsRefish: string, options: Me
 		throw new Error("refusing to merge unrelated histories");
 	}
 	const baseMap = virtualBaseTree(repo, bases);
-	const ourMap = flatTree(repo, treeOfCommit(repo, head));
-	const theirMap = flatTree(repo, treeOfCommit(repo, theirs));
+	const ourMap = flatTree(repo, repo.commitTree(head));
+	const theirMap = flatTree(repo, repo.commitTree(theirs));
 	const label = theirsRefish.replace(/^refs\/heads\//, "");
 	const merged = mergeTrees(repo, baseMap, ourMap, theirMap, "HEAD", label);
-	const touchedPaths = new Set<string>([...ourMap.keys(), ...theirMap.keys()]);
-	if (hasLocalEdits(repo, touchedPaths)) {
-		throw new Error("Your local changes to the following files would be overwritten by merge");
-	}
+	assertNoLocalEdits(repo, [...ourMap.keys(), ...theirMap.keys()], "merge");
 	const message = options.message ?? `${defaultMergeMessage(repo, label)}\n`;
 	if (merged.clean) {
 		const index = repo.loadIndex();
 		applyTreeChanges(repo, ourMap, merged.files, index);
 		const committer = committerNow(repo, options);
-		const time = Math.floor(Date.now() / 1000);
 		const sha = writeLooseObject(
 			repo.gitDir,
 			"commit",
-			serializeCommitObject({
+			serializeCommitMessage({
 				tree: repo.writeTreeFromIndex(),
 				parents: [head, theirs],
 				message,
-				name: committer.name,
-				email: committer.email,
-				time,
+				author: { ...committer, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" },
 			}),
 		);
 		repo.updateRef(repo.headBranch() ?? "HEAD", sha);
@@ -433,7 +409,17 @@ export function mergeInto(repo: GitRepository, theirsRefish: string, options: Me
 	applyTreeChanges(repo, ourMap, merged.files, index);
 	writeFileSync(gitDirFile(repo, "MERGE_HEAD"), `${theirs}\n`);
 	writeFileSync(gitDirFile(repo, "MERGE_MSG"), message);
-	for (const conflict of merged.conflicts) {
+	landMergeConflicts(repo, index, merged.conflicts);
+	repo.saveIndex(index);
+	return { status: "conflict", commit: null, conflicts: merged.conflicts.map((conflict) => conflict.path) };
+}
+
+/**
+ * Record conflicts as index stages 1/2/3 and write ours-or-theirs content into the
+ * worktree. Shared by mergeInto / cherry-pick / revert / stash-apply / rebase.
+ */
+export function landMergeConflicts(repo: GitRepository, index: GitIndex, conflicts: PathConflict[]): void {
+	for (const conflict of conflicts) {
 		index.remove(conflict.path);
 		for (const [stageText, file] of Object.entries(conflict.stages)) {
 			index.add(stageEntry(repo, conflict.path, file as TreeFile, Number(stageText)));
@@ -444,8 +430,6 @@ export function mergeInto(repo: GitRepository, theirsRefish: string, options: Me
 			rmSync(join(repo.workdir, conflict.path));
 		}
 	}
-	repo.saveIndex(index);
-	return { status: "conflict", commit: null, conflicts: merged.conflicts.map((conflict) => conflict.path) };
 }
 
 function stageEntry(repo: GitRepository, path: string, file: TreeFile, stage: number): IndexEntry {
@@ -473,13 +457,11 @@ export function concludeMerge(
 	const sha = writeLooseObject(
 		repo.gitDir,
 		"commit",
-		serializeCommitObject({
+		serializeCommitMessage({
 			tree: repo.writeTreeFromIndex(),
 			parents: [head as string, theirs],
 			message,
-			name: committer.name,
-			email: committer.email,
-			time: Math.floor(Date.now() / 1000),
+			author: { ...committer, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" },
 		}),
 	);
 	repo.updateRef(repo.headBranch() ?? "HEAD", sha);
@@ -511,51 +493,9 @@ function readFileSyncText(path: string): string {
 	return readFileSync(path, "utf8");
 }
 
-function serializeCommitObject(options: {
-	tree: string;
-	parents: string[];
-	message: string;
-	name: string;
-	email: string;
-	time: number;
-}): Uint8Array {
-	const ident = `${options.name} <${options.email}> ${options.time} +0000`;
-	const lines = [`tree ${options.tree}`];
-	for (const parent of options.parents) lines.push(`parent ${parent}`);
-	lines.push(`author ${ident}`, `committer ${ident}`);
-	return new TextEncoder().encode(
-		`${lines.join("\n")}\n\n${options.message}${options.message.endsWith("\n") ? "" : "\n"}`,
-	);
-}
-
-function appliedCommitBytes(options: {
-	tree: string;
-	parents: string[];
-	message: string;
-	author: GitSignature;
-	committerName: string;
-	committerEmail: string;
-}): Uint8Array {
-	const now = Math.floor(Date.now() / 1000);
-	const committer = `${options.committerName} <${options.committerEmail}> ${now} +0000`;
-	const lines = [`tree ${options.tree}`];
-	for (const parent of options.parents) lines.push(`parent ${parent}`);
-	lines.push(`author ${formatSignature(options.author)}`, `committer ${committer}`);
-	return new TextEncoder().encode(
-		`${lines.join("\n")}\n\n${options.message}${options.message.endsWith("\n") ? "" : "\n"}`,
-	);
-}
-
 /** Hard reset helper shared with reset/rebase/abort: point ref at sha, force worktree+index to match. */
 export function hardResetTo(repo: GitRepository, sha: string): void {
-	const currentHead = repo.headCommitSha();
-	const before = currentHead === null ? new Map<string, TreeFile>() : flatTree(repo, treeOfCommit(repo, currentHead));
-	const after = flatTree(repo, treeOfCommit(repo, sha));
-	const index = repo.loadIndex();
-	applyTreeChanges(repo, before, after, index);
-	index.entries = [];
-	for (const [path, file] of [...after].sort()) index.add(repo.makeIndexEntry(path, file.sha));
-	repo.saveIndex(index);
+	materializeTree(repo, repo.commitTree(sha));
 	repo.updateRef(repo.headBranch() ?? "HEAD", sha);
 }
 
@@ -580,21 +520,20 @@ export function cherryPick(
 	const commit = parseCommit(commitRaw.body);
 	const head = repo.headCommitSha();
 	if (head === null) throw new Error("cherry-pick needs a HEAD commit");
-	const baseTree = commit.parents.length > 0 ? treeOfCommit(repo, commit.parents[0]) : null;
-	const outcome = applyThreeWay(repo, baseTree, treeOfCommit(repo, head), commit.tree, "HEAD", commitSha.slice(0, 7));
+	const baseTree = commit.parents.length > 0 ? repo.commitTree(commit.parents[0]) : null;
+	const outcome = applyThreeWay(repo, baseTree, repo.commitTree(head), commit.tree, "HEAD", commitSha.slice(0, 7));
 	if (outcome.clean) {
 		// Author identity and message come from the original commit; committer is us.
 		const committer = committerNow(repo, options);
 		const sha = writeLooseObject(
 			repo.gitDir,
 			"commit",
-			appliedCommitBytes({
+			serializeCommitMessage({
 				tree: repo.writeTreeFromIndex(),
 				parents: [head],
 				message: commit.message,
 				author: commit.author,
-				committerName: committer.name,
-				committerEmail: committer.email,
+				committer: { ...committer, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" },
 			}),
 		);
 		repo.updateRef(repo.headBranch() ?? "HEAD", sha);
@@ -618,22 +557,21 @@ export function revert(
 	const commit = parseCommit(commitRaw.body);
 	const head = repo.headCommitSha();
 	if (head === null) throw new Error("revert needs a HEAD commit");
-	const parentTree = commit.parents.length > 0 ? treeOfCommit(repo, commit.parents[0]) : null;
+	const parentTree = commit.parents.length > 0 ? repo.commitTree(commit.parents[0]) : null;
 	const subject = commit.message.split("\n")[0] ?? "";
 	const message = `Revert "${subject}"\n\nThis reverts commit ${commitSha}.\n`;
-	const outcome = applyThreeWay(repo, commit.tree, treeOfCommit(repo, head), parentTree, "HEAD", "parent");
+	const outcome = applyThreeWay(repo, commit.tree, repo.commitTree(head), parentTree, "HEAD", "parent");
 	if (outcome.clean) {
 		const committer = committerNow(repo, options);
 		const sha = writeLooseObject(
 			repo.gitDir,
 			"commit",
-			appliedCommitBytes({
+			serializeCommitMessage({
 				tree: repo.writeTreeFromIndex(),
 				parents: [head],
 				message,
 				author: commit.author,
-				committerName: committer.name,
-				committerEmail: committer.email,
+				committer: { ...committer, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" },
 			}),
 		);
 		repo.updateRef(repo.headBranch() ?? "HEAD", sha);
@@ -664,19 +602,9 @@ function applyThreeWay(
 	const ourMap = flatTree(repo, ourTreeSha);
 	const theirMap = theirTreeSha === null ? new Map<string, TreeFile>() : flatTree(repo, theirTreeSha);
 	const merged = mergeTrees(repo, baseMap, ourMap, theirMap, ourLabel, theirLabel);
-	const touched = new Set<string>([...ourMap.keys(), ...theirMap.keys()]);
-	if (hasLocalEdits(repo, touched)) {
-		throw new Error("Your local changes to the following files would be overwritten");
-	}
+	assertNoLocalEdits(repo, [...ourMap.keys(), ...theirMap.keys()]);
 	const index = repo.loadIndex();
 	applyTreeChanges(repo, ourMap, merged.files, index);
-	for (const conflict of merged.conflicts) {
-		index.remove(conflict.path);
-		for (const [stageText, file] of Object.entries(conflict.stages)) {
-			index.add(stageEntry(repo, conflict.path, file as TreeFile, Number(stageText)));
-		}
-		if (conflict.worktree) writeBlobToWorktree(repo, conflict.path, conflict.worktree.sha, conflict.worktree.mode);
-		else if (existsSync(join(repo.workdir, conflict.path))) rmSync(join(repo.workdir, conflict.path));
-	}
+	landMergeConflicts(repo, index, merged.conflicts);
 	return { clean: merged.clean, index, conflicts: merged.conflicts.map((conflict) => conflict.path) };
 }

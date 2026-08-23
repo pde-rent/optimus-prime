@@ -24,6 +24,9 @@ export interface RawObject {
 	body: Uint8Array;
 }
 
+/** The all-zero object id git uses as "no such object" (ref deletions, ORIG_HEAD sentinel). */
+export const ZERO_SHA = "0".repeat(40);
+
 export function sha1Hex(...parts: Uint8Array[]): string {
 	const hasher = createHash("sha1");
 	for (const part of parts) {
@@ -234,6 +237,13 @@ export function parseCommit(body: Uint8Array): ParsedCommit {
 	return { tree, parents, author, committer, headers, message };
 }
 
+function commitHeaderLines(tree: string, parents: string[], author: GitSignature, committer?: GitSignature): string {
+	const lines = [`tree ${tree}`];
+	for (const parent of parents) lines.push(`parent ${parent}`);
+	lines.push(`author ${formatSignature(author)}`, `committer ${formatSignature(committer ?? author)}`);
+	return `${lines.join("\n")}\n\n`;
+}
+
 export function serializeCommit(options: {
 	tree: string;
 	parents: string[];
@@ -241,11 +251,29 @@ export function serializeCommit(options: {
 	committer?: GitSignature;
 	message: string;
 }): Uint8Array {
-	const lines = [`tree ${options.tree}`];
-	for (const parent of options.parents) lines.push(`parent ${parent}`);
-	lines.push(`author ${formatSignature(options.author)}`);
-	lines.push(`committer ${formatSignature(options.committer ?? options.author)}`);
-	return concatBytes(ascii(`${lines.join("\n")}\n\n`), ascii(options.message), ascii("\n"));
+	return concatBytes(
+		ascii(commitHeaderLines(options.tree, options.parents, options.author, options.committer)),
+		ascii(options.message),
+		ascii("\n"),
+	);
+}
+
+/**
+ * Command-layer variant (merge / cherry-pick / revert / stash): the message is
+ * guaranteed exactly one trailing newline instead of one appended unconditionally.
+ */
+export function serializeCommitMessage(options: {
+	tree: string;
+	parents: string[];
+	message: string;
+	author: GitSignature;
+	committer?: GitSignature;
+}): Uint8Array {
+	const body = options.message.endsWith("\n") ? options.message : `${options.message}\n`;
+	return concatBytes(
+		ascii(commitHeaderLines(options.tree, options.parents, options.author, options.committer)),
+		ascii(body),
+	);
 }
 
 export interface ParsedTag {
@@ -254,6 +282,13 @@ export interface ParsedTag {
 	tag: string;
 	tagger: GitSignature | null;
 	message: string;
+}
+
+/** Serialize an annotated tag payload; message must already end with a newline. */
+export function serializeTag(options: ParsedTag): Uint8Array {
+	const lines = [`object ${options.object}`, `type ${options.type}`, `tag ${options.tag}`];
+	if (options.tagger) lines.push(`tagger ${formatSignature(options.tagger)}`);
+	return ascii(`${lines.join("\n")}\n\n${options.message}`);
 }
 
 export function parseTag(body: Uint8Array): ParsedTag {
@@ -265,4 +300,14 @@ export function parseTag(body: Uint8Array): ParsedTag {
 	if (!object || !type || !tag) throw new Error("tag object missing object/type/tag");
 	const taggerLine = get("tagger");
 	return { object, type, tag, tagger: taggerLine ? parseSignature(taggerLine) : null, message };
+}
+
+/** Direct parent shas of a commit; empty for root commits or non-commits. */
+export function parentsOf(
+	repo: { readObject(sha: string): { type: string; body: Uint8Array } | null },
+	sha: string,
+): string[] {
+	const raw = repo.readObject(sha);
+	if (raw === null || raw.type !== "commit") return [];
+	return parseCommit(raw.body).parents;
 }

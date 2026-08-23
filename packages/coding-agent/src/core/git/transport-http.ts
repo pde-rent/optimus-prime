@@ -154,6 +154,30 @@ function serviceUrl(url: string, service: PackService, query: string): string {
 	return `${url.replace(/\/+$/, "")}/info/refs?service=${service}${query}`;
 }
 
+/** Shared smart-HTTP POST: service headers, auth, non-OK -> GitHttpError with a body snippet. */
+async function postService(
+	url: string,
+	service: PackService,
+	body: Uint8Array,
+	auth: ResolvedAuth,
+): Promise<Uint8Array> {
+	const response = await fetch(`${auth.url.replace(/\/+$/, "")}/${service}`, {
+		method: "POST",
+		headers: {
+			"Content-Type": `application/x-${service}-request`,
+			Accept: `application/x-${service}-result`,
+			"Git-Protocol": "version=1",
+			...(auth.authorization ? { Authorization: auth.authorization } : {}),
+		},
+		body: new Blob([body]),
+	});
+	if (!response.ok) {
+		const errBody = new Uint8Array(await response.arrayBuffer());
+		throw new GitHttpError(`${service} failed with HTTP ${response.status}`, response.status, snippet(errBody));
+	}
+	return new Uint8Array(await response.arrayBuffer());
+}
+
 async function httpGet(url: string, authorization: string | null): Promise<Response> {
 	const headers: Record<string, string> = { "Git-Protocol": "version=1" };
 	if (authorization) headers.Authorization = authorization;
@@ -436,4 +460,3 @@ export async function postReceivePack(
 	if (!sawStatus) throw new Error("receive-pack returned no report-status despite being requested");
 	return report;
 }
-
