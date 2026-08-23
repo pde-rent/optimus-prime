@@ -212,7 +212,20 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		return this.toolName === "repl" && !this.toolDefinition?.renderCall && !this.toolDefinition?.renderResult;
 	}
 
-	private isBuiltInEditTool(): boolean {
+	/**
+	 * Machine-readable class for this tool: the connection definition's kind when
+	 * the daemon publishes it, else the replayed built-in definition's kind.
+	 */
+	private effectiveKind(): string | undefined {
+		return this.toolDefinition?.kind ?? this.builtInToolDefinition?.kind;
+	}
+
+	/** Mutating file tools (the edit family) expand their diffs with ctrl+j. */
+	private usesEditDiffExpansion(): boolean {
+		if (this.effectiveKind() !== undefined) {
+			return this.effectiveKind() === "edit";
+		}
+		// Definitions without a kind (older daemons): fall back to the edit name.
 		return (
 			this.toolName === "edit" &&
 			(this.toolDefinition === undefined || this.toolDefinition.replayBuiltInToolName === "edit")
@@ -233,7 +246,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 			executionStarted: this.executionStarted,
 			argsComplete: this.argsComplete,
 			isPartial: this.isPartial,
-			expanded: this.isBuiltInEditTool() ? this.editDiffsExpanded : this.expanded,
+			expanded: this.usesEditDiffExpansion() ? this.editDiffsExpanded : this.expanded,
 			showExpandHint: this.showExpandHint,
 			showImages: this.showImages,
 			includeImageDimensions: this.includeImageDimensions,

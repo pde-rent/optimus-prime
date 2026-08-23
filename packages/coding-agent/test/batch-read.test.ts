@@ -40,8 +40,8 @@ describe("batched reads (paths[])", () => {
 			].join("\n"),
 		);
 		expect(result.details.mode).toBe("batch");
-		expect(result.details.files.map((f) => f.included)).toEqual([true, true]);
-		expect(result.details.files.find((f) => f.givenPath === oldPath)?.totalLines).toBe(1);
+		expect(result.details.files.map((f: any) => f.included)).toEqual([true, true]);
+		expect(result.details.files.find((f: any) => f.givenPath === oldPath)?.totalLines).toBe(1);
 	});
 
 	it("read_file returns only the size table when nothing fits the budget", async () => {
@@ -56,7 +56,7 @@ describe("batched reads (paths[])", () => {
 		expect(text).toContain(`${a}: ${60 * 1024} bytes, mtime `);
 		expect(text).toContain(`${b}: ${60 * 1024} bytes, mtime `);
 		expect(text).not.toContain("x".repeat(16));
-		expect(result.details.files.every((f) => !f.included)).toBe(true);
+		expect(result.details.files.every((f: any) => !f.included)).toBe(true);
 	});
 
 	it("read_file skips missing paths with a note and reads the rest", async () => {
@@ -70,7 +70,7 @@ describe("batched reads (paths[])", () => {
 		expect(text).toContain(`=== present.txt (4 bytes) ===`);
 		expect(text).toContain("[Skipped 1 unreadable path(s):");
 		expect(text).toContain(missing);
-		expect(result.details.files.map((f) => f.givenPath)).toEqual([present]);
+		expect(result.details.files.map((f: any) => f.givenPath)).toEqual([present]);
 	});
 
 	it("read_file short-circuits per file inside a batch", async () => {

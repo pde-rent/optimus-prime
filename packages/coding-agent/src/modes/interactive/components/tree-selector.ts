@@ -13,8 +13,15 @@ import {
 	TruncatedText,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { AgentConnectionSessionTreeNode } from "../../agent-connection/index.js";
+import type { AgentConnectionSessionEntry, AgentConnectionSessionTreeNode } from "../../agent-connection/index.js";
 import { theme } from "../theme/theme.js";
+import { renderRichDiff } from "./diff.js";
+import {
+	FILE_CHANGE_DIFF_INDENT,
+	formatToolResultChangeLabel,
+	getToolResultDiffs,
+	type ToolResultDiff,
+} from "./edit-summary.js";
 import { keyHint, keyText } from "./keybinding-hints.js";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
@@ -41,6 +48,11 @@ interface FlatNode {
 /** Filter mode for tree display */
 export type FilterMode = "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 
+/** Optional presentation data for the tree (cwd for path shortening). */
+export interface TreeSelectorOptions {
+	cwd?: string;
+}
+
 /**
  * Tree list component with selection and ASCII art visualization
  */
@@ -66,6 +78,9 @@ class TreeList implements Component {
 	private visibleChildrenMap: Map<string | null, string[]> = new Map();
 	private lastSelectedId: string | null = null;
 	private foldedNodes: Set<string> = new Set();
+	/** Entry ids whose tool-result diffs are expanded (ctrl+j). */
+	private diffExpandedIds: Set<string> = new Set();
+	private cwd: string | undefined;
 
 	public onSelect?: (entryId: string) => void;
 	public onCancel?: () => void;
@@ -77,7 +92,9 @@ class TreeList implements Component {
 		maxVisibleLines: number,
 		initialSelectedId?: string,
 		initialFilterMode?: FilterMode,
+		options?: TreeSelectorOptions,
 	) {
+		this.cwd = options?.cwd;
 		this.currentLeafId = currentLeafId;
 		this.maxVisibleLines = maxVisibleLines;
 		this.filterMode = initialFilterMode ?? "default";
@@ -695,6 +712,9 @@ class TreeList implements Component {
 				line = theme.getSelectionBackgroundColor()(line);
 			}
 			lines.push(truncateToWidth(line, width));
+			for (const diffRow of this.getDiffRows(entry, width)) {
+				lines.push(diffRow);
+			}
 		}
 
 		lines.push(
@@ -708,6 +728,39 @@ class TreeList implements Component {
 		);
 
 		return lines;
+	}
+
+	/** Unified diffs a tool-result entry carries; empty for non-results and reads. */
+	private getEntryDiffs(entry: AgentConnectionSessionEntry): ToolResultDiff[] {
+		if (entry.type !== "message" || entry.message.role !== "toolResult") {
+			return [];
+		}
+		const msg = entry.message as { toolCallId?: string; isError?: unknown };
+		const toolCall = msg.toolCallId ? this.toolCallMap.get(msg.toolCallId) : undefined;
+		if (!toolCall || msg.isError === true) {
+			return [];
+		}
+		return getToolResultDiffs(toolCall.name, toolCall.arguments, {
+			details: (entry.message as { details?: unknown }).details,
+			isError: msg.isError === true,
+		});
+	}
+
+	/** Indented diff rows shown under an entry while its diffs are expanded. */
+	private getDiffRows(entry: AgentConnectionSessionEntry, width: number): string[] {
+		if (!this.diffExpandedIds.has(entry.id)) {
+			return [];
+		}
+		const indent = FILE_CHANGE_DIFF_INDENT.slice(0, Math.max(0, width - 1));
+		const contentWidth = Math.max(1, width - indent.length);
+		const rows: string[] = [];
+		for (const change of this.getEntryDiffs(entry)) {
+			rows.push(truncateToWidth(`${indent}${theme.fg("muted", change.path)}`, width));
+			for (const line of renderRichDiff(change.diff, contentWidth)) {
+				rows.push(truncateToWidth(`${indent}${line}`, width));
+			}
+		}
+		return rows;
 	}
 
 	private getEntryDisplayText(node: AgentConnectionSessionTreeNode, isSelected: boolean): string {
@@ -738,9 +791,21 @@ class TreeList implements Component {
 						result = theme.fg("success", "assistant: ") + theme.fg("muted", "(no content)");
 					}
 				} else if (role === "toolResult") {
-					const toolMsg = msg as { toolCallId?: string; toolName?: string };
+					const toolMsg = msg as { toolCallId?: string; toolName?: string; isError?: unknown };
 					const toolCall = toolMsg.toolCallId ? this.toolCallMap.get(toolMsg.toolCallId) : undefined;
-					if (toolCall) {
+					// Mutating tool results render as file-change summaries, not raw call previews.
+					const changeLabel =
+						toolCall && !toolMsg.isError
+							? formatToolResultChangeLabel(
+									toolCall.name,
+									toolCall.arguments,
+									{ details: msg.details, isError: toolMsg.isError === true },
+									this.cwd,
+								)
+							: undefined;
+					if (changeLabel) {
+						result = changeLabel;
+					} else if (toolCall) {
 						result = theme.fg("muted", this.formatToolCall(toolCall.name, toolCall.arguments));
 					} else {
 						result = theme.fg("muted", `[${toolMsg.toolName ?? "tool"}]`);
@@ -916,6 +981,15 @@ class TreeList implements Component {
 				this.applyFilter();
 			} else {
 				this.selectedIndex = this.findBranchSegmentStart("down");
+			}
+		} else if (kb.matches(keyData, "app.edits.expand")) {
+			const selected = this.filteredNodes[this.selectedIndex]?.node.entry;
+			if (selected && this.getEntryDiffs(selected).length > 0) {
+				if (this.diffExpandedIds.has(selected.id)) {
+					this.diffExpandedIds.delete(selected.id);
+				} else {
+					this.diffExpandedIds.add(selected.id);
+				}
 			}
 		} else if (kb.matches(keyData, "tui.editor.cursorLeft") || kb.matches(keyData, "tui.select.pageUp")) {
 			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, -this.maxVisibleLines);
@@ -1155,13 +1229,14 @@ export class TreeSelectorComponent extends Container implements Focusable {
 		onLabelChange?: (entryId: string, label: string | undefined) => void,
 		initialSelectedId?: string,
 		initialFilterMode?: FilterMode,
+		options?: TreeSelectorOptions,
 	) {
 		super();
 
 		this.onLabelChangeCallback = onLabelChange;
 		const maxVisibleLines = Math.max(5, Math.floor(terminalHeight / 2));
 
-		this.treeList = new TreeList(tree, currentLeafId, maxVisibleLines, initialSelectedId, initialFilterMode);
+		this.treeList = new TreeList(tree, currentLeafId, maxVisibleLines, initialSelectedId, initialFilterMode, options);
 		this.treeList.onSelect = onSelect;
 		this.treeList.onCancel = onCancel;
 		this.treeList.onLabelEdit = (entryId, currentLabel) => this.showLabelInput(entryId, currentLabel);
@@ -1193,6 +1268,7 @@ export class TreeSelectorComponent extends Container implements Focusable {
 						`${keyText("app.tree.editLabel")} label`,
 						`${filterKeys} filters (${cycleKeys} cycle)`,
 						`${keyText("app.tree.toggleLabelTimestamp")} label time`,
+						`${keyText("app.edits.expand")} edit diffs`,
 					]),
 				),
 				1,

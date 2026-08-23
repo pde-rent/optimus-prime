@@ -55,7 +55,11 @@ export function formatGoalStatus(goal: GoalState, terminalColumns: number): stri
 	}
 }
 
-export function formatGoalDetailSuffix(value: string | undefined, prefixWidth: number, terminalColumns: number): string {
+export function formatGoalDetailSuffix(
+	value: string | undefined,
+	prefixWidth: number,
+	terminalColumns: number,
+): string {
 	const detail = value?.replace(/\s+/g, " ").trim();
 	if (!detail) {
 		return "";
@@ -66,4 +70,3 @@ export function formatGoalDetailSuffix(value: string | undefined, prefixWidth: n
 	}
 	return `: ${truncateToWidth(detail, availableWidth)}`;
 }
-

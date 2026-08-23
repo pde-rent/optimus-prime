@@ -97,11 +97,12 @@ export type RlmChildTerminalNoticeDetails =
 export function createRlmChildFailureMessage(
 	details: RlmChildFailureDetails,
 	timestamp = Date.now(),
+	contentOverride?: string,
 ): CustomMessage<RlmChildFailureDetails> {
 	return {
 		role: "custom",
 		customType: RLM_CHILD_FAILURE_CUSTOM_TYPE,
-		content: `RLM child ${details.sessionName} (${details.childId}) failed: ${details.error}`,
+		content: contentOverride ?? `RLM child ${details.sessionName} (${details.childId}) failed: ${details.error}`,
 		display: true,
 		details,
 		timestamp,
@@ -111,11 +112,13 @@ export function createRlmChildFailureMessage(
 export function createRlmChildTerminalNoticeMessage(
 	details: RlmChildTerminalNoticeDetails,
 	timestamp = Date.now(),
+	contentOverride?: string,
 ): CustomMessage<RlmChildTerminalNoticeDetails> {
 	const content =
-		details.kind === "cancelled"
+		contentOverride ??
+		(details.kind === "cancelled"
 			? `RLM child ${details.sessionName} (${details.childId}) was cancelled${details.reason ? `: ${details.reason}` : ""}`
-			: `RLM child ${details.sessionName} (${details.childId}) completed without sending a reply${details.lastAssistantTextPreview ? `. Last assistant text: ${details.lastAssistantTextPreview}` : ""}`;
+			: `RLM child ${details.sessionName} (${details.childId}) completed without sending a reply${details.lastAssistantTextPreview ? `. Last assistant text: ${details.lastAssistantTextPreview}` : ""}`);
 	return {
 		role: "custom",
 		customType: RLM_CHILD_TERMINAL_NOTICE_CUSTOM_TYPE,

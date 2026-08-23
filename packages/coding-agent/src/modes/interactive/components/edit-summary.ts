@@ -4,8 +4,10 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditToolDetails } from "../../../core/tools/edit.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
+import type { SedToolDetails } from "../../../core/tools/native/sed.js";
 import { resolveToCwd } from "../../../core/tools/path-utils.js";
 import type { ReplToolDetails } from "../../../core/tools/repl-types.js";
+import type { WriteFileToolDetails } from "../../../core/tools/write-file.js";
 import { canonicalizePath, formatPathRelativeToCwdOrAbsolute } from "../../../utils/paths.js";
 import { theme } from "../theme/theme.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
@@ -56,6 +58,19 @@ export function getToolFileChanges(
 		const diff = (result.details as EditToolDetails | undefined)?.diff;
 		if (typeof path === "string" && diff) {
 			mergeFileChange(changes, { path, ...countChangedLines(diff) }, cwd);
+		}
+	} else if (toolName === "write_file" && !result.isError) {
+		const writeArgs = args as { path?: unknown } | undefined;
+		const details = result.details as WriteFileToolDetails | undefined;
+		if (typeof writeArgs?.path === "string" && details?.diff) {
+			mergeFileChange(changes, { path: writeArgs.path, ...countChangedLines(details.diff) }, cwd);
+		}
+	} else if (toolName === "sed" && !result.isError) {
+		const sedArgs = args as { path?: unknown } | undefined;
+		const details = result.details as SedToolDetails | undefined;
+		// Dry runs report a diff but write nothing, so they are not changes.
+		if (typeof sedArgs?.path === "string" && details?.applied && details.diff) {
+			mergeFileChange(changes, { path: sedArgs.path, ...countChangedLines(details.diff) }, cwd);
 		}
 	}
 	return [...changes.values()];
@@ -132,4 +147,86 @@ export function formatTotalChangeSummary(changes: readonly FileChangeSummary[]):
 	);
 	const files = `${changes.length} file${changes.length === 1 ? "" : "s"} changed`;
 	return `${theme.fg("muted", files)}${theme.fg("dim", " | ")}${formatChangeCounts(totals)}`;
+}
+
+/** One unified diff attached to a tool result, keyed by the file it changes. */
+export interface ToolResultDiff {
+	path: string;
+	diff: string;
+}
+
+/**
+ * Unified diffs carried by a tool result for the mutating built-ins
+ * (edit, write_file, applied sed) and repl cells. Empty for reads, dry runs,
+ * errors, and created files without a diff.
+ */
+export function getToolResultDiffs(
+	toolName: string,
+	args: unknown,
+	result: { details?: unknown; isError: boolean },
+): ToolResultDiff[] {
+	if (result.isError || !result.details || typeof result.details !== "object") {
+		return [];
+	}
+	const details = result.details as Record<string, unknown>;
+	const argPath = (args as { path?: unknown; file_path?: unknown } | undefined)?.path;
+	const path = typeof argPath === "string" ? argPath : undefined;
+	const asDiff = (rawPath: string | undefined, diff: unknown): ToolResultDiff | undefined =>
+		rawPath !== undefined && typeof diff === "string" && diff.length > 0 ? { path: rawPath, diff } : undefined;
+
+	if (toolName === "repl") {
+		return ((details as ReplToolDetails).diffs ?? []).map((display) => ({
+			path: display.path,
+			diff: generateDiffString(display.oldStr, display.newStr, 4, display.startLine ?? 1).diff,
+		}));
+	}
+	if (toolName === "edit" || toolName === "write_file") {
+		const diff = asDiff(path, details.diff);
+		return diff ? [diff] : [];
+	}
+	if (toolName === "sed" && details.applied === true) {
+		const diff = asDiff(path, details.diff);
+		return diff ? [diff] : [];
+	}
+	return [];
+}
+
+/**
+ * One-line outcome label for a mutating tool result in compact views:
+ * `Edited <path> +N -M`, or `Created <path>` for newly written files.
+ * Undefined when the result is not a file change.
+ */
+export function formatToolResultChangeLabel(
+	toolName: string,
+	args: unknown,
+	result: { details?: unknown; isError: boolean },
+	cwd: string | undefined,
+): string | undefined {
+	if (result.isError) {
+		return undefined;
+	}
+	const changes = getToolFileChanges(toolName, args, result, cwd ?? process.cwd());
+	const counts = changes.reduce(
+		(sum, change) => ({ added: sum.added + change.added, removed: sum.removed + change.removed }),
+		{ added: 0, removed: 0 },
+	);
+	if (changes.length === 0) {
+		const created =
+			toolName === "write_file" &&
+			(result.details as { created?: unknown } | undefined)?.created === true &&
+			typeof (args as { path?: unknown } | undefined)?.path === "string"
+				? ((args as { path?: unknown }).path as string)
+				: undefined;
+		if (!created) {
+			return undefined;
+		}
+		return `${theme.fg("success", "Created ")}${theme.fg("muted", created)}`;
+	}
+	const target =
+		changes.length === 1
+			? cwd === undefined
+				? changes[0].path
+				: formatFileChangePath(changes[0].path, cwd)
+			: `${changes.length} files`;
+	return `${theme.fg("success", "Edited ")}${theme.fg("muted", target)} ${theme.fg("dim", " ")}${theme.fg("toolDiffAdded", `+${counts.added}`)} ${theme.fg("toolDiffRemoved", `-${counts.removed}`)}`;
 }

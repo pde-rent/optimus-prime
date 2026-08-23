@@ -92,6 +92,8 @@ export function createBunReplToolDefinition(
 		description:
 			"Execute JavaScript/TypeScript code in a persistent Bun REPL. Variables and imports persist across calls, and are revived on a best-effort basis when a session is resumed. Use %%bash cells for shell commands.",
 		promptSnippet: "repl - persistent Bun JavaScript/TypeScript REPL for scratchpad code and %%bash orchestration",
+		kind: "execute",
+		read_only: false,
 		executionMode: "sequential",
 		parameters: bunReplSchema,
 		execute: async (toolCallId, params, signal, onUpdate, _ctx) => {

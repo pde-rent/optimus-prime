@@ -4,8 +4,6 @@ import { HEARTBEAT_PROMPT_PREVIEW_LABEL } from "../../core/messages.js";
 import { isLeadingSlashCommand, styleSlashCommandText } from "./components/slash-command-message.js";
 import { theme } from "./theme/theme.js";
 
-
-
 function isLabeledQueuedPreview(message: string): boolean {
 	return (
 		message.startsWith(`${HEARTBEAT_PROMPT_PREVIEW_LABEL}: `) ||

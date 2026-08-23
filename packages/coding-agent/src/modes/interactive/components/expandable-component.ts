@@ -14,6 +14,11 @@ export abstract class ExpandableComponent extends Container {
 
 	protected abstract updateDisplay(): void;
 
+	/** Current absolute expansion, so UI state can persist across transcript rebuilds. */
+	get isExpanded(): boolean {
+		return this.expanded;
+	}
+
 	setExpanded(expanded: boolean): void {
 		if (this.lastGlobalExpanded === expanded) {
 			return;

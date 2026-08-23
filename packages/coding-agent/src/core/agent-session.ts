@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -239,6 +240,7 @@ import {
 	type RlmSetMaxDepthResult,
 	type RlmSpawnHandle,
 	type RlmSubagentRegistryEntry,
+	type RlmSubagentRegistryStatus,
 	type RlmSubagentRuntime,
 	type SubagentRuntimeHost,
 } from "./rlm-runtime.js";
@@ -919,6 +921,10 @@ interface RlmChildRun {
 	detachedDeletion?: RlmSubagentRegistryEntry;
 	emitUpdate?: () => void;
 	unsubscribe?: () => void;
+	/** Tool executions observed during the run; drives the stalled status. */
+	toolUseCount?: number;
+	/** Run ended with zero replies to the parent and zero tool activity. */
+	stalled?: boolean;
 }
 
 interface RlmSubagentModelSelection {
@@ -1246,6 +1252,9 @@ export class AgentSession {
 	// Inline mode keeps finished child sessions so the inspector can still read them;
 	// the daemon does the same by leaving the child session resident in its registry.
 	private _rlmChildSessions = new Map<string, AgentSession>();
+	// Final list_subagents status for retained children; the active-run record is
+	// dropped once the session is retained, so the mark outlives it.
+	private _rlmChildFinalStatuses = new Map<string, RlmSubagentRegistryStatus>();
 	private _deletedRlmChildIds = new Set<string>();
 	// Failed explicit deletes stay hidden from listings but retain their original
 	// selector so a later delete can retry cleanup without orphaning the runtime.
@@ -9214,7 +9223,9 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride ? Object.keys(this._baseToolsOverride) : ["repl"];
+		const defaultActiveToolNames = this._baseToolsOverride
+			? Object.keys(this._baseToolsOverride)
+			: ["repl", "bash", "skill", "grep", "find", "sed", "wc", "head", "tail", "ln"];
 		const baseActiveToolNames = [...(options.activeToolNames ?? defaultActiveToolNames)];
 		if (this._goalState.status === "active" && this._includeGoals) {
 			// An active goal needs repl so the model can reach the goal skill.
@@ -9794,7 +9805,14 @@ export class AgentSession {
 				session_id: daemonChild?.sessionId ?? run.session?.sessionId ?? null,
 				session_name: daemonChild?.sessionName ?? run.session?.sessionName ?? run.sessionName,
 				session_dir: run.sessionDir,
-				status: run.status === "done" ? "completed" : run.status === "error" ? "error" : "running",
+				status:
+					run.status === "done"
+						? run.stalled
+							? "stalled"
+							: "completed"
+						: run.status === "error"
+							? "error"
+							: "running",
 				tokens_spent: spend.get(run.id) ?? 0,
 			});
 			recorded.add(run.id);
@@ -9820,7 +9838,7 @@ export class AgentSession {
 				session_name:
 					daemonChild?.sessionName ?? childSession.sessionName ?? createDefaultRlmSubagentSessionName("", childId),
 				session_dir: sessionDir,
-				status: "completed",
+				status: this._rlmChildFinalStatuses.get(childId) ?? "completed",
 			});
 			recorded.add(childId);
 		}
@@ -9845,6 +9863,54 @@ export class AgentSession {
 			});
 		}
 		return { subagents };
+	}
+
+	/** Cap for the structured terminal report a silent child sends its parent. */
+	private static readonly RLM_TERMINAL_AUTO_REPORT_MAX_CHARS = 1500;
+
+	/**
+	 * Structured terminal report for a child run that ended without messaging its parent.
+	 * Summarizes the last assistant activity, the git tree under the child's cwd, and any
+	 * local unpushed commits, so the parent learns the outcome without a reply.
+	 */
+	_buildRlmTerminalAutoReport(outcome: "completed" | "error" | "interrupted", failureText?: string): string {
+		const did: string[] = [];
+		for (let i = this.messages.length - 1; i >= 0 && did.length < 3; i--) {
+			const message = this.messages[i];
+			if (!message || message.role !== "assistant") continue;
+			const text = compactRlmText(readAssistantText(message), 200).trim();
+			if (!text) continue;
+			did.push(`- ${text}`);
+		}
+		const didText = did.length > 0 ? did.join("; ") : "no assistant output";
+		let dirtyFiles: number | undefined;
+		let commits = "none";
+		try {
+			const statusResult = spawnSync("git", ["status", "--porcelain"], { cwd: this._cwd, encoding: "utf8" });
+			if (!statusResult.error && statusResult.status === 0) {
+				dirtyFiles = statusResult.stdout.split("\n").filter((line) => line.trim().length > 0).length;
+			}
+			const logResult = spawnSync("git", ["log", "--oneline", "--max-count=5", "@{u}..HEAD"], {
+				cwd: this._cwd,
+				encoding: "utf8",
+			});
+			if (!logResult.error && logResult.status === 0 && logResult.stdout.trim()) {
+				commits = logResult.stdout.trim().split("\n").join(", ");
+			}
+		} catch {
+			// Best-effort reporting; a missing git binary or repo leaves the defaults.
+		}
+		const needs = failureText ? compactRlmText(failureText) : "nothing";
+		const report = [
+			`AUTO-REPORT (${outcome}) task=${this.sessionName ?? this.sessionId}`,
+			`outcome: ${outcome}`,
+			`did: ${didText}`,
+			`tree: ${dirtyFiles ?? "unknown"} dirty files under cwd`,
+			`commits: ${commits}`,
+			`needs: ${needs}`,
+		].join(" | ");
+		if (report.length <= AgentSession.RLM_TERMINAL_AUTO_REPORT_MAX_CHARS) return report;
+		return `${report.slice(0, AgentSession.RLM_TERMINAL_AUTO_REPORT_MAX_CHARS - 1)}...`;
 	}
 
 	private _rlmSubagentMatchesTarget(entry: RlmSubagentRegistryEntry, target: string): boolean {
@@ -10007,6 +10073,7 @@ export class AgentSession {
 		this._rlmChildUnsubscribes.delete(childId);
 		this._rlmChildSessions.delete(childId);
 		this._rlmChildCleanupFailures.delete(childId);
+		this._rlmChildFinalStatuses.delete(childId);
 		if (!run || this._activeRlmChildRuns.get(childId) === run) {
 			this._activeRlmChildRuns.delete(childId);
 		}
@@ -10418,6 +10485,48 @@ export class AgentSession {
 			}).catch(() => undefined);
 		};
 
+		// Single choke point for run endings: every path below (done, error,
+		// cancelled) reports a still-silent child to its parent once, best-effort.
+		const maybeSendTerminalAutoReport = async (
+			outcome: "completed" | "error" | "interrupted",
+			failureText?: string,
+		): Promise<boolean> => {
+			if (run.detachedDeletion) return false;
+			const childSessionRef = childSession;
+			if (!childSessionRef || childSessionRef._repliedToParentSinceTask !== false) return false;
+			if ((childSessionRef._rlmDepth ?? 0) <= 0) return false;
+			const report = childSessionRef._buildRlmTerminalAutoReport(outcome, failureText);
+			try {
+				if (outcome === "error") {
+					await deliverTerminalMessageToParent(
+						createRlmChildFailureMessage(
+							{
+								childId: run.id,
+								sessionName,
+								error: failureText ?? "unknown error",
+							},
+							Date.now(),
+							report,
+						),
+					);
+				} else {
+					await deliverTerminalMessageToParent(
+						createRlmChildTerminalNoticeMessage(
+							outcome === "interrupted"
+								? { kind: "cancelled", childId: run.id, sessionName, reason: failureText }
+								: { kind: "completed_without_reply", childId: run.id, sessionName },
+							Date.now(),
+							report,
+						),
+					);
+				}
+			} catch (error) {
+				console.warn(`rlm terminal auto-report delivery failed for ${sessionName}:`, error);
+			}
+			childSessionRef._repliedToParentSinceTask = true;
+			return true;
+		};
+
 		// Runtime startup and the task run are deliberately detached. The public
 		// spawn resolves at admission, while this task owns live tracking, usage,
 		// retention, cancellation, and late-startup cleanup.
@@ -10492,6 +10601,7 @@ export class AgentSession {
 						}
 					} else if (event.type === "tool_execution_start") {
 						toolUseCount += 1;
+						run.toolUseCount = toolUseCount;
 						runningToolCount += 1;
 						activity = { kind: "executing", toolName: event.toolName };
 						emitChildUpdate();
@@ -10530,11 +10640,35 @@ export class AgentSession {
 					customMessage: spawnMessage,
 				});
 				if (run.error) throw new Error(run.error);
-				run.status = "done";
+				// A provider/lifecycle failure ends the loop with an error-stopReason
+				// assistant message instead of a thrown error, so classify it here.
+				const lastChildMessage = child.messages[child.messages.length - 1] as AssistantMessage | undefined;
+				const childFailed =
+					lastChildMessage?.role === "assistant" && (lastChildMessage as AssistantMessage).stopReason === "error";
+				if (childFailed) {
+					run.status = "error";
+					run.error = lastChildMessage?.errorMessage ?? "child run failed";
+				} else {
+					run.status = "done";
+				}
 				durationMs = Date.now() - startedAt;
 				activity = undefined;
 				emitChildUpdate();
-				if (!run.detachedDeletion && child._parentReplyCount === parentReplyCountBeforeRun) {
+				run.toolUseCount = toolUseCount;
+				// Mandatory terminal report: a child that ends without ever messaging its
+				// parent leaves the parent with nothing — no summary, no dirty-tree or
+				// commit state. The structured AUTO-REPORT fills that gap best-effort.
+				const silentRun = child._repliedToParentSinceTask !== true;
+				const reported = await maybeSendTerminalAutoReport(
+					childFailed ? "error" : "completed",
+					childFailed ? run.error : undefined,
+				);
+				if (
+					!reported &&
+					!childFailed &&
+					!run.detachedDeletion &&
+					child._parentReplyCount === parentReplyCountBeforeRun
+				) {
 					const lastAssistantText = child.getLastAssistantText();
 					await deliverTerminalMessageToParent(
 						createRlmChildTerminalNoticeMessage({
@@ -10545,6 +10679,9 @@ export class AgentSession {
 						}),
 					);
 				}
+				run.stalled = !childFailed && silentRun && toolUseCount === 0;
+				if (childFailed) this._rlmChildFinalStatuses.set(run.id, "error");
+				else if (run.stalled) this._rlmChildFinalStatuses.set(run.id, "stalled");
 				if (!this.registerRlmChildSession(run.id, child)) {
 					if (childRuntime && this._subagentRuntimeHost?.releaseRlmSubagentRuntime) {
 						await this._subagentRuntimeHost
@@ -10564,8 +10701,9 @@ export class AgentSession {
 				durationMs = Date.now() - startedAt;
 				activity = undefined;
 				emitChildUpdate();
-				if (!run.detachedDeletion) {
-					if (run.status === "error") {
+				if (run.status === "error") {
+					const reportedError = await maybeSendTerminalAutoReport("error", run.error ?? "unknown error");
+					if (!reportedError) {
 						await deliverTerminalMessageToParent(
 							createRlmChildFailureMessage({
 								childId: run.id,
@@ -10573,7 +10711,10 @@ export class AgentSession {
 								error: run.error ?? "unknown error",
 							}),
 						);
-					} else if (run.status === "cancelled") {
+					}
+				} else if (run.status === "cancelled") {
+					const reportedCancel = await maybeSendTerminalAutoReport("interrupted", run.error);
+					if (!reportedCancel) {
 						await deliverTerminalMessageToParent(
 							createRlmChildTerminalNoticeMessage({
 								kind: "cancelled",

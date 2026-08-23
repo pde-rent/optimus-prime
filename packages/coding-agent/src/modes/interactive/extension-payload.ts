@@ -1,7 +1,5 @@
 import type { LoaderIndicatorOptions } from "@earendil-works/pi-tui";
 
-
-
 export function getPayloadString(payload: Record<string, unknown>, key: string): string | undefined {
 	const value = payload[key];
 	return typeof value === "string" ? value : undefined;
@@ -25,7 +23,10 @@ export function getPayloadStringArray(payload: Record<string, unknown>, key: str
 	return Array.isArray(value) && value.every((item): item is string => typeof item === "string") ? value : undefined;
 }
 
-export function getPayloadNotifyType(payload: Record<string, unknown>, key: string): "info" | "warning" | "error" | undefined {
+export function getPayloadNotifyType(
+	payload: Record<string, unknown>,
+	key: string,
+): "info" | "warning" | "error" | undefined {
 	const value = payload[key];
 	return value === "info" || value === "warning" || value === "error" ? value : undefined;
 }

@@ -142,6 +142,12 @@ export class ClickableBlock implements Component {
 export interface Collapsible {
 	/** Stable id embedded in this block's click targets. */
 	readonly toggleTargetId: string;
+	/**
+	 * Current absolute expansion, when the block can report it. Optional because
+	 * not every collapsible tracks state that outlives a transcript rebuild; only
+	 * blocks that expose it get their expansion restored after a rebuild.
+	 */
+	readonly isExpanded?: boolean;
 	/** Flip this block's own expansion, overriding the global state until the next global toggle. */
 	toggleExpandedSelf(): void;
 }

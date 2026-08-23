@@ -180,9 +180,9 @@ const harnessObj = {
 };
 
 /**
- * `rlm` is documented to the model as a callable (`await rlm('sub-task')`) that also
- * carries the registry and harness helpers, so the injected binding is the spawn
- * function with those members assigned onto it.
+ * The model-facing spawn form is `spawn`; it is an exact alias of `rlm`, which stays
+ * functional. Both are the spawn function with the registry and harness helpers assigned
+ * onto them.
  */
 const rlmObj = Object.assign(rlm, {
 	run: rlm,
@@ -549,6 +549,7 @@ for (const [name, value] of Object.entries({
 	__import: importModule,
 	__rlm_host_request: hostBridge.hostRequest.bind(hostBridge),
 	rlm: rlmObj,
+	spawn: rlmObj,
 	mcp: mcpObj,
 	pi: piObj,
 })) {

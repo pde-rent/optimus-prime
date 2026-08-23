@@ -3,8 +3,6 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 import type { AgentCronJob } from "../../core/cron-jobs.js";
 
-
-
 export const HEARTBEAT_LEGACY_PROMPT_MIN_TOLERANCE_MS = 15_000;
 export const HEARTBEAT_LEGACY_PROMPT_MAX_TOLERANCE_MS = 120_000;
 

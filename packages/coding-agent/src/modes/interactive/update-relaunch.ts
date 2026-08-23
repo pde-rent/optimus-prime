@@ -1,7 +1,5 @@
 import { APP_NAME } from "../../config.js";
 
-
-
 export function updateArgsIncludeSelf(args: readonly string[]): boolean {
 	let selfFlag = false;
 	let extensionsOnlyFlag = false;

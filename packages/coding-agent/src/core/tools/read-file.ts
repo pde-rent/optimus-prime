@@ -27,7 +27,7 @@ const BATCH_WINDOW_KEY = "batch";
 
 const readFileSchema = Type.Object(
 	{
-		path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
+		path: Type.Optional(Type.String({ description: "Path to a single file to read. Omit when paths is provided." })),
 		paths: Type.Optional(
 			Type.Array(Type.String(), {
 				description: `Pass paths[] to fetch many files in ONE call; the tool sizes them first (stat), then reads newest-mtime-first up to ${formatSize(BATCH_DEFAULT_MAX_BYTES)} total across ALL files. Max ${MAX_BATCH_PATHS} files. Overrides path/offset/limit/lineNumbers.`,
@@ -379,8 +379,9 @@ export function createReadFileToolDefinition(
 		label: "read_file",
 		kind: "read",
 		read_only: true,
-		description: `Read a text file, one line range of one, or many files in one batched call. Use for whole-file and multi-line reads; do not read a whole file just to make a small targeted change — go straight to the edit tool. Binary files are not supported; inspect them with bash. Output is capped at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}, whichever hits first, and never splits a line; a truncated or paged read appends "[Showing lines X-Y of Z ...]" stating exactly what was returned. Re-reading an unmodified file with the same range returns a one-line unchanged notice instead of the content. Missing or unreadable paths fail with "Could not read file: <path>. Error code: <code>."; an empty file returns "(empty file)". Pass paths[] (up to ${MAX_BATCH_PATHS}) to fetch many files in ONE call: the tool sizes them first, reads newest-mtime-first within limitBytes total (default ${formatSize(BATCH_DEFAULT_MAX_BYTES)}), renders each file under a "=== <path> (N bytes) ===" header, skips missing paths with a note, and returns only the size table when nothing fits - raise limitBytes or pass fewer paths.`,
-		promptSnippet: "Read a text file, a line range of one, or many files in one call via paths[]",
+		description:
+			"Read file contents - the default and fastest way to see whole files, line ranges or many files at once (paths[]); runs in-process on Windows/macOS/Linux; replaces bash cat/head/tail. Not for binary files - inspect those with bash. Caps at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}.",
+		promptSnippet: "Read whole files, line ranges, or many files at once via paths[]",
 		parameters: readFileSchema,
 		renderCall(args, theme, _context) {
 			const path = shortenPath(args?.path);
@@ -425,7 +426,8 @@ export function createReadFileToolDefinition(
 			if (input.limitBytes !== undefined) {
 				throw new Error("limitBytes only applies when paths is given.");
 			}
-			const absolutePath = resolveToCwd(input.path, cwd);
+			const singlePath = input.path ?? "";
+			const absolutePath = resolveToCwd(singlePath, cwd);
 
 			if (signal?.aborted) {
 				throw new Error("Operation aborted");
@@ -433,7 +435,7 @@ export function createReadFileToolDefinition(
 			const read = await readSingleFile(
 				{
 					absolutePath,
-					givenPath: input.path,
+					givenPath: input.path as string,
 					windowKey: buildWindowKey(input),
 					offset: input.offset,
 					limit: input.limit,

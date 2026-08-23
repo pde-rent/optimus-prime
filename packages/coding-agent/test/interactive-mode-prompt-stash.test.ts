@@ -586,7 +586,7 @@ describe("InteractiveMode prompt stash", () => {
 
 		const submit = mode.defaultEditor.onSubmit?.("/fork");
 		await Promise.resolve();
-		selector.resolve();
+		selector.resolve(undefined as never);
 		await submit;
 
 		expect(mode.showUserMessageSelector).toHaveBeenCalled();
@@ -611,7 +611,7 @@ describe("InteractiveMode prompt stash", () => {
 		expect(mode.showSettingsSelector).toHaveBeenCalledOnce();
 		expect(admitPendingStartupPrompts).not.toHaveBeenCalled();
 
-		settings.resolve();
+		settings.resolve(undefined as never);
 		await followUp;
 
 		expect(mode.promptStash).toBeUndefined();
@@ -737,11 +737,11 @@ describe("InteractiveMode prompt stash", () => {
 			await Promise.resolve();
 		}
 		if (newer === "accepted submission") {
-			second.resolve();
+			second.resolve(undefined as never);
 			await secondSubmission;
 		}
 		if (firstError) first.reject(new Error(firstError));
-		else first.resolve();
+		else first.resolve(undefined as never);
 		await firstSubmission;
 
 		if (firstError) expect(mode.showError).toHaveBeenCalledWith(firstError);
@@ -754,7 +754,7 @@ describe("InteractiveMode prompt stash", () => {
 		if (newer === "pending submission") {
 			// The stash restores only once the newest pending submission is accepted.
 			expect(mode.promptStash?.text).toBe("stashed draft");
-			second.resolve();
+			second.resolve(undefined as never);
 			await secondSubmission;
 			expect(mode.editor.getText()).toBe("stashed draft");
 			expect(mode.promptStash).toBeUndefined();
