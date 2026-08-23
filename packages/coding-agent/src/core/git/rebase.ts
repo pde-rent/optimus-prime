@@ -5,7 +5,6 @@ import { commitParents, flatTree } from "./diff.js";
 import { allAncestors, committerNow, hardResetTo, isAncestor, landMergeConflicts, mergeTrees } from "./merge.js";
 import { type parseCommit, serializeCommit, writeLooseObject } from "./objects.js";
 import type { GitRepository } from "./repository.js";
-import { resolveRevision } from "./revision.js";
 import { applyTreeChanges, hasLocalEdits } from "./worktree.js";
 
 /**
@@ -73,7 +72,7 @@ export function rebase(
 	if (existsSync(join(repo.gitDir, STATE_FILE))) {
 		throw new Error("a rebase is already in progress");
 	}
-	const upstream = resolveRevision(repo, upstreamRefish);
+	const upstream = repo.resolveRevision(upstreamRefish);
 	if (upstream === null) throw new Error(`unknown revision: ${upstreamRefish}`);
 	const head = repo.headCommitSha();
 	if (head === null) throw new Error("rebase needs a HEAD commit");

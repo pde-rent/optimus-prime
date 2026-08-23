@@ -1,14 +1,92 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	fsyncSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { GitConfig } from "./config.js";
-import { flatTree, readWorktreeBytes, type TreeFile, writeTreeFromFiles } from "./diff.js";
+import { flatIndex, flatTree, readWorktreeBytes, type TreeFile, writeTreeFromFiles } from "./diff.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage, GitIndex } from "./index.js";
-import { writeFileLocked } from "./lock.js";
 import type { GitObjectType, ParsedCommit, RawObject } from "./objects.js";
 import { hashRawObject, parseCommit, readLooseObject, serializeCommit, writeLooseObject } from "./objects.js";
 import { PackReader } from "./pack-read.js";
-import { headRefName, resolveHead, resolveRef, writeRef } from "./refs.js";
+import { headRefName, refExists, resolveHead, resolveRef, writeRef } from "./refs.js";
+
+// ---------------------------------------------------------------------------
+// Git-style exclusive lockfile protocol (spec §3.5): create "<path>.lock" with
+// O_CREAT|O_EXCL, write, fsync, rename onto the target. A fresh lock held by
+// someone else refuses after a short retry; a stale lock (older than
+// LOCK_STALE_MS) is taken over, matching git's practice for crashed writers.
+// Readers never look at the lock file.
+// ---------------------------------------------------------------------------
+
+const LOCK_STALE_MS = 5000;
+const LOCK_RETRY_MS = 100;
+
+export class LockBusyError extends Error {
+	constructor(readonly lockPath: string) {
+		super(`could not acquire ${lockPath}: locked by another process`);
+	}
+}
+
+function lockAgeMs(path: string): number {
+	return Date.now() - statSync(path).mtimeMs;
+}
+
+/**
+ * Run fn() while holding "<path>.lock"; its return value is passed through.
+ * A competing fresh lock gets one short retry window before refusing.
+ */
+function withLock<T>(targetPath: string, fn: () => T): T {
+	const lockPath = `${targetPath}.lock`;
+	if (!existsSync(dirname(lockPath))) mkdirSync(dirname(lockPath), { recursive: true });
+	for (;;) {
+		let fd: number;
+		try {
+			fd = openSync(lockPath, "wx"); // O_CREAT | O_EXCL
+		} catch {
+			if (!existsSync(lockPath)) throw new Error(`cannot create lock ${lockPath}`);
+			if (lockAgeMs(lockPath) > LOCK_STALE_MS) {
+				unlinkSync(lockPath); // crashed writer; take over
+				continue;
+			}
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_RETRY_MS);
+			throw new LockBusyError(lockPath);
+		}
+		try {
+			fsyncSync(fd);
+			return fn();
+		} finally {
+			closeSync(fd);
+			unlinkSync(lockPath);
+		}
+	}
+}
+
+/** Serialize bytes to targetPath under the git lock protocol (write temp, fsync, rename). */
+function writeFileLocked(targetPath: string, data: Uint8Array): void {
+	withLock(targetPath, () => {
+		const tmp = `${targetPath}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+		const fd = openSync(tmp, "w");
+		try {
+			writeFileSync(fd, data);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		renameSync(tmp, targetPath);
+	});
+}
 
 /**
  * A working repository handle: object database (loose + packs), refs, index,
@@ -295,10 +373,7 @@ export class GitRepository {
 	status(): Map<string, FileStatus> {
 		const statuses = new Map<string, FileStatus>();
 		const headFiles = this.flatHeadTree() ?? new Map<string, string>();
-		const indexFiles = new Map<string, IndexEntry>();
-		for (const entry of this.loadIndex().entries) {
-			if (entryStage(entry) === 0) indexFiles.set(entry.path, entry);
-		}
+		const indexFiles = flatIndex(this.loadIndex().entries);
 		const worktreeFiles = this.listWorktreeFiles();
 		const paths = new Set<string>([...headFiles.keys(), ...indexFiles.keys(), ...worktreeFiles]);
 		for (const path of paths) {
@@ -338,6 +413,62 @@ export class GitRepository {
 		};
 		visit(this.workdir);
 		return files.sort();
+	}
+
+	/**
+	 * Revision resolution for the shapes agents actually type: HEAD, HEAD~n / ^n,
+	 * branch and tag names, full and abbreviated object ids. Not general
+	 * gitrevisions (no ranges, no ":path").
+	 */
+	resolveRevision(spec: string): string | null {
+		let current = spec;
+		for (;;) {
+			const suffixMatch = /^(.*?)([~^])(\d+)$/.exec(current);
+			if (!suffixMatch) break;
+			current = suffixMatch[1];
+		}
+		let sha = this.resolveBase(current);
+		if (sha === null) return null;
+		// Apply ~n / ^n suffixes left to right on the original text.
+		const rest = spec.slice(current.length);
+		for (const [, operator, countText] of rest.matchAll(/([~^])(\d+)/g)) {
+			const count = Number(countText);
+			for (let i = 0; i < count; i++) {
+				const raw = this.readObject(sha);
+				if (raw === null || raw.type !== "commit") return null;
+				const commit = parseCommit(raw.body);
+				if (commit.parents.length === 0) return null;
+				sha = commit.parents[operator === "~" ? 0 : Math.min(count - 1, commit.parents.length - 1)];
+				if (operator === "^") break;
+			}
+		}
+		return sha;
+	}
+
+	private resolveBase(name: string): string | null {
+		if (/^[0-9a-f]{40}$/.test(name)) return this.hasObject(name) ? name : null;
+		if (
+			name === "HEAD" ||
+			refExists(this.gitDir, `refs/heads/${name}`) ||
+			refExists(this.gitDir, `refs/tags/${name}`)
+		) {
+			return this.resolveRef(name === "HEAD" ? "HEAD" : this.candidateRefName(name));
+		}
+		if (/^[0-9a-f]{4,39}$/.test(name)) {
+			const found = this.expandShortSha(name);
+			if (found) return found;
+		}
+		return null;
+	}
+
+	private candidateRefName(name: string): string {
+		return refExists(this.gitDir, `refs/heads/${name}`) ? `refs/heads/${name}` : `refs/tags/${name}`;
+	}
+
+	/** Scan the loose + packed object store for the unique object with this abbreviated sha. */
+	private expandShortSha(prefix: string): string | null {
+		const matches = this.listObjectIds((id) => id.startsWith(prefix));
+		return matches.length === 1 ? matches[0] : null;
 	}
 
 	config(): GitConfig {

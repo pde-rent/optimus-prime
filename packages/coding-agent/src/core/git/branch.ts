@@ -4,7 +4,6 @@ import { flatTree, headTreeFiles, sameTreeFile } from "./diff.js";
 import { serializeTag, writeLooseObject } from "./objects.js";
 import { assertValidRefName, deleteRef, listRefNames, refExists, resolveRef } from "./refs.js";
 import type { GitRepository } from "./repository.js";
-import { resolveRevision } from "./revision.js";
 import { assertNoLocalEdits, materializeTree } from "./worktree.js";
 
 /**
@@ -40,7 +39,7 @@ export function createBranch(repo: GitRepository, name: string, startPoint = "HE
 	const refName = `refs/heads/${name}`;
 	assertValidRefName(refName);
 	if (refExists(repo.gitDir, refName)) throw new Error(`branch already exists: ${name}`);
-	const sha = resolveRevision(repo, startPoint);
+	const sha = repo.resolveRevision(startPoint);
 	if (sha === null) throw new Error(`unknown revision: ${startPoint}`);
 	repo.updateRef(refName, sha);
 	return sha;
@@ -67,7 +66,7 @@ export function createTag(
 	const refName = `refs/tags/${name}`;
 	assertValidRefName(refName);
 	if (refExists(repo.gitDir, refName)) throw new Error(`tag already exists: ${name}`);
-	const sha = resolveRevision(repo, startPoint);
+	const sha = repo.resolveRevision(startPoint);
 	if (sha === null) throw new Error(`unknown revision: ${startPoint}`);
 	if (options.message !== undefined) {
 		const config = repo.config();
@@ -103,7 +102,7 @@ export function deleteTag(repo: GitRepository, name: string): boolean {
  * edits on paths the switch touches are refused.
  */
 export function checkout(repo: GitRepository, targetRefish: string): { sha: string; branch: string | null } {
-	const sha = resolveRevision(repo, targetRefish);
+	const sha = repo.resolveRevision(targetRefish);
 	if (sha === null) throw new Error(`unknown revision: ${targetRefish}`);
 	const branchRef = refExists(repo.gitDir, `refs/heads/${targetRefish}`) ? `refs/heads/${targetRefish}` : null;
 	const before = headTreeFiles(repo);

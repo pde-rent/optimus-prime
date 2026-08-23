@@ -6,7 +6,6 @@ import type { IndexEntry } from "./index.js";
 import { entryStage } from "./index.js";
 import { hardResetTo } from "./merge.js";
 import type { GitRepository } from "./repository.js";
-import { resolveRevision } from "./revision.js";
 
 /**
  * Reset (soft/mixed/hard), single-path unstaging, ls-files listing and gitignore
@@ -20,7 +19,7 @@ export type ResetMode = "soft" | "mixed" | "hard";
  * itself when on a branch), then optionally the index (mixed) and worktree (hard).
  */
 export function reset(repo: GitRepository, targetRefish = "HEAD", mode: ResetMode = "mixed"): string {
-	const sha = resolveRevision(repo, targetRefish);
+	const sha = repo.resolveRevision(targetRefish);
 	if (sha === null) throw new Error(`unknown revision: ${targetRefish}`);
 	repo.updateRef("ORIG_HEAD", repo.headCommitSha() ?? "0000000000000000000000000000000000000000");
 	if (mode === "hard") {
