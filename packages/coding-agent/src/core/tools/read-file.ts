@@ -5,7 +5,6 @@ import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, stat as fsStat } from "fs/promises";
-import type { theme } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";
 import {
 	BATCH_DEFAULT_MAX_BYTES,
@@ -379,8 +378,7 @@ export function createReadFileToolDefinition(
 		label: "read_file",
 		kind: "read",
 		read_only: true,
-		description:
-			"Read file contents - the default and fastest way to see whole files, line ranges or many files at once (paths[]); runs in-process on Windows/macOS/Linux; replaces bash cat/head/tail. Not for binary files - inspect those with bash. Caps at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}.",
+		description: `Read file contents - the default and fastest way to see whole files, line ranges or many files at once (paths[]); runs in-process on Windows/macOS/Linux; replaces bash cat/head/tail. Not for binary files - inspect those with bash. Caps at ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}.`,
 		promptSnippet: "Read whole files, line ranges, or many files at once via paths[]",
 		parameters: readFileSchema,
 		renderCall(args, theme, _context) {

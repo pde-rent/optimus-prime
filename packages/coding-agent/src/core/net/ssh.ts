@@ -10,7 +10,7 @@
 
 import { statSync } from "node:fs";
 import { resolveToCwd } from "../tools/path-utils.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead } from "../tools/truncate.js";
+import { DEFAULT_MAX_LINES, truncateHead } from "../tools/truncate.js";
 import { NetAbortedError, NetTimeoutError } from "./core.js";
 
 // ---------------------------------------------------------------------------

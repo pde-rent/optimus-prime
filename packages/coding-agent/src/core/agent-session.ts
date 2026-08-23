@@ -11104,7 +11104,10 @@ export class AgentSession {
 			return false;
 		}
 
-		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		const exponentialDelayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+		// Full jitter spreads synchronized provider outages while retaining the
+		// exponential ceiling; the emitted delay is the exact sleep duration.
+		const delayMs = Math.max(1, Math.floor(Math.random() * Math.min(exponentialDelayMs, settings.maxDelayMs)));
 
 		this._emit({
 			type: "auto_retry_start",

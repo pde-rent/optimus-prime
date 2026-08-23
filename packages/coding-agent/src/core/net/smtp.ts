@@ -102,7 +102,7 @@ async function readReply(lp: LineProtocol, timeoutMs: number, signal?: AbortSign
 
 function expect(reply: SmtpReply, min: number, max: number, what: string): void {
 	if (reply.code < min || reply.code > max) {
-		throw new NetProtocolError(what + " failed.", reply.text);
+		throw new NetProtocolError(`${what} failed.`, reply.text);
 	}
 }
 
@@ -123,7 +123,7 @@ export function parseAddress(address: string): string {
 	const angled = address.match(/<([^>]*)>/);
 	const addr = angled ? angled[1].trim() : address.trim();
 	if (!addr || !addr.includes("@")) {
-		throw new NetProtocolError("Not a valid email address: " + address.slice(0, 64), "");
+		throw new NetProtocolError(`Not a valid email address: ${address.slice(0, 64)}`, "");
 	}
 	return addr;
 }
@@ -144,7 +144,7 @@ export function encodeRfc2047Word(text: string): string {
 	for (let i = 0; i < encoded.length; i += dataLimit) {
 		chunks.push(encoded.slice(i, i + dataLimit));
 	}
-	return chunks.map((chunk) => "=?UTF-8?B?" + chunk + "?=").join(" ");
+	return chunks.map((chunk) => `=?UTF-8?B?${chunk}?=`).join(" ");
 }
 
 /** Encode a header value when (and only when) it needs RFC 2047 protection. */
@@ -172,7 +172,7 @@ export function quotedPrintable(text: string): string {
 			continue;
 		}
 		const literal = (byte >= 33 && byte <= 126 && byte !== 61) || byte === 32 || byte === 9;
-		const token = literal ? String.fromCharCode(byte) : "=" + byte.toString(16).toUpperCase().padStart(2, "0");
+		const token = literal ? String.fromCharCode(byte) : `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
 		if (lineLength + token.length > 75) {
 			out += "=\r\n";
 			lineLength = 0;
@@ -190,7 +190,7 @@ function rfc5322Date(date = new Date()): string {
 
 function messageIdFor(fromAddr: string): string {
 	const domain = fromAddr.split("@")[1] ?? "localhost";
-	return "<" + crypto.randomUUID() + "@" + domain + ">";
+	return `<${crypto.randomUUID()}@${domain}>`;
 }
 
 interface AssembledMessage {
@@ -206,23 +206,23 @@ export function assembleMessage(message: SmtpMessage, opts: { eightBitMime: bool
 	}
 	const clean = (value: string): string => value.replace(/[\r\n]+/g, " ").trim();
 	const headers: string[] = [];
-	headers.push("From: " + clean(message.from));
-	headers.push("To: " + message.to.map(clean).join(", "));
-	if (message.cc?.length) headers.push("Cc: " + message.cc.map(clean).join(", "));
+	headers.push(`From: ${clean(message.from)}`);
+	headers.push(`To: ${message.to.map(clean).join(", ")}`);
+	if (message.cc?.length) headers.push(`Cc: ${message.cc.map(clean).join(", ")}`);
 	// Deliberately no Bcc header: envelope-only distribution.
-	if (message.subject) headers.push("Subject: " + encodeHeaderValue(message.subject));
-	headers.push("Date: " + rfc5322Date());
-	headers.push("Message-ID: " + messageIdFor(parseAddress(message.from)));
+	if (message.subject) headers.push(`Subject: ${encodeHeaderValue(message.subject)}`);
+	headers.push(`Date: ${rfc5322Date()}`);
+	headers.push(`Message-ID: ${messageIdFor(parseAddress(message.from))}`);
 	headers.push("MIME-Version: 1.0");
 
 	const body = message.body ?? "";
 	const hasNonAscii = !isAscii(body);
 	const eightBit = opts.eightBitMime;
 	headers.push("Content-Type: text/plain; charset=utf-8");
-	headers.push("Content-Transfer-Encoding: " + (eightBit ? "8bit" : "quoted-printable"));
+	headers.push(`Content-Transfer-Encoding: ${eightBit ? "8bit" : "quoted-printable"}`);
 
 	const wireBody = eightBit ? body : quotedPrintable(body);
-	return { wire: headers.join("\r\n") + "\r\n\r\n" + wireBody, eightBit, hasNonAscii };
+	return { wire: `${headers.join("\r\n")}\r\n\r\n${wireBody}`, eightBit, hasNonAscii };
 }
 
 // ---------------------------------------------------------------------------
@@ -292,10 +292,10 @@ export class SmtpClient {
 	/** EHLO (falling back to HELO on rejection); refreshes the capability map. */
 	async ehlo(localHostname?: string): Promise<void> {
 		const name = localHostname ?? hostnameForEhlo();
-		await this.lp.writeLine("EHLO " + name, { signal: this.signal });
+		await this.lp.writeLine(`EHLO ${name}`, { signal: this.signal });
 		let reply = await readReply(this.lp, this.timeoutMs, this.signal);
 		if (reply.code !== 250) {
-			await this.lp.writeLine("HELO " + name, { signal: this.signal });
+			await this.lp.writeLine(`HELO ${name}`, { signal: this.signal });
 			reply = await readReply(this.lp, this.timeoutMs, this.signal);
 			expect(reply, 250, 250, "HELO");
 			this.capabilities.clear();
@@ -322,8 +322,8 @@ export class SmtpClient {
 		const method = spec.method ?? (advertised.includes("PLAIN") || advertised.length === 0 ? "plain" : "login");
 
 		if (method === "plain") {
-			const blob = Buffer.from("\0" + user + "\0" + secret, "utf-8").toString("base64");
-			await this.lp.writeLine("AUTH PLAIN " + blob, { signal: this.signal });
+			const blob = Buffer.from(`\0${user}\0${secret}`, "utf-8").toString("base64");
+			await this.lp.writeLine(`AUTH PLAIN ${blob}`, { signal: this.signal });
 		} else {
 			await this.lp.writeLine("AUTH LOGIN", { signal: this.signal });
 			expect(await readReply(this.lp, this.timeoutMs, this.signal), 300, 399, "AUTH LOGIN prompt");
@@ -350,23 +350,23 @@ export class SmtpClient {
 		const mailParams: string[] = [];
 		if (assembled.eightBit) mailParams.push("BODY=8BITMIME");
 		if (this.capabilities.has("SMTPUTF8") && assembled.hasNonAscii) mailParams.push("SMTPUTF8");
-		const paramText = mailParams.length ? " " + mailParams.join(" ") : "";
-		await this.lp.writeLine("MAIL FROM:<" + fromAddr + ">" + paramText, { signal: this.signal });
+		const paramText = mailParams.length ? ` ${mailParams.join(" ")}` : "";
+		await this.lp.writeLine(`MAIL FROM:<${fromAddr}>${paramText}`, { signal: this.signal });
 		expect(await readReply(this.lp, this.timeoutMs, this.signal), 200, 299, "MAIL FROM");
 
 		const recipients = [...message.to, ...(message.cc ?? []), ...(message.bcc ?? [])];
 		let accepted = 0;
 		for (const recipient of recipients) {
-			await this.lp.writeLine("RCPT TO:<" + parseAddress(recipient) + ">", { signal: this.signal });
+			await this.lp.writeLine(`RCPT TO:<${parseAddress(recipient)}>`, { signal: this.signal });
 			const reply = await readReply(this.lp, this.timeoutMs, this.signal);
 			if (reply.code >= 200 && reply.code <= 299) accepted++;
-			else throw new NetProtocolError("Recipient refused: " + recipient.slice(0, 64), reply.text);
+			else throw new NetProtocolError(`Recipient refused: ${recipient.slice(0, 64)}`, reply.text);
 		}
 
 		await this.lp.writeLine("DATA", { signal: this.signal });
 		expect(await readReply(this.lp, this.timeoutMs, this.signal), 300, 399, "DATA");
 		// Byte-exact body write with dot-stuffing; never re-split by the line reader.
-		await this.lp.write(dotStuff(assembled.wire) + "\r\n.\r\n", { signal: this.signal });
+		await this.lp.write(`${dotStuff(assembled.wire)}\r\n.\r\n`, { signal: this.signal });
 		const final = await readReply(this.lp, this.timeoutMs, this.signal);
 		expect(final, 200, 299, "DATA acceptance");
 		return { acceptedRecipients: accepted, serverReply: final.text, messageId: messageIdFor(fromAddr) };

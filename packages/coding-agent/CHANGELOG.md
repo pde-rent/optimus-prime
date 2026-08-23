@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+- Added `/rewind` to return to an earlier session-tree point without summarizing or changing later branches.
+- Changed automatic retry defaults to five attempts and added capped exponential backoff with full jitter for provider outages.
 - Added user REPL-kernel slash commands: `/js` and `/ts` evaluate code in the focused session's running kernel and render the result as a pane, `/vars` lists top-level kernel variables with type badges, and `/clear-vars` clears user-defined variables (including the on-disk snapshot so a restart cannot restore them); like side questions these never enter the model's message history and work while the agent streams. `/bash` and `/python` are registered but report their kernel shim is not yet available.
 - Added `spawn()` in the REPL as an exact alias of the `rlm` callable for spawning child agents (same handle, same options); prompts and docs now teach the `spawn(...)` form while `rlm(...)` stays fully functional.
 - Changed model-facing prompt wording to plain, predictable forms: prompts now teach `spawn('<task>')` with a real task placeholder instead of the literal `'sub-task'`, "fan-out budget" instead of "graph budget", and plain words for the persisted note store instead of "continual harness"; all call names (`rlm.harness.*`, `refine.run`) are unchanged.

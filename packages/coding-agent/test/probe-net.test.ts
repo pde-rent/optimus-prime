@@ -7,7 +7,7 @@ describe("dial real fixture", () => {
 	it("greeting", async () => {
 		const src = await Bun.file("test/smtp.test.ts").text();
 		const re = /NODE_STARTTLS_SERVER_SCRIPT = `([\s\S]*?)`;/;
-		const script = eval("`" + src.match(re)![1] + "`");
+		const script = src.match(re)![1];
 		console.error("SCRIPT conn-log:", script.includes("[fixture] connection from"));
 		const dir = mkdtempSync(join(tmpdir(), "smtp-tls-"));
 		const openssl = Bun.which("openssl") ?? "/usr/bin/openssl";

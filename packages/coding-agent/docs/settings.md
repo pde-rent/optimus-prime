@@ -108,8 +108,9 @@ The stable `latest.json` and beta `beta.json` manifests use the same JSON shape:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `retry.enabled` | boolean | `true` | Enable automatic agent-level retry on transient errors |
-| `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts |
-| `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff (2s, 4s, 8s) |
+| `retry.maxRetries` | number | `5` | Maximum agent-level retry attempts |
+| `retry.baseDelayMs` | number | `2000` | Base delay for jittered exponential backoff, capped by `retry.maxDelayMs` |
+| `retry.maxDelayMs` | number | `60000` | Maximum delay between agent-level retries (60s) |
 | `retry.provider.timeoutMs` | number | SDK default | Provider/SDK request timeout in milliseconds |
 | `retry.provider.maxRetries` | number | SDK default | Provider/SDK retry attempts |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay before failing (60s) |
@@ -120,7 +121,7 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 {
   "retry": {
     "enabled": true,
-    "maxRetries": 3,
+    "maxRetries": 5,
     "baseDelayMs": 2000,
     "provider": {
       "timeoutMs": 3600000,

@@ -372,8 +372,7 @@ export function createBashToolDefinition(
 		label: "bash",
 		kind: "execute",
 		read_only: false,
-		description:
-			"Execute a bash command in the working directory - the fallback for anything no native tool covers; the native siblings run in-process on Windows/macOS/Linux and replace bash grep/find/sed/wc/head/tail/ln/read/write/sysinfo/netdiag/processes. Output caps at ${DEFAULT_MAX_LINES} lines / ${DEFAULT_MAX_BYTES / 1024}KB; overflow goes to a temp file. Optional timeout in seconds.",
+		description: `Execute a bash command in the working directory - the fallback for anything no native tool covers; the native siblings run in-process on Windows/macOS/Linux and replace bash grep/find/sed/wc/head/tail/ln/read/write/sysinfo/netdiag/processes. Output caps at ${DEFAULT_MAX_LINES} lines / ${DEFAULT_MAX_BYTES / 1024}KB; overflow goes to a temp file. Optional timeout in seconds.`,
 		promptSnippet: "Run a shell command only for what no native tool covers",
 		parameters: bashSchema,
 		async execute(

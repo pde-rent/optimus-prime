@@ -59,7 +59,7 @@ import {
 } from "../../config.js";
 
 import { isAgentSessionMessage, startsAgentRun } from "../../core/agent-messages.js";
-
+import { compactRlmText } from "../../core/agent-session.js";
 import { isNoModelsAvailableMessage } from "../../core/auth-guidance.js";
 import {
 	type AgentCronJob,
@@ -638,6 +638,7 @@ export class InteractiveMode {
 	private subagentGraphPanel = new SubagentGraphPanel();
 	private subagentGraphContainer!: Container;
 	private subagentSnapshots = new Map<string, AgentConnectionRlmChildAgentSnapshot>();
+	private reportedSubagentErrors = new Set<string>();
 	private rlmNodeId: string | undefined;
 
 	private toolOutputExpanded = false;
@@ -4212,6 +4213,12 @@ export class InteractiveMode {
 					await this.showTreeSelector();
 					return;
 				}
+				if (commandName === "rewind" && !commandArgs) {
+					this.editor.setText("");
+					restorePromptStashAfterSubmit = false;
+					await this.showRewindSelector();
+					return;
+				}
 				if (commandName === "login" && !commandArgs) {
 					this.editor.setText("");
 					await this.showConfigurationMenu("providers");
@@ -5106,8 +5113,9 @@ export class InteractiveMode {
 				this.stopWorkingLoader();
 				this.statusContainer.clear();
 				this.retryCountdown?.dispose();
+				const providerError = compactRlmText(event.errorMessage, 120);
 				const retryMessage = (seconds: number) =>
-					`Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (${keyText("app.clear")} to cancel)`;
+					`Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... ${providerError} (${keyText("app.clear")} to cancel)`;
 				this.retryLoader = new Loader(
 					this.ui,
 					(spinner) => theme.fg("muted", spinner),
@@ -5304,6 +5312,15 @@ export class InteractiveMode {
 	}
 
 	private updateSubagentSummary(child: AgentConnectionRlmChildAgentSnapshot): void {
+		if (child.status === "error" && child.error) {
+			const errorKey = `${child.id}\0${child.error}`;
+			if (!this.reportedSubagentErrors.has(errorKey)) {
+				this.reportedSubagentErrors.add(errorKey);
+				this.showError(
+					`Subagent ${child.sessionName || child.label || child.id} failed: ${compactRlmText(child.error)}`,
+				);
+			}
+		}
 		if (child.status === "cancelled") {
 			this.removeSubagentSnapshot(child.id);
 		} else {
@@ -8012,6 +8029,68 @@ export class InteractiveMode {
 						});
 				},
 				initialSelectedId,
+				initialFilterMode,
+				{ cwd: this.getCurrentCwd() },
+			);
+			return selector;
+		});
+	}
+
+	private async showRewindSelector(): Promise<void> {
+		let tree: AgentConnectionSessionTreeNode[];
+		let realLeafId: string | null;
+		try {
+			const sessionTree = await this.agentConnection.getSessionTree();
+			tree = sessionTree.tree;
+			realLeafId = sessionTree.leafId;
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		const initialFilterMode = this.settingsManager.getTreeFilterMode();
+		if (tree.length === 0) {
+			this.showStatus("No entries in session");
+			return;
+		}
+
+		this.showSelectorModal((done) => {
+			const selector = new TreeSelectorComponent(
+				tree,
+				realLeafId,
+				this.ui.terminal.rows,
+				async (entryId) => {
+					done();
+					if (entryId === realLeafId) {
+						this.showStatus("Already at this point");
+						return;
+					}
+					try {
+						const result = await this.agentConnection.navigateTree(entryId, { summarize: false });
+						if (result.cancelled) {
+							this.showStatus("Rewind cancelled");
+							return;
+						}
+						await this.renderTreeNavigation(result);
+					} catch (error) {
+						this.showError(error instanceof Error ? error.message : String(error));
+					}
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				(entryId, label) => {
+					void this.agentConnection
+						.setSessionEntryLabel(entryId, label)
+						.then(() => {
+							this.ui.requestRender();
+						})
+						.catch((error) => {
+							this.showError(error instanceof Error ? error.message : String(error));
+						});
+				},
+				undefined,
 				initialFilterMode,
 				{ cwd: this.getCurrentCwd() },
 			);
