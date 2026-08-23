@@ -1,17 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { setKeybindings, type TUI } from "@earendil-works/pi-tui";
+import { setKeybindings } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import { ModelSelectorComponent } from "../src/modes/interactive/components/model-selector.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createFakeTui } from "./helpers/render.js";
 import { flushAsyncWork } from "./helpers/wait.js";
 import { createHarness, type Harness } from "./suite/harness.js";
-
-function createFakeTui(): TUI {
-	return {
-		requestRender: () => {},
-	} as unknown as TUI;
-}
 
 function getFauxModels(harness: Harness, count: number) {
 	return Array.from({ length: count }, (_, index) => harness.getModel(`faux-${index + 1}`)!);

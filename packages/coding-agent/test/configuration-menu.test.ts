@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { setKeybindings, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import { setKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../src/core/keybindings.js";
 import {
 	ConfigurationMenuComponent,
@@ -7,13 +7,8 @@ import {
 } from "../src/modes/interactive/components/configuration-menu.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createFakeTui } from "./helpers/render.js";
 import { createHarness, type Harness } from "./suite/harness.js";
-
-function createFakeTui(): TUI {
-	return {
-		requestRender: () => {},
-	} as unknown as TUI;
-}
 
 describe("ConfigurationMenuComponent", () => {
 	const harnesses: Harness[] = [];

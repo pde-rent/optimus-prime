@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock, vi } from "bun:test";
-import { resetCapabilitiesCache, setCapabilities, setKeybindings, type TUI } from "@earendil-works/pi-tui";
+import { resetCapabilitiesCache, setCapabilities, setKeybindings } from "@earendil-works/pi-tui";
 import stripAnsi from "../src/utils/ansi.js";
+import { createFakeTui } from "./helpers/render.js";
 import { waitFor } from "./helpers/wait.js";
 
 const mocks = {
@@ -35,12 +36,6 @@ afterAll(() => {
  * `bun:test` exposes a `vi` compat object but not `vi.waitFor`. Poll instead of
  * sleeping a fixed amount: a sleep either flakes under load or wastes the slack.
  */
-function createFakeTui(): TUI {
-	return {
-		requestRender: vi.fn(),
-	} as unknown as TUI;
-}
-
 describe("LoginDialogComponent", () => {
 	beforeAll(() => {
 		initTheme("dark");

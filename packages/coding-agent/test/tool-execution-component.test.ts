@@ -15,6 +15,7 @@ import { ToolExecutionComponent } from "../src/modes/interactive/components/tool
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../src/modes/interactive/theme/working-icon.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createFakeTui } from "./helpers/render.js";
 
 function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
 	return {
@@ -27,12 +28,6 @@ function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
 			details: {},
 		}),
 	};
-}
-
-function createFakeTui(): TUI {
-	return {
-		requestRender: () => {},
-	} as unknown as TUI;
 }
 
 function createMetadataOnlyToolDefinition(definition: ToolDefinition<any, any>) {

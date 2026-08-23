@@ -8,6 +8,7 @@ import { ReplCellComponent, type ReplCellState } from "../src/modes/interactive/
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
+import { createFakeTui } from "./helpers/render.js";
 
 class HostComponent implements Component {
 	constructor(private child: Component) {}
@@ -19,12 +20,6 @@ class HostComponent implements Component {
 	invalidate(): void {
 		this.child.invalidate();
 	}
-}
-
-function createFakeTui(): TUI {
-	return {
-		requestRender: () => {},
-	} as unknown as TUI;
 }
 
 const EMPTY_USAGE: Usage = {

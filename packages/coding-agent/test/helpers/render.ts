@@ -1,7 +1,7 @@
 /**
  * Unified TUI render/output readers shared by interactive-mode suites.
  */
-import type { Container } from "@earendil-works/pi-tui";
+import type { Container, TUI } from "@earendil-works/pi-tui";
 
 /** Renders only the last child of the container. */
 export function renderLastLine(container: Container, width = 120): string {
@@ -39,4 +39,9 @@ export function getTextOutput(result: { content?: Array<{ type: string; text?: s
 			.map((part) => part.text ?? "")
 			.join("\n") || ""
 	);
+}
+
+/** Minimal TUI double: components only need requestRender. */
+export function createFakeTui(): TUI {
+	return { requestRender: () => {} } as unknown as TUI;
 }
