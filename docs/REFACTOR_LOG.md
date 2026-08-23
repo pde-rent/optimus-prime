@@ -72,3 +72,6 @@ unloaded re-runs; rotating ~12s localhost timeouts under campaign load occur on
 pristine HEAD too (verified via clean worktree comparison). tsgo 0 errors in
 src/core/git; biome clean. Comments touched: 0 stripped; 6 doc-comments added/
 extended to document the new shared helpers.
+## Harness improvements queue
+- harness.update_memory should UPSERT (create-if-missing) instead of erroring on unknown id - hit twice this session while persisting campaign state.
+- Skill loader YAML: plain-scalar descriptions containing ": " silently drop skills - fixed with recovery+warning (see skills.ts rawTopLevelScalar).
