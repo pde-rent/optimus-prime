@@ -344,6 +344,31 @@ function loadSkillsFromDirInternal(
 	return { skills, diagnostics };
 }
 
+/**
+ * Raw text of a top-level scalar key in frontmatter, joining indented continuation lines.
+ *
+ * Bun's YAML parses `description:` followed by an indented `key: value` as a nested
+ * mapping instead of a string, which would drop the description. This recovers the
+ * author's literal text; returns null when the key is absent or its value is empty.
+ */
+function rawTopLevelScalar(yamlString: string, key: string): string | null {
+	const lines = yamlString.split("\n");
+	const start = lines.findIndex((line) => line.startsWith(`${key}:`));
+	if (start === -1) {
+		return null;
+	}
+	const parts = [lines[start].slice(key.length + 1).trim()];
+	for (let i = start + 1; i < lines.length; i++) {
+		const line = lines[i];
+		if (line.trim() === "" || !/^\s/.test(line)) {
+			break;
+		}
+		parts.push(line.trim());
+	}
+	const text = parts.join(" ").trim();
+	return text === "" ? null : text;
+}
+
 function loadSkillFromFile(
 	filePath: string,
 	source: string,
@@ -352,23 +377,48 @@ function loadSkillFromFile(
 
 	try {
 		const rawContent = readFileSync(filePath, "utf-8");
-		const { frontmatter } = parseFrontmatter<SkillFrontmatter>(rawContent);
+		const { frontmatter, yamlString } = parseFrontmatter<SkillFrontmatter>(rawContent);
 		const skillDir = dirname(filePath);
 		const parentDirName = basename(skillDir);
 
-		const descErrors = validateDescription(frontmatter.description);
+		let description = frontmatter.description;
+		if (typeof description !== "string" && yamlString) {
+			// A plain YAML scalar cannot contain ": "; Bun parses the indented remnant as a
+			// nested mapping rather than throwing. Recover the literal text and tell the
+			// author to quote it, instead of dropping the skill with a cryptic error.
+			const raw = rawTopLevelScalar(yamlString, "description");
+			if (raw) {
+				diagnostics.push({
+					type: "warning",
+					message: 'description contains ": " - wrap the value in quotes',
+					path: filePath,
+				});
+				description = raw;
+			}
+		}
+
+		const descErrors = validateDescription(description);
 		for (const error of descErrors) {
 			diagnostics.push({ type: "warning", message: error, path: filePath });
 		}
 
-		const name = frontmatter.name || parentDirName;
+		let name = parentDirName;
+		if (typeof frontmatter.name === "string") {
+			name = frontmatter.name;
+		} else if (frontmatter.name != null) {
+			diagnostics.push({
+				type: "warning",
+				message: `name must be a string, got ${typeof frontmatter.name} - using directory name "${parentDirName}"`,
+				path: filePath,
+			});
+		}
 
 		const nameErrors = validateName(name, parentDirName);
 		for (const error of nameErrors) {
 			diagnostics.push({ type: "warning", message: error, path: filePath });
 		}
 
-		if (!frontmatter.description || frontmatter.description.trim() === "") {
+		if (!description || description.trim() === "") {
 			return { skill: null, diagnostics };
 		}
 
@@ -376,7 +426,7 @@ function loadSkillFromFile(
 		const rawSummary = typeof frontmatter.summary === "string" ? frontmatter.summary.trim() : "";
 		const baseSkill: BaseSkill = {
 			name,
-			description: frontmatter.description,
+			description,
 			...(rawSummary ? { summary: rawSummary } : {}),
 			filePath,
 			baseDir: skillDir,

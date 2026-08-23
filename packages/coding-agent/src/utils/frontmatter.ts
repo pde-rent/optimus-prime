@@ -1,5 +1,7 @@
 type ParsedFrontmatter<T extends Record<string, unknown>> = {
 	frontmatter: T;
+	/** Raw frontmatter text, for callers that need to recover values YAML mangled. */
+	yamlString: string | null;
 	body: string;
 };
 
@@ -28,10 +30,10 @@ export const parseFrontmatter = <T extends Record<string, unknown> = Record<stri
 ): ParsedFrontmatter<T> => {
 	const { yamlString, body } = extractFrontmatter(content);
 	if (!yamlString) {
-		return { frontmatter: {} as T, body };
+		return { frontmatter: {} as T, yamlString: null, body };
 	}
 	const parsed = Bun.YAML.parse(yamlString);
-	return { frontmatter: (parsed ?? {}) as T, body };
+	return { frontmatter: (parsed ?? {}) as T, yamlString, body };
 };
 
 export const stripFrontmatter = (content: string): string => parseFrontmatter(content).body;

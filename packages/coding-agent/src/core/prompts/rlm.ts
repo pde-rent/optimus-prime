@@ -14,7 +14,7 @@ export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"Bun built-in modules through `await import(...)`: `bun:sqlite`, `bun:ffi`, `bun:jsc`, plus every `node:` builtin",
 	"databases with no driver to install: `bun:sqlite` (`new Database(path)`, local and durable — reach for it before anything networked), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), `Bun.redis`/`Bun.RedisClient`",
 	"networking with nothing to install: `fetch` and `WebSocket` clients, `Bun.serve` for an HTTP/WebSocket server with static file routes, `HTMLRewriter` for streaming HTML parsing, `Bun.connect`/`Bun.listen` for raw TCP and TLS, `Bun.S3Client` for S3-compatible object storage",
-	"`pi` — harness helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
+	"`pi` — REPL-only helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
 	"Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern",
 	"a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel",
 ];
@@ -148,15 +148,15 @@ const REPL_CONTROL_PROMPT = [
 	"",
 	"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages), but prefer a Bun API where one exists — `Bun.spawn` over `child_process`, `Bun.file` over `fs` reads, `$` over shelling out for a simple pipeline — because the Bun namespace is already loaded and needs no import.",
 	"",
-	"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)`, `rlm.harness.consolidate_memories()`, and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+	"This session keeps persisted notes you can read and write: memories, skills, subagent specs, and prompt notes, under `rlm.harness` (raw state via `rlm.get_harness_state()`). Memories are never injected into your prompt: search them on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. Entries you create are local to this session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)`, `rlm.harness.consolidate_memories()`, and `rlm.harness.overview()`. Pass `{ global: true }` only for lessons that should hold across sessions.",
 	"",
-	"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
+	"`harness` in those names means exactly that note store; `rlm` itself is the runtime: spawn, effort, depth, budget, and model calls.",
 	"",
-	"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await rlm('sub-task', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped and a level the policy will not grant comes back as `effort_refused` with the child left inheriting, raise only after observed failure, and lower once a task proves trivial.",
+	"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await spawn('<task>', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped and a level the policy will not grant comes back as `effort_refused` with the child left inheriting, raise only after observed failure, and lower once a task proves trivial.",
 	"Recursion depth is dynamic too: `await rlm.get_max_depth()` reports the current limit, your depth, and the ceiling; `await rlm.set_max_depth(n)` raises it only after an observed failure and never past the ceiling. A raise rebuilds the system prompt, so set it before spawning a subtree rather than mid-run.",
 	"Context budget is dynamic as well: `await rlm.get_context_budget()` reports the effective context budget, compaction trigger point, and the model window; `await rlm.set_context_budget({ maxContextTokens?, compactAtTokens? })` adjusts them for this session only. Values are hard-capped by the model window and the change is refused when dynamic context is disabled.",
 	"",
-	"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
+	"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Skill entries saved through refinement carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await spawn('<task>')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as a `spawn()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 ].join("\n");
 
 export interface ChildAgentDoctrineOptions {
@@ -279,8 +279,8 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 	if (allowRecursion && hasRepl) {
 		parts.push(
 			"",
-			"A callable `rlm` is already in your global namespace. `await rlm('sub-task')` spawns a child and returns immediately after task admission with `rlm_child_id`, `name`, `session_dir`, and `model`; it never waits for or returns the child's answer.",
-			"Choose a stable child name with `await rlm('sub-task', name='api-reviewer')`; names must be unique among siblings. If omitted, the host generates a readable unique name.",
+			"A callable `spawn` is already in your global namespace. `await spawn('<task>')` spawns a child and returns immediately after task admission with `rlm_child_id`, `name`, `session_dir`, and `model`; it never waits for or returns the child's answer.",
+			"Choose a stable child name with `await spawn('<task>', name='api-reviewer')`; names must be unique among siblings. If omitted, the host generates a readable unique name.",
 			"A child inherits your model. If a different model is explicitly requested, use `await rlm.find_models(...)` and an exact returned selector. An unavailable requested model fails spawn; decide whether to retry or omit `model`.",
 		);
 		if (hasAgentMessage) {
@@ -313,7 +313,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 				// Which component a given observation belongs in -- the judgement, not the API.
 				// `refine.run(...)` and its timing are in the skill's SKILL.md, reached the same
 				// way as any other skill's contract.
-				"Continual harness refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole harness.",
+				"Refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole note store.",
 			);
 		}
 	}
@@ -332,7 +332,7 @@ export function buildRlmPrompt(options: RlmPromptOptions): string {
 /**
  * Supplemental sub-agent delegation guidance, appended after the base RLM
  * prompt (see system-prompt.ts). The recursion block covers the mechanics
- * (`rlm(...)` admission and handle management); this block adds the
+ * (`spawn(...)` admission and handle management); this block adds the
  * when and why in the same When -> Why -> menu order Claude Code's Agent tool
  * uses. The subagent-spec menu itself renders just after this, inside the
  * harness-state block.
@@ -365,7 +365,7 @@ export function buildSubagentGuidance(
 		// out the narrow cases where a second opinion earns it.
 		graphLevel === "off"
 			? "Spawn children only when the task splits into independent units that do not share state — separate files, modules, or sources. Never spawn to get more opinions on one problem: another pass with more context beats a cohort on both tokens and wall-clock."
-			: "Spawn children when the task splits into independent units that do not share state — separate files, modules, or sources. Spawning for a second opinion on one indivisible problem is governed by the graph budget block below; without it, another pass with more context beats a cohort on both tokens and wall-clock.",
+			: "Spawn children when the task splits into independent units that do not share state — separate files, modules, or sources. Spawning for a second opinion on one indivisible problem is governed by the fan-out budget block below; without it, another pass with more context beats a cohort on both tokens and wall-clock.",
 		// Brief authoring is serialized in this agent's own token stream, so it is the fan-out
 		// latency bottleneck long before the children are.
 		"Keep each child's brief short and specific. Long briefs are written one token at a time here, so they delay every child that is waiting on one.",
@@ -394,7 +394,7 @@ function buildGraphResolverBlock(level: Exclude<GraphResolverLevel, "off">): str
 	const maxNodes = budget?.maxNodes ?? 2;
 	const nests = graphMinDepth(level) > 1;
 	return [
-		`# Graph budget: ${level}`,
+		`# Fan-out budget: ${level}`,
 		"",
 		`Up to ${maxNodes} children on one task. A ceiling, not a target: spend it when a trigger below has fired, not because a task feels hard or important.`,
 		"",
@@ -410,7 +410,7 @@ function buildGraphResolverBlock(level: Exclude<GraphResolverLevel, "off">): str
 		"",
 		// Reach permits sibling messages generally; inside a cohort it is wrong, so the exception has
 		// to be stated or the model will follow the broader rule.
-		"Declare the cohort's edges when you spawn it: `rlm('task', { peers: ['other-child'] })` lets that child message those siblings and no others, and `peers: []` means it reports only to you. Edges are one-way — listing B in A's peers does not let B reach A — so a reviewer can be allowed to send a verdict without opening a debate.",
+		"Declare the cohort's edges when you spawn it: `spawn('task', { peers: ['other-child'] })` lets that child message those siblings and no others, and `peers: []` means it reports only to you. Edges are one-way — listing B in A's peers does not let B reach A — so a reviewer can be allowed to send a verdict without opening a debate.",
 		"Default to `peers: []`. A message interrupts the receiver mid-turn, so the first one to land reframes whoever gets it, and independent answers are the only reason to run more than one child. Open an edge when a child genuinely needs another's output, not so they can confer.",
 		"",
 		"Settle it with a check that already existed and that nobody being checked wrote. Otherwise surface disagreements with the differing lines rather than picking silently.",

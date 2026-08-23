@@ -1,7 +1,8 @@
 # Changelog
 
 ## [Unreleased]
-- Added `spawn()` in the REPL as an exact alias of the `rlm` callable for spawning child agents (same handle, same options); prompts and docs now teach `spawn('sub-task')` while `rlm(...)` stays fully functional.
+- Added `spawn()` in the REPL as an exact alias of the `rlm` callable for spawning child agents (same handle, same options); prompts and docs now teach the `spawn(...)` form while `rlm(...)` stays fully functional.
+- Changed model-facing prompt wording to plain, predictable forms: prompts now teach `spawn('<task>')` with a real task placeholder instead of the literal `'sub-task'`, "fan-out budget" instead of "graph budget", and plain words for the persisted note store instead of "continual harness"; all call names (`rlm.harness.*`, `refine.run`) are unchanged.
 - Changed queued-message editing to checkout-edit-reinsert semantics: alt+up pops the newest queued message (delete mutation applies before the text is shown, so the agent can never consume a message being edited), Enter resends the edited text as a fresh message through the normal pipeline without reinserting, and Escape or alt+down returns the original text to its lane tail and restores the stashed draft; in-place replace/reorder editing was removed along with the ctrl+alt+up/down reorder bindings.
 - Added a session restart and external queue-wipe guard for checked-out messages: a restart keeps the original text in the editor with a warning, an externally wiped queue re-queues the original best-effort or surfaces its text in an error, so nothing is silently lost.
 - Added the `queueMergeBehavior` setting (`"merge"` default, `"separate"` opt-out): with `"separate"`, submitting an edited checkout also re-queues the original as its own entry instead of folding the edit into the checked-out slot.

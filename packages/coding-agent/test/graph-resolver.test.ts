@@ -85,13 +85,13 @@ describe("admission", () => {
 describe("prompt", () => {
 	it("renders no graph block by default, so the default path pays no prefix tokens", () => {
 		const off = buildSubagentGuidance({});
-		expect(off).not.toContain("Graph budget");
+		expect(off).not.toContain("Fan-out budget");
 		expect(off).toContain("Never spawn to get more opinions on one problem");
 	});
 
 	it("replaces the absolute no-cohort rule when the dial is raised", () => {
 		const on = buildSubagentGuidance({ graphResolver: "medium" });
-		expect(on).toContain("Graph budget: medium");
+		expect(on).toContain("Fan-out budget: medium");
 		expect(on).not.toContain("Never spawn to get more opinions on one problem");
 	});
 

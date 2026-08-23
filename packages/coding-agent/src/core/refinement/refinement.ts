@@ -138,7 +138,7 @@ Continual harness components:
 - prompt: supplemental prompt notes only. The base system prompt is immutable and MUST NOT be rewritten.
 - memory: durable facts, decisions, failures, preferences, and outcomes.
 - skill: installed JS REPL skill. Skill create/update edits MUST include a \`reference\` object with \`{"type":"js"}\`, a \`binding\` (the preloaded global for the skill: its name with \`-\` replaced by \`_\`), and a callable or call pattern; they also MUST include an \`arguments\` object describing accepted inputs, required fields, defaults, and constraints. Use \`{}\` for \`arguments\` only when the JS callable truly needs no external inputs. Include the RLM-native call form \`await <skill_binding>.<method>(...)\`.
-- subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with \`handle = await rlm("sub-task")\`; admission returns immediately with \`rlm_child_id\`, \`name\`, \`session_dir\`, and \`model\`, never the child's answer. Results arrive only through explicit \`agent_message\` replies or files; children reply with \`await agent_message.send(message, { receiver_role: 'parent' })\`. Use \`await rlm.list_subagents()\` to recover direct child handles and \`await agent_message.send(message, { receiver_role: 'child', receiver_name: handle.name })\` for follow-ups. Do not invent wrappers like \`run_subagent(...)\`.
+- subagent: reusable delegation specs, including purpose, instructions, and when to invoke. Include the RLM-native call form: compose a concise task prompt and spawn with \`handle = await spawn("<task>")\`; admission returns immediately with \`rlm_child_id\`, \`name\`, \`session_dir\`, and \`model\`, never the child's answer. Results arrive only through explicit \`agent_message\` replies or files; children reply with \`await agent_message.send(message, { receiver_role: 'parent' })\`. Use \`await rlm.list_subagents()\` to recover direct child handles and \`await agent_message.send(message, { receiver_role: 'child', receiver_name: handle.name })\` for follow-ups. Do not invent wrappers like \`run_subagent(...)\`.
 
 Scope and persistence policy:
 - The default editable continual harness store is local to the current Optimus Prime session. Use it for session-specific progress, active task state, current-run coordination notes, temporary blockers, and project facts that should not affect other sessions.
@@ -539,22 +539,22 @@ export function formatHarnessStateForPrompt(
 	const includeReplExamples = options.includeReplExamples ?? true;
 	const includeRefineExamples = options.includeRefineExamples ?? includeReplExamples;
 	const lines = [
-		"# Continual Harness State",
+		"# Persisted Session State",
 		"",
-		"Local continual harness entries belong to this Optimus Prime session. Global continual harness entries persist across Optimus Prime sessions.",
-		"The continual harness entries below are compact summaries, not full descriptions. Use them as routing/context hints; inspect or refine the underlying continual harness entry only when detail matters.",
-		"Default to local continual harness refinement for current task progress, temporary blockers, and session coordination. Use global continual harness refinement only for stable cross-session lessons, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts.",
-		"Use these continual harness prompt notes, memories, skills, and subagent specs when they are relevant. The base system prompt is immutable; prompt entries below are supplemental notes only.",
+		"Local entries belong to this Optimus Prime session. Global entries persist across Optimus Prime sessions.",
+		"The entries below are compact summaries, not full descriptions. Use them as routing hints; inspect or refine the underlying entry only when detail matters.",
+		"Default to local edits for current task progress, temporary blockers, and session coordination. Save globally only for stable cross-session lessons, durable user preferences, reusable skills/subagents, or explicitly project-qualified facts.",
+		"Use these prompt notes, memories, skills, and subagent specs when they are relevant. The base system prompt is immutable; prompt entries below are supplemental notes only.",
 		"",
 		includeRefineExamples
-			? "When to call `await refine.run()`: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep `await refine.run()` continual harness edits small and evidence-backed."
-			: "When to refine the continual harness: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows a continual harness entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep continual harness edits small and evidence-backed.",
+			? "When to call `await refine.run()`: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows an entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep `await refine.run()` edits small and evidence-backed."
+			: "When to refine: after a repeated failure, a reusable tactic emerges, a repeated delegation role should become a subagent spec, a repeated procedure should become a skill, a durable fact/preference should become a memory, a narrow behavioral policy should become a prompt addendum, a user corrects behavior that should persist locally or globally, validation shows an entry is wrong, or a skill/subagent/memory/prompt note should be created, updated, deleted, or rolled back. Keep edits small and evidence-backed.",
 		"",
 		includeReplExamples
-			? 'Call contract: read each installed JS skill\'s SKILL.md and call its documented method on the skill\'s preloaded global binding in the `repl` JavaScript/TypeScript REPL; do not assume a `.run` entrypoint. Continual harness skill entries are JS REPL skills with an explicit `reference` ({"type":"js","binding":"<skill_binding>","callable":"<method>"}) and `arguments` contract; call them with `await <binding>.<method>(...)`. Skills ship no CLI entry points, so never invoke them as shell commands. Spawn a continual harness subagent spec by composing a concise task prompt and calling `const handle = await rlm(\'sub-task\')`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child\'s answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, { receiver_role: \'parent\' })`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(message, { receiver_role: \'child\', receiver_name: handle.name })` for follow-ups. Do not invent wrappers such as `call_skill(...)`, `run_subagent(...)`, or named subagent registries.'
+			? 'Call contract: read each installed JS skill\'s SKILL.md and call its documented method on the skill\'s preloaded global binding in the `repl` JavaScript/TypeScript REPL; do not assume a `.run` entrypoint. Skill entries are JS REPL skills with an explicit `reference` ({"type":"js","binding":"<skill_binding>","callable":"<method>"}) and `arguments` contract; call them with `await <binding>.<method>(...)`. Skills ship no CLI entry points, so never invoke them as shell commands. Spawn a saved subagent spec by composing a concise task prompt and calling `const handle = await spawn(\'<task>\')`; admission returns immediately with `rlm_child_id`, `name`, `session_dir`, and `model`, never the child\'s answer. Results arrive only through explicit `agent_message` replies or files; children reply with `await agent_message.send(message, { receiver_role: \'parent\' })`. Use `await rlm.list_subagents()` to recover direct child handles and `await agent_message.send(message, { receiver_role: \'child\', receiver_name: handle.name })` for follow-ups. Do not invent wrappers such as `call_skill(...)`, `run_subagent(...)`, or named subagent registries.'
 			: options.includeShellExamples
-				? "Call contract: continual harness entries are routing/context hints only in sessions without the `repl` tool. Installed skills ship no CLI entry points, so never invoke them as shell commands; do not use `await`, `rlm`, or `agent_message` examples unless the prompt also documents the `repl` JavaScript/TypeScript REPL."
-				: "Call contract: continual harness entries are routing/context hints only in sessions without the `repl` tool or shell access; do not use `await`, `rlm`, `agent_message`, or shell skill commands unless the prompt also documents those interfaces.",
+				? "Call contract: persisted entries are routing/context hints only in sessions without the `repl` tool. Installed skills ship no CLI entry points, so never invoke them as shell commands; do not use `await`, `rlm`, or `agent_message` examples unless the prompt also documents the `repl` JavaScript/TypeScript REPL."
+				: "Call contract: persisted entries are routing/context hints only in sessions without the `repl` tool or shell access; do not use `await`, `rlm`, `agent_message`, or shell skill commands unless the prompt also documents those interfaces.",
 		"",
 	];
 
@@ -590,7 +590,7 @@ export function formatHarnessStateForPrompt(
 		// the native `rlm` invocation hint.
 		if (kind === "subagent" && includeReplExamples) {
 			lines.push(
-				"subagent specs (invoke a spec by turning it into a concise task prompt and spawning with `await rlm('<task>')`; admission returns a child handle, never the answer):",
+				"subagent specs (invoke a spec by turning it into a concise task prompt and spawning with `await spawn('<task>')`; admission returns a child handle, never the answer):",
 			);
 		} else if (kind === "subagent") {
 			lines.push("subagent specs (delegation roles to match a task against):");
@@ -630,7 +630,7 @@ export function formatHarnessStateForPrompt(
 
 	lines.push(
 		includeReplExamples
-			? "Refinement history is not injected; call `await rlm.harness.overview()` to list every saved continual harness entry (id, title, path) -- memories included -- alongside recent refinement events."
+			? "Refinement history is not injected; call `await rlm.harness.overview()` to list every saved entry (id, title, path) -- memories included -- alongside recent refinement events."
 			: "Refinement history is not injected.",
 	);
 

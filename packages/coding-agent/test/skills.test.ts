@@ -265,6 +265,67 @@ describe("skills", () => {
 			expect(skills[0].name).toBe("valid-skill");
 		});
 
+		it("recovers a colon-in-description nested mapping and warns", () => {
+			const root = mkdtempSync(join(tmpdir(), "skill-colon-desc-"));
+			try {
+				mkdirSync(join(root, "colon-desc"), { recursive: true });
+				writeFileSync(
+					join(root, "colon-desc", "SKILL.md"),
+					// Bun.YAML parses the indented remnant of an unquoted ": " as a nested
+					// mapping instead of throwing. The loader recovers the literal text.
+					"---\nname: colon-desc\ndescription:\n  Use when x: then y\n---\n\nBody.\n",
+				);
+
+				const { skills, diagnostics } = loadSkillsFromDir({ dir: root, source: "test" });
+
+				expect(skills).toHaveLength(1);
+				expect(skills[0].name).toBe("colon-desc");
+				expect(skills[0].description).toBe("Use when x: then y");
+				expect(diagnostics.some((d) => d.message.includes('description contains ": "'))).toBe(true);
+				expect(diagnostics.some((d) => d.message.includes("wrap the value in quotes"))).toBe(true);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
+		it("uses the parent directory name when name is absent from frontmatter", () => {
+			const root = mkdtempSync(join(tmpdir(), "skill-missing-name-"));
+			try {
+				mkdirSync(join(root, "nameless-skill"), { recursive: true });
+				writeFileSync(
+					join(root, "nameless-skill", "SKILL.md"),
+					"---\ndescription: A description without a name.\n---\n\nBody.\n",
+				);
+
+				const { skills, diagnostics } = loadSkillsFromDir({ dir: root, source: "test" });
+
+				expect(skills).toHaveLength(1);
+				expect(skills[0].name).toBe("nameless-skill");
+				expect(diagnostics).toHaveLength(0);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
+		it("warns and falls back to directory name when name parses to a non-string", () => {
+			const root = mkdtempSync(join(tmpdir(), "skill-nested-name-"));
+			try {
+				mkdirSync(join(root, "nested-name"), { recursive: true });
+				writeFileSync(
+					join(root, "nested-name", "SKILL.md"),
+					"---\nname:\n  foo: bar\ndescription: A normal description.\n---\n\nBody.\n",
+				);
+
+				const { skills, diagnostics } = loadSkillsFromDir({ dir: root, source: "test" });
+
+				expect(skills).toHaveLength(1);
+				expect(skills[0].name).toBe("nested-name");
+				expect(diagnostics.some((d) => d.message.includes("name must be a string"))).toBe(true);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+
 		it("should parse disable-model-invocation frontmatter field", () => {
 			const { skills, diagnostics } = loadSkillsFromDir({
 				dir: join(fixturesDir, "disable-model-invocation"),

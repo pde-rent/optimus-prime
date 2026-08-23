@@ -175,17 +175,17 @@ describe("buildRlmPrompt", () => {
 				"",
 				"Load extra modules with `await import('<specifier>')` (node builtins, project files by path, and installed packages), but prefer a Bun API where one exists — `Bun.spawn` over `child_process`, `Bun.file` over `fs` reads, `$` over shelling out for a simple pipeline — because the Bun namespace is already loaded and needs no import.",
 				"",
-				"Continual harness state is available as `rlm.harness` and `rlm.get_harness_state()`. Memory contents are never injected into the system prompt: search persisted facts on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. CRUD calls are local to this Optimus Prime session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)`, `rlm.harness.consolidate_memories()`, and `rlm.harness.overview()`. Pass `{ global: true }` only for stable cross-session lessons.",
+				"This session keeps persisted notes you can read and write: memories, skills, subagent specs, and prompt notes, under `rlm.harness` (raw state via `rlm.get_harness_state()`). Memories are never injected into your prompt: search them on demand with `await rlm.harness.search_memory({ query, top_k?, scope? })` and read one in full with `await rlm.harness.get_memory({ id, scope? })`. Entries you create are local to this session by default: `rlm.harness.create_memory(...)`, `rlm.harness.update_memory(...)`, `rlm.harness.delete_memory(...)`, `rlm.harness.create_skill(...)`, `rlm.harness.update_skill(...)`, `rlm.harness.delete_skill(...)`, `rlm.harness.create_subagent(...)`, `rlm.harness.update_subagent(...)`, `rlm.harness.delete_subagent(...)`, `rlm.harness.create_prompt_note(...)`, `rlm.harness.update_prompt_note(...)`, `rlm.harness.delete_prompt_note(...)`, plus `rlm.harness.record_refinement(...)`, `rlm.harness.consolidate_memories()`, and `rlm.harness.overview()`. Pass `{ global: true }` only for lessons that should hold across sessions.",
 				"",
-				"Terminology: continual harness names the persisted prompt, memory, skill, and subagent layer; RLM names the runtime, REPL, and native call interface exposed to the model.",
+				"`harness` in those names means exactly that note store; `rlm` itself is the runtime: spawn, effort, depth, budget, and model calls.",
 				"",
-				"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await rlm('sub-task', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped and a level the policy will not grant comes back as `effort_refused` with the child left inheriting, raise only after observed failure, and lower once a task proves trivial.",
+				"Reasoning effort is adjustable at runtime: `await rlm.set_effort('<level>')` applies to your next turn, `await rlm.get_effort()` reports the level in force and the levels this model supports, and `await spawn('<task>', { effort: '<level>' })` sets a child's level instead of inheriting yours; unsupported levels are clamped and a level the policy will not grant comes back as `effort_refused` with the child left inheriting, raise only after observed failure, and lower once a task proves trivial.",
 				"Recursion depth is dynamic too: `await rlm.get_max_depth()` reports the current limit, your depth, and the ceiling; `await rlm.set_max_depth(n)` raises it only after an observed failure and never past the ceiling. A raise rebuilds the system prompt, so set it before spawning a subtree rather than mid-run.",
 				"Context budget is dynamic as well: `await rlm.get_context_budget()` reports the effective context budget, compaction trigger point, and the model window; `await rlm.set_context_budget({ maxContextTokens?, compactAtTokens? })` adjusts them for this session only. Values are hard-capped by the model window and the change is refused when dynamic context is disabled.",
 				"",
-				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Continual harness skill entries carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await rlm('sub-task')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as an `rlm()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
+				"RLM-native call contract: installed skills are preloaded bindings in the REPL global scope. Read the matching SKILL.md and call its documented function, such as `await <skill_binding>.<function>(...)`. Skill entries saved through refinement carry an explicit `reference` and `arguments` contract. Spawn a reusable delegation spec with `await spawn('<task>')`; admission returns a child handle immediately. Results arrive only through an available messaging capability or files, never as a `spawn()` return value. Do not invent non-native wrappers such as `call_skill(...)` or `run_subagent(...)`.",
 				"",
-				"Continual harness refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole harness.",
+				"Refinement is a small, evidence-backed update after an observed failure or reusable tactic: a repeated delegation pattern becomes a subagent spec, a repeated procedure a skill, a durable fact or preference a memory, a narrow behavioral policy a prompt addendum. Update the smallest component that fits and validate it on the next action; never rewrite the whole note store.",
 				"",
 				// Last on purpose: the only per-agent-unique line, kept out of the
 				// cacheable prefix so siblings share it.
@@ -248,7 +248,7 @@ describe("buildRlmPrompt", () => {
 		// <available_skills> roster, emitted once by buildSystemPrompt.
 		expect(prompt).not.toContain("Installed skills");
 		expect(prompt).not.toContain("Object.keys");
-		expect(prompt).toContain("A callable `rlm` is already in your global namespace");
+		expect(prompt).toContain("A callable `spawn` is already in your global namespace");
 		expect(prompt).toContain("persistent JavaScript/TypeScript REPL (Bun)");
 		expect(prompt).toContain("Each `%%bash` cell runs in a throw-away subshell");
 	});
@@ -550,15 +550,15 @@ describe("buildSystemPrompt", () => {
 			harnessState,
 		});
 
-		expect(prompt).toContain("# Continual Harness State");
-		expect(prompt).toContain("Local continual harness entries belong to this Optimus Prime session");
-		expect(prompt).toContain("The continual harness entries below are compact summaries, not full descriptions");
-		expect(prompt).toContain("Use global continual harness refinement only for stable cross-session lessons");
+		expect(prompt).toContain("# Persisted Session State");
+		expect(prompt).toContain("Local entries belong to this Optimus Prime session");
+		expect(prompt).toContain("The entries below are compact summaries, not full descriptions");
+		expect(prompt).toContain("Save globally only for stable cross-session lessons");
 		expect(prompt).toContain("When to call `await refine.run()`");
 		expect(prompt).toContain("Call contract: read each installed JS skill's SKILL.md");
-		expect(prompt).toContain("Continual harness skill entries are JS REPL skills");
-		expect(prompt).toContain("Spawn a continual harness subagent spec by composing a concise task prompt");
-		expect(prompt).toContain("handle = await rlm('sub-task')");
+		expect(prompt).toContain("Skill entries are JS REPL skills");
+		expect(prompt).toContain("Spawn a saved subagent spec by composing a concise task prompt");
+		expect(prompt).toContain("handle = await spawn('<task>')");
 		expect(prompt).toContain("admission returns immediately");
 		expect(prompt).toContain("never the child's answer");
 		expect(prompt).toContain("receiver_role: 'parent'");
@@ -570,7 +570,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("a repeated procedure should become a skill");
 		expect(prompt).toContain("a durable fact/preference should become a memory");
 		expect(prompt).toContain("a narrow behavioral policy should become a prompt addendum");
-		expect(prompt).toContain("validation shows a continual harness entry is wrong");
+		expect(prompt).toContain("validation shows an entry is wrong");
 		expect(prompt).toContain("[global:focused_edits] Focused edits (policy)");
 		expect(prompt).toContain("[global:review_refinement] Review refinement (quality)");
 		expect(prompt).toContain("[global:refinement_reviewer] Refinement reviewer (review)");
@@ -579,7 +579,7 @@ describe("buildSystemPrompt", () => {
 		);
 		expect(prompt).toContain("`await rlm.harness.get_memory({ id, scope })`");
 		expect(prompt).toContain(
-			"call `await rlm.harness.overview()` to list every saved continual harness entry (id, title, path) -- memories included -- alongside recent refinement events.",
+			"call `await rlm.harness.overview()` to list every saved entry (id, title, path) -- memories included -- alongside recent refinement events.",
 		);
 		// Memory bodies must never reach the cached system prompt, and no rendered line may
 		// carry a version, a count, or the refinement log: all of them churn the cache.
@@ -589,7 +589,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("[refine_1] Observed validation miss");
 		expect(prompt).not.toContain("(policy, v1)");
 		expect(prompt).not.toContain("memory: 1");
-		expect(prompt.indexOf("# Continual Harness State")).toBeGreaterThan(prompt.indexOf("Conversation log:"));
+		expect(prompt.indexOf("# Persisted Session State")).toBeGreaterThan(prompt.indexOf("Conversation log:"));
 	});
 
 	test("keeps injected harness context compact", () => {
@@ -766,7 +766,7 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).toContain("You are a general purpose agent that uses code to solve tasks.");
 		expect(prompt).toContain("Working directory: /repo");
 		expect(prompt).toContain("Conversation log: /repo/.pi/sessions/session.jsonl");
-		expect(prompt).toContain("await rlm('sub-task')");
+		expect(prompt).toContain("await spawn('<task>')");
 		expect(prompt).toContain("returns immediately after task admission");
 		expect(prompt).toContain("Results arrive only through an available messaging capability or files");
 		expect(prompt).toContain("recover direct child handles");
@@ -816,7 +816,7 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain("You are a general purpose agent that uses code to solve tasks.");
-		expect(prompt).toContain("# Continual Harness State");
+		expect(prompt).toContain("# Persisted Session State");
 		expect(prompt).toContain("Installed skills ship no CLI entry points, so never invoke them as shell commands");
 		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).toContain("subagent specs (delegation roles to match a task against):");
@@ -863,7 +863,7 @@ describe("buildSystemPrompt", () => {
 			harnessState,
 		});
 
-		expect(prompt).toContain("# Continual Harness State");
+		expect(prompt).toContain("# Persisted Session State");
 		expect(prompt).toContain("without the `repl` tool or shell access");
 		expect(prompt).not.toContain("use installed skills as shell commands");
 		expect(prompt).not.toContain("<skill_import> ...");
@@ -909,7 +909,7 @@ describe("buildSystemPrompt", () => {
 		});
 
 		expect(prompt).toContain("custom body");
-		expect(prompt).toContain("# Continual Harness State");
+		expect(prompt).toContain("# Persisted Session State");
 		expect(prompt).toContain(
 			'memory: search on demand with `await rlm.harness.search_memory({ query: "...", top_k: 5 })`',
 		);
@@ -917,10 +917,10 @@ describe("buildSystemPrompt", () => {
 		expect(prompt).not.toContain("Custom prompts still receive harness state.");
 		expect(prompt).not.toContain("You are a general purpose agent that uses code to solve tasks.");
 		expect(prompt.indexOf("Current working directory: /repo")).toBeLessThan(
-			prompt.indexOf("# Continual Harness State"),
+			prompt.indexOf("# Persisted Session State"),
 		);
 		expect(prompt.indexOf("Current working directory: /repo")).toBeLessThan(prompt.indexOf("custom append"));
-		expect(prompt.indexOf("# Continual Harness State")).toBeLessThan(prompt.indexOf("custom append"));
+		expect(prompt.indexOf("# Persisted Session State")).toBeLessThan(prompt.indexOf("custom append"));
 	});
 
 	test("adds child reply doctrine to custom prompts when messaging is available", () => {
