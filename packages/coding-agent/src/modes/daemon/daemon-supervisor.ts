@@ -54,7 +54,9 @@ import { CommandRecoveryJournal, createCommandIdempotencyKey } from "./command-r
 import { CompactAssistantStreamReconstructor, isCompactAssistantDelta } from "./compact-session-stream.js";
 import { DAEMON_CATALOG_ROLE_ENV, DaemonCatalogClient } from "./daemon-catalog-process.js";
 import {
+	defaultClientCapabilities,
 	finishClientSnapshotStreaming,
+	makeDaemonHello,
 	markClientSnapshotStreaming,
 	queueClientCatchup,
 	takePendingClientCatchups,
@@ -66,10 +68,7 @@ import {
 	DAEMON_COMMAND_COMPATIBILITY,
 	DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION,
 	DAEMON_DEFAULT_CLIENT_CAPABILITIES,
-	DAEMON_DEFAULT_SERVER_CAPABILITIES,
 	DAEMON_PROTOCOL_INFO,
-	DAEMON_SCHEMA_ID,
-	DAEMON_SCHEMA_REVISION,
 	DAEMON_UPDATE_RESTART_FORMAT_VERSION,
 	type DaemonAttachResult,
 	type DaemonClientCapability,
@@ -85,7 +84,6 @@ import {
 	success,
 	UPDATE_RESTART_DRAIN_COMMANDS,
 } from "./daemon-protocol.js";
-import { getDaemonRuntimeIdentity } from "./daemon-runtime-identity.js";
 import { matchesSessionIdSuffix } from "./daemon-session-id.js";
 import {
 	classifySessionRosterStatus,
@@ -968,28 +966,26 @@ export class DaemonSupervisor {
 			snapshotActiveSessionIds: new Set(),
 			detachInput: () => {},
 			supportsExtensionUi: false,
-			capabilities: new Set(DAEMON_DEFAULT_CLIENT_CAPABILITIES),
+			capabilities: defaultClientCapabilities(),
 		};
 		this.clients.add(client);
 		void this.ready.then(
 			() => {
 				if (!client.socket.destroyed && this.clients.has(client)) {
-					this.write(client, {
-						type: "daemon_hello",
-						socketPath: this.socketPath,
-						protocol: DAEMON_PROTOCOL_INFO,
-						schemaId: DAEMON_SCHEMA_ID,
-						schemaRevision: DAEMON_SCHEMA_REVISION,
-						appVersion: VERSION,
-						runtime: getDaemonRuntimeIdentity(),
-						supervisorGeneration: this.generation,
-						supervisorOwnerToken: this.ownership?.record.token,
-						supervisorPid: process.pid,
-						supervisorProcessStartId: this.ownership?.record.processStartId,
-						supervisorSocketPath: this.ownership?.record.socketPath,
-						clientId: client.id,
-						serverCapabilities: DAEMON_DEFAULT_SERVER_CAPABILITIES,
-					});
+					this.write(
+						client,
+						makeDaemonHello({
+							socketPath: this.socketPath,
+							clientId: client.id,
+							extras: {
+								supervisorGeneration: this.generation,
+								supervisorOwnerToken: this.ownership?.record.token,
+								supervisorPid: process.pid,
+								supervisorProcessStartId: this.ownership?.record.processStartId,
+								supervisorSocketPath: this.ownership?.record.socketPath,
+							},
+						}),
+					);
 				}
 			},
 			() => client.socket.destroy(),

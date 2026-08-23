@@ -1,4 +1,15 @@
+import { VERSION } from "../../config.js";
 import type { DaemonSocketClient } from "./active-session-state.js";
+import {
+	DAEMON_DEFAULT_CLIENT_CAPABILITIES,
+	DAEMON_DEFAULT_SERVER_CAPABILITIES,
+	DAEMON_PROTOCOL_INFO,
+	DAEMON_SCHEMA_ID,
+	DAEMON_SCHEMA_REVISION,
+	type DaemonClientCapability,
+	type DaemonOutbound,
+} from "./daemon-protocol.js";
+import { getDaemonRuntimeIdentity } from "./daemon-runtime-identity.js";
 
 /**
  * Pure per-client connection state transitions shared by every daemon-protocol
@@ -88,4 +99,33 @@ export function abortClientSnapshotStreaming(client: DaemonSocketClient, activeS
 	for (const controller of client.snapshotTransferAbortControllers?.values() ?? []) {
 		controller.abort();
 	}
+}
+
+/** Fresh copy of the default client capability set (each connection gets its own). */
+export function defaultClientCapabilities(): Set<DaemonClientCapability> {
+	return new Set(DAEMON_DEFAULT_CLIENT_CAPABILITIES);
+}
+
+/**
+ * Build the shared daemon_hello identity block: protocol/schema/version/runtime
+ * fields every endpoint must agree on. Endpoint-specific fields (supervisor
+ * fencing, worker transport hints) come in via `extras`.
+ */
+export function makeDaemonHello(options: {
+	socketPath: string;
+	clientId: string;
+	extras?: Record<string, unknown>;
+}): DaemonOutbound {
+	return {
+		type: "daemon_hello",
+		socketPath: options.socketPath,
+		protocol: DAEMON_PROTOCOL_INFO,
+		schemaId: DAEMON_SCHEMA_ID,
+		schemaRevision: DAEMON_SCHEMA_REVISION,
+		appVersion: VERSION,
+		runtime: getDaemonRuntimeIdentity(),
+		clientId: options.clientId,
+		serverCapabilities: DAEMON_DEFAULT_SERVER_CAPABILITIES,
+		...options.extras,
+	} as DaemonOutbound;
 }

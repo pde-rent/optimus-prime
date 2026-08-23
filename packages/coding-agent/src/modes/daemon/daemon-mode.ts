@@ -20,7 +20,6 @@ import {
 	getDaemonLogPath,
 	getDaemonUpdateRestartManifestPath,
 	getSessionsDir,
-	VERSION,
 } from "../../config.js";
 import {
 	AGENT_FAMILY_REACH_ERROR,
@@ -128,7 +127,9 @@ import {
 } from "./active-session-state.js";
 import {
 	abortClientSnapshotStreaming,
+	defaultClientCapabilities,
 	finishClientSnapshotStreaming,
+	makeDaemonHello,
 	markClientSnapshotStreaming,
 	queueClientCatchup,
 } from "./daemon-client-connection.js";
@@ -148,10 +149,7 @@ import {
 	createDaemonEventMeta,
 	createDaemonReplayInfo,
 	DAEMON_DEFAULT_CLIENT_CAPABILITIES,
-	DAEMON_DEFAULT_SERVER_CAPABILITIES,
 	DAEMON_PROTOCOL_INFO,
-	DAEMON_SCHEMA_ID,
-	DAEMON_SCHEMA_REVISION,
 	DAEMON_SUPPORTED_CLIENT_CAPABILITIES,
 	DAEMON_UPDATE_RESTART_FORMAT_VERSION,
 	type DaemonAttachResult,
@@ -172,7 +170,6 @@ import {
 	success,
 	UPDATE_RESTART_DRAIN_COMMANDS,
 } from "./daemon-protocol.js";
-import { getDaemonRuntimeIdentity } from "./daemon-runtime-identity.js";
 import {
 	buildRlmChildSnapshots,
 	buildSessionList,
@@ -3220,20 +3217,10 @@ export class AgentDaemon {
 			transport: this.options.worker ? "private-framed" : "jsonl",
 			detachInput: () => {},
 			supportsExtensionUi: false,
-			capabilities: new Set(DAEMON_DEFAULT_CLIENT_CAPABILITIES),
+			capabilities: defaultClientCapabilities(),
 		};
 		this.clients.add(client);
-		this.write(client, {
-			type: "daemon_hello",
-			socketPath: this.socketPath,
-			protocol: DAEMON_PROTOCOL_INFO,
-			schemaId: DAEMON_SCHEMA_ID,
-			schemaRevision: DAEMON_SCHEMA_REVISION,
-			appVersion: VERSION,
-			runtime: getDaemonRuntimeIdentity(),
-			clientId: client.id,
-			serverCapabilities: DAEMON_DEFAULT_SERVER_CAPABILITIES,
-		});
+		this.write(client, makeDaemonHello({ socketPath: this.socketPath, clientId: client.id }));
 
 		if (client.transport === "private-framed") {
 			const decoder = new PrivateFrameDecoder(isDaemonWorkerFrameHeader);
