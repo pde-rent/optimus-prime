@@ -53,6 +53,12 @@ import { createActiveSessionId, type DaemonSocketClient } from "./active-session
 import { CommandRecoveryJournal, createCommandIdempotencyKey } from "./command-recovery-journal.js";
 import { CompactAssistantStreamReconstructor, isCompactAssistantDelta } from "./compact-session-stream.js";
 import { DAEMON_CATALOG_ROLE_ENV, DaemonCatalogClient } from "./daemon-catalog-process.js";
+import {
+	finishClientSnapshotStreaming,
+	markClientSnapshotStreaming,
+	queueClientCatchup,
+	takePendingClientCatchups,
+} from "./daemon-client-connection.js";
 import { deserializeDaemonError, serializeDaemonError } from "./daemon-errors.js";
 import {
 	collectDaemonClientEnv,
@@ -3712,31 +3718,14 @@ export class DaemonSupervisor {
 	}
 
 	private reserveSnapshotStream(client: DaemonSocketClient, activeSessionId: string): () => void {
-		client.snapshotStreaming = true;
-		client.snapshotActiveSessionIds ??= new Set();
-		client.snapshotActiveSessionIds.add(activeSessionId);
-		client.snapshotActiveSessionCounts ??= new Map();
-		client.snapshotActiveSessionCounts.set(
-			activeSessionId,
-			(client.snapshotActiveSessionCounts.get(activeSessionId) ?? 0) + 1,
-		);
+		markClientSnapshotStreaming(client, activeSessionId);
 		let released = false;
 		return () => {
 			if (released) {
 				return;
 			}
 			released = true;
-			const streamCount = client.snapshotActiveSessionCounts?.get(activeSessionId) ?? 1;
-			if (streamCount > 1) {
-				client.snapshotActiveSessionCounts?.set(activeSessionId, streamCount - 1);
-			} else {
-				client.snapshotActiveSessionCounts?.delete(activeSessionId);
-				client.snapshotActiveSessionIds?.delete(activeSessionId);
-			}
-			client.snapshotStreaming = (client.snapshotActiveSessionIds?.size ?? 0) > 0;
-			if (!client.snapshotStreaming) {
-				client.backpressured = false;
-			}
+			finishClientSnapshotStreaming(client, activeSessionId);
 			if (!client.snapshotStreaming && client.catchupActiveSessionIds?.size) {
 				void this.catchUpClient(client).catch((error) =>
 					this.log(`Failed to catch up client ${client.id}: ${String(error)}`),
@@ -4267,14 +4256,7 @@ export class DaemonSupervisor {
 		activeSessionId: string,
 		purpose: "replacement" | "resync" = "resync",
 	): void {
-		if (!client.catchupActiveSessionIds) {
-			client.catchupActiveSessionIds = new Set();
-		}
-		client.catchupActiveSessionIds.add(activeSessionId);
-		client.catchupPurposes ??= new Map();
-		if (purpose === "replacement" || !client.catchupPurposes.has(activeSessionId)) {
-			client.catchupPurposes.set(activeSessionId, purpose);
-		}
+		queueClientCatchup(client, activeSessionId, purpose);
 	}
 
 	private catchUpClient(client: DaemonSocketClient): Promise<void> {
@@ -4308,12 +4290,7 @@ export class DaemonSupervisor {
 		if (client.socket.destroyed) {
 			return;
 		}
-		const pending = [...(client.catchupActiveSessionIds ?? [])].map((activeSessionId) => ({
-			activeSessionId,
-			purpose: client.catchupPurposes?.get(activeSessionId) ?? ("resync" as const),
-		}));
-		client.catchupActiveSessionIds?.clear();
-		client.catchupPurposes?.clear();
+		const pending = takePendingClientCatchups(client);
 		for (let index = 0; index < pending.length; index++) {
 			const { activeSessionId, purpose } = pending[index]!;
 			let releaseTranscript: (() => void) | undefined;

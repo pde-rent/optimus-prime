@@ -126,6 +126,19 @@ import {
 	type DaemonSocketClient,
 	resolveActiveSessionState,
 } from "./active-session-state.js";
+import {
+	abortClientSnapshotStreaming,
+	finishClientSnapshotStreaming,
+	markClientSnapshotStreaming,
+	queueClientCatchup,
+} from "./daemon-client-connection.js";
+
+export {
+	abortClientSnapshotStreaming,
+	finishClientSnapshotStreaming,
+	markClientSnapshotStreaming,
+} from "./daemon-client-connection.js";
+
 import { createCompactAssistantDelta } from "./compact-session-stream.js";
 import { DaemonClient } from "./daemon-client.js";
 import { filterClientEnv, withClientEnv } from "./daemon-client-env.js";
@@ -359,6 +372,8 @@ export async function runDaemonMode(options: DaemonModeOptions): Promise<never> 
 
 export class AgentDaemon {
 	private server?: Server;
+	/** Delegates to daemon-client-connection.ts; kept as a member for the test-internals surface. */
+	private queueClientCatchup = queueClientCatchup;
 	private shuttingDown = false;
 	private readonly updateRestartQueuePauses = new Map<string, { release(): void }>();
 	private readonly mutationDrain = new MutationDrainLatch();
@@ -6714,21 +6729,6 @@ export class AgentDaemon {
 		return "drained";
 	}
 
-	private queueClientCatchup(
-		client: DaemonSocketClient,
-		activeSessionId: string,
-		purpose: "replacement" | "resync" = "resync",
-	): void {
-		if (!client.catchupActiveSessionIds) {
-			client.catchupActiveSessionIds = new Set();
-		}
-		client.catchupActiveSessionIds.add(activeSessionId);
-		client.catchupPurposes ??= new Map();
-		if (purpose === "replacement" || !client.catchupPurposes.has(activeSessionId)) {
-			client.catchupPurposes.set(activeSessionId, purpose);
-		}
-	}
-
 	// The AgentSession doesn't know its own daemon active-session id, so fill it in here.
 	private stampRlmChildActiveSessionId(message: DaemonOutbound): void {
 		if (
@@ -6946,49 +6946,6 @@ function daemonClientCapabilitiesForSession(
 
 function daemonClientSupportsExtensionUi(client: DaemonSocketClient, activeSessionId: string): boolean {
 	return client.capabilitiesByActiveSessionId?.get(activeSessionId)?.has("extension_ui") ?? client.supportsExtensionUi;
-}
-
-export function markClientSnapshotStreaming(client: DaemonSocketClient, activeSessionId: string): AbortSignal {
-	client.snapshotStreaming = true;
-	client.snapshotActiveSessionIds ??= new Set();
-	client.snapshotActiveSessionIds.add(activeSessionId);
-	client.snapshotActiveSessionCounts ??= new Map();
-	client.snapshotActiveSessionCounts.set(
-		activeSessionId,
-		(client.snapshotActiveSessionCounts.get(activeSessionId) ?? 0) + 1,
-	);
-	client.snapshotTransferAbortControllers ??= new Map();
-	let controller = client.snapshotTransferAbortControllers.get(activeSessionId);
-	if (!controller || controller.signal.aborted) {
-		controller = new AbortController();
-		client.snapshotTransferAbortControllers.set(activeSessionId, controller);
-	}
-	return controller.signal;
-}
-
-function abortClientSnapshotStreaming(client: DaemonSocketClient, activeSessionId?: string): void {
-	if (activeSessionId) {
-		client.snapshotTransferAbortControllers?.get(activeSessionId)?.abort();
-		return;
-	}
-	for (const controller of client.snapshotTransferAbortControllers?.values() ?? []) {
-		controller.abort();
-	}
-}
-
-export function finishClientSnapshotStreaming(client: DaemonSocketClient, activeSessionId: string): void {
-	const count = client.snapshotActiveSessionCounts?.get(activeSessionId) ?? 1;
-	if (count > 1) {
-		client.snapshotActiveSessionCounts?.set(activeSessionId, count - 1);
-	} else {
-		client.snapshotActiveSessionCounts?.delete(activeSessionId);
-		client.snapshotActiveSessionIds?.delete(activeSessionId);
-		client.snapshotTransferAbortControllers?.delete(activeSessionId);
-	}
-	client.snapshotStreaming = (client.snapshotActiveSessionIds?.size ?? 0) > 0;
-	if (!client.snapshotStreaming) {
-		client.backpressured = false;
-	}
 }
 
 export function cancelPendingExtensionUiRequests(state: ActiveSessionState): void {
