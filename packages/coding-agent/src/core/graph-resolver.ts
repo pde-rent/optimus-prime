@@ -9,7 +9,7 @@
  * freedom. `graphMaxTokens` is a clamp: it only ever lowers a level's ceiling.
  */
 
-export type GraphResolverLevel = "off" | "low" | "medium" | "high" | "max";
+export type GraphResolverLevel = "off" | "min" | "low" | "medium" | "high" | "max";
 
 export const DEFAULT_GRAPH_RESOLVER_LEVEL: GraphResolverLevel = "off";
 
@@ -27,10 +27,11 @@ export interface GraphResolverBudget {
 }
 
 const LEVEL_BUDGETS: Record<Exclude<GraphResolverLevel, "off">, { multiplier: number; maxNodes: number }> = {
-	low: { multiplier: 3, maxNodes: 2 },
-	medium: { multiplier: 10, maxNodes: 4 },
-	high: { multiplier: 25, maxNodes: 6 },
-	max: { multiplier: 100, maxNodes: 8 },
+	min: { multiplier: 3, maxNodes: 2 },
+	low: { multiplier: 6, maxNodes: 4 },
+	medium: { multiplier: 20, maxNodes: 6 },
+	high: { multiplier: 50, maxNodes: 10 },
+	max: { multiplier: 200, maxNodes: 16 },
 };
 
 export function graphResolverBudget(

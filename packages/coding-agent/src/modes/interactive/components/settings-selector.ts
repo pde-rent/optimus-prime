@@ -32,6 +32,15 @@ export const THINKING_LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	max: "Maximum reasoning",
 };
 
+export const GRAPH_RESOLVER_DESCRIPTIONS: Record<GraphResolverLevel, string> = {
+	off: "No fan-out - single agents only",
+	min: "2 children, ~3x budget",
+	low: "4 children, ~6x budget",
+	medium: "6 children, ~20x budget",
+	high: "10 children, ~50x budget",
+	max: "16 children, ~200x budget",
+};
+
 export interface SettingsConfig {
 	autoCompact: boolean;
 	idleEvictionMinutes: IdleEvictionMinutes;
