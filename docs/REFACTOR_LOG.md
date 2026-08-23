@@ -14,6 +14,8 @@ Target: <=250,000 total. Numbers always reported split by category.
 - menu selector state machine: MenuSelector<T> replaces duplicated selection/layout/windowing in extension-selector + oauth-selector; physical LOC +48 in the three files (controller API surface), semantic win = one state machine where two divergent copies existed; config/tree selector adoption audited and CLOSED (different contracts)
 - dead-export sweep: ~841 production LOC (proxy.ts module 350, resources/ dir 260, 20 dead decls, 98 unexports); 240 test-only symbols flagged not deleted (S slice 5, @e3c547202)
 - responses-wire factory: createResponsesWireStream collapses 3 copies of the OpenAI Responses request/stream skeleton (openai-responses/grok/azure), net -96 (@6b9591081)
+- completions-family merge audited and CLOSED: zero shared wire contract across openai-completions/mistral/cursor (S)
+- supervisor-core strangler step 1: daemon-client-connection.ts owns per-client catchup/snapshot state, -108 net (@49cf78169); baseline 194/4 preserved
 
 ## In flight
 - E2: daemon trio scenario tables (15,231 -> 14,294 so far)
