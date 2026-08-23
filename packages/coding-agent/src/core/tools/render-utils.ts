@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { getImageDimensions, imageFallback } from "@earendil-works/pi-tui";
+import { getImageDimensions, imageFallback, Text } from "@earendil-works/pi-tui";
 import { stripAnsi } from "../../utils/ansi.js";
 import { sanitizeBinaryOutput } from "../../utils/shell.js";
 
@@ -65,4 +65,24 @@ export type ToolRenderResultLike<TDetails> = {
 
 export function invalidArgText(theme: { fg: (name: any, text: string) => string }): string {
 	return theme.fg("error", "[invalid arg]");
+}
+
+/**
+ * Render a failed tool result as its joined text content, styled as an error.
+ * Shared by every renderResult that surfaces raw error text.
+ */
+
+/**
+ * Render a failed tool result as its joined text content, styled as an error.
+ * Shared by every renderResult that surfaces raw error text.
+ */
+export function errorTextComponent(
+	result: { content: Array<{ type: string; text?: string }> },
+	theme: { fg: (name: any, text: string) => string },
+): Text {
+	const errorText = result.content
+		.filter((c) => c.type === "text")
+		.map((c) => c.text || "")
+		.join("\n");
+	return new Text(theme.fg("error", errorText), 1, 0);
 }

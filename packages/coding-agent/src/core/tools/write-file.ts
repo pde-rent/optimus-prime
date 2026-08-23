@@ -11,6 +11,7 @@ import { EditChangeSummaryComponent } from "./edit.js";
 import { detectLineEnding, generateDiffString, normalizeToLF, restoreLineEndings, stripBom } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
+import { errorTextComponent } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { formatSize } from "./truncate.js";
 
@@ -93,11 +94,7 @@ export function createWriteFileToolDefinition(
 		parameters: writeFileSchema,
 		renderResult(result, _options, theme, context) {
 			if (context.isError) {
-				const errorText = result.content
-					.filter((c) => c.type === "text")
-					.map((c) => c.text || "")
-					.join("\n");
-				return new Text(theme.fg("error", errorText), 1, 0);
+				return errorTextComponent(result, theme);
 			}
 			const details = result.details as WriteFileToolDetails | undefined;
 			const diff = details?.diff;

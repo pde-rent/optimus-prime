@@ -18,7 +18,7 @@ import {
 } from "./batch-read.js";
 import { getMutationQueueKey, onFileMutation } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
-import { shortenPath } from "./render-utils.js";
+import { errorTextComponent, shortenPath } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
 
@@ -394,11 +394,7 @@ export function createReadFileToolDefinition(
 		// Read cell: collapsed shows a lines X-Y-of-Z size label; ctrl+o reveals the body.
 		renderResult(result, options, theme, context) {
 			if (context.isError) {
-				const errorText = result.content
-					.filter((c) => c.type === "text")
-					.map((c) => c.text || "")
-					.join("\n");
-				return new Text(theme.fg("error", errorText), 1, 0);
+				return errorTextComponent(result, theme);
 			}
 			const output = result.content
 				.filter((c) => c.type === "text")
