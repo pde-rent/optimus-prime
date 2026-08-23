@@ -1,4 +1,3 @@
-import { getEnvApiKey } from "../env-api-keys.js";
 import type {
 	CacheRetention,
 	Context,
@@ -10,8 +9,6 @@ import type {
 	StreamOptions,
 } from "../types.js";
 import type { AssistantMessageEventStream } from "../utils/event-stream.js";
-import { headersToRecord } from "../utils/headers.js";
-import { requestWithRetry } from "../utils/http.js";
 import {
 	applyCopilotRequestHeaders,
 	applyResponsesReasoningParams,
@@ -19,13 +16,11 @@ import {
 	convertResponsesMessages,
 	convertResponsesTools,
 	finalizeOpenAIRequest,
-	iterateOpenAIStream,
-	processResponsesStream,
 	resolveOpenAIApiKey,
 } from "./openai-responses-shared.js";
-import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
+import type { ResponseCreateParamsStreaming } from "./openai-wire-types.js";
+import { createResponsesWireStream } from "./responses-wire.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning, resolveCacheRetention } from "./simple-options.js";
-import { runProviderStream } from "./stream-runner.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 
@@ -49,51 +44,24 @@ export interface OpenAIResponsesOptions extends StreamOptions {
 	serviceTier?: ServiceTier;
 }
 
-export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIResponsesOptions> = (
-	model: Model<"openai-responses">,
-	context: Context,
-	options?: OpenAIResponsesOptions,
-): AssistantMessageEventStream => {
-	let requestId: string | undefined;
-
-	return runProviderStream(
-		model,
-		options,
-		async (output, stream) => {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIResponsesOptions> =
+	createResponsesWireStream({
+		buildRequest: (model, context, options, apiKey) => {
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 			const { url, headers } = createClient(model, context, apiKey, options?.headers, cacheSessionId);
-			let params = buildParams(model, context, options);
-			const nextParams = await options?.onPayload?.(params, model);
-			if (nextParams !== undefined) {
-				params = nextParams as ResponseCreateParamsStreaming;
-			}
-			const response = await requestWithRetry({
+			return {
 				url,
 				headers,
-				body: JSON.stringify(params),
-				signal: options?.signal,
-				timeoutMs: options?.timeoutMs,
-				maxRetries: options?.maxRetries,
-			});
-			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
-			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
-			requestId = response.headers.get("x-request-id") ?? undefined;
-			stream.push({ type: "start", partial: output });
-
-			await processResponsesStream(openaiStream, output, stream, model, {
-				serviceTier: options?.serviceTier,
-				applyServiceTierPricing: (usage, serviceTier) =>
-					applyServiceTierCostMultiplier(usage, serviceTier, getServiceTierCostMultiplier(model, serviceTier)),
-			});
+				params: buildParams(model, context, options),
+				processOptions: {
+					serviceTier: options?.serviceTier,
+					applyServiceTierPricing: (usage, serviceTier) =>
+						applyServiceTierCostMultiplier(usage, serviceTier, getServiceTierCostMultiplier(model, serviceTier)),
+				},
+			};
 		},
-		{
-			getRequestId: () => requestId,
-			scratchKeys: ["index", "partialJson"],
-		},
-	);
-};
+	});
 
 export const streamSimpleOpenAIResponses: StreamFunction<"openai-responses", SimpleStreamOptions> = (
 	model: Model<"openai-responses">,

@@ -14,22 +14,17 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 	});
 }
 
-import { getEnvApiKey } from "../env-api-keys.js";
 import type { Context, Model, SimpleStreamOptions, StreamFunction, StreamOptions } from "../types.js";
 import type { AssistantMessageEventStream } from "../utils/event-stream.js";
-import { headersToRecord } from "../utils/headers.js";
-import { requestWithRetry } from "../utils/http.js";
 import { sanitizeGrokPayload } from "./grok-payload.js";
 import {
 	applyResponsesReasoningParams,
 	convertResponsesMessages,
 	convertResponsesTools,
-	iterateOpenAIStream,
-	processResponsesStream,
 } from "./openai-responses-shared.js";
-import type { ResponseCreateParamsStreaming, ResponseStreamEvent } from "./openai-wire-types.js";
+import type { ResponseCreateParamsStreaming } from "./openai-wire-types.js";
+import { createResponsesWireStream } from "./responses-wire.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning } from "./simple-options.js";
-import { runProviderStream } from "./stream-runner.js";
 
 const GROK_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
 const GROK_CLIENT_IDENTIFIER = "grok-shell";
@@ -98,44 +93,13 @@ function buildParams(
 	return params;
 }
 
-export const streamGrok: StreamFunction<"grok-responses", GrokStreamOptions> = (
-	model: Model<"grok-responses">,
-	context: Context,
-	options?: GrokStreamOptions,
-): AssistantMessageEventStream => {
-	let requestId: string | undefined;
-
-	return runProviderStream(
-		model,
-		options,
-		async (output, stream) => {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
-			let params = sanitizeGrokPayload(buildParams(model, context, options), model.id);
-			const nextParams = await options?.onPayload?.(params, model);
-			if (nextParams !== undefined) {
-				params = nextParams as ResponseCreateParamsStreaming;
-			}
-			const response = await requestWithRetry({
-				url: resolveProxyUrl(model),
-				headers: { ...buildGrokHeaders(model, apiKey), ...options?.headers },
-				body: JSON.stringify(params),
-				signal: options?.signal,
-				timeoutMs: options?.timeoutMs,
-				maxRetries: options?.maxRetries,
-			});
-			const openaiStream = iterateOpenAIStream<ResponseStreamEvent>(response, options?.signal);
-			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
-			requestId = response.headers.get("x-request-id") ?? undefined;
-			stream.push({ type: "start", partial: output });
-
-			await processResponsesStream(openaiStream, output, stream, model);
-		},
-		{
-			getRequestId: () => requestId,
-			scratchKeys: ["index", "partialJson"],
-		},
-	);
-};
+export const streamGrok: StreamFunction<"grok-responses", GrokStreamOptions> = createResponsesWireStream({
+	buildRequest: (model, context, options, apiKey) => ({
+		url: resolveProxyUrl(model),
+		headers: { ...buildGrokHeaders(model, apiKey), ...options?.headers },
+		params: sanitizeGrokPayload(buildParams(model, context, options), model.id),
+	}),
+});
 
 export const streamSimpleGrok: StreamFunction<"grok-responses", SimpleStreamOptions> = (
 	model: Model<"grok-responses">,
