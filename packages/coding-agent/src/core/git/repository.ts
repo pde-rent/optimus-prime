@@ -50,12 +50,6 @@ const DEFAULT_CONFIG = [
 	"	logallrefupdates = true",
 ].join("\n");
 
-function _signatureLine(sig: GitSignatureLike): string {
-	const time = sig.time ?? Math.floor(Date.now() / 1000);
-	const tz = sig.timezoneOffset ?? "+0000";
-	return `${sig.name} <${sig.email}> ${time} ${tz}`;
-}
-
 export class GitRepository {
 	private packReaders: PackReader[] | null = null;
 

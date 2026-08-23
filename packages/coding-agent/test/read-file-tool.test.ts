@@ -1,28 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { createReadFileTool } from "../src/core/tools/read-file.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("read_file tool", () => {
+	const temps = makeTempDirs("read-file-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `read-file-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("reads a whole file", async () => {

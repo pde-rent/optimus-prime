@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import type { RawObject } from "./objects.js";
-import { bytesToHex, hexToBytes, PACK_TYPE_NAMES, sha1Hex } from "./objects.js";
+import { bytesToHex, concatBytes, hexToBytes, PACK_TYPE_NAMES, sha1Hex } from "./objects.js";
 
 /**
  * Pack index (.idx v2) + packfile (.pack v2) reader.
@@ -51,18 +51,6 @@ export function applyDelta(delta: Uint8Array, source: Uint8Array): Uint8Array {
 	}
 	if (produced !== targetSize) throw new Error(`delta produced ${produced} bytes, expected ${targetSize}`);
 	return concatBytes(...chunks);
-}
-
-function concatBytes(...parts: Uint8Array[]): Uint8Array {
-	let length = 0;
-	for (const part of parts) length += part.length;
-	const out = new Uint8Array(length);
-	let at = 0;
-	for (const part of parts) {
-		out.set(part, at);
-		at += part.length;
-	}
-	return out;
 }
 
 function compareBytes(a: Uint8Array, b: Uint8Array): number {

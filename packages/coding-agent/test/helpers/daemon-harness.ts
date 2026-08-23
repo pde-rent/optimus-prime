@@ -86,6 +86,19 @@ export interface MakeDaemonOptions {
 	worker?: Record<string, unknown>;
 }
 
+/**
+ * Constructs an AgentDaemon whose runtime factory always throws, for suites that
+ * only exercise internal bookkeeping and must never create a real runtime.
+ */
+export function stubDaemon(options: Omit<MakeDaemonOptions, "createRuntime"> = {}): AgentDaemon {
+	return makeDaemon({
+		...options,
+		createRuntime: async () => {
+			throw new Error("unexpected runtime creation");
+		},
+	});
+}
+
 /** Constructs an AgentDaemon with the option defaults every suite repeats. */
 export function makeDaemon(options: MakeDaemonOptions = {}): AgentDaemon {
 	const config: Record<string, unknown> = {

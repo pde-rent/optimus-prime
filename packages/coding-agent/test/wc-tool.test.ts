@@ -1,28 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { createWcTool } from "../src/core/tools/native/wc.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("wc tool", () => {
+	const temps = makeTempDirs("wc-tool-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `wc-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(join(testDir, "sub"), { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("counts a single file exactly", async () => {

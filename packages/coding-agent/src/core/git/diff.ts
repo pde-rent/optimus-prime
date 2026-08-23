@@ -296,22 +296,6 @@ export function diffSnapshots(
 	return out;
 }
 
-/** Worktree snapshot keyed against the index: unchanged paths carry their indexed blob sha. */
-function _worktreeAsSnapshot(repo: GitRepository): Map<string, TreeFile> {
-	const indexed = flatIndex(repo.loadIndex().entries);
-	const content = flatWorktree(repo);
-	const snapshot = new Map<string, TreeFile>();
-	const paths = new Set<string>([...indexed.keys(), ...content.keys()]);
-	for (const path of paths) {
-		const entry = indexed.get(path);
-		const bytes = content.get(path);
-		if (!entry) continue; // untracked paths are invisible to git diff without --no-index
-		if (!bytes) continue; // deletions are handled by diffWorktree directly
-		snapshot.set(path, { mode: entry.mode, sha: repo.hashBlob(bytes) });
-	}
-	return snapshot;
-}
-
 /** "git diff": index vs worktree (untracked files excluded, like git). */
 export function diffWorktree(repo: GitRepository, options: DiffOptions = {}): FileDiff[] {
 	const indexed = flatIndex(repo.loadIndex().entries);

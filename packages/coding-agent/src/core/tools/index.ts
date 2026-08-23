@@ -51,6 +51,12 @@ export {
 	type LnToolInput,
 } from "./native/ln.js";
 export {
+	createMailTool,
+	createMailToolDefinition,
+	type MailToolDetails,
+	type MailToolInput,
+} from "./native/mail.js";
+export {
 	createNetdiagTool,
 	createNetdiagToolDefinition,
 	type NetdiagToolDetails,
@@ -69,6 +75,12 @@ export {
 	type SedToolDetails,
 	type SedToolInput,
 } from "./native/sed.js";
+export {
+	createSshTool,
+	createSshToolDefinition,
+	type SshToolDetails,
+	type SshToolInput,
+} from "./native/ssh.js";
 export {
 	createSysinfoTool,
 	createSysinfoToolDefinition,
@@ -132,13 +144,27 @@ import {
 	createTailToolDefinition,
 } from "./native/head-tail.js";
 import { createLnTool, createLnToolDefinition } from "./native/ln.js";
+import { createMailTool, createMailToolDefinition } from "./native/mail.js";
 import { createSedTool, createSedToolDefinition } from "./native/sed.js";
+import { createSshTool, createSshToolDefinition } from "./native/ssh.js";
 import { createWcTool, createWcToolDefinition } from "./native/wc.js";
 import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } from "./skill.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "bash" | "repl" | "skill" | "grep" | "find" | "sed" | "wc" | "ln" | "head" | "tail";
+export type ToolName =
+	| "bash"
+	| "repl"
+	| "skill"
+	| "grep"
+	| "find"
+	| "sed"
+	| "wc"
+	| "ln"
+	| "head"
+	| "tail"
+	| "mail"
+	| "ssh";
 export interface ToolsOptions {
 	repl?: BunReplToolOptions;
 	/** Skill provider; defaults to an empty roster (every lookup reports no skills). */
@@ -159,6 +185,8 @@ export function createAllToolDefinitions(_cwd: string, options?: ToolsOptions): 
 		head: createHeadToolDefinition(_cwd),
 		tail: createTailToolDefinition(_cwd),
 		ln: createLnToolDefinition(_cwd),
+		mail: createMailToolDefinition(_cwd),
+		ssh: createSshToolDefinition(_cwd),
 	};
 }
 
@@ -174,5 +202,7 @@ export function createAllTools(_cwd: string, options?: ToolsOptions): Record<Too
 		head: createHeadTool(_cwd),
 		tail: createTailTool(_cwd),
 		ln: createLnTool(_cwd),
+		mail: createMailTool(_cwd),
+		ssh: createSshTool(_cwd),
 	};
 }

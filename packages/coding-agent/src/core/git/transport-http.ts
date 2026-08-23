@@ -1,3 +1,5 @@
+import { concatBytes } from "./objects.js";
+
 /**
  * Smart HTTP transport (protocol v0/v1): pkt-line framing, ref discovery,
  * fetch-pack and send-pack over POST, side-band-64k demux, token/URL auth.
@@ -282,7 +284,7 @@ export async function postUploadPack(
 			"Git-Protocol": "version=1",
 			...(auth.authorization ? { Authorization: auth.authorization } : {}),
 		},
-		body: new Blob([concatChunks(lines)]),
+		body: new Blob([concatBytes(...lines)]),
 	});
 	if (!response.ok) {
 		const body = new Uint8Array(await response.arrayBuffer());
@@ -331,7 +333,7 @@ export async function postUploadPack(
 		else if (channel === 2) options.onProgress?.(pktText(payload));
 		else if (channel === 3) throw new Error(`fetch failed server-side: ${pktText(payload).trim()}`);
 	}
-	return { acks, shallow, unshallow, pack: packChunks.length > 0 ? concatChunks(packChunks) : null };
+	return { acks, shallow, unshallow, pack: packChunks.length > 0 ? concatBytes(...packChunks) : null };
 }
 
 // -- send-pack ----------------------------------------------------------------
@@ -372,7 +374,7 @@ export function buildReceivePackRequest(
 	});
 	lines.push(encodeFlushPkt());
 	if (pack) lines.push(pack);
-	return concatChunks(lines);
+	return concatBytes(...lines);
 }
 
 /** POST /git-receive-pack and parse the report-status response. */
@@ -435,14 +437,3 @@ export async function postReceivePack(
 	return report;
 }
 
-function concatChunks(chunks: Uint8Array[]): Uint8Array {
-	let length = 0;
-	for (const chunk of chunks) length += chunk.length;
-	const out = new Uint8Array(length);
-	let at = 0;
-	for (const chunk of chunks) {
-		out.set(chunk, at);
-		at += chunk.length;
-	}
-	return out;
-}

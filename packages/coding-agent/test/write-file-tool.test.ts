@@ -1,29 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { createWriteFileTool, type WriteFileOperations } from "../src/core/tools/write-file.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("write_file tool", () => {
+	const temps = makeTempDirs("write-file-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `write-file-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("creates a new file", async () => {

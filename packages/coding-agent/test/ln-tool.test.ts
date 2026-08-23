@@ -1,32 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { platform } from "process";
 import { createLnTool } from "../src/core/tools/native/ln.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("ln tool", () => {
+	const temps = makeTempDirs("ln-tool-test-");
 	let testDir: string;
 	let targetPath: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `ln-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
 		targetPath = join(testDir, "target.txt");
 		writeFileSync(targetPath, "shared content\n");
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("creates a symbolic link by default", async () => {

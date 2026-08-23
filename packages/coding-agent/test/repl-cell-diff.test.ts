@@ -6,10 +6,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { renderRichDiff } from "../src/modes/interactive/components/diff.js";
 import { ReplCellComponent } from "../src/modes/interactive/components/repl-cell.js";
 import { initTheme, preloadCodeHighlighter, theme } from "../src/modes/interactive/theme/theme.js";
-
-function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;]*m/g, "");
-}
+import { stripAnsi } from "./helpers/render.js";
 
 function hasBackground(line: string): boolean {
 	return /\x1b\[4[0-9]m|\x1b\[48[;:]/.test(line);

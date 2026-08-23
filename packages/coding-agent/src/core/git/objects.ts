@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 
@@ -96,22 +96,13 @@ export function writeLooseObject(gitDir: string, type: GitObjectType, body: Uint
 	const sha = hashRawObject(type, body);
 	const path = looseObjectPath(gitDir, sha);
 	mkdirSync(dirname(path), { recursive: true });
-	if (!existsSafe(path)) {
+	if (!existsSync(path)) {
 		// Write-then-rename so a crash never leaves a partial object.
 		const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
 		writeFileSync(tmp, serializeLooseObject(type, body));
 		renameSync(tmp, path);
 	}
 	return sha;
-}
-
-function existsSafe(path: string): boolean {
-	try {
-		readFileSync(path);
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -125,11 +116,9 @@ export interface GitTreeEntry {
 	sha: string;
 }
 
-export const TREE_MODE_FILE = "100644";
 export const TREE_MODE_EXEC = "100755";
 export const TREE_MODE_SYMLINK = "120000";
 export const TREE_MODE_DIR = "40000";
-export const TREE_MODE_GITLINK = "160000";
 
 /** Parse tree payload bytes: repeated "<mode> <name>\0<20-byte binary sha>". */
 export function parseTree(body: Uint8Array): GitTreeEntry[] {

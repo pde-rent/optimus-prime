@@ -5,15 +5,7 @@ import { join } from "path";
 import { parseSkillBlock } from "../src/core/skill-blocks.js";
 import { createAllToolDefinitions } from "../src/core/tools/index.js";
 import { createSkillTool } from "../src/core/tools/skill.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
 
 function makeSkillDir(root: string, name: string, body = `Use ${name} for things.\n`): string {
 	const dir = join(root, name);

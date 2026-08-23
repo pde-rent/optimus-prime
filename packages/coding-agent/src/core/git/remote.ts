@@ -91,14 +91,6 @@ export function resolveRemoteSpec(repo: GitRepository, remoteNameOrUrl: string):
 	return configured;
 }
 
-// -- ls-remote ----------------------------------------------------------------
-
-export async function lsRemote(url: string, credentials?: RemoteCredentials): Promise<Map<string, string>> {
-	const auth = resolveRemoteAuth(url, credentials);
-	const advertisement = await discoverRefs(auth.url, UPLOAD_PACK_SERVICE, auth);
-	return advertisement.refs;
-}
-
 // -- shared helpers -----------------------------------------------------------
 
 interface LocalRefSource {

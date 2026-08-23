@@ -64,6 +64,7 @@ import {
 	makePersistedRlmDaemonFixture,
 	makeRuntimeSession,
 	makeState,
+	stubDaemon,
 	withTempDir,
 } from "./helpers/daemon-harness.js";
 
@@ -195,14 +196,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("acknowledges agent messages after target prompt preflight succeeds", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target") as ActiveSessionState & {
 			runtime: ActiveSessionState["runtime"] & {
@@ -522,14 +517,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("lists and sends agent messages to completed retained subagents", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const parentState = makeState("parent");
 		applySession(parentState, {
 			cwd: "/tmp",
@@ -969,14 +958,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("closes the exact parent-scoped daemon runtime when a retained subagent is deleted", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const parentState = makeState("parent");
 		applySession(parentState, { session: { sessionManager: { getSessionArtifactDir: () => undefined } } });
 		const childState = makeState("child", parentState.activeSessionId);
@@ -1082,15 +1065,13 @@ describe("daemon mode helpers", () => {
 			}
 			mkdirSync(join(parentArtifactDir, "rlm-subagents.jsonl"), { recursive: true });
 
-			const daemon = makeDaemon({
+			const daemon = stubDaemon({
 				socketPath: join(tempDir, "daemon.sock"),
 				agentDir: tempDir,
 				cwd: tempDir,
 				sessionDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
 			});
+
 			const parentState = makeState("parent");
 			parentState.runtime = {
 				...parentState.runtime,
@@ -1118,15 +1099,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("hides daemon sessions from messaging and observation while they are closing", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-			worker: { authenticationToken: "worker-token" },
-		});
+		const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 		const parentState = makeState("parent");
 		const childState = makeState("child", parentState.activeSessionId);
 		const sessionPrompt = vi.fn(async () => {});
@@ -1180,14 +1154,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("removes a closing daemon session even when runtime disposal fails", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("child");
 		const dispose = vi.fn(async () => {
 			throw new Error("dispose failed");
@@ -1217,15 +1185,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("lists and routes agent messages to peers hosted by another worker", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-worker-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-			worker: { authenticationToken: "worker-token" },
-		});
+		const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 		const source = makeState("source");
 		applySession(source, {
 			cwd: "/tmp",
@@ -1273,15 +1234,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes nonresident agent-message targets through the supervisor wake path", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-worker-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-			worker: { authenticationToken: "worker-token" },
-		});
+		const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 		const source = makeState("source");
 		applySession(source, {
 			cwd: "/tmp",
@@ -1309,15 +1263,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects invalid nonresident agent messages before remote fallback", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-worker-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-			worker: { authenticationToken: "worker-token" },
-		});
+		const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 		const source = makeState("source");
 		const sendRemoteAgentSessionMessage = vi.fn();
 		const internals = daemonInternals(daemon);
@@ -1386,15 +1333,8 @@ describe("daemon mode helpers", () => {
 		try {
 			await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 			process.env[DAEMON_WORKER_SUPERVISOR_SOCKET_ENV] = socketPath;
-			const daemon = makeDaemon({
-				socketPath: "/tmp/optimus-worker-test.sock",
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-				worker: { authenticationToken: "worker-token" },
-			});
+			const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 			const sendRemoteAgentSessionMessage = (
 				daemon as unknown as {
 					sendRemoteAgentSessionMessage(
@@ -1558,14 +1498,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reports queued status when a direct accept races into the queue", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		const acceptAgentMessagePrompt = vi.fn(
@@ -1601,14 +1535,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("ignores a legacy follow-up mode and always steers agent messages", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		const queueAgentMessagePrompt = vi.fn(async () => true);
 		applySession(targetState, {
@@ -1641,14 +1569,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rate limits agent messages per sender and target pair", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetA = makeState("target-a");
 		const targetB = makeState("target-b");
@@ -1715,14 +1637,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears only queued agent-message prompts", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		const agentMessageText =
 			"Agent-to-agent message received.\nSource: agent_message\nTo: Target, active target, session session-target\nMessage id: agentmsg_test\n\nhello";
@@ -1756,14 +1672,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("pause clears queued agent-message prompts from all sessions", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const firstState = makeState("target-1");
 		const secondState = makeState("target-2");
 		const firstClear = vi.fn(() => ({ steering: [], followUp: ["agent message"] }));
@@ -1797,14 +1707,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("pause clears queued agent messages concurrently across sessions", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const blockedState = makeState("blocked");
 		const readyState = makeState("ready");
 		let resolveBlockedClear: () => void = () => {};
@@ -1846,14 +1750,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("refunds agent message rate limit tokens when delivery fails", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -1894,14 +1792,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("counts concurrent agent message queue reservations against the target queue cap", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -1959,14 +1851,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("releases queue reservations once messages are queued so concurrent senders do not halve capacity", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let pending = 0;
 		const queueAgentMessagePrompt = vi.fn(async (_message: string, _streamingBehavior: "steer" | "followUp") => {
@@ -2023,14 +1909,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("resolves queued sends immediately with a queued receipt while the target is streaming", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2066,14 +1946,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("resolves mutual sends between two busy sessions without deadlocking", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const makeBusyState = (name: string) => {
 			const state = makeState(name);
 			state.runtime = {
@@ -2117,14 +1991,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("counts accepted in-flight agent messages against the target queue cap", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2154,14 +2022,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reports accepted in-flight agent messages in agent-message lists", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		applySession(targetState, {
 			cwd: "/tmp",
@@ -2178,14 +2040,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("reports non-streaming busy sessions as active in agent-observe summaries", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		applySession(targetState, {
 			cwd: "/tmp",
@@ -2357,14 +2213,12 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("limits agent send and observation to the nuclear family", async () => {
-		const daemon = makeDaemon({
+		const daemon = stubDaemon({
 			socketPath: "/tmp/optimus-family-reach.sock",
 			agentDir: "/tmp/optimus-test-agent",
 			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
 		});
+
 		const states = [
 			makeState("root"),
 			makeState("child", "root"),
@@ -2531,14 +2385,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("serializes concurrent agent messages to an idle target", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2591,14 +2439,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages behind an idle target with a pending retry", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2634,14 +2476,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages behind existing pending work on an idle target", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2676,14 +2512,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while the target is compacting", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2717,14 +2547,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while target bash is running", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2758,14 +2582,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("acknowledges queued agent messages after queue insertion", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2804,14 +2622,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("recomputes agent message streaming behavior after waiting for the target lock", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2866,14 +2678,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when queued delivery is coalesced", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2902,14 +2708,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when direct delivery preflight fails", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -2942,14 +2742,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("queues agent messages while daemon prompts prepare to stream", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolvePrompt: () => void = () => {};
 		let reportPreflight: ((didSucceed: boolean) => void) | undefined;
@@ -2998,14 +2792,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("waits for an in-flight agent-message accept before starting daemon prompts", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolveAccept: () => void = () => {};
 		const acceptAgentMessagePrompt = vi.fn(
@@ -3061,14 +2849,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("releases cron preparing state after prompt admission", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolvePrompt: () => void = () => {};
 		const prompt = vi.fn(
@@ -3113,14 +2895,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("keeps the preparing state until every concurrent prompt settles", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		const promptResolves: Array<() => void> = [];
 		const prompt = vi.fn(
@@ -3178,14 +2954,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("re-checks agent message queue capacity after waiting for the target lock", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const fromState = makeState("source");
 		const targetState = makeState("target");
 		applySession(fromState, { sessionId: "session-source", sessionName: "Source" });
@@ -3243,14 +3013,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rate limits CLI agent messages by stable daemon identity", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		applySession(targetState, {
 			cwd: "/tmp",
@@ -3284,14 +3048,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("holds the target lock while clearing queued agent messages", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolvePrompt: () => void = () => {};
 		const acceptAgentMessagePrompt = vi.fn(
@@ -3337,14 +3095,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when pause wins the target lock", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolveBlockedClear: () => void = () => {};
 		const clearQueuedUserMessagesMatching = vi.fn(
@@ -3387,14 +3139,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when the target session changes before delivery", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		let resolveBlockedClear: () => void = () => {};
 		const clearQueuedUserMessagesMatching = vi.fn(
@@ -3438,14 +3184,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages when the target session closes before delivery", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const targetState = makeState("target");
 		targetState.extensionUiRequests = new Map();
 		let resolveBlockedClear: () => void = () => {};
@@ -3508,14 +3248,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("rejects agent messages to the sending session", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("self");
 		applySession(state, {
 			cwd: "/tmp",
@@ -3571,14 +3305,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("delivers session closure while a client is snapshotting and backpressured", () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("active");
 		state.eventGeneration = "generation-1";
 		const write = vi.fn((_data: unknown) => false);
@@ -3603,14 +3331,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("catches up on drain only after events are skipped behind a backpressured write", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("active");
 		state.eventGeneration = "generation-1";
 		const writes: string[] = [];
@@ -3673,14 +3395,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("automatically retries every pending catch-up after snapshot creation rejects", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const firstState = makeState("first");
 		const secondState = makeState("second");
 		firstState.eventGeneration = "generation-1";
@@ -3734,14 +3450,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears a scheduled catch-up retry when the client disconnects", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("active");
 		state.extensionUiRequests = new Map();
 		const socketState = { destroyed: false };
@@ -3881,14 +3591,8 @@ describe("daemon mode helpers", () => {
 
 	it("marks a chunked attach as snapshotting before deferred streaming", async () => {
 		await withTempDir("optimus-daemon-snapshot-order-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const state = makeState("active");
 			state.eventGeneration = "generation-1";
 			const client = makeClient("client-1", state.activeSessionId);
@@ -3937,14 +3641,8 @@ describe("daemon mode helpers", () => {
 		await withTempDir("optimus-daemon-replacement-fallback-", async (root) => {
 			const invalidAgentDir = join(root, "not-a-directory");
 			writeFileSync(invalidAgentDir, "file");
-			const daemon = makeDaemon({
-				socketPath: join(root, "daemon.sock"),
-				agentDir: invalidAgentDir,
-				cwd: root,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(root, "daemon.sock"), agentDir: invalidAgentDir, cwd: root });
+
 			const state = makeState("active");
 			state.eventGeneration = "generation-1";
 			const write = vi.fn((_data: unknown) => true);
@@ -3984,14 +3682,8 @@ describe("daemon mode helpers", () => {
 	it.each(["resolved", "rejected"] as const)(
 		"does not send a replacement snapshot after the session closes while preparation is %s",
 		async (outcome) => {
-			const daemon = makeDaemon({
-				socketPath: "/tmp/optimus-test.sock",
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon();
+
 			const state = makeState("active");
 			state.eventGeneration = "generation-1";
 			state.extensionUiRequests = new Map();
@@ -4058,14 +3750,8 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("drains queued catch-up after replacement snapshot preparation outlives its session", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const state = makeState("closing");
 		state.eventGeneration = "generation-1";
 		const otherState = makeState("queued");
@@ -7165,14 +6851,8 @@ describe("daemon mode helpers", () => {
 
 	it("includes paused jobs in the default cron list", async () => {
 		await withTempDir("optimus-daemon-cron-list-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: "active-1",
@@ -7196,14 +6876,8 @@ describe("daemon mode helpers", () => {
 
 	it("cancels scheduled jobs when a live session is killed", async () => {
 		await withTempDir("optimus-daemon-kill-cron-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const sessionFile = join(tempDir, "session.jsonl");
 			const removeQueuedFollowUp = vi.fn();
 			const abort = vi.fn(async () => {});
@@ -7288,14 +6962,8 @@ describe("daemon mode helpers", () => {
 			markDisposeStarted = resolve;
 		});
 		try {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const sessionFile = join(tempDir, "session.jsonl");
 			const appendSessionState = vi.fn();
 			const state = makeState("active-1");
@@ -7356,14 +7024,8 @@ describe("daemon mode helpers", () => {
 			rejectClose = reject;
 		});
 		try {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const appendSessionState = vi.fn();
 			const state = makeState("active-1");
 			applySession(state, {
@@ -7404,14 +7066,8 @@ describe("daemon mode helpers", () => {
 
 	it("finishes a reason upgrade after one target fails to archive", async () => {
 		await withTempDir("optimus-daemon-kill-archive-failure-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const parent = makeState("parent");
 			const child = makeState("child", parent.activeSessionId);
 			const parentArchive = vi.fn(() => {
@@ -7526,14 +7182,8 @@ describe("daemon mode helpers", () => {
 			markDisposeStarted = resolve;
 		});
 		try {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const appendSessionState = vi.fn();
 			const state = makeState("active-1");
 			state.extensionUiRequests = new Map();
@@ -7586,14 +7236,8 @@ describe("daemon mode helpers", () => {
 
 	it("cancels scheduled jobs when a saved session is deleted", async () => {
 		await withTempDir("optimus-daemon-delete-cron-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const internals = daemonInternals(daemon);
 			const sessionFile = join(tempDir, "saved-session.jsonl");
 			const otherSessionFile = join(tempDir, "other-session.jsonl");
@@ -7654,15 +7298,13 @@ describe("daemon mode helpers", () => {
 				basedOnMessageCount: 0,
 			});
 			session.appendSessionState({ status: "active" });
-			const daemon = makeDaemon({
+			const daemon = stubDaemon({
 				socketPath: join(tempDir, "daemon.sock"),
 				agentDir: tempDir,
 				cwd: tempDir,
 				sessionDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
 			});
+
 			const internals = daemonInternals(daemon);
 			const writes: string[] = [];
 			const client = {
@@ -7728,14 +7370,8 @@ describe("daemon mode helpers", () => {
 
 	it("keeps saved session jobs when file deletion fails", async () => {
 		await withTempDir("optimus-daemon-delete-cron-fail-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const deleteSavedSessionFile = vi.fn(async () => ({ ok: false, error: "delete failed" }) as const);
 			const internals = daemonInternals(daemon);
 			internals.deleteSavedSessionFile = deleteSavedSessionFile;
@@ -7777,14 +7413,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("preserves omitted global scope on daemon refine commands", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const refine = vi.fn(async () => ({
 			id: "refine_daemon",
 			appliedEdits: [],
@@ -7816,14 +7446,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes queued message mutation to the active session", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const mutateQueuedMessage = vi.fn(() => "applied" as const);
 		const state = makeState("active-1") as ActiveSessionState;
 		(state.runtime as { session: unknown }).session = { mutateQueuedMessage };
@@ -7845,14 +7469,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("gets and sets RLM max depth directly on the active session", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const getRlmMaxDepthStatus = vi.fn(() => ({ maxDepth: 2, source: "chat" as const }));
 		const setRlmMaxDepth = vi.fn(async () => ({
 			maxDepth: 3,
@@ -8007,14 +7625,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("delivers steer heartbeats after an RPC prompt finishes preflight while its turn is still streaming", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		let releasePrompt = () => {};
 		const promptFinished = new Promise<void>((resolve) => {
 			releasePrompt = resolve;
@@ -8076,14 +7688,8 @@ describe("daemon mode helpers", () => {
 	it.each(["steer", "follow_up"] as const)(
 		"idle daemon %s inserts into its scheduler lane exactly once",
 		async (type) => {
-			const daemon = makeDaemon({
-				socketPath: "/tmp/optimus-test.sock",
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon();
+
 			const steer = vi.fn(async () => {});
 			const followUp = vi.fn(async () => true);
 			const state = makeState("active-1") as ActiveSessionState & {
@@ -8122,15 +7728,8 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("clears prompt admission registered before unauthenticated worker rejection", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-worker-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-			worker: { authenticationToken: "worker-token" },
-		});
+		const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 		const client = makeClient("unauthenticated", "active-1");
 		const end = vi.fn();
 		client.socket = { destroyed: false, write: vi.fn(() => true), end } as unknown as Socket;
@@ -8151,14 +7750,12 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("clears prompt admission when restart fencing rejects before dispatch", async () => {
-		const daemon = makeDaemon({
+		const daemon = stubDaemon({
 			socketPath: "/tmp/optimus-worker-test.sock",
 			agentDir: "/tmp/optimus-test-agent",
 			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
 		});
+
 		const client = makeClient("client", "active-1");
 		client.socket = { destroyed: false, write: vi.fn(() => true), end: vi.fn() } as unknown as Socket;
 		const internals = daemonInternals(daemon);
@@ -8181,15 +7778,8 @@ describe("daemon mode helpers", () => {
 	it.each(["success", "late-failure", "replacement"] as const)(
 		"handles cancellation followed by supervisor-claim %s without affecting the wrong socket binding",
 		async (outcome) => {
-			const daemon = makeDaemon({
-				socketPath: "/tmp/optimus-worker-test.sock",
-				agentDir: "/tmp/optimus-test-agent",
-				cwd: "/tmp",
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-				worker: { authenticationToken: "worker-token" },
-			});
+			const daemon = stubDaemon({ worker: { authenticationToken: "worker-token" } });
+
 			const client = makeClient("authenticated", "active-1");
 			client.authenticated = true;
 			const end = vi.fn();
@@ -8250,14 +7840,8 @@ describe("daemon mode helpers", () => {
 	);
 
 	it("cancels only pre-ownership prompt admission and cleans up its controller", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		let promptOptions: { signal?: AbortSignal; admissionCommitted?: () => void } | undefined;
 		let rejectPrompt: ((error: Error) => void) | undefined;
 		const promptUntilAccepted = vi.fn(
@@ -8336,14 +7920,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("settles cancellation while prompt routing waits on the target lock", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const promptUntilAccepted = vi.fn(async () => {});
 		const state = makeState("active-lock") as ActiveSessionState;
 		state.runtime = { ...state.runtime, session: { promptUntilAccepted } } as never;
@@ -8379,14 +7957,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("aborts waiting prompt admissions when their session closes", () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const internals = daemonInternals(daemon);
 		const client = makeClient("client-closing", "closing-session");
 		internals.parseCommandAndRegisterPromptAdmission(
@@ -8405,14 +7977,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("uses the queued default lane for old-client prompts on a new daemon", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const promptUntilAccepted = vi.fn(async () => {});
 		const state = makeState("active-1") as ActiveSessionState & {
 			runtime: ActiveSessionState["runtime"] & { session: { promptUntilAccepted: typeof promptUntilAccepted } };
@@ -8441,14 +8007,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it("routes resume_queue through the session scheduler", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const resumeQueuedWork = vi.fn(() => true);
 		const continueAgent = vi.fn(async () => {});
 		const state = makeState("active-1") as ActiveSessionState & {
@@ -8472,14 +8032,8 @@ describe("daemon mode helpers", () => {
 	});
 
 	it.each(["steer", "follow_up"] as const)("routes correlated daemon %s commands", async (type) => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const steer = vi.fn(async () => {});
 		const followUp = vi.fn(async () => true);
 		const restoreSteeringMessage = vi.fn(async () => {});
@@ -8564,28 +8118,26 @@ describe("daemon mode helpers", () => {
 		).rejects.toThrow("agentMessageId must not be empty");
 	});
 
+	function makeRemoveFollowUpState() {
+		const removeQueuedFollowUp = vi.fn(() => true);
+		const state = makeState("active-1");
+		applySession(state, { session: { removeQueuedFollowUp } });
+		return { removeQueuedFollowUp, state };
+	}
+
+	function makeHeartbeatFixture(tempDir: string, session: Record<string, unknown> = {}) {
+		const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+		const sessionFile = join(tempDir, "session.jsonl");
+		const state = makeState("active-1");
+		applySession(state, { cwd: tempDir, sessionId: "session-1", session: { sessionFile, ...session } });
+		const internals = daemonInternals(daemon);
+		internals.sessions.set(state.activeSessionId, state);
+		return { sessionFile, state, internals };
+	}
+
 	it("rejects invalid heartbeat delivery modes before persisting", async () => {
 		await withTempDir("optimus-daemon-heartbeat-delivery-mode-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
-			const sessionFile = join(tempDir, "session.jsonl");
-			const state = makeState("active-1") as ActiveSessionState & {
-				runtime: ActiveSessionState["runtime"] & {
-					session: ActiveSessionState["runtime"]["session"] & {
-						sessionFile: string;
-						sessionId: string;
-					};
-				};
-			};
-			applySession(state, { cwd: tempDir, sessionId: "session-1", session: { sessionFile } });
-			const internals = daemonInternals(daemon);
-			internals.sessions.set(state.activeSessionId, state);
+			const { state, internals } = makeHeartbeatFixture(tempDir);
 
 			await expect(
 				internals.handleCommand(makeClient("client-1", state.activeSessionId), {
@@ -8603,31 +8155,7 @@ describe("daemon mode helpers", () => {
 
 	it("preserves the current heartbeat delivery mode when replacement omits it", async () => {
 		await withTempDir("optimus-daemon-heartbeat-preserve-delivery-mode-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
-			const state = makeState("active-1") as ActiveSessionState & {
-				runtime: ActiveSessionState["runtime"] & {
-					session: ActiveSessionState["runtime"]["session"] & {
-						removeQueuedFollowUp: ReturnType<typeof vi.fn>;
-						sessionFile: string;
-						sessionId: string;
-					};
-				};
-			};
-			applySession(state, {
-				cwd: tempDir,
-				removeQueuedFollowUp: vi.fn(() => false),
-				sessionFile: join(tempDir, "session.jsonl"),
-				sessionId: "session-1",
-			});
-			const internals = daemonInternals(daemon);
-			internals.sessions.set(state.activeSessionId, state);
+			const { state, internals } = makeHeartbeatFixture(tempDir, { removeQueuedFollowUp: vi.fn(() => false) });
 			const client = makeClient("client-1", state.activeSessionId);
 
 			await internals.handleCommand(client, {
@@ -8655,24 +8183,10 @@ describe("daemon mode helpers", () => {
 
 	it("removes queued RLM heartbeat follow-ups when only delivery mode changes", async () => {
 		await withTempDir("optimus-daemon-rlm-delivery-mode-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
-			const removeQueuedFollowUp = vi.fn(() => true);
-			const state = makeState("active-1") as ActiveSessionState & {
-				runtime: ActiveSessionState["runtime"] & {
-					session: ActiveSessionState["runtime"]["session"] & {
-						removeQueuedFollowUp: typeof removeQueuedFollowUp;
-					};
-				};
-			};
-			state.runtime.session = { removeQueuedFollowUp } as never;
-			const internals = daemonInternals(daemon);
+			const { removeQueuedFollowUp, state } = makeRemoveFollowUpState();
+			const internals = daemonInternals(
+				stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir }),
+			);
 			const rlmHeartbeat = internals.cronStore.createRlmHeartbeat({
 				activeSessionId: state.activeSessionId,
 				sessionId: "session-1",
@@ -8696,24 +8210,10 @@ describe("daemon mode helpers", () => {
 
 	it("removes queued heartbeat follow-ups when a heartbeat is cleared", async () => {
 		await withTempDir("optimus-daemon-heartbeat-clear-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
-			const removeQueuedFollowUp = vi.fn(() => true);
-			const state = makeState("active-1") as ActiveSessionState & {
-				runtime: ActiveSessionState["runtime"] & {
-					session: ActiveSessionState["runtime"]["session"] & {
-						removeQueuedFollowUp: typeof removeQueuedFollowUp;
-					};
-				};
-			};
-			state.runtime.session = { removeQueuedFollowUp } as never;
-			const internals = daemonInternals(daemon);
+			const { removeQueuedFollowUp, state } = makeRemoveFollowUpState();
+			const internals = daemonInternals(
+				stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir }),
+			);
 			internals.sessions.set(state.activeSessionId, state);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: state.activeSessionId,
@@ -8738,14 +8238,8 @@ describe("daemon mode helpers", () => {
 
 	it("manages a persisted heartbeat after its session unloads", async () => {
 		await withTempDir("optimus-daemon-unloaded-heartbeat-", async (tempDir) => {
-			const daemon = makeDaemon({
-				socketPath: join(tempDir, "daemon.sock"),
-				agentDir: tempDir,
-				cwd: tempDir,
-				createRuntime: async () => {
-					throw new Error("unexpected runtime creation");
-				},
-			});
+			const daemon = stubDaemon({ socketPath: join(tempDir, "daemon.sock"), agentDir: tempDir, cwd: tempDir });
+
 			const internals = daemonInternals(daemon);
 			const heartbeat = internals.cronStore.createHeartbeat({
 				activeSessionId: "unloaded-session",
@@ -8771,232 +8265,95 @@ describe("daemon mode helpers", () => {
 		});
 	});
 
-	it("sets models without waiting for model_select extension handlers while running", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
-		const model: Model<Api> = {
-			provider: "faux",
-			id: "faux-2",
-			name: "Two",
-			api: "openai-completions",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
-			maxTokens: 4096,
-		};
-		const setModel = vi.fn(async () => {});
-		const state = makeState("active-1") as ActiveSessionState & {
-			runtime: ActiveSessionState["runtime"] & {
-				session: {
-					modelRegistry: {
-						refreshAvailableModels(): Promise<unknown[]>;
-					};
-					isStreaming: boolean;
-					isCompacting: boolean;
-					setModel(model: unknown, options?: { waitForExtensions?: boolean }): Promise<void>;
-				};
-			};
-		};
-		state.runtime.session = {
-			modelRegistry: {
-				refreshAvailableModels: vi.fn(async () => [model]),
-			},
+	// Table over the set_model / cycle_model quartet: the only variable under test is
+	// whether the session is streaming, which decides if model_select handlers must wait.
+	const modelSelectWaitCases = [
+		{
+			name: "sets models without waiting for model_select extension handlers while running",
+			commandType: "set_model",
 			isStreaming: true,
-			isCompacting: false,
-			setModel,
-		} as never;
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(state.activeSessionId, state);
-
-		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-			id: "command-1",
-			type: "set_model",
-			activeSessionId: state.activeSessionId,
-			provider: "faux",
-			modelId: "faux-2",
-		});
-
-		expect(setModel).toHaveBeenCalledWith(model, { waitForExtensions: false });
-	});
-
-	it("waits for model_select extension handlers when setting models while idle", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
-		const model: Model<Api> = {
-			provider: "faux",
-			id: "faux-2",
-			name: "Two",
-			api: "openai-completions",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
-			maxTokens: 4096,
-		};
-		const setModel = vi.fn(async () => {});
-		const state = makeState("active-1") as ActiveSessionState & {
-			runtime: ActiveSessionState["runtime"] & {
-				session: {
-					modelRegistry: {
-						refreshAvailableModels(): Promise<unknown[]>;
-					};
-					isStreaming: boolean;
-					isCompacting: boolean;
-					setModel(model: unknown, options?: { waitForExtensions?: boolean }): Promise<void>;
-				};
-			};
-		};
-		state.runtime.session = {
-			modelRegistry: {
-				refreshAvailableModels: vi.fn(async () => [model]),
-			},
+			waitForExtensions: false,
+		},
+		{
+			name: "waits for model_select extension handlers when setting models while idle",
+			commandType: "set_model",
 			isStreaming: false,
-			isCompacting: false,
-			setModel,
-		} as never;
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(state.activeSessionId, state);
-
-		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-			id: "command-1",
-			type: "set_model",
-			activeSessionId: state.activeSessionId,
-			provider: "faux",
-			modelId: "faux-2",
-		});
-
-		expect(setModel).toHaveBeenCalledWith(model, { waitForExtensions: true });
-	});
-
-	it("cycles models without waiting for model_select extension handlers while running", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
-		const model: Model<Api> = {
-			provider: "faux",
-			id: "faux-2",
-			name: "Two",
-			api: "openai-completions",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
-			maxTokens: 4096,
-		};
-		const cycleResult = { model, thinkingLevel: "off" as const, isScoped: false };
-		const cycleModel = vi.fn(async () => cycleResult);
-		const state = makeState("active-1") as ActiveSessionState & {
-			runtime: ActiveSessionState["runtime"] & {
-				session: {
-					isStreaming: boolean;
-					isCompacting: boolean;
-					cycleModel(
-						direction?: "forward" | "backward",
-						options?: { waitForExtensions?: boolean },
-					): Promise<typeof cycleResult | undefined>;
-				};
-			};
-		};
-		state.runtime.session = {
+			waitForExtensions: true,
+		},
+		{
+			name: "cycles models without waiting for model_select extension handlers while running",
+			commandType: "cycle_model",
 			isStreaming: true,
-			isCompacting: false,
-			cycleModel,
-		} as never;
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(state.activeSessionId, state);
-
-		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-			id: "command-1",
-			type: "cycle_model",
-			activeSessionId: state.activeSessionId,
-			direction: "backward",
-		});
-
-		expect(cycleModel).toHaveBeenCalledWith("backward", { waitForExtensions: false });
-	});
-
-	it("waits for model_select extension handlers when cycling models while idle", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
-		const model: Model<Api> = {
-			provider: "faux",
-			id: "faux-2",
-			name: "Two",
-			api: "openai-completions",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128000,
-			maxTokens: 4096,
-		};
-		const cycleResult = { model, thinkingLevel: "off" as const, isScoped: false };
-		const cycleModel = vi.fn(async () => cycleResult);
-		const state = makeState("active-1") as ActiveSessionState & {
-			runtime: ActiveSessionState["runtime"] & {
-				session: {
-					isStreaming: boolean;
-					isCompacting: boolean;
-					cycleModel(
-						direction?: "forward" | "backward",
-						options?: { waitForExtensions?: boolean },
-					): Promise<typeof cycleResult | undefined>;
-				};
-			};
-		};
-		state.runtime.session = {
+			waitForExtensions: false,
+			direction: "backward" as const,
+		},
+		{
+			name: "waits for model_select extension handlers when cycling models while idle",
+			commandType: "cycle_model",
 			isStreaming: false,
-			isCompacting: false,
-			cycleModel,
-		} as never;
-		const internals = daemonInternals(daemon);
-		internals.sessions.set(state.activeSessionId, state);
+			waitForExtensions: true,
+		},
+	];
+	for (const modelCase of modelSelectWaitCases) {
+		it(modelCase.name, async () => {
+			const daemon = stubDaemon();
+			const model: Model<Api> = {
+				provider: "faux",
+				id: "faux-2",
+				name: "Two",
+				api: "openai-completions",
+				baseUrl: "https://example.com",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 128000,
+				maxTokens: 4096,
+			};
+			const setModel = vi.fn(async () => {});
+			const cycleResult = { model, thinkingLevel: "off" as const, isScoped: false };
+			const cycleModel = vi.fn(async () => cycleResult);
+			const state = makeState("active-1");
+			applySession(state, {
+				isStreaming: modelCase.isStreaming,
+				isCompacting: false,
+				session:
+					modelCase.commandType === "set_model"
+						? { modelRegistry: { refreshAvailableModels: vi.fn(async () => [model]) }, setModel }
+						: { cycleModel },
+			});
+			const internals = daemonInternals(daemon);
+			internals.sessions.set(state.activeSessionId, state);
 
-		await internals.handleCommand(makeClient("client-1", state.activeSessionId), {
-			id: "command-1",
-			type: "cycle_model",
-			activeSessionId: state.activeSessionId,
+			const command: DaemonCommand =
+				modelCase.commandType === "set_model"
+					? {
+							id: "command-1",
+							type: "set_model",
+							activeSessionId: state.activeSessionId,
+							provider: "faux",
+							modelId: "faux-2",
+						}
+					: {
+							id: "command-1",
+							type: "cycle_model",
+							activeSessionId: state.activeSessionId,
+							...(modelCase.direction ? { direction: modelCase.direction } : {}),
+						};
+			await internals.handleCommand(makeClient("client-1", state.activeSessionId), command);
+
+			if (modelCase.commandType === "set_model") {
+				expect(setModel).toHaveBeenCalledWith(model, { waitForExtensions: modelCase.waitForExtensions });
+			} else {
+				expect(cycleModel).toHaveBeenCalledWith(modelCase.direction, {
+					waitForExtensions: modelCase.waitForExtensions,
+				});
+			}
 		});
-
-		expect(cycleModel).toHaveBeenCalledWith(undefined, { waitForExtensions: true });
-	});
+	}
 
 	it("validates active sessions before reading a heartbeat", async () => {
-		const daemon = makeDaemon({
-			socketPath: "/tmp/optimus-test.sock",
-			agentDir: "/tmp/optimus-test-agent",
-			cwd: "/tmp",
-			createRuntime: async () => {
-				throw new Error("unexpected runtime creation");
-			},
-		});
+		const daemon = stubDaemon();
+
 		const handleCommand = (
 			daemon as unknown as {
 				handleCommand(client: DaemonSocketClient, command: DaemonCommand): Promise<unknown>;
@@ -9027,14 +8384,8 @@ function makeCronAdmissionFixture(
 	options: { acceptingAgentMessage?: boolean } = {},
 ) {
 	const activeSessionId = "active-1";
-	const daemon = makeDaemon({
-		socketPath: "/tmp/optimus-test.sock",
-		agentDir: "/tmp/optimus-test-agent",
-		cwd: "/tmp",
-		createRuntime: async () => {
-			throw new Error("unexpected runtime creation");
-		},
-	});
+	const daemon = stubDaemon();
+
 	const prompt = vi.fn(
 		async (
 			_message: string,

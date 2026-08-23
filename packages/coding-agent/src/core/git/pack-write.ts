@@ -309,11 +309,6 @@ export function buildPackBuffer(objects: PackableObject[], options: BuildPackOpt
 	return { pack: concatBytes(body, trailer), entries };
 }
 
-/** Convenience wrapper: just the pack bytes. */
-export function buildPack(objects: PackableObject[], options: BuildPackOptions = {}): Uint8Array {
-	return buildPackBuffer(objects, options).pack;
-}
-
 /** Trailer checksum (SHA-1 over the pack body) as hex. */
 export function packChecksum(pack: Uint8Array): string {
 	if (pack.length < 32) throw new Error("pack too short");

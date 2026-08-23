@@ -6,10 +6,7 @@ import {
 	WORKING_ICON_FRAMES,
 	workingIconFrame,
 } from "../src/modes/interactive/theme/working-icon.js";
-
-function stripAnsi(text: string): string {
-	return text.replace(/\x1b\[[0-9;]*m/g, "");
-}
+import { stripAnsi } from "./helpers/render.js";
 
 describe("workingIconFrame", () => {
 	it("cycles through the frames and wraps in both directions", () => {

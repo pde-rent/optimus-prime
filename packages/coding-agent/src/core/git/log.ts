@@ -79,7 +79,3 @@ export function readLogEntry(repo: GitRepository, sha: string): LogEntry {
 export function formatOneline(entry: LogEntry, abbrevLength = 7): string {
 	return `${entry.sha.slice(0, abbrevLength)} ${entry.subject}`;
 }
-
-export function formatOnelines(entries: LogEntry[], abbrevLength = 7): string[] {
-	return entries.map((entry) => formatOneline(entry, abbrevLength));
-}

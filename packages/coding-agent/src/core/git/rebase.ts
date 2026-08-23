@@ -181,16 +181,3 @@ function threeWayApply(
 	}
 	return { clean: merged.clean, index, conflicts: merged.conflicts.map((conflict) => conflict.path) };
 }
-
-function _serializeReplayedCommit(options: { tree: string; parent: string; step: ReplayStep }): Uint8Array {
-	const author = options.step.author;
-	const committer = options.step.committer;
-	const lines = [
-		`tree ${options.tree}`,
-		`parent ${options.parent}`,
-		`author ${author.name} <${author.email}> ${author.time} ${author.timezoneOffset}`,
-		`committer ${committer.name} <${committer.email}> ${committer.time} ${committer.timezoneOffset}`,
-	];
-	const message = options.step.message.endsWith("\n") ? options.step.message : `${options.step.message}\n`;
-	return new TextEncoder().encode(`${lines.join("\n")}\n\n${message}`);
-}

@@ -1,31 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { createSedTool, parseSubstitution } from "../src/core/tools/native/sed.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("sed tool", () => {
+	const temps = makeTempDirs("sed-tool-test-");
 	let testDir: string;
 	let filePath: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `sed-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
 		filePath = join(testDir, "data.txt");
 		writeFileSync(filePath, "alpha one\nalpha two\nbeta three\n");
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("dry-runs by default: returns a diff and leaves the file untouched", async () => {

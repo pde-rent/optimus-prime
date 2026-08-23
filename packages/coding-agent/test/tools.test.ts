@@ -1,38 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { beforeEach, describe, expect, it, vi } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { executeBashWithOperations } from "../src/core/bash-executor.js";
 import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.js";
 import { computeEditsDiff } from "../src/core/tools/edit-diff.js";
 import { createEditTool } from "../src/index.js";
 import * as shellModule from "../src/utils/shell.js";
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 const editTool = createEditTool(process.cwd());
 const bashTool = createBashTool(process.cwd());
 
-// Helper to extract text from content blocks
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
-
 describe("Coding Agent Tools", () => {
+	const temps = makeTempDirs("coding-agent-test-");
 	let testDir: string;
 
 	beforeEach(() => {
 		// Create a unique temporary directory for each test
-		testDir = join(tmpdir(), `coding-agent-test-${Date.now()}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
-	});
-
-	afterEach(() => {
-		// Clean up test directory
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	describe("edit tool", () => {
@@ -472,15 +459,12 @@ describe("Coding Agent Tools", () => {
 });
 
 describe("edit tool fuzzy matching", () => {
+	const temps = makeTempDirs("coding-agent-fuzzy-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `coding-agent-fuzzy-test-${Date.now()}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("should match text with trailing whitespace stripped", async () => {
@@ -648,15 +632,12 @@ describe("edit tool fuzzy matching", () => {
 });
 
 describe("edit tool CRLF handling", () => {
+	const temps = makeTempDirs("coding-agent-crlf-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `coding-agent-crlf-test-${Date.now()}`);
+		testDir = temps.create();
 		mkdirSync(testDir, { recursive: true });
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("should match LF oldText against CRLF file content", async () => {

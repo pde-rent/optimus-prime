@@ -5,6 +5,7 @@ import { KEYBINDINGS, KeybindingsManager } from "../src/core/keybindings.js";
 import type { AgentConnectionHeartbeat } from "../src/modes/agent-connection/types.js";
 import { HeartbeatManagerComponent } from "../src/modes/interactive/components/heartbeat-manager.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { stripAnsi } from "./helpers/render.js";
 
 function heartbeat(
 	id: string,
@@ -30,10 +31,6 @@ function heartbeat(
 		},
 		sessionName: id === "user" ? "Primary session" : "Background session",
 	};
-}
-
-function stripAnsi(value: string): string {
-	return value.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 describe("HeartbeatManagerComponent", () => {

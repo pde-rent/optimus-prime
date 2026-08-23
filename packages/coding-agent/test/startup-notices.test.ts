@@ -1,12 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import { formatTmuxWarningNotice } from "../src/modes/shared/startup-notices.js";
-
-const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
-
-function stripAnsi(text: string): string {
-	return text.replace(ANSI_PATTERN, "");
-}
+import { stripAnsi } from "./helpers/render.js";
 
 describe("startup notice formatters", () => {
 	beforeAll(() => {

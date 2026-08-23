@@ -1,32 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
 import { createFindTool } from "../src/core/tools/native/find.js";
-
-function getTextOutput(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") || ""
-	);
-}
+import { getTextOutput } from "./helpers/render.js";
+import { makeTempDirs } from "./helpers/temp.js";
 
 describe("find tool", () => {
+	const temps = makeTempDirs("find-tool-test-");
 	let testDir: string;
 
 	beforeEach(() => {
-		testDir = join(tmpdir(), `find-tool-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		testDir = temps.create();
 		mkdirSync(join(testDir, "src", "nested"), { recursive: true });
 		writeFileSync(join(testDir, "README.md"), "readme");
 		writeFileSync(join(testDir, "src", "index.ts"), "export {};");
 		writeFileSync(join(testDir, "src", "nested", "util.spec.ts"), "test();");
 		writeFileSync(join(testDir, "big.dat"), Buffer.alloc(2048, 7));
-	});
-
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
 	});
 
 	it("matches name globs over nested trees", async () => {

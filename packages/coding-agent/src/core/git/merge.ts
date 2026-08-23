@@ -680,28 +680,3 @@ function applyThreeWay(
 	}
 	return { clean: merged.clean, index, conflicts: merged.conflicts.map((conflict) => conflict.path) };
 }
-
-function _serializeCommitWithIdent(options: {
-	tree: string;
-	parents: string[];
-	message: string;
-	author: { name: string; email: string; time: number; timezoneOffset: string };
-	committerName: string;
-	committerEmail: string;
-}): Uint8Array {
-	const authorLine =
-		options.author.name +
-		" <" +
-		options.author.email +
-		"> " +
-		options.author.time +
-		" " +
-		options.author.timezoneOffset;
-	const committerLine = `${options.committerName} <${options.committerEmail}> ${Math.floor(Date.now() / 1000)} +0000`;
-	const lines = [`tree ${options.tree}`];
-	for (const parent of options.parents) lines.push(`parent ${parent}`);
-	lines.push(`author ${authorLine}`, `committer ${committerLine}`);
-	return new TextEncoder().encode(
-		`${lines.join("\n")}\n\n${options.message}${options.message.endsWith("\n") ? "" : "\n"}`,
-	);
-}
