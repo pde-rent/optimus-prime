@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create, validate, and install Optimus Prime skills — markdown skills and JS-backed skills callable from the REPL. Use when asked to create a skill, turn a workflow, script, or prompt into one, or asked how to write a SKILL.md and where skills live.
+description: Use when asked to create, validate, or install an Optimus Prime skill, or how SKILL.md works - replacing ad-hoc prompt snippets with a loadable, routable skill. Covers markdown skills and JS-backed REPL skills - layout, frontmatter rules, locations, verification. For editing existing files use edit.
 ---
 
 # Skill Creator

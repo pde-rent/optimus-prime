@@ -1,6 +1,6 @@
 ---
 name: edit
-description: Edit an existing file two ways. `await edit(path, oldStr, newStr)` replaces one unique string; `await edit.patch(path, tag, hunks)` replaces lines by number against a tag from `await edit.src(path)` and returns the next tag. Prefer patch for more than a line or two, and for pure insertions.
+description: Use for existing-file edits, replacing sed gymnastics and whole-file rewrites. `await edit(path, oldStr, newStr)` swaps one unique string; pass `edit(path, [[old, new], ...])` to apply several at once. Line-addressed work goes through `edit.src(path)` then `edit.patch(path, tag, hunks)`, which rejects stale anchors. New files need write, not edit.
 ---
 
 # Edit
@@ -14,6 +14,17 @@ exactly once; widen the snippet if it does not. Best when you know the text but
 not the line, and when the hunk is small.
 
     await edit("pkg/file.ts", oldStr, newStr)
+
+Pass an array of pairs to apply several replacements in one call - one read,
+one diff, one write:
+
+    await edit("pkg/file.ts", [
+      ["const foo = 1;", "const foo = 2;"],
+      ["import { bar }", "import { bar, baz }"],
+    ])
+
+Each old string must be unique in the file as it stands when its pair runs -
+earlier pairs of the same call are already applied.
 
 ## `await edit.src(path, from?, to?)` then `await edit.patch(path, tag, hunks)`
 

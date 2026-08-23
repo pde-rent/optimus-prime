@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Persist a lesson into the continual harness. `await refine.run({ instructions?, global? })` -> `{ scheduled }`, plus `reason` when false; `await refine.status()` -> `{ pending, in_flight }`. Use after a repeated failure, reusable tactic, delegation role, or behavior policy worth keeping. Runs when the turn ends, so keep working.
+description: Use when a repeated failure, reusable tactic, delegation role, or durable preference emerges - persisting it beats hoping to recall next session. `await refine.run({ instructions?, global? })` schedules analysis at turn end; `refine.status()` checks pending. Keep working after calling; skip it for one-off fixes not worth keeping.
 ---
 
 # Refine

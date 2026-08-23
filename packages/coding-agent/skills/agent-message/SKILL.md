@@ -1,6 +1,6 @@
 ---
 name: agent-message
-description: Message an agent's parent, siblings, or direct children. `await agent_message.list_agents()` -> the roster `{ current, agents }`. `await agent_message.send(text, { receiver_role, receiver_name })` sends direct; `await agent_message.send("all", { broadcast_message })` broadcasts. Sender identity is set by the host, not by you.
+description: Use when a result must reach a family agent now - steering a child mid-run, reporting to the parent, sibling coordination - replacing file drop-boxes and polling for cross-agent talk. `await agent_message.send(text, { receiver_role, receiver_name? })`; `send("all", { broadcast_message })` broadcasts; `list_agents()` is the roster. For read-only looks use agent-observe.
 ---
 
 # Agent Message

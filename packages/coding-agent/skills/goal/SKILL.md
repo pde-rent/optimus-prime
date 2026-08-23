@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Manage the persistent thread goal. `await goal.get()` -> `{ goal, remaining_tokens, completion_budget_report }`, `goal` null when none. `await goal.create(objective, tokenBudget?)` starts one, only when the user explicitly asks. `await goal.complete()` marks it achieved — the harness keeps re-prompting you until that call arrives.
+description: Use only when the user explicitly asks for a persistent objective the harness re-prompts across turns - never inferred from ordinary tasks. `await goal.create(objective, tokenBudget?)` starts it, `goal.get()` reads it, and `goal.complete()` ends it; nothing else does. Pausing and clearing belong to the host.
 ---
 
 # Goal

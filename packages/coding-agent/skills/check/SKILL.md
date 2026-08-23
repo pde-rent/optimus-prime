@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run the project's own checker. `await check()` -> `{ ok, results }`, each result `{ checker, ok, command, exitCode, tookMs, output }`; `await check("rust")` runs one; `await check.detect()` -> what would run, without running it. A missing toolchain is skipped, not failed. Use after edits, before claiming a change builds.
+description: Use after edits, before claiming anything builds - runs the project's own declared checkers instead of guessing lint/type commands per toolchain. `await check()` -> `{ ok, results }`; `check("rust")` runs one; `check.detect()` previews. Missing toolchains skip, not fail. Clean means compile+lint only - still exercise the path you changed.
 ---
 
 # Check

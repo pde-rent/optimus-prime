@@ -1,6 +1,6 @@
 ---
 name: websearch
-description: Search the web with `await websearch.run(query, options?)` and read one page as text with `await websearch.read(url, options?)` — both return a plain string, never an array or object. Backed by self-hosted SearXNG (`SEARXNG_URL`, keyless) or Serper. Output is deduplicated and character-capped; `read` strips navigation, ends with its range, and takes `{ offset }` to continue. Errors arrive inside the string rather than thrown.
+description: Search the web or read one page as text whenever facts postdate training or need verification - replacing curl scraping and guessed URLs. `websearch.run(query)` / `read(url)` return capped plain strings. Backends are self-hosted SearXNG (`SEARXNG_URL`, keyless) or Serper. Errors arrive inside the string, not thrown.
 ---
 
 # Web Search

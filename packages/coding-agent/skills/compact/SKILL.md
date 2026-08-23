@@ -1,6 +1,6 @@
 ---
 name: compact
-description: Compact the conversation to free context. `await compact.status()` -> `{ tokens, context_window, percent, scheduled }`; `await compact.run(instructions?)` -> `{ scheduled }`, plus `reason` when false. It runs when the turn ends, never mid-cell, and the REPL survives it. Use when context is filling and substantial work remains.
+description: Use when context is filling and substantial work remains, instead of turning terse or stopping early. `await compact.run(instructions?)` schedules compaction at turn end (never mid-cell); `compact.status()` shows usage percent. The REPL survives with every variable intact. Not for trimming one long output - fix that cell instead.
 ---
 
 # Compact

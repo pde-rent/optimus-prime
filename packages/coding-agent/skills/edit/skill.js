@@ -65,10 +65,17 @@ export default function createSkill({ display, cwd }) {
 		return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
 	}
 
-	async function run(path, oldStr, newStr) {
+	async function run(path, oldStrOrPairs, newStr) {
 		if (typeof path !== "string") throw new TypeError(`path must be a string, got ${typeof path}`);
-		if (typeof oldStr !== "string") throw new TypeError(`old_str must be a string, got ${typeof oldStr}`);
-		if (typeof newStr !== "string") throw new TypeError(`new_str must be a string, got ${typeof newStr}`);
+		const pairs = Array.isArray(oldStrOrPairs)
+			? oldStrOrPairs.map((pair) => (Array.isArray(pair) ? pair : [pair[0], pair[1]]))
+			: [[oldStrOrPairs, newStr]];
+		for (const [o] of pairs) {
+			if (typeof o !== "string") throw new TypeError(`old_str must be a string, got ${typeof o}`);
+		}
+		if (!Array.isArray(oldStrOrPairs) && typeof newStr !== "string") {
+			throw new TypeError(`new_str must be a string, got ${typeof newStr}`);
+		}
 
 		const resolvedPath = resolvePath(path);
 		const file = Bun.file(resolvedPath);
@@ -76,7 +83,17 @@ export default function createSkill({ display, cwd }) {
 			throw new Error(`${path} not found`);
 		}
 
-		const content = await file.text();
+		let content = await file.text();
+		for (const [o, n] of pairs) {
+			content = applyReplacement(resolvedPath, path, content, o, n);
+		}
+		await Bun.write(resolvedPath, content);
+		snapshots.set(resolvedPath, content);
+		return `Edited ${resolvedPath} (${pairs.length} replacement${pairs.length === 1 ? "" : "s"})`;
+	}
+
+	/** Find the single occurrence of oldStr in content and return content with it replaced. */
+	function applyReplacement(resolvedPath, path, content, oldStr, newStr) {
 		let count = 0;
 		let index = content.indexOf(oldStr);
 		const matchIndex = index;
@@ -92,8 +109,6 @@ export default function createSkill({ display, cwd }) {
 
 		const startLine = content.slice(0, matchIndex).split("\n").length;
 		const updated = content.replace(oldStr, newStr);
-		await Bun.write(resolvedPath, updated);
-		snapshots.set(resolvedPath, updated);
 
 		try {
 			display({
@@ -103,7 +118,7 @@ export default function createSkill({ display, cwd }) {
 		} catch {
 			// display is best-effort: the edit already landed
 		}
-		return `Edited ${resolvedPath}`;
+		return updated;
 	}
 
 	/**

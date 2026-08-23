@@ -1,6 +1,6 @@
 ---
 name: chart
-description: Terminal charts over @crafter/charts (braille rendering), in two surfaces. Native — `chart(data, opts?)` plus `chart.bar/scatter/candle/spark/gauge/donut/histogram`, each returning a string. matplotlib.pyplot — `const plt = chart.plt` then plot, scatter, bar, barh, hist, step, title, xlabel, ylabel, legend, xlim, ylim, grid, figure, show, clf, close. `plot(x, y, fmt?, opts?)` takes `{label, color}` and named colours, as matplotlib does. `plt.show()` renders the figure and resets it, so each chart holds exactly the calls made since the last show. No subplots, savefig, colormaps, 3D or animation. Use it whenever numbers read better as a shape than as a table.
+description: Use when numbers read better as a shape than as a table - trends, distributions, comparisons - replacing matplotlib scripts and hand-drawn ASCII bars. `chart(data)` and `chart.bar/spark/gauge/...` return strings; `const plt = chart.plt` mimics pyplot (`plot/title/xlabel/show`). Braille terminal output; no subplots or savefig. For single-series statistics use stats.
 ---
 
 # Chart

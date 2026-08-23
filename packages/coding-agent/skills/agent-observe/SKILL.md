@@ -1,6 +1,6 @@
 ---
 name: agent-observe
-description: Read-only inspection of an agent's parent, siblings, and direct children. `await agent_observe.list_agents()` -> `{ current, agents }`; `await agent_observe.get_agent(target)` -> `{ agent }`; `await agent_observe.recent_messages(target, limit?, maxChars?)` -> `{ agent, messages }`, previews bounded. Never mutates a session.
+description: Use before acting on another family agent - check its status or recent output without steering it, instead of tailing transcripts by hand or interrupting it. Read-only - `await agent_observe.get_agent(target)`, `recent_messages(target)` for bounded previews, `list_agents()` for the roster. To message it use agent-message.
 ---
 
 # Agent Observe

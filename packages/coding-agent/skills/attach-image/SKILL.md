@@ -1,6 +1,6 @@
 ---
 name: attach-image
-description: Load on-disk images (PNG, JPEG, GIF, WebP) into context as attachments you can actually SEE — screenshots, diagrams, charts, scans. `await attach_image.run(...paths)` -> a status string; throws on a non-image file or a model without vision. For pixel work use `Bun.Image`, which does not put the image in context.
+description: Use when you must SEE an on-disk image - screenshots, diagrams, scans - rather than reason over bytes blind. `await attach_image.run(...paths)` loads PNG/JPEG/GIF/WebP into context as vision attachments, auto-resized; no base64 or shell dance. For pixel math (resize, crop, hashes) use Bun.Image; it never enters context.
 ---
 
 # Attach Image
