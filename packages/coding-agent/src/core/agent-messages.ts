@@ -1,4 +1,5 @@
 export const AGENT_MESSAGE_SOURCE = "agent_message";
+
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CustomMessage } from "./messages.js";

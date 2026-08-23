@@ -93,12 +93,12 @@ describe("todo store", () => {
 		store.setCoordinator("worker-7");
 
 		const board = readTodoBoard(dir);
-		expect(board.version).toBe(1);
+		expect(board.version).toBe(2);
 		expect(board.coordinator).toBe("worker-7");
 		expect(board.tasks.map((task) => task.title)).toEqual(["first", "second"]);
 		// The stale tmp file is untouched; the json itself is always valid.
 		expect(existsSync(join(dir, ".optimus-todo.json.tmp-999-1"))).toBe(true);
-		expect(JSON.parse(readFileSync(todoStorePath(dir), "utf-8"))).toHaveProperty("version", 1);
+		expect(JSON.parse(readFileSync(todoStorePath(dir), "utf-8"))).toHaveProperty("version", 2);
 	});
 
 	it("waits on the file lock: second acquirer fails while held, succeeds after release", async () => {

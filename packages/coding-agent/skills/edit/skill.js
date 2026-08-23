@@ -62,7 +62,12 @@ export default function createSkill({ display, cwd }) {
 	/** Resolve `~`, relative and absolute paths the same way for every entry point. */
 	function resolvePath(path) {
 		const expanded = expandUser(path);
-		return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+		if (isAbsolute(expanded)) return expanded;
+		// Prefer the skill's captured cwd; fall back to the kernel's live cwd so an
+		// agent that called cd() mid-session does not get stale-path failures.
+		const preferred = resolve(cwd, expanded);
+		if (existsSync(preferred)) return preferred;
+		return resolve(process.cwd(), expanded);
 	}
 
 	async function run(path, oldStrOrPairs, newStr) {

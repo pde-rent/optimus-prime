@@ -16,16 +16,25 @@ export interface TodoTask {
 	/** Parent task id, or null for a root-level task. */
 	parent_id: string | null;
 	priority?: string;
+	/** ISO timestamp of the first time status became ongoing. */
+	started_at?: string;
+	/** ISO timestamp of the most recent transition to done; cleared when reopened. */
+	completed_at?: string;
 	notes: string[];
 	created_at: string;
 	updated_at: string;
 }
 
 export interface TodoBoard {
-	version: 1;
+	version: 2;
 	/** Agent in charge of overall completion of the board (default "root"). */
 	coordinator: string;
 	tasks: TodoTask[];
+}
+
+/** Tasks that still need work - the idle-watchdog trigger set. */
+export function openTodoTasks(tasks: TodoTask[]): TodoTask[] {
+	return tasks.filter((task) => task.status !== "done");
 }
 
 export function todoStorePath(cwd: string): string {
@@ -33,22 +42,45 @@ export function todoStorePath(cwd: string): string {
 }
 
 function emptyBoard(): TodoBoard {
-	return { version: 1, coordinator: "root", tasks: [] };
+	return { version: 2, coordinator: "root", tasks: [] };
+}
+
+/**
+ * Schema v2 timestamp lifecycle: the first start sticks forever, reaching done
+ * stamps completed_at, and reopening a done task clears the stamp again.
+ */
+function applyTodoStatusChange(task: TodoTask, status: TodoStatus): void {
+	if (status === task.status) return;
+	if (status === "ongoing") task.started_at ??= nowIso();
+	if (status === "done") task.completed_at = nowIso();
+	else task.completed_at = undefined;
+	task.status = status;
 }
 
 function nowIso(): string {
 	return new Date().toISOString();
 }
 
+function normalizeTask(raw: TodoTask): TodoTask {
+	return {
+		...raw,
+		started_at: typeof raw.started_at === "string" ? raw.started_at : undefined,
+		completed_at: typeof raw.completed_at === "string" ? raw.completed_at : undefined,
+	};
+}
+
 function parseBoard(raw: string): TodoBoard {
-	const parsed = JSON.parse(raw) as Partial<TodoBoard>;
-	if (parsed.version !== 1) {
+	const parsed = JSON.parse(raw) as Omit<Partial<TodoBoard>, "version"> & { version?: number };
+	// Schema v2 only adds started_at/completed_at; v1 boards load as-is and
+	// upgrade to v2 on the next write, so old readers keep working meanwhile.
+	if (parsed.version !== 1 && parsed.version !== 2) {
 		throw new Error(`Unsupported ${TODO_FILENAME} version: ${String(parsed.version)}.`);
 	}
+
 	if (!Array.isArray(parsed.tasks)) {
 		throw new Error(`Corrupt ${TODO_FILENAME}: tasks must be an array.`);
 	}
-	return { version: 1, coordinator: parsed.coordinator ?? "root", tasks: parsed.tasks };
+	return { version: 2, coordinator: parsed.coordinator ?? "root", tasks: parsed.tasks.map(normalizeTask) };
 }
 
 /** Reads the board without locking; returns an empty board when the file does not exist. */
@@ -178,7 +210,7 @@ export class TodoStore {
 				if (!trimmed) throw new Error("Task title must not be empty.");
 				task.title = trimmed;
 			}
-			if (patch.status !== undefined) task.status = patch.status;
+			if (patch.status !== undefined) applyTodoStatusChange(task, patch.status);
 			if (patch.assignees !== undefined) task.assignees = [...patch.assignees];
 			if (patch.priority !== undefined) task.priority = patch.priority;
 			if (patch.note !== undefined && patch.note.trim()) task.notes.push(patch.note.trim());
@@ -221,7 +253,7 @@ export class TodoStore {
 				throw new Error(`Task ${id} is claimed by ${task.assignees.join(", ")}; pass force to take over.`);
 			}
 			if (!task.assignees.includes(assignee)) task.assignees.push(assignee);
-			task.status = "ongoing";
+			applyTodoStatusChange(task, "ongoing");
 			task.updated_at = nowIso();
 			return task;
 		});

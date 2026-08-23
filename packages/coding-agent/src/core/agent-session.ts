@@ -290,6 +290,8 @@ import {
 } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
+import { openTodoTasks, readTodoBoard } from "./todo/store.js";
+import { buildTodoWatchdogContinuation } from "./todo/watchdog.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import type { HostRequestHandlers, KernelSentAgentMessage } from "./tools/repl-types.js";
@@ -1138,6 +1140,10 @@ export class AgentSession {
 	private _goalAccountingStartedAt: number | undefined = undefined;
 	private _goalAccountedAssistantMessages = new WeakSet<AssistantMessage>();
 	private _goalAbortInProgress = false;
+	// Idle watchdog over the shared todo board: one timer per idle event,
+	// cancelled (epoch-bumped) by any newer run end or dispose.
+	private _todoWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+	private _todoWatchdogEpoch = 0;
 	private _autonomousState: AutonomousRuntimeState;
 	private _autonomousContinuationSuppressionDepth = 0;
 	/** Dynamic-effort run state; all four reset on `agent_start`. */
@@ -2176,6 +2182,56 @@ export class AgentSession {
 			resumeIfIdle: true,
 		});
 		this._admitSessionInput(action, { front: true, wake: false });
+	}
+
+	/**
+	 * Graph-wide todo accountability: after a run ends (root and children share
+	 * this agent_end choke point), one timer re-prompts this session if it stays
+	 * idle while the workspace board still has open tasks. Any newer run end
+	 * replaces the timer; firing is skipped when input arrived in the meantime.
+	 */
+	private _scheduleTodoWatchdog(): void {
+		this._cancelTodoWatchdog();
+		const settings = this.settingsManager.getTodoWatchdogSettings();
+		if (!settings.enabled) return;
+		if (openTodoTasks(readTodoBoard(this._cwd).tasks).length === 0) return;
+		const epoch = ++this._todoWatchdogEpoch;
+		this._todoWatchdogTimer = setTimeout(() => {
+			this._todoWatchdogTimer = undefined;
+			void this._fireTodoWatchdog(epoch);
+		}, settings.delayMs);
+		// A pending watchdog must never keep a finished process alive.
+		this._todoWatchdogTimer.unref?.();
+	}
+
+	private _cancelTodoWatchdog(): void {
+		this._todoWatchdogEpoch++;
+		if (this._todoWatchdogTimer !== undefined) {
+			clearTimeout(this._todoWatchdogTimer);
+			this._todoWatchdogTimer = undefined;
+		}
+	}
+
+	private async _fireTodoWatchdog(epoch: number): Promise<void> {
+		if (epoch !== this._todoWatchdogEpoch) return;
+		if (this._disposed || this._disposing) return;
+		// User or queued input arrived during the delay: the session is not idle.
+		if (this.isStreaming || this.queuedActionCount > 0) return;
+		const board = readTodoBoard(this._cwd);
+		const openTasks = openTodoTasks(board.tasks);
+		if (openTasks.length === 0) return;
+		const selfName = this.sessionName ?? board.coordinator;
+		try {
+			const { prompt, message } = buildTodoWatchdogContinuation(selfName, openTasks);
+			const action = this._createPreparedTurnAction("followUp", prompt, undefined, {
+				message,
+				resumeIfIdle: true,
+				previewLabel: "todo watchdog",
+			});
+			this._admitSessionInput(action);
+		} catch {
+			// Best-effort accountability; admission can race disposal.
+		}
 	}
 
 	private async _handleGoalSlashCommand(text: string, images: ImageContent[] | undefined): Promise<boolean> {
@@ -3752,7 +3808,10 @@ export class AgentSession {
 				(this._retryPromise ? this._findLastAssistantInMessages(event.messages) : undefined);
 			this._lastAssistantMessage = undefined;
 			if (!msg) {
+				// Run ended with no assistant output at all: the silent-death shape.
+				// The watchdog still holds this session accountable for open todos.
 				this._resolveRetry();
+				this._scheduleTodoWatchdog();
 				return;
 			}
 
@@ -3786,6 +3845,7 @@ export class AgentSession {
 						this._scheduleAutoRefineAfterAgentEnd();
 					}
 				}
+				this._scheduleTodoWatchdog();
 			}
 		}
 	}
@@ -4168,6 +4228,7 @@ export class AgentSession {
 				clearTimeout(timer);
 			}
 			this._scheduledAutoRefineTimers.clear();
+			this._cancelTodoWatchdog();
 			this._serializedPlanInFlight = undefined;
 			this._serializedExplicitRefineOptions = undefined;
 			this._pendingRequestedRefine = undefined;
@@ -9875,6 +9936,37 @@ export class AgentSession {
 	 * local unpushed commits, so the parent learns the outcome without a reply.
 	 */
 	_buildRlmTerminalAutoReport(outcome: "completed" | "error" | "interrupted", failureText?: string): string {
+		// Autopsy: every silent termination ships its own cause. The last
+		// stopReason explains how the loop ended, the token count rules out
+		// context death, and mid-run compaction/restore events surface restarts
+		// that would otherwise look like idleness from the parent's side.
+		let lastAssistant: AssistantMessage | undefined;
+		let outputTokens = 0;
+		let assistantTurns = 0;
+		for (const message of this.messages) {
+			if (message.role !== "assistant") continue;
+			lastAssistant = message as AssistantMessage;
+			assistantTurns += 1;
+			outputTokens += lastAssistant.usage?.output ?? 0;
+		}
+		const stopText =
+			lastAssistant === undefined
+				? "none (no assistant message ever produced)"
+				: lastAssistant.stopReason === "error"
+					? `error (${compactRlmText(lastAssistant.errorMessage ?? "unknown error")})`
+					: String(lastAssistant.stopReason);
+		let compactions = 0;
+		let kernelRestores = 0;
+		try {
+			for (const entry of this.sessionManager.getBranch()) {
+				if (entry.type === "compaction") compactions += 1;
+				else if (entry.type === "custom_message" && entry.customType === REPL_STATE_RESTORED_CUSTOM_TYPE) {
+					kernelRestores += 1;
+				}
+			}
+		} catch {
+			// Branch read is best-effort; counts stay zero.
+		}
 		const did: string[] = [];
 		for (let i = this.messages.length - 1; i >= 0 && did.length < 3; i--) {
 			const message = this.messages[i];
@@ -9905,6 +9997,9 @@ export class AgentSession {
 		const report = [
 			`AUTO-REPORT (${outcome}) task=${this.sessionName ?? this.sessionId}`,
 			`outcome: ${outcome}`,
+			`stop: ${stopText}`,
+			`tokens: ${outputTokens} output over ${assistantTurns} assistant turn(s)`,
+			`events: ${compactions} compaction(s), ${kernelRestores} kernel restore(s)`,
 			`did: ${didText}`,
 			`tree: ${dirtyFiles ?? "unknown"} dirty files under cwd`,
 			`commits: ${commits}`,

@@ -66,6 +66,7 @@ import type {
 	AgentConnectionQueuedMessageMutationStatus,
 	AgentConnectionQueueMode,
 	AgentConnectionQueueState,
+	AgentConnectionReplCellResult,
 	AgentConnectionResourceSnapshot,
 	AgentConnectionSavedSessionInfo,
 	AgentConnectionSavedSessionScope,
@@ -84,7 +85,6 @@ import type {
 	AgentConnectionSwitchSessionOptions,
 	AgentConnectionToolDefinition,
 	AgentConnectionUserMessage,
-	AgentConnectionReplCellResult,
 } from "./types.js";
 import { AgentConnectionPromptAdmissionError } from "./types.js";
 

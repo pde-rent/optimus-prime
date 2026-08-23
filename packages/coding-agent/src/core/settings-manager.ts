@@ -163,6 +163,10 @@ export interface Settings {
 	degeneracyGuard?: boolean;
 	/** Steer, abort, or stop a run whose assistant keeps planning without acting. default: true */
 	reasoningLoopGuard?: boolean;
+	/** Re-prompt an idle session whose todo board still has open tasks. default: true */
+	todoWatchdogEnabled?: boolean;
+	/** Seconds a session stays idle with open todos before the watchdog continuation fires. default: 120 */
+	todoWatchdogDelaySeconds?: number;
 	defaultServiceTier?: ServiceTier;
 	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
 	/** Cap on concurrently running rlm subagents. "auto" sizes it from a live memory sample; a number pins it (kill-switch). default: "auto" */
@@ -832,6 +836,13 @@ export class SettingsManager {
 		this.setGlobalField("reasoningLoopGuard", enabled);
 	}
 
+	/** Idle-watchdog over the shared todo board; settings + effective delay in ms. */
+	getTodoWatchdogSettings(): { enabled: boolean; delayMs: number } {
+		return {
+			enabled: this.settings.todoWatchdogEnabled ?? true,
+			delayMs: Math.max(0, this.settings.todoWatchdogDelaySeconds ?? 120) * 1000,
+		};
+	}
 	getSubagentGraph(): boolean {
 		return this.settings.subagentGraph ?? true;
 	}
