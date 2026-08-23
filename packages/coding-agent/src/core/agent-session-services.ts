@@ -9,6 +9,7 @@ import { AuthStorage } from "./auth-storage.js";
 import type { AgentAutonomousConfig } from "./autonomous.js";
 import type { AgentRlmHeartbeatController } from "./cron-jobs.js";
 import { createHerdrAgentStateExtension } from "./extensions/builtin/herdr-agent-state.js";
+import { createWebsearchHealthExtension } from "./extensions/builtin/websearch-health.js";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { McpManager } from "./mcp/mcp-manager.js";
 import { ModelRegistry } from "./model-registry.js";
@@ -38,6 +39,12 @@ export interface CreateAgentSessionServicesOptions {
 	 * would release the pane while the parent is still running.
 	 */
 	noBuiltinHerdrReporter?: boolean;
+	/**
+	 * Skip the built-in websearch health check for these services. Set for RLM
+	 * subagent runtimes so a missing search backend does not warn in every
+	 * subagent pane; the parent session already reported it.
+	 */
+	noBuiltinWebsearchHealth?: boolean;
 }
 
 export interface AgentSessionCreationOptions {
@@ -162,9 +169,11 @@ export async function createAgentSessionServices(
 	// noExtensions is a full opt-out: it disables the built-in reporter too,
 	// not just discovered extension files.
 	const skipHerdrReporter = options.noBuiltinHerdrReporter || options.resourceLoaderOptions?.noExtensions;
-	const builtinExtensionFactories = skipHerdrReporter
-		? []
-		: [createHerdrAgentStateExtension(() => resourceLoader.getLoadedExtensionPaths())];
+	const skipWebsearchHealth = options.noBuiltinWebsearchHealth || options.resourceLoaderOptions?.noExtensions;
+	const builtinExtensionFactories = [
+		...(skipHerdrReporter ? [] : [createHerdrAgentStateExtension(() => resourceLoader.getLoadedExtensionPaths())]),
+		...(skipWebsearchHealth ? [] : [createWebsearchHealthExtension()]),
+	];
 	const resourceLoader: DefaultResourceLoader = new DefaultResourceLoader({
 		...(options.resourceLoaderOptions ?? {}),
 		extensionFactories: [...builtinExtensionFactories, ...userExtensionFactories],

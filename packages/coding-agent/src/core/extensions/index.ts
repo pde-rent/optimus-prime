@@ -9,6 +9,7 @@ export {
 	hasFileBasedHerdrIntegration,
 	herdrAgentStateExtension,
 } from "./builtin/herdr-agent-state.js";
+export { createWebsearchHealthExtension } from "./builtin/websearch-health.js";
 export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
