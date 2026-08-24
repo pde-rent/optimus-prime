@@ -26,7 +26,7 @@ export function encodePktLine(payload: string | Uint8Array): Uint8Array {
 	return out;
 }
 
-export function encodeFlushPkt(): Uint8Array {
+function encodeFlushPkt(): Uint8Array {
 	return FLUSH_PKT.slice();
 }
 
@@ -66,7 +66,7 @@ export class PktLineReader {
 	}
 }
 
-export function pktText(payload: Uint8Array): string {
+function pktText(payload: Uint8Array): string {
 	return new TextDecoder().decode(payload);
 }
 
@@ -79,7 +79,7 @@ export interface RemoteCredentials {
 	token?: string;
 }
 
-export interface ResolvedAuth {
+interface ResolvedAuth {
 	/** URL with any embedded userinfo removed; safe to log and to fetch. */
 	url: string;
 	/** Value for the Authorization header, or null when anonymous. */
@@ -130,9 +130,9 @@ function stripUserInfo(rawUrl: string): string {
 
 // -- ref discovery ------------------------------------------------------------
 
-export type PackService = typeof UPLOAD_PACK_SERVICE | typeof RECEIVE_PACK_SERVICE;
+type PackService = typeof UPLOAD_PACK_SERVICE | typeof RECEIVE_PACK_SERVICE;
 
-export interface RefAdvertisement {
+interface RefAdvertisement {
 	/** refname -> oid; excludes peeled "^{}" entries and the empty-repo sentinel. */
 	refs: Map<string, string>;
 	/** tagname -> peeled oid (from "<tag>^{}" advertisement lines). */
@@ -257,7 +257,7 @@ function snippet(body: Uint8Array): string {
 
 // -- fetch-pack ---------------------------------------------------------------
 
-export interface UploadPackRequest {
+interface UploadPackRequest {
 	/** "want <oid>" lines (capabilities are appended to the first by this module). */
 	wants: string[];
 	/** Local tips to negotiate with ("have" lines). */
@@ -268,7 +268,7 @@ export interface UploadPackRequest {
 	depth?: number;
 }
 
-export interface UploadPackResult {
+interface UploadPackResult {
 	/** OIDs from final "ACK <oid>" lines (empty when nothing was common). */
 	acks: string[];
 	/** OIDs from "shallow <oid>" lines (grafts; parents not sent). */
@@ -355,13 +355,13 @@ export interface PushCommand {
 	refName: string;
 }
 
-export interface PushReportEntry {
+interface PushReportEntry {
 	refName: string;
 	ok: boolean;
 	reason?: string;
 }
 
-export interface PushReport {
+interface PushReport {
 	unpackOk: boolean;
 	unpackReason?: string;
 	commands: PushReportEntry[];

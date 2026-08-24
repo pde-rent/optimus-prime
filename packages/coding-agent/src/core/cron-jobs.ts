@@ -13,10 +13,10 @@ import { dirname, join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
 import { getSessionArtifactPathForFile } from "./session-manager.js";
 
-export type AgentCronJobStatus = "active" | "paused" | "completed" | "cancelled";
-export type AgentCronScheduleKind = "once" | "cron" | "interval";
-export type AgentCronJobSource = "cron" | "heartbeat" | "rlm_heartbeat";
-export type AgentCronJobRuntimeKind = "top-level" | "subagent";
+type AgentCronJobStatus = "active" | "paused" | "completed" | "cancelled";
+type AgentCronScheduleKind = "once" | "cron" | "interval";
+type AgentCronJobSource = "cron" | "heartbeat" | "rlm_heartbeat";
+type AgentCronJobRuntimeKind = "top-level" | "subagent";
 export type AgentHeartbeatUpdateAction = "pause" | "resume" | "clear";
 export type AgentHeartbeatManagementAction = "pause" | "resume" | "stop";
 export type AgentRlmHeartbeatStatusUpdate = "pause" | "resume";
@@ -26,7 +26,7 @@ export type AgentRlmHeartbeatStatusUpdate = "pause" | "resume";
  */
 export type AgentHeartbeatDeliveryMode = "steer" | "follow_up";
 
-export interface AgentCronSchedule {
+interface AgentCronSchedule {
 	kind: AgentCronScheduleKind;
 	expression: string;
 	intervalMs?: number;
@@ -55,7 +55,7 @@ export interface AgentCronJob {
 	runCount: number;
 }
 
-export interface CreateAgentCronJobInput {
+interface CreateAgentCronJobInput {
 	activeSessionId: string;
 	sessionId: string;
 	sessionFile: string;
@@ -69,21 +69,21 @@ export interface CreateAgentCronJobInput {
 	now?: Date;
 }
 
-export type AgentCronJobRunResult = "ran" | "skipped";
+type AgentCronJobRunResult = "ran" | "skipped";
 
-export interface AgentCronDispatch {
+interface AgentCronDispatch {
 	id: string;
 	job: AgentCronJob;
 }
 
-export interface AgentCronSchedulerHooks {
+interface AgentCronSchedulerHooks {
 	runJob: (job: AgentCronJob) => Promise<AgentCronJobRunResult | undefined>;
 	beginDispatch?: (dispatch: AgentCronDispatch) => (() => void) | undefined;
 	now?: () => Date;
 	onError?: (job: AgentCronJob, error: unknown) => void;
 }
 
-export interface HeartbeatCronSessionActivity {
+interface HeartbeatCronSessionActivity {
 	isStreaming: boolean;
 	isCompacting?: boolean;
 	isRetrying?: boolean;

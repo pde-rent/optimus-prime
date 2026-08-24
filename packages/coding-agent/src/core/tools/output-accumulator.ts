@@ -10,7 +10,7 @@ import {
 	utf8BoundaryStart,
 } from "./truncate.js";
 
-export interface OutputAccumulatorOptions {
+interface OutputAccumulatorOptions {
 	maxLines?: number;
 	maxBytes?: number;
 	tempFilePrefix?: string;
@@ -18,7 +18,7 @@ export interface OutputAccumulatorOptions {
 	maxHeadBytes?: number;
 }
 
-export interface OutputSnapshot {
+interface OutputSnapshot {
 	content: string;
 	truncation: TruncationResult;
 	fullOutputPath?: string;

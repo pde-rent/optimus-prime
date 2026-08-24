@@ -18,13 +18,13 @@ export interface AgentAutonomousConfig {
 	gates?: AgentAutonomousGateConfig;
 }
 
-export interface AgentAutonomousGateConfig {
+interface AgentAutonomousGateConfig {
 	commands?: string[];
 	maxRetries?: number;
 	timeoutMs?: number;
 }
 
-export interface AgentAutonomousGateFailure {
+interface AgentAutonomousGateFailure {
 	command: string;
 	attempt: number;
 	exitText: string;
@@ -83,14 +83,14 @@ export interface AutonomousRuntimeState {
 }
 
 export type AutonomousLimitReason = "maxContinuations" | "maxTurns" | "maxTokens" | "timeoutMs";
-export type AutonomousGateResult = "passed" | "failed" | "retry_exhausted";
+type AutonomousGateResult = "passed" | "failed" | "retry_exhausted";
 
 type AutonomousLimitState = Pick<
 	AgentAutonomousStatus,
 	"continuationsUsed" | "turnsUsed" | "tokensUsed" | "startedAt" | "limits"
 >;
 
-export interface AutonomousDecision {
+interface AutonomousDecision {
 	shouldContinue: boolean;
 	reason: "missing_terminal_evidence" | "gate_failed" | "not_needed" | "limit_reached" | "no_progress";
 }

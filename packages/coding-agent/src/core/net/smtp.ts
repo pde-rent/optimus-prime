@@ -28,7 +28,7 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface SmtpConnectOptions {
+interface SmtpConnectOptions {
 	host: string;
 	/** Default 587. */
 	port?: number;
@@ -50,7 +50,7 @@ export interface SmtpConnectOptions {
 	signal?: AbortSignal;
 }
 
-export interface SmtpAuthSpec {
+interface SmtpAuthSpec {
 	/** Env-var name or literal username. */
 	user: string;
 	/** Env-var name, literal, or "!"-prefixed command producing the password. */
@@ -73,7 +73,7 @@ export interface SmtpMessage {
 	attachPaths?: string[];
 }
 
-export interface SmtpSendResult {
+interface SmtpSendResult {
 	acceptedRecipients: number;
 	/** Verbatim final DATA reply, enhanced status codes included ("250 2.0.0 OK"). */
 	serverReply: string;
@@ -136,7 +136,7 @@ function isAscii(text: string): boolean {
 }
 
 /** RFC 2047 encoded-word for UTF-8 text, B transfer encoding, words <= 75 chars. */
-export function encodeRfc2047Word(text: string): string {
+function encodeRfc2047Word(text: string): string {
 	const encoded = Buffer.from(text, "utf-8").toString("base64");
 	const chunks: string[] = [];
 	// "=UTF-8?B?" + "?" overhead is 11 chars per encoded word.
@@ -401,7 +401,7 @@ function hostnameForEhlo(): string {
 // One-shot helper
 // ---------------------------------------------------------------------------
 
-export interface SendMailOptions extends SmtpConnectOptions {
+interface SendMailOptions extends SmtpConnectOptions {
 	auth?: SmtpAuthSpec;
 	message: SmtpMessage;
 }

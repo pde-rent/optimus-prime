@@ -36,7 +36,7 @@ export interface WcToolDetails {
 	truncated: boolean;
 }
 
-export interface WcCounts {
+interface WcCounts {
 	lines: number;
 	words: number;
 	bytes: number;

@@ -2,7 +2,7 @@ const DESCRIPTOR_MAX_WIDTH = 64;
 
 const BASH_CELL_MAGIC_PATTERN = /^((?:[ \t]*\r?\n)*)([ \t]*)%%bash\b([^\r\n]*)(\r?\n|$)/;
 
-export interface ParsedReplBashCell {
+interface ParsedReplBashCell {
 	leadingWhitespace: string;
 	indent: string;
 	magicArguments: string;
@@ -68,9 +68,9 @@ const JS_PROTOTYPE_METHOD_PATTERN =
 const JS_HOST_RECEIVER_PATTERN =
 	/^(?:console|process|globalThis|self|module|exports|require|crypto|performance|navigator|document|window|localStorage|sessionStorage|fetch)$/;
 
-export type CodePreviewLanguage = "bash" | "js";
+type CodePreviewLanguage = "bash" | "js";
 
-export interface CodePreview {
+interface CodePreview {
 	language: CodePreviewLanguage;
 	text: string;
 }

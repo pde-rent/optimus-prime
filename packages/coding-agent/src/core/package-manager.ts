@@ -203,7 +203,7 @@ export interface ResolvedPaths {
 	diagnostics: ResourceDiagnostic[];
 }
 
-export type MissingSourceAction = "install" | "skip" | "error";
+type MissingSourceAction = "install" | "skip" | "error";
 
 export interface ProgressEvent {
 	type: "start" | "progress" | "complete" | "error";
@@ -214,14 +214,14 @@ export interface ProgressEvent {
 
 export type ProgressCallback = (event: ProgressEvent) => void;
 
-export interface PackageUpdate {
+interface PackageUpdate {
 	source: string;
 	displayName: string;
 	type: "npm" | "git";
 	scope: Exclude<SourceScope, "temporary">;
 }
 
-export interface ConfiguredPackage {
+interface ConfiguredPackage {
 	source: string;
 	scope: "user" | "project";
 	filtered: boolean;

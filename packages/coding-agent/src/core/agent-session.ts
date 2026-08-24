@@ -305,12 +305,12 @@ export { type ParsedSkillBlock, parseSkillBlock } from "./skill-blocks.js";
 
 export type RlmChildAgentStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
-export interface RlmChildAgentActivity {
+interface RlmChildAgentActivity {
 	kind: "waiting" | "writing" | "executing";
 	toolName?: string;
 }
 
-export interface RlmChildAgentSnapshot {
+interface RlmChildAgentSnapshot {
 	id: string;
 	parentId?: string;
 	activeSessionId?: string;
@@ -337,7 +337,7 @@ export interface RlmChildAgentSnapshot {
 	error?: string;
 }
 
-export type CompactionReason = "manual" | "threshold" | "overflow" | "requested";
+type CompactionReason = "manual" | "threshold" | "overflow" | "requested";
 
 export type AgentSessionEvent =
 	| AgentEvent
@@ -496,7 +496,7 @@ export interface ExtensionBindings {
 	onError?: ExtensionErrorListener;
 }
 
-export interface AutoRefineReviewRequest {
+interface AutoRefineReviewRequest {
 	reason: AutoRefineReason;
 	turnsSinceLastReview: number;
 }
@@ -509,7 +509,7 @@ export interface AutoRefineReviewRequest {
  * - "skip": reviewer declined; no refine needed.
  * - "failure": review or planning threw; boundary should not retry.
  */
-export type SerializedBackgroundPlanResult =
+type SerializedBackgroundPlanResult =
 	| {
 			status: "plan";
 			plan: RefinementPlan;
@@ -597,7 +597,7 @@ interface CommitPreparationSteps<TPrepared, TCommitted> {
 type QueuedAgentMessage = UserMessage | CustomMessage;
 type SessionInputSchedule = "steer" | "followUp";
 
-export interface TurnExecutionPolicy {
+interface TurnExecutionPolicy {
 	preparation: CommitPreparationPolicy;
 	runBeforeAgentStart: boolean;
 	nextTurnContextTiming: "preparation" | "commit" | "skip";
@@ -670,14 +670,14 @@ interface RestoredPromptInput {
 
 export const SESSION_ACTION_RECOVERY_FORMAT_VERSION = 1;
 
-export interface SessionActionRecoveryRecord {
+interface SessionActionRecoveryRecord {
 	id: string;
 	role: DeliveryRecord["role"];
 	message: QueuedAgentMessage;
 	ownerActionId: string;
 }
 
-export type SessionActionRecoveryPayload =
+type SessionActionRecoveryPayload =
 	| {
 			kind: "turn";
 			text: string;
@@ -698,7 +698,7 @@ export type SessionActionRecoveryPayload =
 			images?: ImageContent[];
 	  };
 
-export interface SessionActionRecoveryAction {
+interface SessionActionRecoveryAction {
 	id: string;
 	source: InputSource | "internal";
 	delivery: DeliveryPolicy;
@@ -1093,6 +1093,20 @@ function attributeChildUsage(parentUsage: Usage, childUsage: Usage): void {
 	addAssistantUsage(parentUsage, childUsage);
 	// Child work affects session-level billable totals, not the parent's model-facing context size.
 	parentUsage.totalTokens = parentContextTokens;
+}
+
+/** A silent child whose last message opens like this is treated as stopped
+ * mid-task and continued once, instead of being reported completed. */
+const RLM_MIDTASK_NARRATION_OPENERS =
+	/^(now\b|next[,:]|then\b|let me\b|i'll\b|i am going to\b|starting\b|checking\b|inspecting\b|reading\b|analyzing\b|wave\s*\d+|step\s*\d+)/i;
+
+/** Conservative: only clear forward-looking openers count; anything else keeps
+ * the normal terminal auto-report path so legitimate silent finishes are not
+ * restarted. */
+function looksLikeMidTaskNarration(text: string | undefined): boolean {
+	if (!text) return false;
+	const head = text.trim().slice(0, 200);
+	return head.length > 0 && RLM_MIDTASK_NARRATION_OPENERS.test(head);
 }
 
 export class AgentSession {
@@ -9927,6 +9941,7 @@ export class AgentSession {
 	}
 
 	/** Cap for the structured terminal report a silent child sends its parent. */
+
 	private static readonly RLM_TERMINAL_AUTO_REPORT_MAX_CHARS = 1500;
 
 	/**
@@ -10709,8 +10724,8 @@ export class AgentSession {
 					}
 				});
 				run.unsubscribe = unsubscribeChildEvents;
-				const content = `[task from parent]\n\n${prompt}`;
-				const spawnMessage: AgentSessionMessage = {
+				let content = `[task from parent]\n\n${prompt}`;
+				let spawnMessage: AgentSessionMessage = {
 					role: "custom",
 					customType: AGENT_MESSAGE_CUSTOM_TYPE,
 					content,
@@ -10729,12 +10744,51 @@ export class AgentSession {
 				};
 				throwIfCancelled();
 				const parentReplyCountBeforeRun = child._parentReplyCount;
-				await child.promptAndWait(content, {
-					expandPromptTemplates: false,
-					source: "extension",
-					customMessage: spawnMessage,
-				});
-				if (run.error) throw new Error(run.error);
+				// A model sometimes ends its turn right after narrating its next step
+				// ("Now wave 3...", "Let me check..."), which resolves the run while the
+				// task is unfinished. One bounded continuation asks it to finish or
+				// explicitly report, instead of the parent receiving "completed".
+				let midTaskContinuations = 0;
+				for (;;) {
+					await child.promptAndWait(content, {
+						expandPromptTemplates: false,
+						source: "extension",
+						customMessage: spawnMessage,
+					});
+					if (run.error) throw new Error(run.error);
+					const childFailedNow = (() => {
+						const lastChildMessage = child.messages[child.messages.length - 1] as AssistantMessage | undefined;
+						return (
+							lastChildMessage?.role === "assistant" &&
+							(lastChildMessage as AssistantMessage).stopReason === "error"
+						);
+					})();
+					const silentNow = child._repliedToParentSinceTask !== true;
+					if (
+						!childFailedNow &&
+						silentNow &&
+						midTaskContinuations < 1 &&
+						looksLikeMidTaskNarration(child.getLastAssistantText())
+					) {
+						midTaskContinuations += 1;
+						const lastText = compactRlmText(child.getLastAssistantText() ?? "", 160);
+						const continuePrompt = `Your previous turn ended after: "${lastText}". That reads as mid-task narration, not a finished result. Either continue the task now, or reply to your parent via agent_message.send with a final summary of the outcome.`;
+						content = `[continuation from parent]\n\n${continuePrompt}`;
+						spawnMessage = {
+							...spawnMessage,
+							content,
+							details: {
+								...spawnMessage.details,
+								id: `continue:${run.id}:${String(midTaskContinuations)}`,
+								message: continuePrompt,
+							},
+							timestamp: Date.now(),
+						};
+						throwIfCancelled();
+						continue;
+					}
+					break;
+				}
 				// A provider/lifecycle failure ends the loop with an error-stopReason
 				// assistant message instead of a thrown error, so classify it here.
 				const lastChildMessage = child.messages[child.messages.length - 1] as AssistantMessage | undefined;

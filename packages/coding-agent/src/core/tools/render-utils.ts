@@ -1,5 +1,4 @@
 import * as os from "node:os";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { getImageDimensions, imageFallback, Text } from "@earendil-works/pi-tui";
 import type { ThemeColor } from "../../modes/interactive/theme/theme.js";
 import { stripAnsi } from "../../utils/ansi.js";
@@ -24,7 +23,7 @@ export function replaceTabs(text: string): string {
 	return text.replace(/\t/g, "   ");
 }
 
-export interface TextOutputOptions {
+interface TextOutputOptions {
 	/** Whether image fallbacks should parse image dimensions from base64 data. */
 	includeImageDimensions?: boolean;
 }
@@ -58,11 +57,6 @@ export function getTextOutput(
 
 	return output;
 }
-
-export type ToolRenderResultLike<TDetails> = {
-	content: (TextContent | ImageContent)[];
-	details: TDetails;
-};
 
 export function invalidArgText(theme: { fg: (name: ThemeColor, text: string) => string }): string {
 	return theme.fg("error", "[invalid arg]");

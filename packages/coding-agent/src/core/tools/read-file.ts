@@ -74,7 +74,7 @@ export interface ReadFileToolDetails {
 	truncated: boolean;
 }
 
-export interface ReadFileBatchFileDetails {
+interface ReadFileBatchFileDetails {
 	path: string;
 	givenPath: string;
 	bytes: number;
@@ -92,7 +92,7 @@ export interface ReadFileBatchToolDetails {
 	files: ReadFileBatchFileDetails[];
 }
 
-export type ReadFileResultDetails = ReadFileToolDetails | ReadFileBatchToolDetails;
+type ReadFileResultDetails = ReadFileToolDetails | ReadFileBatchToolDetails;
 
 /**
  * Pluggable operations for the read-file tool.
@@ -124,12 +124,12 @@ export interface ReadFileToolOptions {
 	maxBatchBytes?: number;
 }
 
-export interface ReadFileToolResult {
+interface ReadFileToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details: ReadFileToolDetails;
 }
 
-export interface ReadFileBatchResult {
+interface ReadFileBatchResult {
 	content: Array<{ type: "text"; text: string }>;
 	details: ReadFileBatchToolDetails;
 }

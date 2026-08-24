@@ -169,13 +169,13 @@ import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } fro
 import { createWriteFileTool, createWriteFileToolDefinition } from "./write-file.js";
 
 export type Tool = AgentTool;
-export type ToolDef = ToolDefinition;
+type ToolDef = ToolDefinition;
 /**
  * Priority-ordered: agents should pick the first tool that fits the job and
  * treat bash as the last resort (mission rule - natives run in-process on
  * every OS; bash assumes a Unix shell).
  */
-export type ToolName =
+type ToolName =
 	| "read_file"
 	| "write_file"
 	| "edit"

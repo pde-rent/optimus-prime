@@ -11,7 +11,7 @@ import type { Theme } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition, ToolRenderContext } from "../extensions/types.js";
 import { ansiLinesToHtml } from "./ansi-to-html.js";
 
-export interface ToolHtmlRendererDeps {
+interface ToolHtmlRendererDeps {
 	/** Function to look up tool definition by name */
 	getToolDefinition: (name: string) => ToolDefinition | undefined;
 	/** Theme for styling */

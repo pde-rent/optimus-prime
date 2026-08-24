@@ -62,8 +62,8 @@ const tailSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
-export type HeadToolInput = Static<typeof headSchema>;
-export type TailToolInput = Static<typeof tailSchema>;
+type HeadToolInput = Static<typeof headSchema>;
+type TailToolInput = Static<typeof tailSchema>;
 
 export interface WindowToolDetails {
 	path: string;
@@ -92,7 +92,7 @@ export interface WindowBatchDetails {
 	files: WindowBatchFileDetails[];
 }
 
-export type WindowResultDetails = WindowToolDetails | WindowBatchDetails;
+type WindowResultDetails = WindowToolDetails | WindowBatchDetails;
 
 const SMALL_FILE = 512 * 1024;
 const MAX_WINDOW = 1024 * 1024;

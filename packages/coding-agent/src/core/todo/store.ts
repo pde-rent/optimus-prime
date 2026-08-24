@@ -2,10 +2,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { acquireLockSyncWithRetry } from "../file-lock.js";
 
-export const TODO_FILENAME = ".optimus-todo.json";
+const TODO_FILENAME = ".optimus-todo.json";
 
 export type TodoStatus = "todo" | "ongoing" | "done";
-export const TODO_STATUSES: readonly TodoStatus[] = ["todo", "ongoing", "done"];
 
 export interface TodoTask {
 	id: string;

@@ -17,7 +17,7 @@ import { NetAbortedError, NetTimeoutError } from "./core.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface SshTarget {
+interface SshTarget {
 	host: string;
 	port?: number;
 	user?: string;
@@ -36,16 +36,16 @@ export interface SshTarget {
 }
 
 /** Minimal structural process handle so tests can mock spawning. */
-export interface SshProcess {
+interface SshProcess {
 	exited: Promise<number>;
 	stdout: ReadableStream<Uint8Array>;
 	stderr: ReadableStream<Uint8Array>;
 	kill(signal?: number): void;
 }
 
-export type SshSpawn = (argv: string[], options: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" }) => SshProcess;
+type SshSpawn = (argv: string[], options: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" }) => SshProcess;
 
-export interface SshDeps {
+interface SshDeps {
 	spawn?: SshSpawn;
 	which?: (binary: string) => string | null;
 }
@@ -57,7 +57,7 @@ export interface SshExecResult {
 	truncated: boolean;
 }
 
-export interface ScpResult {
+interface ScpResult {
 	bytes: number;
 	localPath: string;
 	remotePath: string;
@@ -80,17 +80,17 @@ function commonSshFlags(target: SshTarget): string[] {
 	return flags;
 }
 
-export function targetString(target: SshTarget): string {
+function targetString(target: SshTarget): string {
 	return target.user ? `${target.user}@${target.host}` : target.host;
 }
 
 /** Build the full argv for exec; command is an argv array, never shell-joined. */
-export function buildExecArgv(target: SshTarget, command: string[]): string[] {
+function buildExecArgv(target: SshTarget, command: string[]): string[] {
 	return ["ssh", ...commonSshFlags(target), "--", targetString(target), ...command];
 }
 
 /** Build the full argv for scp put/get (-O for the classic protocol, not SFTP). */
-export function buildScpArgv(target: SshTarget, source: string, destination: string): string[] {
+function buildScpArgv(target: SshTarget, source: string, destination: string): string[] {
 	const flags = ["-O"];
 	if (target.batchMode !== false) flags.push("-o", "BatchMode=yes");
 	flags.push("-o", `StrictHostKeyChecking=${target.strictHostKeyChecking ?? "yes"}`);
@@ -170,7 +170,7 @@ function checkAborted(signal?: AbortSignal): void {
 // Operations
 // ---------------------------------------------------------------------------
 
-export interface SshExecOptions {
+interface SshExecOptions {
 	/** Kill the process on expiry. Default 30_000 ms. */
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -206,7 +206,7 @@ export async function sshExec(target: SshTarget, command: string[], opts?: SshEx
 	};
 }
 
-export interface ScpOptions {
+interface ScpOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
 	deps?: SshDeps;

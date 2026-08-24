@@ -70,7 +70,7 @@ const GET_STATE_MAX_REFINEMENTS = 20;
  * five it needs to decide "is this the memory I want, and how do I fetch it" are
  * sent by default; the rest are diagnostics behind `verbose`.
  */
-export interface HarnessSearchMemoryHit {
+interface HarnessSearchMemoryHit {
 	id: string;
 	scope: HarnessScope;
 	title: string;
@@ -92,7 +92,7 @@ export interface HarnessSearchMemoryHit {
 	content_chars?: number;
 }
 
-export interface HarnessSearchMemoryResponse {
+interface HarnessSearchMemoryResponse {
 	query: string;
 	query_terms: string[];
 	top_k: number;
@@ -110,7 +110,7 @@ export interface HarnessSearchMemoryResponse {
 	paths?: string[];
 }
 
-export interface HarnessGetMemoryResponse {
+interface HarnessGetMemoryResponse {
 	key: string;
 	id: string;
 	scope: HarnessScope;

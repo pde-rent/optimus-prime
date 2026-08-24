@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
  * Spec: Documentation/git-config.txt (FORMATS section).
  */
 
-export interface ConfigEntry {
+interface ConfigEntry {
 	section: string;
 	subsection: string | null;
 	key: string;
@@ -81,13 +81,13 @@ export function serializeConfigText(entries: ConfigEntry[]): string {
 }
 
 /** Dotted lookup path, e.g. "user.name" or "remote.origin.url". */
-export interface ConfigPath {
+interface ConfigPath {
 	section: string;
 	subsection: string | null;
 	key: string;
 }
 
-export function parseConfigPath(path: string): ConfigPath {
+function parseConfigPath(path: string): ConfigPath {
 	const parts = path.split(".");
 	if (parts.length < 2) throw new Error(`config path needs a section: ${path}`);
 	return {
@@ -101,12 +101,12 @@ function matches(entry: ConfigEntry, target: ConfigPath): boolean {
 	return entry.section === target.section && entry.subsection === target.subsection && entry.key === target.key;
 }
 
-export function configGetAll(entries: ConfigEntry[], path: string): string[] {
+function configGetAll(entries: ConfigEntry[], path: string): string[] {
 	const target = parseConfigPath(path);
 	return entries.filter((entry) => matches(entry, target)).map((entry) => entry.value);
 }
 
-export function configGet(entries: ConfigEntry[], path: string): string | undefined {
+function configGet(entries: ConfigEntry[], path: string): string | undefined {
 	const all = configGetAll(entries, path);
 	return all[all.length - 1];
 }

@@ -18,8 +18,8 @@ export const DEFAULT_AGENT_MESSAGE_RATE_LIMIT_REFILL_MS = 1000;
 /** Legacy daemon wire input accepted and ignored for compatibility. */
 export type AgentSessionMessageDeliveryMode = "auto" | "steer" | "follow_up";
 export type AgentSessionMessageDeliveryStatus = "delivered" | "queued";
-export type AgentSessionMessageRuntimeKind = "top-level" | "subagent";
-export type AgentFamilyStatus = "running" | "idle" | "inactive";
+type AgentSessionMessageRuntimeKind = "top-level" | "subagent";
+type AgentFamilyStatus = "running" | "idle" | "inactive";
 export type AgentFamilyRelationship = "parent" | "sibling" | "child";
 
 export const AGENT_FAMILY_REACH_ERROR = "Agent reach is limited to parent, siblings, and children";
@@ -35,7 +35,7 @@ export interface AgentSessionMessageSender extends Partial<AgentSessionMessageEn
 	clientId?: string;
 }
 
-export type AgentMessageDirection = "received" | "sent";
+type AgentMessageDirection = "received" | "sent";
 
 /** Format the directional role/name segment shared by received and sent agent-message UI. */
 export function formatAgentMessageParticipant(
@@ -85,7 +85,7 @@ export interface AgentFamilyCatalogEntry {
 	sessionPath?: string;
 }
 
-export interface AgentFamilyRosterEntry {
+interface AgentFamilyRosterEntry {
 	relationship: AgentFamilyRelationship;
 	name: string;
 	id: string;
@@ -99,13 +99,13 @@ export interface AgentFamilyRosterResult {
 	entries: AgentFamilyRosterEntry[];
 }
 
-export interface AgentSessionNameScope {
+interface AgentSessionNameScope {
 	parentSessionId?: string;
 	parentSessionPath?: string;
 	depth: number;
 }
 
-export interface AgentSessionNameAvailabilityInput extends AgentSessionNameScope {
+interface AgentSessionNameAvailabilityInput extends AgentSessionNameScope {
 	name: string;
 	ignoreSessionId?: string;
 }
@@ -120,7 +120,7 @@ export interface AgentSessionMessagePayload {
 	target: AgentSessionMessageEndpoint;
 }
 
-export interface AgentSessionMessageDetails {
+interface AgentSessionMessageDetails {
 	id: string;
 	message: string;
 	from?: AgentSessionMessageSender;
@@ -466,7 +466,7 @@ export function createAgentSessionMessageReceipt(
 	};
 }
 
-export interface AgentSessionMessageRateLimiterOptions {
+interface AgentSessionMessageRateLimiterOptions {
 	capacity?: number;
 	refillMs?: number;
 	now?: () => number;

@@ -31,7 +31,7 @@ const AGENT = "agent=pi-git/1";
 
 // -- remote config ------------------------------------------------------------
 
-export interface RemoteInfo {
+interface RemoteInfo {
 	name: string;
 	url: string;
 }
@@ -91,7 +91,7 @@ interface LocalRefSource {
 }
 
 /** Enumerate all local refs (loose under refs/ plus packed-refs). */
-export function listLocalRefs(repo: GitRepository): LocalRefSource[] {
+function listLocalRefs(repo: GitRepository): LocalRefSource[] {
 	const refs: LocalRefSource[] = [];
 	for (const name of listRefNames(repo.gitDir, "refs")) {
 		const sha = readRawRef(repo.gitDir, name);
@@ -169,7 +169,7 @@ function advertisedHeadTarget(advertisement: { capabilities: Set<string>; refs: 
 
 // -- fetch --------------------------------------------------------------------
 
-export interface FetchOptions {
+interface FetchOptions {
 	depth?: number;
 	credentials?: RemoteCredentials;
 	onProgress?: (text: string) => void;
@@ -287,7 +287,7 @@ function applyShallowState(gitDir: string, shallow: string[], unshallow: string[
 
 // -- clone --------------------------------------------------------------------
 
-export interface CloneOptions {
+interface CloneOptions {
 	depth?: number;
 	branch?: string;
 	remoteName?: string;
@@ -324,7 +324,7 @@ export async function cloneRepository(
 // -- checkout (minimal: trees -> worktree + stage-0 index) --------------------
 
 /** Materialize HEAD's tree into the worktree and rebuild the stage-0 index. */
-export function checkoutWorktree(repo: GitRepository): void {
+function checkoutWorktree(repo: GitRepository): void {
 	const treeSha = repo.headTreeSha();
 	if (treeSha === null) return;
 	const files = flatTree(repo, treeSha);
@@ -353,17 +353,17 @@ export function checkoutWorktree(repo: GitRepository): void {
 
 // -- pull ---------------------------------------------------------------------
 
-export type PullOutcome = "fast-forward" | "up-to-date" | "merged";
+type PullOutcome = "fast-forward" | "up-to-date" | "merged";
 
 /** Hook point for real merges; called instead of throwing when histories diverged. */
-export type MergeSeam = (context: {
+type MergeSeam = (context: {
 	repo: GitRepository;
 	fetchedTip: string;
 	refToUpdate: string;
 	upstreamRef: string;
 }) => "merged" | undefined;
 
-export interface PullOptions extends FetchOptions {
+interface PullOptions extends FetchOptions {
 	onMerge?: MergeSeam;
 }
 
@@ -401,14 +401,14 @@ export async function pullRemote(
 
 // -- push ---------------------------------------------------------------------
 
-export interface PushOptions {
+interface PushOptions {
 	refspecs?: string[];
 	force?: boolean;
 	credentials?: RemoteCredentials;
 	onProgress?: (text: string) => void;
 }
 
-export interface PushRefResult {
+interface PushRefResult {
 	refName: string;
 	ok: boolean;
 	reason?: string;

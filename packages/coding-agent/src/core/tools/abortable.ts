@@ -10,7 +10,7 @@
  */
 const ABORTED = new Error("Operation aborted");
 
-export interface AbortGuard {
+interface AbortGuard {
 	readonly aborted: boolean;
 	/** Detach the abort listener (idempotent). */
 	cleanup(): void;

@@ -12,7 +12,7 @@ export function getMutationQueueKey(filePath: string): string {
 	}
 }
 
-export type FileMutationListener = (filePath: string) => void;
+type FileMutationListener = (filePath: string) => void;
 
 const mutationListeners = new Set<FileMutationListener>();
 

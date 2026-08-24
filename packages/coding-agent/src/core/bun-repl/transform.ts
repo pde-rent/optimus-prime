@@ -17,7 +17,7 @@
  * assigned onto `globalThis` (see rewriteImport below).
  */
 
-export interface TransformResult {
+interface TransformResult {
 	/** The rewritten code, ready to be wrapped in an async IIFE. */
 	code: string;
 	/** The text of the final top-level statement, if it was an expression (used for result capture). */

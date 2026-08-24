@@ -100,7 +100,7 @@ export interface InjectionRefSite {
 	end: number;
 }
 
-export interface InjectionExpansion {
+interface InjectionExpansion {
 	text: string;
 	injected: string[];
 	failed: Array<{ name: string; reason: string }>;
@@ -248,7 +248,7 @@ export function expandInjectionRefs(
 	return { text: out, injected, failed, remainingBudget };
 }
 
-export interface BunReplExecuteOptions {
+interface BunReplExecuteOptions {
 	signal?: AbortSignal;
 	timeout?: number;
 	/**

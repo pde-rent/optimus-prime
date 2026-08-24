@@ -1,7 +1,7 @@
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 
-export type SideQuestionStatus = "running" | "complete" | "cancelled" | "error";
+type SideQuestionStatus = "running" | "complete" | "cancelled" | "error";
 
 export interface SideQuestionEvent {
 	id: string;
@@ -11,7 +11,7 @@ export interface SideQuestionEvent {
 	errorMessage?: string;
 }
 
-export interface SideQuestionTurn {
+interface SideQuestionTurn {
 	question: string;
 	answer: string;
 }

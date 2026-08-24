@@ -14,7 +14,7 @@ import { type TLSSocket, connect as tlsConnect } from "node:tls";
 // Errors (§2.5)
 // ---------------------------------------------------------------------------
 
-export type NetErrorCode = "NET_CONNECT" | "NET_AUTH" | "NET_PROTOCOL" | "NET_TIMEOUT" | "NET_ABORTED";
+type NetErrorCode = "NET_CONNECT" | "NET_AUTH" | "NET_PROTOCOL" | "NET_TIMEOUT" | "NET_ABORTED";
 
 export class NetError extends Error {
 	readonly code: NetErrorCode;
@@ -72,7 +72,7 @@ export interface TlsOptions {
 	rejectUnauthorized?: boolean;
 }
 
-export interface TcpConnectOptions {
+interface TcpConnectOptions {
 	host: string;
 	port: number;
 	/** Implicit TLS from the first byte (SMTPS 465, IMAPS 993, FTPS 990). */
@@ -82,7 +82,7 @@ export interface TcpConnectOptions {
 	signal?: AbortSignal;
 }
 
-export interface ReadOptions {
+interface ReadOptions {
 	/** Deadline in ms; on expiry the socket is destroyed and NetTimeoutError thrown. */
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -90,7 +90,7 @@ export interface ReadOptions {
 	atLeast?: number;
 }
 
-export interface WriteOptions {
+interface WriteOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
 }
@@ -560,11 +560,6 @@ export function isFinalReplyLine(line: string): boolean {
 	return line.length <= 3 || line[3] !== "-";
 }
 
-/** True while reply lines still carry "-" after the status code. */
-export function isContinuedReplyLine(line: string): boolean {
-	return line.length > 3 && line[3] === "-";
-}
-
 /**
  * Shared multi-line continuation collector: read lines until the terminal-line
  * predicate fires; return every line including the terminal one.
@@ -587,7 +582,7 @@ export async function collectLines(
 
 const secretCommandCache = new Map<string, string>();
 
-export interface CredentialSpec {
+interface CredentialSpec {
 	/** Env-var name or literal value. */
 	user?: string;
 	/** Env-var name, literal value, or "!"-prefixed shell command. */
@@ -603,7 +598,7 @@ export interface CredentialSpec {
  * missing credential - never silently the var name. A "!" prefix runs the rest
  * as a cached shell command, same contract as resolveConfigValue.
  */
-export function resolveCredField(raw: string | undefined): string | undefined {
+function resolveCredField(raw: string | undefined): string | undefined {
 	if (raw === undefined) return undefined;
 	if (raw.startsWith("!")) return runSecretCommand(raw);
 	const envValue = process.env[raw];

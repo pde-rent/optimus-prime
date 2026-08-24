@@ -19,7 +19,7 @@ import type { GitRepository } from "./repository.js";
  * in src/utils/diff.ts - reused, not reimplemented (spec §7 fallback path).
  */
 
-export interface DiffOptions {
+interface DiffOptions {
 	contextLines?: number;
 	/**
 	 * Byte source for blob shas that are not in the object store - diffWorktree
@@ -29,7 +29,7 @@ export interface DiffOptions {
 	readBytes?: (sha: string) => Uint8Array;
 }
 
-export interface FileDiff {
+interface FileDiff {
 	path: string;
 	oldMode: string | null;
 	newMode: string | null;
@@ -41,7 +41,7 @@ export interface FileDiff {
 }
 
 /** NUL byte in the first 8 KiB means binary (isomorphic-git isBinary heuristic, spec §7). */
-export function isBinaryContent(bytes: Uint8Array): boolean {
+function isBinaryContent(bytes: Uint8Array): boolean {
 	const head = bytes.subarray(0, 8192);
 	for (let i = 0; i < head.length; i++) if (head[i] === 0) return true;
 	return false;
@@ -231,7 +231,7 @@ function toDiffLines(text: string): DiffLine[] {
  * Build git-style "@@ -a,b +c,d @@" hunk blocks: changed step regions expanded by
  * `context` lines on each side, merged when the expansions overlap.
  */
-export function buildHunks(beforeText: string, afterText: string, context: number): string[] {
+function buildHunks(beforeText: string, afterText: string, context: number): string[] {
 	const changes = diffLines(beforeText, afterText);
 	const before = toDiffLines(beforeText);
 	const after = toDiffLines(afterText);
@@ -347,7 +347,7 @@ function emitLine(out: string[], prefix: string, line: DiffLine): void {
 }
 
 /** All files differing between two snapshot maps, sorted by path. */
-export function diffSnapshots(
+function diffSnapshots(
 	repo: GitRepository,
 	beforeFiles: Map<string, TreeFile>,
 	afterFiles: Map<string, TreeFile>,

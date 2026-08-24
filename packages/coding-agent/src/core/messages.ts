@@ -35,12 +35,12 @@ export const COMPACTION_OUTCOME_CUSTOM_TYPE = "compaction_outcome";
 export const RLM_CHILD_FAILURE_CUSTOM_TYPE = "rlm_child_failure";
 export const RLM_CHILD_TERMINAL_NOTICE_CUSTOM_TYPE = "rlm_child_terminal_notice";
 
-export interface SessionSlashCommandDetails {
+interface SessionSlashCommandDetails {
 	command: SessionSlashCommand;
 	commandEntryId?: string;
 }
 
-export interface SessionSlashCommandResultDetails {
+interface SessionSlashCommandResultDetails {
 	command: SessionSlashCommand;
 	success: boolean;
 	severity: "info" | "warning" | "error";
@@ -48,7 +48,7 @@ export interface SessionSlashCommandResultDetails {
 	commandEntryId?: string;
 }
 
-export interface SessionSlashCommandMessage extends CustomMessage<SessionSlashCommandDetails> {
+interface SessionSlashCommandMessage extends CustomMessage<SessionSlashCommandDetails> {
 	customType: typeof SESSION_SLASH_COMMAND_CUSTOM_TYPE;
 	content: string;
 	details: SessionSlashCommandDetails;
@@ -63,7 +63,7 @@ export interface SessionSlashCommandResultMessage extends CustomMessage<SessionS
 export type CompactionOutcomeReason = "threshold" | "overflow" | "requested";
 export type CompactionOutcome = "skipped" | "cancelled" | "failed";
 
-export interface CompactionOutcomeDetails {
+interface CompactionOutcomeDetails {
 	reason: CompactionOutcomeReason;
 	outcome: CompactionOutcome;
 }
@@ -232,7 +232,7 @@ export function bashOutputToText(
 /**
  * Convert a BashExecutionMessage to user message text for LLM context.
  */
-export function bashExecutionToText(msg: BashExecutionMessage): string {
+function bashExecutionToText(msg: BashExecutionMessage): string {
 	return `Ran \`${msg.command}\`\n${bashOutputToText(msg)}`;
 }
 

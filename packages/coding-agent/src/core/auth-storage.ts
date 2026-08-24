@@ -49,7 +49,7 @@ export type AuthStatus = {
 	label?: string;
 };
 
-export type AuthStorageOptions = {
+type AuthStorageOptions = {
 	optimusCliConfigPath?: string;
 	useOptimusCliConfig?: boolean;
 };

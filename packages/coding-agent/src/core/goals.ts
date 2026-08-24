@@ -8,7 +8,7 @@ export const GOAL_SKILL_NAME = "goal";
 const MAX_THREAD_GOAL_OBJECTIVE_CHARS = 4000;
 
 export type GoalStatus = "idle" | "active" | "paused" | "budget_limited" | "complete" | "error";
-export type GoalContextKind = "continuation" | "budget_limit" | "objective_updated";
+type GoalContextKind = "continuation" | "budget_limit" | "objective_updated";
 
 export interface GoalState {
 	active: boolean;
@@ -26,7 +26,7 @@ export interface GoalState {
 }
 
 /** Goal payload returned to the goal skill. Keys stay snake_case to match the host-request contract. */
-export type SerializedGoal = {
+type SerializedGoal = {
 	goal_id?: string;
 	objective: string;
 	status: Exclude<GoalStatus, "idle">;

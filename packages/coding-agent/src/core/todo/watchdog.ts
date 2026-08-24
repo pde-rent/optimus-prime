@@ -3,7 +3,7 @@ import { openTodoTasks, type TodoTask } from "./store.js";
 
 export const TODO_WATCHDOG_CUSTOM_TYPE = "todo_watchdog";
 
-export interface TodoWatchdogDetails {
+interface TodoWatchdogDetails {
 	kind: "continuation";
 	/** Open (not done) task count at fire time. */
 	openCount: number;

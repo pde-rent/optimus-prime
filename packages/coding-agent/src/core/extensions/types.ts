@@ -707,7 +707,7 @@ export interface ModelSelectEvent {
 }
 
 /** Fired when a new thinking level is selected */
-export interface ThinkingLevelSelectEvent {
+interface ThinkingLevelSelectEvent {
 	type: "thinking_level_select";
 	level: ThinkingLevel;
 	previousLevel: ThinkingLevel;
@@ -1249,9 +1249,9 @@ export type SendUserMessageHandler = (
 
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 
-export type SetSessionNameHandler = (name: string) => void | Promise<void>;
+type SetSessionNameHandler = (name: string) => void | Promise<void>;
 
-export type GetSessionNameHandler = () => string | undefined;
+type GetSessionNameHandler = () => string | undefined;
 
 export type GetActiveToolsHandler = () => string[];
 
@@ -1266,7 +1266,7 @@ export type GetCommandsHandler = () => SlashCommandInfo[];
 
 export type SetActiveToolsHandler = (toolNames: string[]) => void;
 
-export type RefreshToolsHandler = () => void;
+type RefreshToolsHandler = () => void;
 
 export type SetModelHandler = (model: Model<Api>) => Promise<boolean>;
 
@@ -1280,7 +1280,7 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
  * Shared state created by loader, used during registration and runtime.
  * Contains flag values (defaults set during registration, CLI values set after).
  */
-export interface ExtensionRuntimeState {
+interface ExtensionRuntimeState {
 	flagValues: Map<string, boolean | string>;
 	/**
 	 * Extra env vars merged over process.env for pi.exec() subprocesses (an

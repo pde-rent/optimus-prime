@@ -2,7 +2,7 @@ import { matchesSavedSessionSelector, normalizeSessionId } from "./session-id.js
 import type { SessionInfo } from "./session-manager.js";
 import { SessionManager } from "./session-manager.js";
 
-export type ResolvedSession =
+type ResolvedSession =
 	| { type: "path"; path: string }
 	| { type: "local"; path: string }
 	| { type: "global"; path: string; cwd: string };

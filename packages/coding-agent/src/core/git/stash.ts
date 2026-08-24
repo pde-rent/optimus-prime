@@ -17,7 +17,7 @@ import { applyTreeChanges, rebuildIndexFromTree } from "./worktree.js";
 const STASH_REF = "refs/stash";
 const STASH_LOG = join("logs", "refs", "stash");
 
-export interface StashEntry {
+interface StashEntry {
 	sha: string;
 	/** Reflog message ("WIP on main: abc1234 subject" or a custom one). */
 	message: string;
@@ -152,7 +152,7 @@ export function stashList(repo: GitRepository): StashEntry[] {
 		.reverse();
 }
 
-export interface StashApplyResult {
+interface StashApplyResult {
 	conflicts: string[];
 }
 

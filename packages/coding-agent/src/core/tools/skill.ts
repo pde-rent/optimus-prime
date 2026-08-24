@@ -29,7 +29,7 @@ export interface SkillToolDetails {
  * Minimal shape the tool needs. Structural on purpose: callers hand over the live
  * ResourceLoader result, tests hand over fixtures.
  */
-export interface SkillToolSkill {
+interface SkillToolSkill {
 	name: string;
 	filePath: string;
 	baseDir: string;

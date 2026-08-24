@@ -33,33 +33,6 @@ import { wrapToolDefinition } from "../tool-definition-wrapper.js";
 import { truncateHead } from "../truncate.js";
 import { clampInt, formatTable } from "./sysutil.js";
 
-// ---------------------------------------------------------------------------
-// Op metadata: the permission envelope per op group. The tool as a whole is
-// kind "edit" (it can mutate), but permission flows and callers that want a
-// finer envelope can consult GIT_OP_GROUPS: read-only groups never touch
-// worktree, index or refs.
-// ---------------------------------------------------------------------------
-
-export type GitOpGroup = "inspect" | "stage" | "history" | "branch" | "remote";
-
-export interface GitOpInfo {
-	op: string;
-	group: GitOpGroup;
-	readOnly: boolean;
-}
-
-export const GIT_OP_GROUPS: Array<{ group: GitOpGroup; readOnly: boolean; ops: string[] }> = [
-	{ group: "inspect", readOnly: true, ops: ["status", "log", "diff", "branch.list", "stash.list", "remote.list"] },
-	{ group: "stage", readOnly: false, ops: ["add", "commit", "reset", "restore"] },
-	{
-		group: "history",
-		readOnly: false,
-		ops: ["merge", "cherry-pick", "revert", "rebase", "stash.push", "stash.apply", "stash.pop", "stash.drop"],
-	},
-	{ group: "branch", readOnly: false, ops: ["checkout", "branch.create", "branch.delete"] },
-	{ group: "remote", readOnly: false, ops: ["clone", "fetch", "pull", "push", "remote.add", "remote.remove"] },
-];
-
 const READ_ONLY_OPS = new Set(["status", "log", "diff", "ls-files"]);
 
 function _opReadOnly(op: string): boolean {
@@ -270,7 +243,9 @@ const gitSchema = Type.Union([
 	),
 ]);
 
-export type GitToolInput = Static<typeof gitSchema>;
+type GitOpGroup = "inspect" | "stage" | "history" | "branch" | "remote";
+
+type GitToolInput = Static<typeof gitSchema>;
 
 export interface GitToolDetails {
 	op: string;

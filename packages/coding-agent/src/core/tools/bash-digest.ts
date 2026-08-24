@@ -10,7 +10,7 @@
 
 import { formatSize } from "./truncate.js";
 
-export interface BashDigestInput {
+interface BashDigestInput {
 	/** The executed command */
 	command: string;
 	/** First bytes of the full output */

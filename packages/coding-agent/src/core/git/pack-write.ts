@@ -15,7 +15,7 @@ import { applyDelta, decodeOfsDistance, packEntryHeader } from "./pack-read.js";
  * Spec: Documentation/gitformat-pack.txt in git.git.
  */
 
-export const PACK_SIGNATURE = 0x5041434b; // "PACK"
+const PACK_SIGNATURE = 0x5041434b; // "PACK"
 
 /** Objects that can be packed; sha is computed when absent and deduplicated. */
 export interface PackableObject {
@@ -29,7 +29,7 @@ const TYPE_NUMBERS: Record<GitObjectType, number> = { commit: 1, tree: 2, blob: 
 // -- varint helpers -----------------------------------------------------------
 
 /** Pack object header size encoding (7-bit groups, least-significant first). */
-export function encodeSizeHeader(typeNumber: number, size: number): Uint8Array {
+function encodeSizeHeader(typeNumber: number, size: number): Uint8Array {
 	const bytes: number[] = [];
 	let first = (typeNumber << 4) | (size & 0x0f);
 	size >>>= 4;
@@ -43,7 +43,7 @@ export function encodeSizeHeader(typeNumber: number, size: number): Uint8Array {
 }
 
 /** OFS_DELTA negative-offset encoding; inverse of acc = ((acc + 1) << 7) | byte. */
-export function encodeOfsOffset(offset: number): Uint8Array {
+function encodeOfsOffset(offset: number): Uint8Array {
 	const bytes = [offset & 0x7f];
 	let value = offset >> 7;
 	while (value > 0) {
@@ -232,13 +232,13 @@ function chooseDelta(body: Uint8Array, emitted: Array<{ body: Uint8Array; sha: s
 	return best;
 }
 
-export interface BuildPackOptions {
+interface BuildPackOptions {
 	/** Attempt ofs-delta compression against other objects in this pack (default true). */
 	delta?: boolean;
 	maxDeltaCandidates?: number;
 }
 
-export interface PackEntryInfo {
+interface PackEntryInfo {
 	sha: string;
 	/** Byte offset of the entry's first header byte inside the pack. */
 	offset: number;
@@ -246,7 +246,7 @@ export interface PackEntryInfo {
 	crc32: number;
 }
 
-export interface BuiltPack {
+interface BuiltPack {
 	pack: Uint8Array;
 	entries: PackEntryInfo[];
 }

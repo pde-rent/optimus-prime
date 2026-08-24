@@ -10,7 +10,7 @@ const SKIP_DIR_NAMES = new Set(["node_modules", ".git"]);
 /** Bytes inspected from a file head when sniffing for binary content. */
 const BINARY_SNIFF_BYTES = 8192;
 
-export interface WalkedEntry {
+interface WalkedEntry {
 	/** Absolute path of the entry. */
 	absPath: string;
 	/** Path relative to the walk root, using forward slashes on every platform. */
@@ -19,7 +19,7 @@ export interface WalkedEntry {
 	isFile: boolean;
 }
 
-export interface WalkOptions {
+interface WalkOptions {
 	/** Gitignore-style glob a file's relative path must match to be visited. */
 	include?: string;
 	/** Gitignore-style glob excluding files whose relative path matches. */

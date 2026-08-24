@@ -489,7 +489,7 @@ function summarizeSkillForPrompt(skill: Pick<Skill, "summary" | "description">):
  * `summary` renders a routing line per skill and defers the contract to the SKILL.md;
  * `full` renders the whole description, as every request used to.
  */
-export type SkillRosterMode = "summary" | "full";
+type SkillRosterMode = "summary" | "full";
 
 /**
  * Deferring is the default because this harness cannot be used without the lookup it
@@ -557,7 +557,7 @@ export function formatSkillsForPrompt(skills: Skill[], options?: { mode?: SkillR
 	return [...intro, "", "<available_skills>", ...lines, "</available_skills>"].join("\n");
 }
 
-export interface LoadSkillsOptions {
+interface LoadSkillsOptions {
 	/** Working directory for project-local skills. */
 	cwd: string;
 	/** Agent config directory for global skills. */

@@ -1,7 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { flatTree, headTreeFiles, sameTreeFile } from "./diff.js";
-import { serializeTag, writeLooseObject } from "./objects.js";
 import { assertValidRefName, deleteRef, listRefNames, refExists, resolveRef } from "./refs.js";
 import type { GitRepository } from "./repository.js";
 import { assertNoLocalEdits, materializeTree } from "./worktree.js";
@@ -10,7 +9,7 @@ import { assertNoLocalEdits, materializeTree } from "./worktree.js";
  * Branch and tag lifecycle plus checkout (HEAD + index + worktree switched together).
  */
 
-export interface RefInfo {
+interface RefInfo {
 	name: string;
 	sha: string | null;
 	current: boolean;
@@ -49,51 +48,6 @@ export function deleteBranch(repo: GitRepository, name: string): boolean {
 	const refName = `refs/heads/${name}`;
 	if (repo.headBranch() === refName) throw new Error(`cannot delete the current branch: ${name}`);
 	return deleteRef(repo.gitDir, refName);
-}
-
-export interface CreateTagOptions {
-	message?: string;
-	tagger?: { name: string; email: string };
-}
-
-/** Create a lightweight tag, or an annotated one when a message is given. Returns the ref target. */
-export function createTag(
-	repo: GitRepository,
-	name: string,
-	startPoint = "HEAD",
-	options: CreateTagOptions = {},
-): string {
-	const refName = `refs/tags/${name}`;
-	assertValidRefName(refName);
-	if (refExists(repo.gitDir, refName)) throw new Error(`tag already exists: ${name}`);
-	const sha = repo.resolveRevision(startPoint);
-	if (sha === null) throw new Error(`unknown revision: ${startPoint}`);
-	if (options.message !== undefined) {
-		const config = repo.config();
-		const who = options.tagger ?? {
-			name: config.get("user.name") ?? "BTR Git Client",
-			email: config.get("user.email") ?? "git@btr.local",
-		};
-		const tagSha = writeLooseObject(
-			repo.gitDir,
-			"tag",
-			serializeTag({
-				object: sha,
-				type: "commit",
-				tag: name,
-				tagger: { ...who, time: Math.floor(Date.now() / 1000), timezoneOffset: "+0000" },
-				message: options.message.endsWith("\n") ? options.message : `${options.message}\n`,
-			}),
-		);
-		repo.updateRef(refName, tagSha);
-		return tagSha;
-	}
-	repo.updateRef(refName, sha);
-	return sha;
-}
-
-export function deleteTag(repo: GitRepository, name: string): boolean {
-	return deleteRef(repo.gitDir, `refs/tags/${name}`);
 }
 
 /**

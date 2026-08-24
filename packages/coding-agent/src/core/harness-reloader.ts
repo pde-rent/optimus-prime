@@ -32,7 +32,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export interface HarnessModuleSpec {
+interface HarnessModuleSpec {
 	/** Stable identifier shown to the user. */
 	id: string;
 	/** Source file path relative to this module's directory (src/core). */
@@ -53,7 +53,7 @@ export const HARNESS_MODULE_MANIFEST: ReadonlyArray<HarnessModuleSpec> = [
 	{ id: "rlm-max-depth", file: "rlm-max-depth.ts", wired: true },
 ];
 
-export interface HarnessReloadResult {
+interface HarnessReloadResult {
 	id: string;
 	wired: boolean;
 	/** Re-import succeeded (module parsed + loaded from source). */
@@ -61,7 +61,7 @@ export interface HarnessReloadResult {
 	error?: string;
 }
 
-export interface HarnessReloadSummary {
+interface HarnessReloadSummary {
 	results: ReadonlyArray<HarnessReloadResult>;
 	/** Number of modules that failed to re-import. */
 	failed: number;

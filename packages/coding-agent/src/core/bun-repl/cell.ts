@@ -7,7 +7,7 @@
 
 const BASH_CELL_MAGIC = /^((?:[ \t]*\r?\n)*)([ \t]*)(%%bash|%%js)\b([^\r\n]*)(\r?\n|$)/;
 
-export interface ParsedCell {
+interface ParsedCell {
 	kind: "bash" | "js";
 	leadingWhitespace: string;
 	indent: string;

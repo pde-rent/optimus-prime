@@ -52,7 +52,7 @@ export interface SessionCommandPayload {
 	text: string;
 }
 
-export type SessionActionPayload = SessionTurnPayload | SessionCommandPayload;
+type SessionActionPayload = SessionTurnPayload | SessionCommandPayload;
 
 export type ActionLifecycle =
 	| { state: "queued" }
@@ -76,7 +76,7 @@ export interface SessionAction<TPayload extends SessionActionPayload = SessionAc
 	suppressAutonomousContinuation?: boolean;
 }
 
-export interface RollbackProof {
+interface RollbackProof {
 	dispatchSettled: true;
 	transcript: readonly AgentMessage[];
 }
@@ -126,13 +126,13 @@ export function transitionSessionAction(
 	action.lifecycle = next;
 }
 
-export type AdmissionDisposition = "starts_when_admitted" | "queued";
-export type SubmissionOutcome =
+type AdmissionDisposition = "starts_when_admitted" | "queued";
+type SubmissionOutcome =
 	| { status: "accepted"; actionId: string; disposition: AdmissionDisposition }
 	| { status: "coalesced"; existingActionId: string }
 	| { status: "handled_without_turn" }
 	| { status: "extension_command"; completion: Promise<void> };
-export type DeliveryOutcome = { status: "delivered" } | { status: "not_applicable" };
+type DeliveryOutcome = { status: "delivered" } | { status: "not_applicable" };
 
 export interface ActionTicket {
 	id: string;
@@ -347,7 +347,7 @@ export interface RuntimeActivity {
 
 export type IdleEvictionMinutes = number | "off";
 
-export interface SessionEvictionSnapshot {
+interface SessionEvictionSnapshot {
 	isSessionActive: boolean;
 	attachedClients: number;
 	hasRegisteredHeartbeat: boolean;

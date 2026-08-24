@@ -64,7 +64,7 @@ export interface NetdiagToolDetails {
 // ping parsing
 // ---------------------------------------------------------------------------
 
-export interface PingSummary {
+interface PingSummary {
 	transmitted: number | null;
 	received: number | null;
 	lossPercent: number | null;

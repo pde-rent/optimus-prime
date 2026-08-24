@@ -48,7 +48,7 @@ export interface AgentObserveRecentMessagesResult {
 	truncated: boolean;
 }
 
-export interface AgentObserveMessagePreview {
+interface AgentObserveMessagePreview {
 	index: number;
 	role: string;
 	timestamp?: number;

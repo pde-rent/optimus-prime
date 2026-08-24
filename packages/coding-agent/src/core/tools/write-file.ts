@@ -71,7 +71,7 @@ export interface WriteFileToolOptions {
 	operations?: WriteFileOperations;
 }
 
-export interface WriteFileToolResult {
+interface WriteFileToolResult {
 	content: Array<{ type: "text"; text: string }>;
 	details: WriteFileToolDetails;
 }

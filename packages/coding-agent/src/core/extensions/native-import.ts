@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 
-export interface VirtualModuleMap {
+interface VirtualModuleMap {
 	[specifier: string]: unknown;
 }
 

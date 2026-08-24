@@ -31,7 +31,7 @@ interface RenderedToolHtml {
 	resultHtmlExpanded?: string;
 }
 
-export interface ExportOptions {
+interface ExportOptions {
 	outputPath?: string;
 	themeName?: string;
 	/** Optional tool renderer for custom tools */

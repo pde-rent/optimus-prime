@@ -261,7 +261,7 @@ type ProviderRequestAuthSource = {
 	resolveValueFingerprint?: () => string | undefined;
 };
 
-export type ResolvedRequestAuth =
+type ResolvedRequestAuth =
 	| {
 			ok: true;
 			apiKey?: string;
@@ -272,7 +272,7 @@ export type ResolvedRequestAuth =
 			error: string;
 	  };
 
-export interface ModelCatalogSnapshot {
+interface ModelCatalogSnapshot {
 	models: Model<Api>[];
 	configuredProviders: string[];
 }
@@ -467,7 +467,7 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 	},
 };
 
-export type DynamicModelsFetcher = () => Promise<unknown>;
+type DynamicModelsFetcher = () => Promise<unknown>;
 
 // Test seam: replaces the HTTP fetch for a provider's discovery endpoint.
 const dynamicModelsFetchers = new Map<string, DynamicModelsFetcher>();

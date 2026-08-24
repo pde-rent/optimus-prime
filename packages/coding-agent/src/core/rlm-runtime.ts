@@ -5,7 +5,7 @@ import type { ToolDefinition } from "./extensions/index.js";
 import type { HostRequestHandler } from "./tools/repl-types.js";
 
 /** Request emitted by `rlm.run`; cellSourceCode preserves the spawning cell for display. */
-export interface RlmRunRequest {
+interface RlmRunRequest {
 	prompt: string;
 	kwargs: Record<string, unknown>;
 	cellSourceCode?: string;
@@ -48,7 +48,7 @@ export interface RlmDeleteSubagentResult {
 	outcome?: "deleted" | "skipped_running";
 }
 
-export interface RlmModelMatch {
+interface RlmModelMatch {
 	provider: string;
 	id: string;
 	name: string;
@@ -59,10 +59,10 @@ export interface RlmFindModelsResult {
 	models: RlmModelMatch[];
 }
 
-export type RlmRunHandler = (request: RlmRunRequest) => Promise<Record<string, unknown>>;
-export type RlmListSubagentsHandler = () => RlmListSubagentsResult | Promise<RlmListSubagentsResult>;
-export type RlmDeleteSubagentHandler = (target: string) => Promise<RlmDeleteSubagentResult>;
-export type RlmFindModelsHandler = (query: string, limit: number) => RlmFindModelsResult | Promise<RlmFindModelsResult>;
+type RlmRunHandler = (request: RlmRunRequest) => Promise<Record<string, unknown>>;
+type RlmListSubagentsHandler = () => RlmListSubagentsResult | Promise<RlmListSubagentsResult>;
+type RlmDeleteSubagentHandler = (target: string) => Promise<RlmDeleteSubagentResult>;
+type RlmFindModelsHandler = (query: string, limit: number) => RlmFindModelsResult | Promise<RlmFindModelsResult>;
 
 const RLM_SUBAGENT_SESSION_NAME_MAX_LENGTH = 64;
 const DEFAULT_RLM_MODEL_SEARCH_LIMIT = 8;
@@ -274,20 +274,13 @@ export interface RlmSetMaxDepthResult {
 	refused?: "cap" | "no_trigger" | "thrash" | "disabled";
 }
 
-export interface RlmGetMaxDepthResult {
-	max_depth: number;
-	depth: number;
-	/** Ceiling on a model-initiated raise. */
-	model_max: number;
-}
-
 export interface RlmGetEffortResult {
 	effort: string;
 	available: string[];
 }
 
-export type RlmSetEffortHandler = (level: ThinkingLevel) => RlmSetEffortResult | Promise<RlmSetEffortResult>;
-export type RlmGetEffortHandler = () => RlmGetEffortResult | Promise<RlmGetEffortResult>;
+type RlmSetEffortHandler = (level: ThinkingLevel) => RlmSetEffortResult | Promise<RlmSetEffortResult>;
+type RlmGetEffortHandler = () => RlmGetEffortResult | Promise<RlmGetEffortResult>;
 
 /** Let the model raise or lower its own reasoning effort for the next turn. */
 export function createRlmSetEffortHostHandler(handler: RlmSetEffortHandler): HostRequestHandler {

@@ -30,7 +30,7 @@ export interface BranchSummaryResult {
 }
 
 /** Details stored in BranchSummaryEntry.details for file tracking */
-export interface BranchSummaryDetails {
+interface BranchSummaryDetails {
 	readFiles: string[];
 	modifiedFiles: string[];
 }

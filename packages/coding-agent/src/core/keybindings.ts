@@ -10,7 +10,7 @@ import { join } from "path";
 import { getAgentDir } from "../config.js";
 import { isRecord, readJsonFile } from "../utils/shared.js";
 
-export interface AppKeybindings {
+interface AppKeybindings {
 	"app.interrupt": true;
 	"app.clear": true;
 	"app.input.clear": true;

@@ -8,7 +8,7 @@ import { registerOAuthProvider, unregisterOAuthProvider } from "@earendil-works/
 import type { AuthStorage } from "../auth-storage.js";
 import type { McpServerConfig } from "../settings-manager.js";
 
-export interface McpManagerOptions {
+interface McpManagerOptions {
 	authStorage: AuthStorage;
 	/** Reads the current Settings.mcpServers (name → config). Re-read on refresh(). */
 	getUserServers?: () => Record<string, McpServerConfig> | undefined;

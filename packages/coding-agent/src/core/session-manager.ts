@@ -101,7 +101,7 @@ export interface NewSessionOptions {
 	rlmDepth?: number;
 }
 
-export type SessionPersistListener = (sessionFile: string) => void;
+type SessionPersistListener = (sessionFile: string) => void;
 
 export interface SessionEntryBase {
 	type: string;
@@ -166,7 +166,7 @@ export interface CustomEntry<T = unknown> extends SessionEntryBase {
  * The child usage is kept separately so audit/UI code can explain why the
  * parent turn's aggregate usage exceeds the parent model response itself.
  */
-export interface ChildUsageAttributionEntry extends SessionEntryBase {
+interface ChildUsageAttributionEntry extends SessionEntryBase {
 	type: "child_usage_attributed";
 	targetId: string;
 	childUsage: Usage;
@@ -207,12 +207,12 @@ export interface AgentStatus {
 	basedOnMessageCount: number;
 }
 
-export interface AgentStatusEntry extends SessionEntryBase {
+interface AgentStatusEntry extends SessionEntryBase {
 	type: "agent_status";
 	status: AgentStatus;
 }
 
-export interface GitStateEntry extends SessionEntryBase {
+interface GitStateEntry extends SessionEntryBase {
 	type: "git_state";
 	git: GitContext;
 }
@@ -243,13 +243,13 @@ export type SessionEntry =
 
 export type FileEntry = SessionHeader | SessionEntry;
 
-export interface SessionTreeFlatNode {
+interface SessionTreeFlatNode {
 	entry: SessionEntry;
 	label?: string;
 	labelTimestamp?: string;
 }
 
-export interface SessionTreeNode extends SessionTreeFlatNode {
+interface SessionTreeNode extends SessionTreeFlatNode {
 	children: SessionTreeNode[];
 }
 
@@ -1109,10 +1109,10 @@ async function scanSessionInfo(filePath: string, stats: Stats): Promise<SessionI
 	}
 }
 
-export type SessionListProgress = (loaded: number, total: number) => void;
-export type SessionListItem = (session: SessionInfo) => void;
+type SessionListProgress = (loaded: number, total: number) => void;
+type SessionListItem = (session: SessionInfo) => void;
 
-export interface SessionListCallbacks {
+interface SessionListCallbacks {
 	onProgress?: SessionListProgress;
 	onSession?: SessionListItem;
 }

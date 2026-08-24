@@ -6,7 +6,7 @@ import { getSessionArtifactPathForFile } from "./session-manager.js";
 
 export type DeleteSessionFileResult = { ok: true; method: "trash" | "unlink" } | { ok: false; error: string };
 
-export interface DeleteSessionFileOptions {
+interface DeleteSessionFileOptions {
 	afterFileRemoved?: () => void;
 }
 

@@ -33,7 +33,7 @@ import { headRefName, refExists, resolveHead, resolveRef, writeRef } from "./ref
 const LOCK_STALE_MS = 5000;
 const LOCK_RETRY_MS = 100;
 
-export class LockBusyError extends Error {
+class LockBusyError extends Error {
 	constructor(readonly lockPath: string) {
 		super(`could not acquire ${lockPath}: locked by another process`);
 	}
@@ -95,7 +95,7 @@ function writeFileLocked(targetPath: string, data: Uint8Array): void {
 
 export type FileStatus = "unmodified" | "staged" | "modified" | "untracked" | "deleted";
 
-export interface CommitSpec {
+interface CommitSpec {
 	tree: string;
 	parents: string[];
 	message: string;
@@ -103,7 +103,7 @@ export interface CommitSpec {
 	committer?: GitSignatureLike;
 }
 
-export interface GitSignatureLike {
+interface GitSignatureLike {
 	name: string;
 	email: string;
 	/** Unix seconds; defaults to now. */

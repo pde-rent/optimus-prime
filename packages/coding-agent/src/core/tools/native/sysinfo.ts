@@ -32,7 +32,7 @@ export interface SysinfoToolDetails {
 	filesystemCount: number;
 }
 
-export interface DiskUsage {
+interface DiskUsage {
 	mount: string;
 	filesystem: string;
 	totalBytes: number;

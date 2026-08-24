@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export interface SnapshotManifest {
+interface SnapshotManifest {
 	version: number;
 	createdAt: string;
 	names: string[];
@@ -14,7 +14,7 @@ export interface SnapshotManifest {
 }
 
 /** A snapshot as read back from disk: the revivable data plus the names that were never captured. */
-export interface LoadedSnapshot {
+interface LoadedSnapshot {
 	/** Structured-clone payload, base64; absent for legacy JSON snapshots. */
 	dataB64?: string;
 	/** Payload of a snapshot written before the structured-clone format. */

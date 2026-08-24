@@ -8,14 +8,14 @@ import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { waitForChildProcess } from "../../../utils/child-process.js";
 
-export interface BinaryResult {
+interface BinaryResult {
 	stdout: string;
 	stderr: string;
 	code: number;
 }
 
 /** Resolve a bare command name against PATH (PATHEXT-aware on win32). */
-export function lookupPath(command: string): string | null {
+function lookupPath(command: string): string | null {
 	if (command.includes("/") || command.includes("\\")) {
 		return command;
 	}

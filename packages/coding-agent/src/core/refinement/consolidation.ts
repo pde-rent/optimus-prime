@@ -28,17 +28,17 @@ export interface ConsolidateHarnessMemoriesOptions {
 	contentThreshold?: number;
 }
 
-export interface HarnessMemoryMerge {
+interface HarnessMemoryMerge {
 	keptId: string;
 	mergedIds: string[];
 }
 
-export interface HarnessMemoryDeletion {
+interface HarnessMemoryDeletion {
 	keptId: string;
 	deletedIds: string[];
 }
 
-export interface HarnessMemoryConsolidation {
+interface HarnessMemoryConsolidation {
 	state: HarnessState;
 	merged: HarnessMemoryMerge[];
 	deleted: HarnessMemoryDeletion[];

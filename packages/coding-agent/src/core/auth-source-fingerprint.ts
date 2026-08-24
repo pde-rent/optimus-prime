@@ -6,7 +6,7 @@ function fingerprintAuthSource(source: string, material: string): string {
 	return `${source}:${digest}`;
 }
 
-export interface AuthSourceFingerprintOptions<S extends string, C extends boolean> {
+interface AuthSourceFingerprintOptions<S extends string, C extends boolean> {
 	source: S;
 	configured: C;
 	label?: string;
@@ -15,7 +15,7 @@ export interface AuthSourceFingerprintOptions<S extends string, C extends boolea
 	resolveValueMaterial?: () => string | undefined;
 }
 
-export interface AuthSourceFingerprints<S extends string, C extends boolean> {
+interface AuthSourceFingerprints<S extends string, C extends boolean> {
 	configured: C;
 	source: S;
 	label?: string;

@@ -15,9 +15,9 @@ import { applyTreeChanges, hasLocalEdits } from "./worktree.js";
 
 const STATE_FILE = "rebase-in-progress";
 
-export type RebaseStatus = "up-to-date" | "fast-forward" | "rebased" | "conflict";
+type RebaseStatus = "up-to-date" | "fast-forward" | "rebased" | "conflict";
 
-export interface RebaseOutcome {
+interface RebaseOutcome {
 	status: RebaseStatus;
 	commit: string | null;
 	/** When stopped mid-replay: the original commit being applied. */

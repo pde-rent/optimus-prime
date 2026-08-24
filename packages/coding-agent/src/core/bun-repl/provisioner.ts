@@ -108,7 +108,7 @@ export class IdleReapScheduler {
 	}
 }
 
-export interface BunReplProvisionerOptions {
+interface BunReplProvisionerOptions {
 	cwd?: string;
 	env?: Record<string, string>;
 	hostHandlers?: Record<string, BunReplHostRequestHandler>;

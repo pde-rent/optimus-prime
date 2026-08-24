@@ -62,7 +62,7 @@ export interface ProcessesToolDetails {
 	truncated: boolean;
 }
 
-export interface ProcRow {
+interface ProcRow {
 	pid: number;
 	ppid: number | null;
 	user: string;

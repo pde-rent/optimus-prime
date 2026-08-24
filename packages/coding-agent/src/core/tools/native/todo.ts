@@ -85,7 +85,7 @@ const todoSchema = Type.Union(
 
 export type TodoToolInput = Static<typeof todoSchema>;
 
-export interface TodoToolOptions {
+interface TodoToolOptions {
 	maxLines?: number;
 	maxBytes?: number;
 }

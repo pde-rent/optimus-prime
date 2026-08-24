@@ -1,4 +1,4 @@
-export interface ParsedNewSessionCommand {
+interface ParsedNewSessionCommand {
 	name?: string;
 	prompt?: string;
 }

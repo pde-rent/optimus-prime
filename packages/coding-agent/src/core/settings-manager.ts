@@ -6,13 +6,14 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 import { acquireLockSyncWithRetry } from "./file-lock.js";
 import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverLevel } from "./graph-resolver.js";
-export type MaxRunningAgentsSetting = "auto" | number;
+
+type MaxRunningAgentsSetting = "auto" | number;
 
 const RECENT_MODELS_LIMIT = 20;
 const DEFAULT_IDLE_EVICTION_MINUTES = 90;
 const DEFAULT_REPL_IDLE_TIMEOUT_MINUTES = 10;
 
-export interface ToolTimeoutsSettings {
+interface ToolTimeoutsSettings {
 	/** Default repl cell timeout in ms; a call-level timeout overrides it. default: 120000 */
 	replMs?: number;
 	/** Default bash tool timeout in seconds; 0 keeps the current no-default behavior. default: 0 */
@@ -28,19 +29,19 @@ export interface CompactionSettings {
 	agentCallable?: boolean; // default: true - expose the compact skill so the model can request compaction
 }
 
-export interface BranchSummarySettings {
+interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
 }
 
-export interface AutoRefineSettings {
+interface AutoRefineSettings {
 	enabled?: boolean; // default: true
 	turnInterval?: number; // default: 25 assistant turns
 	compact?: boolean; // default: true
 	cooldownMs?: number; // default: 20 minutes
 }
 
-export interface ProviderRetrySettings {
+interface ProviderRetrySettings {
 	timeoutMs?: number; // SDK/provider request timeout in milliseconds
 	maxRetries?: number; // SDK/provider retry attempts
 	maxRetryDelayMs?: number; // default: 60000 (max server-requested delay before failing)
@@ -54,7 +55,7 @@ export interface RetrySettings {
 	provider?: ProviderRetrySettings;
 }
 
-export interface TerminalSettings {
+interface TerminalSettings {
 	showImages?: boolean; // default: true (show image type and dimensions)
 	clearOnShrink?: boolean; // default: false (clear empty rows when content shrinks)
 	showTerminalProgress?: boolean; // default: false (OSC 9;4 terminal progress indicators)
@@ -67,18 +68,18 @@ export interface ImageSettings {
 	blockImages?: boolean; // default: false - when true, prevents all images from being sent to LLM providers
 }
 
-export interface ThinkingBudgetsSettings {
+interface ThinkingBudgetsSettings {
 	minimal?: number;
 	low?: number;
 	medium?: number;
 	high?: number;
 }
 
-export interface MarkdownSettings {
+interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 }
 
-export interface BundledSkillsSettings {
+interface BundledSkillsSettings {
 	websearch?: boolean; // default: true
 }
 
@@ -86,7 +87,7 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
-export type TransportSetting = Transport;
+type TransportSetting = Transport;
 
 /**
  * Package source for npm/git packages.
@@ -222,11 +223,11 @@ export interface Settings {
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 }
 
-export interface AgentTracesSettings {
+interface AgentTracesSettings {
 	enabled?: boolean;
 }
 
-export interface TelemetrySettings {
+interface TelemetrySettings {
 	enabled?: boolean;
 	noticeShown?: boolean;
 }
@@ -259,13 +260,13 @@ function deepMergeSettings(base: Settings, overrides: Settings): Settings {
 	return result;
 }
 
-export type SettingsScope = "global" | "project";
+type SettingsScope = "global" | "project";
 
-export interface SettingsStorage {
+interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
 }
 
-export interface SettingsError {
+interface SettingsError {
 	scope: SettingsScope;
 	error: Error;
 }

@@ -43,7 +43,7 @@ function normalizeForFuzzyMatch(text: string): string {
 		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
 }
 
-export interface FuzzyMatchResult {
+interface FuzzyMatchResult {
 	/** Whether a match was found */
 	found: boolean;
 	/** The index where the match starts (in the content that should be used for replacement) */
@@ -71,7 +71,7 @@ interface MatchedEdit {
 	newText: string;
 }
 
-export interface AppliedEditsResult {
+interface AppliedEditsResult {
 	baseContent: string;
 	newContent: string;
 }

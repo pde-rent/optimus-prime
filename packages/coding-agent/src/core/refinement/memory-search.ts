@@ -48,7 +48,7 @@ const SNIPPET_MIN_CHARS = 80;
 const SNIPPET_EDGE_EXPANSION = 32;
 const SNIPPET_MAX_OCCURRENCES = 200;
 
-export interface HarnessMemorySearchOptions {
+interface HarnessMemorySearchOptions {
 	query: string;
 	topK: number;
 	scope?: HarnessScope;
@@ -85,7 +85,7 @@ export interface HarnessMemorySearchResult {
 	truncated: boolean;
 }
 
-export interface HarnessMemorySearchResponse {
+interface HarnessMemorySearchResponse {
 	queryTerms: string[];
 	/**
 	 * Distinct matches after duplicate bodies are collapsed, before the topK slice.

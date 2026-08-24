@@ -1,6 +1,3 @@
-import { join } from "node:path";
-import ignoreFactory from "../../utils/ignore-matcher.js";
-import { addIgnoreRules } from "../ignore-rules.js";
 import { flatTree } from "./diff.js";
 import type { IndexEntry } from "./index.js";
 import { entryStage } from "./index.js";
@@ -8,8 +5,7 @@ import { hardResetTo } from "./merge.js";
 import type { GitRepository } from "./repository.js";
 
 /**
- * Reset (soft/mixed/hard), single-path unstaging, ls-files listing and gitignore
- * queries (matching reuses the existing shared matcher - no second implementation).
+ * Reset (soft/mixed/hard), single-path unstaging and ls-files listing.
  */
 
 export type ResetMode = "soft" | "mixed" | "hard";
@@ -91,15 +87,4 @@ export function listFiles(repo: GitRepository): string[] {
 		.entries.filter((entry) => entryStage(entry) === 0)
 		.map((entry) => entry.path)
 		.sort();
-}
-
-/** True when the worktree-relative path is excluded by .gitignore rules at any level. */
-export function isIgnored(repo: GitRepository, relPath: string): boolean {
-	const matcher = ignoreFactory();
-	const segments = relPath.split("/");
-	for (let i = 0; i < segments.length; i++) {
-		addIgnoreRules(matcher, join(repo.workdir, ...segments.slice(0, i)), repo.workdir);
-	}
-	addIgnoreRules(matcher, repo.workdir, repo.workdir);
-	return matcher.ignores(relPath);
 }

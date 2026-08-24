@@ -21,8 +21,9 @@ import {
 	serializeLlmMessage,
 	truncateForSummary,
 } from "./utils.js";
+
 /** Details stored in CompactionEntry.details for file tracking */
-export interface CompactionDetails {
+interface CompactionDetails {
 	readFiles: string[];
 	modifiedFiles: string[];
 }
@@ -127,7 +128,7 @@ export function getLastAssistantUsage(entries: SessionEntry[]): Usage | undefine
 	return undefined;
 }
 
-export interface ContextUsageEstimate {
+interface ContextUsageEstimate {
 	tokens: number;
 	usageTokens: number;
 	trailingTokens: number;

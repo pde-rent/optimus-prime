@@ -62,7 +62,7 @@ export function headRefName(gitDir: string): string | null {
 	return raw.startsWith("ref: ") ? raw.slice("ref: ".length) : null;
 }
 
-export interface HeadResolution {
+interface HeadResolution {
 	sha: string | null;
 	/** true when HEAD holds a sha directly rather than a branch name. */
 	detached: boolean;
@@ -108,7 +108,7 @@ export function deleteRef(gitDir: string, refName: string): boolean {
 	return existed;
 }
 
-export function savePackedRefs(gitDir: string, refs: Map<string, string>): void {
+function savePackedRefs(gitDir: string, refs: Map<string, string>): void {
 	if (refs.size === 0) {
 		rmSync(join(gitDir, "packed-refs"), { force: true });
 		return;

@@ -59,11 +59,11 @@ export function hashRawObject(type: GitObjectType, body: Uint8Array): string {
 	return sha1Hex(objectHeader(type, body), body);
 }
 
-export function serializeLooseObject(type: GitObjectType, body: Uint8Array): Uint8Array {
+function serializeLooseObject(type: GitObjectType, body: Uint8Array): Uint8Array {
 	return deflateSync(concatBytes(objectHeader(type, body), body));
 }
 
-export function looseObjectPath(gitDir: string, sha: string): string {
+function looseObjectPath(gitDir: string, sha: string): string {
 	return join(gitDir, "objects", sha.slice(0, 2), sha.slice(2));
 }
 
@@ -119,8 +119,6 @@ export interface GitTreeEntry {
 	sha: string;
 }
 
-export const TREE_MODE_EXEC = "100755";
-export const TREE_MODE_SYMLINK = "120000";
 export const TREE_MODE_DIR = "40000";
 
 /** Parse tree payload bytes: repeated "<mode> <name>\0<20-byte binary sha>". */
@@ -169,7 +167,7 @@ export function hexToBytes(hex: string): Uint8Array {
 // Commits and tags
 // ---------------------------------------------------------------------------
 
-export interface GitSignature {
+interface GitSignature {
 	name: string;
 	email: string;
 	/** Unix seconds. */
@@ -194,7 +192,7 @@ interface ParsedHeaders {
 }
 
 /** Split "key value" header lines (with space-indented continuations) from the message. */
-export function parseHeaders(payload: Uint8Array): ParsedHeaders {
+function parseHeaders(payload: Uint8Array): ParsedHeaders {
 	const text = new TextDecoder().decode(payload);
 	const split = text.indexOf("\n\n");
 	const headText = split === -1 ? text : text.slice(0, split);
@@ -276,7 +274,7 @@ export function serializeCommitMessage(options: {
 	);
 }
 
-export interface ParsedTag {
+interface ParsedTag {
 	object: string;
 	type: GitObjectType;
 	tag: string;

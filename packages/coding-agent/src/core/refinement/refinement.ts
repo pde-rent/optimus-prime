@@ -50,7 +50,7 @@ export interface HarnessEntry {
 	last_used_at?: string;
 }
 
-export interface HarnessRefinementEvent {
+interface HarnessRefinementEvent {
 	id: string;
 	trigger: string;
 	changes: string[];
@@ -65,7 +65,7 @@ export interface HarnessState {
 	refinements: HarnessRefinementEvent[];
 }
 
-export interface RefinementEdit {
+interface RefinementEdit {
 	action: RefinementAction;
 	kind: RefinementKind;
 	id?: string;
@@ -85,7 +85,7 @@ export interface RefinementProposal {
 	expectedOutcome: string;
 }
 
-export interface AppliedRefinementEdit extends RefinementEdit {
+interface AppliedRefinementEdit extends RefinementEdit {
 	id: string;
 	before?: HarnessEntry;
 	after?: HarnessEntry;
@@ -104,7 +104,7 @@ export interface RefinementResult {
 	scope?: HarnessScope;
 }
 
-export interface RefineOptions {
+interface RefineOptions {
 	instructions?: string;
 	rollbackId?: string;
 	global?: boolean;
@@ -112,7 +112,7 @@ export interface RefineOptions {
 
 export type AutoRefineReason = "turn_interval" | "compact";
 
-export interface AutoRefineReviewContext {
+interface AutoRefineReviewContext {
 	reason: AutoRefineReason;
 	turnsSinceLastReview: number;
 }
@@ -831,7 +831,7 @@ function validateEdit(edit: RefinementEdit, computedId?: string): string | undef
  * Per-scope memory count caps. Applied after every refinement/CRUD apply so an
  * unbounded refine loop cannot grow the store without bound.
  */
-export interface MemoryBudget {
+interface MemoryBudget {
 	local?: number;
 	global?: number;
 }

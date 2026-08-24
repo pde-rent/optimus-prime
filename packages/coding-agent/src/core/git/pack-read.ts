@@ -41,7 +41,7 @@ export function decodeOfsDistance(data: Uint8Array, at: number): { distance: num
 }
 
 /** git repack defaults to depth <= 50; treat deeper chains as corrupt/cyclic (spec §2.4). */
-export const MAX_DELTA_DEPTH = 50;
+const MAX_DELTA_DEPTH = 50;
 
 /** Apply a git delta buffer (copy/insert ops) to a base object body. */
 export function applyDelta(delta: Uint8Array, source: Uint8Array): Uint8Array {

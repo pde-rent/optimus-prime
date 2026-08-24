@@ -18,7 +18,7 @@ export interface SlashCommandInfo {
 
 export const SESSION_SLASH_COMMAND_NAMES = ["compact", "refine", "goal", "autonomous", "summarize"] as const;
 
-export type SessionSlashCommandName = (typeof SESSION_SLASH_COMMAND_NAMES)[number];
+type SessionSlashCommandName = (typeof SESSION_SLASH_COMMAND_NAMES)[number];
 
 const SESSION_SLASH_COMMAND_NAME_SET: ReadonlySet<string> = new Set(SESSION_SLASH_COMMAND_NAMES);
 
@@ -32,13 +32,13 @@ export interface SessionSlashCommand {
 	text: string;
 }
 
-export interface RefineCommandOptions {
+interface RefineCommandOptions {
 	instructions?: string;
 	rollbackId?: string;
 	global?: boolean;
 }
 
-export interface CompactCommandOptions {
+interface CompactCommandOptions {
 	instructions?: string;
 	force: boolean;
 }
@@ -123,7 +123,7 @@ export function parseLoopCommand(input: string, now = new Date()): ParsedHeartbe
 	return { ...parsed, deliveryMode: parsed.deliveryMode ?? "follow_up" };
 }
 
-export interface BuiltinSlashCommand {
+interface BuiltinSlashCommand {
 	name: string;
 	description: string;
 	execution?: "client" | "session";
@@ -134,12 +134,12 @@ export interface BuiltinSlashCommand {
 	takesArgument?: boolean;
 }
 
-export interface ParsedSlashCommand {
+interface ParsedSlashCommand {
 	name: string;
 	args: string;
 }
 
-export interface ResolvedSlashCommand extends ParsedSlashCommand {
+interface ResolvedSlashCommand extends ParsedSlashCommand {
 	originalName: string;
 	isAlias: boolean;
 }

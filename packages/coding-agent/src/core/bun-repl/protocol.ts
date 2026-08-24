@@ -11,23 +11,23 @@ export interface BunReplExecuteRequest {
 	commandPrefix?: string;
 }
 
-export interface BunReplInterruptRequest {
+interface BunReplInterruptRequest {
 	id: string;
 	type: "interrupt";
 }
 
-export interface BunReplShutdownRequest {
+interface BunReplShutdownRequest {
 	id: string;
 	type: "shutdown";
 	snapshot?: boolean;
 }
 
-export interface BunReplSnapshotRequest {
+interface BunReplSnapshotRequest {
 	id: string;
 	type: "snapshot";
 }
 
-export interface BunReplRestoreRequest {
+interface BunReplRestoreRequest {
 	id: string;
 	type: "restore";
 	/** Structured-clone payload, base64 so it survives the newline-JSON transport. */
@@ -36,18 +36,18 @@ export interface BunReplRestoreRequest {
 	data?: Record<string, unknown>;
 }
 
-export interface BunReplClearNamespaceRequest {
+interface BunReplClearNamespaceRequest {
 	id: string;
 	type: "clearNamespace";
 }
 
-export interface BunReplListNamesRequest {
+interface BunReplListNamesRequest {
 	id: string;
 	type: "listNames";
 }
 
 /** Read rendered namespace values so an assistant message can reference them by name. */
-export interface BunReplResolveRefsRequest {
+interface BunReplResolveRefsRequest {
 	id: string;
 	type: "resolveRefs";
 	names: string[];
@@ -66,13 +66,13 @@ export type BunReplHostToRepl =
 	| BunReplResolveRefsRequest
 	| BunReplHostResponse;
 
-export interface BunReplStdoutChunk {
+interface BunReplStdoutChunk {
 	id: string;
 	type: "stdout";
 	chunk: string;
 }
 
-export interface BunReplStderrChunk {
+interface BunReplStderrChunk {
 	id: string;
 	type: "stderr";
 	chunk: string;
@@ -95,7 +95,7 @@ export interface BunReplResult {
 	sentAgentMessages?: KernelSentAgentMessage[];
 }
 
-export interface BunReplIdle {
+interface BunReplIdle {
 	id: string;
 	type: "idle";
 }

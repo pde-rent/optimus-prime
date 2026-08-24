@@ -58,7 +58,7 @@ export interface LogEntry {
 	message: string;
 }
 
-export interface LogOptions {
+interface LogOptions {
 	maxCount?: number;
 	/** Committer time >= since (unix seconds), inclusive — matches git --since semantics closely enough for linear walks. */
 	since?: number;
@@ -98,7 +98,7 @@ function commitTime(repo: GitRepository, sha: string): number {
 	return readLogEntry(repo, sha).committerTime;
 }
 
-export function readLogEntry(repo: GitRepository, sha: string): LogEntry {
+function readLogEntry(repo: GitRepository, sha: string): LogEntry {
 	const commit = repo.parseCommitAt(sha);
 	return {
 		sha,
@@ -113,17 +113,12 @@ export function readLogEntry(repo: GitRepository, sha: string): LogEntry {
 	};
 }
 
-/** git log --oneline line: "<abbreviated-sha> <subject>". */
-export function formatOneline(entry: LogEntry, abbrevLength = 7): string {
-	return `${entry.sha.slice(0, abbrevLength)} ${entry.subject}`;
-}
-
 /**
  * Maximal common ancestors (git merge-base semantics): the common ancestors that no
  * other common ancestor reaches. Every ancestor of a common commit is itself common,
  * so one dominated-marking pass over parent edges suffices.
  */
-export function findMergeBases(repo: GitRepository, aSha: string, bSha: string): string[] {
+function findMergeBases(repo: GitRepository, aSha: string, bSha: string): string[] {
 	const inA = allAncestors(repo, aSha);
 	const inB = allAncestors(repo, bSha);
 	const commonSet = new Set<string>();
@@ -144,7 +139,7 @@ export function findMergeBases(repo: GitRepository, aSha: string, bSha: string):
 // Content merge (diff3-style, 7-char markers, spec §8)
 // ---------------------------------------------------------------------------
 
-export interface ContentMergeResult {
+interface ContentMergeResult {
 	content: string;
 	clean: boolean;
 }
@@ -182,7 +177,7 @@ const joinSlice = (lines: string[]): string => lines.join("");
  * Three-way line merge. Non-conflicting hunks interleave cleanly; conflicting regions
  * become "<<<<<<< ourLabel / ours / ======= / theirs / >>>>>>> theirLabel" blocks.
  */
-export function mergeFileContent(
+function mergeFileContent(
 	baseText: string,
 	ourText: string,
 	theirText: string,
@@ -253,7 +248,7 @@ export function mergeFileContent(
 
 const BLOB_MODES = new Set(["100644", "100755"]);
 
-export interface PathConflict {
+interface PathConflict {
 	path: string;
 	/** Present stages keyed 1 (base), 2 (ours), 3 (theirs). */
 	stages: Partial<Record<1 | 2 | 3, TreeFile>>;
@@ -261,7 +256,7 @@ export interface PathConflict {
 	worktree: TreeFile | null;
 }
 
-export interface TreeMergeResult {
+interface TreeMergeResult {
 	/** Clean per-path outcomes (including content-merged blobs), keyed by path. */
 	files: Map<string, TreeFile>;
 	conflicts: PathConflict[];
@@ -348,7 +343,7 @@ export function mergeTrees(
  * into a virtual base tree; recursion is capped and degrades to the first base.
  * Returns a flat path map; virtual trees are hashed in memory only.
  */
-export function virtualBaseTree(repo: GitRepository, bases: string[], depth = 0): Map<string, TreeFile> {
+function virtualBaseTree(repo: GitRepository, bases: string[], depth = 0): Map<string, TreeFile> {
 	if (bases.length === 0) return new Map();
 	if (bases.length === 1 || depth >= 8) return flatTree(repo, repo.commitTree(bases[0]));
 	const current = flatTree(repo, repo.commitTree(bases[0]));
@@ -378,15 +373,15 @@ export function virtualBaseTree(repo: GitRepository, bases: string[], depth = 0)
 // Commands: merge / fast-forward / conclude / abort / cherry-pick / revert
 // ---------------------------------------------------------------------------
 
-export type MergeStatus = "up-to-date" | "fast-forward" | "merged" | "conflict";
+type MergeStatus = "up-to-date" | "fast-forward" | "merged" | "conflict";
 
-export interface MergeOutcome {
+interface MergeOutcome {
 	status: MergeStatus;
 	commit: string | null;
 	conflicts: string[];
 }
 
-export interface MergeOptions {
+interface MergeOptions {
 	allowUnrelatedHistories?: boolean;
 	/** Committer identity used when a merge commit is written. */
 	committer?: { name: string; email: string };
@@ -420,7 +415,7 @@ export function committerNow(
 }
 
 /** Move the current branch (or detached HEAD) to targetSha and make worktree+index match its tree. */
-export function fastForward(repo: GitRepository, targetSha: string): void {
+function fastForward(repo: GitRepository, targetSha: string): void {
 	const before = headTreeFiles(repo);
 	const after = flatTree(repo, repo.commitTree(targetSha));
 	assertNoLocalEdits(repo, [...before.keys(), ...after.keys()], "merge");
@@ -582,7 +577,7 @@ export function hardResetTo(repo: GitRepository, sha: string): void {
 // Cherry-pick and revert (single-commit apply through the same merge machinery)
 // ---------------------------------------------------------------------------
 
-export interface ApplyOutcome {
+interface ApplyOutcome {
 	status: "applied" | "conflict";
 	commit: string | null;
 	conflicts: string[];

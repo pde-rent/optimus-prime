@@ -21,7 +21,7 @@ export const GRAPH_RESOLVER_LEVELS: readonly GraphResolverLevel[] = ["off", "low
  */
 const GRAPH_BASELINE_TOKENS = 250_000;
 
-export interface GraphResolverBudget {
+interface GraphResolverBudget {
 	ceilingTokens: number;
 	maxNodes: number;
 }
