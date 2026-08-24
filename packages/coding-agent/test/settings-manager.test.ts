@@ -602,3 +602,41 @@ describe("rlmMaxDepth unlimited", () => {
 		expect(wrongCase.getRlmMaxDepth()).toBeUndefined();
 	});
 });
+
+describe("settings hot reload", () => {
+	const testDir = join(process.cwd(), "test-settings-hot-reload-tmp");
+	const agentDir = join(testDir, "agent");
+	const projectDir = join(testDir, "project");
+
+	let manager: SettingsManager | undefined;
+
+	beforeEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true });
+		}
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(projectDir, ".optimus", "agent"), { recursive: true });
+	});
+
+	afterEach(() => {
+		manager?.stopWatchingSettingsFiles();
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true });
+		}
+	});
+
+	it("picks up external edits to the global settings file without a restart", async () => {
+		manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getGraphResolver()).toBe("off");
+
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ graphResolver: "unlimited" }));
+
+		const deadline = Date.now() + 3000;
+		let seen: string | undefined = manager.getGraphResolver();
+		while (seen !== "unlimited" && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			seen = manager.getGraphResolver();
+		}
+		expect(seen).toBe("unlimited");
+	});
+});

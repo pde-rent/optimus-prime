@@ -1,7 +1,7 @@
 import type { ServiceTier, Transport } from "@earendil-works/pi-ai";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, type FSWatcher, readFileSync, watch, writeFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 import { acquireLockSyncWithRetry } from "./file-lock.js";
@@ -265,6 +265,8 @@ type SettingsScope = "global" | "project";
 
 interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
+	/** Absolute settings file paths when the backend is file-backed; enables hot reload. */
+	settingsFilePaths?: { global?: string; project?: string };
 }
 
 interface SettingsError {
@@ -279,6 +281,10 @@ class FileSettingsStorage implements SettingsStorage {
 	constructor(cwd: string, agentDir: string) {
 		this.globalSettingsPath = join(agentDir, "settings.json");
 		this.projectSettingsPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
+	}
+
+	get settingsFilePaths(): { global: string; project: string } {
+		return { global: this.globalSettingsPath, project: this.projectSettingsPath };
 	}
 
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
@@ -339,6 +345,8 @@ export class SettingsManager {
 	private projectSettingsLoadError: Error | null = null; // Track if project settings file had parse errors
 	private writeQueue: Promise<void> = Promise.resolve();
 	private errors: SettingsError[];
+	private settingsWatcher: FSWatcher | undefined;
+	private reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 	private constructor(
 		storage: SettingsStorage,
@@ -375,7 +383,7 @@ export class SettingsManager {
 			initialErrors.push({ scope: "project", error: projectLoad.error });
 		}
 
-		return new SettingsManager(
+		const manager = new SettingsManager(
 			storage,
 			globalLoad.settings,
 			projectLoad.settings,
@@ -383,6 +391,38 @@ export class SettingsManager {
 			projectLoad.error,
 			initialErrors,
 		);
+		manager.watchSettingsFiles();
+		return manager;
+	}
+
+	/**
+	 * Watch file-backed settings and hot-reload on external changes, so edits to
+	 * settings.json apply without restarting a long-lived daemon. Debounced and
+	 * unref'd; best-effort - platforms that refuse the watcher keep manual reload.
+	 */
+	private watchSettingsFiles(): void {
+		const globalPath = this.storage.settingsFilePaths?.global;
+		if (!globalPath) return;
+		const dir = dirname(globalPath);
+		const file = basename(globalPath);
+		try {
+			this.settingsWatcher = watch(dir, (_event, changed) => {
+				if (changed !== file) return;
+				if (this.reloadTimer) clearTimeout(this.reloadTimer);
+				this.reloadTimer = setTimeout(() => void this.reload().catch(() => undefined), 250);
+				this.reloadTimer.unref?.();
+			});
+			this.settingsWatcher.unref?.();
+		} catch {
+			// Watcher unavailable; manual reload() still works.
+		}
+	}
+
+	/** Stop watching settings files (used by tests and teardown). */
+	stopWatchingSettingsFiles(): void {
+		this.settingsWatcher?.close();
+		this.settingsWatcher = undefined;
+		if (this.reloadTimer) clearTimeout(this.reloadTimer);
 	}
 
 	/** Create an in-memory SettingsManager (no file I/O) */
