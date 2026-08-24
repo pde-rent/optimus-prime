@@ -13,6 +13,7 @@ import {
 	SUBAGENT_GRAPH_MAX_ROWS,
 	SUBAGENT_GRAPH_MAX_RUNNING,
 	SubagentGraphPanel,
+	type SubagentGraphRow,
 } from "../src/modes/interactive/components/subagent-graph-panel.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 import stripAnsi from "../src/utils/ansi.js";
@@ -484,5 +485,49 @@ describe("SubagentGraphPanel visibility", () => {
 		panel.setChildren([], "root");
 		panel.setChildren(fanOut, "root");
 		expect(panel.isVisible()).toBe(true);
+	});
+});
+
+describe("stopped children in the finished aggregate", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	// nodesFromChildSnapshots drops cancelled rows upstream (shared tree model),
+	// so hand-build the position the panel would receive.
+	function leafRow(child: AgentConnectionRlmChildAgentSnapshot): SubagentGraphRow {
+		return {
+			node: { id: child.id, child },
+			depth: 0,
+			descendants: 0,
+			children: [],
+			prefix: "\u2514\u2500",
+		};
+	}
+
+	it("counts a force-stopped child separately, never as succeeded", () => {
+		const lines = formatSubagentGraph(
+			[
+				leafRow(child("done-1", "done", { parentId: "root", label: "finisher" })),
+				leafRow(child("killed-1", "cancelled", { parentId: "root", label: "killed" })),
+			],
+			120,
+		).map(stripAnsi);
+
+		expect(lines).toHaveLength(2); // root + done summary
+		expect(lines[1]).toContain("2 agents done (1 succeeded, 0 failed, 1 stopped)");
+		expect(lines[1]).not.toContain("(2 succeeded");
+	});
+
+	it("keeps the legacy summary shape when nothing was stopped", () => {
+		const lines = formatSubagentGraph(
+			[
+				leafRow(child("done-1", "done", { parentId: "root", label: "finisher" })),
+				leafRow(child("err-1", "error", { parentId: "root", label: "broken" })),
+			],
+			120,
+		).map(stripAnsi);
+
+		expect(lines[1]).toContain("2 agents done (1 succeeded, 1 failed)");
 	});
 });

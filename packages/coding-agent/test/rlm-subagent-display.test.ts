@@ -98,6 +98,18 @@ describe("rlm subagent display files", () => {
 		}
 	});
 
+	it("round-trips the additive stopped status written when a child is force-killed", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "prime-rlm-display-stopped-"));
+		try {
+			const sessionDir = join(tempDir, "sub-1234abcd");
+			const entry = makeEntry(sessionDir, { status: "stopped" });
+			writeRlmSubagentDisplayEntry(entry);
+			await expect(readRlmSubagentDisplayEntry(sessionDir)).resolves.toEqual(entry);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("accepts unknown extra fields from newer writers", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-rlm-display-forward-"));
 		try {
