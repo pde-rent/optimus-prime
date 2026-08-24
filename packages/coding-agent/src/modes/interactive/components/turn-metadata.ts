@@ -44,7 +44,8 @@ export class TurnMetadataComponent implements Component {
 		].filter((p) => p !== undefined) as string[];
 		const metaText = theme.fg("dim", parts.join(" · "));
 		const pad = Math.max(0, w - visibleWidth(parts.join(" · ")) - 1);
-		const line = `${"·".repeat(pad)} ${metaText}`;
+		// Same muted shade as the subagent view's "..." markers, so the divider stays present but quiet.
+		const line = `${theme.fg("muted", "·".repeat(pad))} ${metaText}`;
 		return [truncateToWidth(line, width)];
 	}
 }
