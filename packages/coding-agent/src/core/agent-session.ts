@@ -192,6 +192,11 @@ import type { ModelRegistry } from "./model-registry.js";
 import { throwIfPromptAdmissionCancelled } from "./prompt-admission.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import {
+	isConcreteProviderAuthFailure,
+	isRetryableError,
+	isStructuredPermanentProviderRetryExhausted,
+} from "./provider-retry.js";
+import {
 	type AutoRefineReason,
 	type AutoRefineReview,
 	appendGlobalRefinement,
@@ -5079,40 +5084,8 @@ export class AgentSession {
 	 * @param images Optional image attachments to include with the message
 	 * @throws Error if text is an extension command
 	 */
-	async steer(
-		text: string,
-		images?: ImageContent[],
-		options: {
-			queueKey?: string;
-			agentMessageId?: string;
-			resumeIfIdle?: boolean;
-		} = {},
-	): Promise<void> {
-		const normalized = this._normalizeSubmission(text, images, {
-			parseSessionCommands: false,
-			extensionCommands: "reject",
-			expandSkills: true,
-			expandPromptTemplates: true,
-		});
-		if (normalized instanceof Promise || normalized.kind !== "prompt") {
-			throw new Error("Queued prompt normalization did not produce a prompt");
-		}
-
-		await this._queuePreparedPrompt("steer", normalized.text, normalized.images, {
-			queueKey: options.queueKey,
-			agentMessageId: options.agentMessageId,
-			resumeIfIdle: options.resumeIfIdle,
-		});
-	}
-
-	/**
-	 * Queue a follow-up message to be processed after the agent finishes.
-	 * Delivered only when agent has no more tool calls or steering messages.
-	 * Expands skill commands and prompt templates. Errors on extension commands.
-	 * @param images Optional image attachments to include with the message
-	 * @throws Error if text is an extension command
-	 */
-	async followUp(
+	private async _queueNormalizedPrompt(
+		schedule: SessionInputSchedule,
 		text: string,
 		images?: ImageContent[],
 		options: {
@@ -5131,11 +5104,50 @@ export class AgentSession {
 			throw new Error("Queued prompt normalization did not produce a prompt");
 		}
 
-		return this._queuePreparedPrompt("followUp", normalized.text, normalized.images, {
+		return this._queuePreparedPrompt(schedule, normalized.text, normalized.images, {
 			queueKey: options.queueKey,
 			agentMessageId: options.agentMessageId,
 			resumeIfIdle: options.resumeIfIdle,
 		});
+	}
+
+	/**
+	 * Queue a steering message while the agent is running.
+	 * Delivered after the current assistant turn finishes executing its tool calls,
+	 * before the next LLM call.
+	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * @param images Optional image attachments to include with the message
+	 * @throws Error if text is an extension command
+	 */
+	async steer(
+		text: string,
+		images?: ImageContent[],
+		options: {
+			queueKey?: string;
+			agentMessageId?: string;
+			resumeIfIdle?: boolean;
+		} = {},
+	): Promise<void> {
+		await this._queueNormalizedPrompt("steer", text, images, options);
+	}
+
+	/**
+	 * Queue a follow-up message to be processed after the agent finishes.
+	 * Delivered only when agent has no more tool calls or steering messages.
+	 * Expands skill commands and prompt templates. Errors on extension commands.
+	 * @param images Optional image attachments to include with the message
+	 * @throws Error if text is an extension command
+	 */
+	async followUp(
+		text: string,
+		images?: ImageContent[],
+		options: {
+			queueKey?: string;
+			agentMessageId?: string;
+			resumeIfIdle?: boolean;
+		} = {},
+	): Promise<boolean> {
+		return this._queueNormalizedPrompt("followUp", text, images, options);
 	}
 
 	async restoreSessionActions(snapshot: SessionActionRecoverySnapshot): Promise<number> {
@@ -5253,6 +5265,38 @@ export class AgentSession {
 		});
 	}
 
+	private async _restoreScheduledInput(
+		schedule: SessionInputSchedule,
+		text: string,
+		images: ImageContent[] | undefined,
+		options: {
+			queueKey?: string;
+			agentMessageId?: string;
+			content?: (TextContent | ImageContent)[];
+			customMessage?: CustomMessage;
+			prefixMessages?: CustomMessage[];
+		},
+	): Promise<boolean> {
+		const restoredCommand = this._restoreSessionCommand(
+			text,
+			options.customMessage,
+			images,
+			schedule,
+			options.agentMessageId,
+		);
+		if (restoredCommand !== undefined) return restoredCommand;
+
+		return this._restorePromptInput(schedule, {
+			text,
+			images,
+			queueKey: options.queueKey,
+			agentMessageId: options.agentMessageId,
+			content: options.content,
+			customMessage: options.customMessage,
+			prefixMessages: options.prefixMessages,
+		});
+	}
+
 	async restoreSteeringMessage(
 		text: string,
 		images?: ImageContent[],
@@ -5264,20 +5308,7 @@ export class AgentSession {
 			prefixMessages?: CustomMessage[];
 		} = {},
 	): Promise<void> {
-		if (
-			this._restoreSessionCommand(text, options.customMessage, images, "steer", options.agentMessageId) !== undefined
-		)
-			return;
-
-		await this._restorePromptInput("steer", {
-			text,
-			images,
-			queueKey: options.queueKey,
-			agentMessageId: options.agentMessageId,
-			content: options.content,
-			customMessage: options.customMessage,
-			prefixMessages: options.prefixMessages,
-		});
+		await this._restoreScheduledInput("steer", text, images, options);
 	}
 
 	async restoreFollowUpMessage(
@@ -5291,24 +5322,7 @@ export class AgentSession {
 			prefixMessages?: CustomMessage[];
 		} = {},
 	): Promise<boolean> {
-		const restoredCommand = this._restoreSessionCommand(
-			text,
-			options.customMessage,
-			images,
-			"followUp",
-			options.agentMessageId,
-		);
-		if (restoredCommand !== undefined) return restoredCommand;
-
-		return this._restorePromptInput("followUp", {
-			text,
-			images,
-			queueKey: options.queueKey,
-			agentMessageId: options.agentMessageId,
-			content: options.content,
-			customMessage: options.customMessage,
-			prefixMessages: options.prefixMessages,
-		});
+		return this._restoreScheduledInput("followUp", text, images, options);
 	}
 
 	private _buildPromptContent(text: string, images?: ImageContent[]): (TextContent | ImageContent)[] {
@@ -6456,13 +6470,16 @@ export class AgentSession {
 		);
 	}
 
+	private _projectQueuedScheduleTexts(
+		policy: DeliveryPolicy,
+		select: (action: QueuedSessionAction) => string,
+	): readonly string[] {
+		return visibleSessionActionProjection(this._actionStore.queuedActions(policy)).map(select);
+	}
+
 	getSessionActionSnapshot(): SessionActionSnapshot {
-		const steering = visibleSessionActionProjection(this._actionStore.queuedActions("next_turn_boundary")).map(
-			queuedAgentMessagePreview,
-		);
-		const followUps = visibleSessionActionProjection(this._actionStore.queuedActions("when_run_idle")).map(
-			queuedAgentMessagePreview,
-		);
+		const steering = this._projectQueuedScheduleTexts("next_turn_boundary", queuedAgentMessagePreview);
+		const followUps = this._projectQueuedScheduleTexts("when_run_idle", queuedAgentMessagePreview);
 		const active = visibleSessionActionProjection(this._actionStore.activeActions())[0];
 		const activeState = active?.lifecycle.state;
 		const phase =
@@ -6488,27 +6505,19 @@ export class AgentSession {
 	}
 
 	getSteeringMessages(): readonly string[] {
-		return visibleSessionActionProjection(this._actionStore.queuedActions("next_turn_boundary")).map(
-			(action) => action.payload.text,
-		);
+		return this._projectQueuedScheduleTexts("next_turn_boundary", (action) => action.payload.text);
 	}
 
 	getSteeringMessagePreviews(): readonly string[] {
-		return visibleSessionActionProjection(this._actionStore.queuedActions("next_turn_boundary")).map(
-			queuedAgentMessagePreview,
-		);
+		return this._projectQueuedScheduleTexts("next_turn_boundary", queuedAgentMessagePreview);
 	}
 
 	getFollowUpMessages(): readonly string[] {
-		return visibleSessionActionProjection(this._actionStore.queuedActions("when_run_idle")).map(
-			(action) => action.payload.text,
-		);
+		return this._projectQueuedScheduleTexts("when_run_idle", (action) => action.payload.text);
 	}
 
 	getFollowUpMessagePreviews(): readonly string[] {
-		return visibleSessionActionProjection(this._actionStore.queuedActions("when_run_idle")).map(
-			queuedAgentMessagePreview,
-		);
+		return this._projectQueuedScheduleTexts("when_run_idle", queuedAgentMessagePreview);
 	}
 
 	getSessionActionRecoverySnapshot(): SessionActionRecoverySnapshot {
@@ -6669,6 +6678,23 @@ export class AgentSession {
 		};
 	}
 
+	/** Waits on {@link waitForPromiseOrAbort}, translating a session-dispose abort into the admission error. */
+	private async _waitForAdmissionOrDispose(
+		promise: Promise<void>,
+		signal: AbortSignal | undefined,
+		disposeSignal: AbortSignal,
+	): Promise<void> {
+		try {
+			const waitSignal = signal ? AbortSignal.any([signal, disposeSignal]) : disposeSignal;
+			await waitForPromiseOrAbort(promise, waitSignal, "Update restart preparation cancelled");
+		} catch (error) {
+			if (disposeSignal.aborted) {
+				throw new Error("Cannot admit a session action because the session is disposing or disposed.");
+			}
+			throw error;
+		}
+	}
+
 	private async _acquireDirectTurnAdmissionFence(signal?: AbortSignal): Promise<{ owner: symbol; release(): void }> {
 		const inheritedOwner = this._sessionActionCommitContext.getStore();
 		if (inheritedOwner !== undefined && inheritedOwner === this._sessionActionCommitOwner) {
@@ -6676,7 +6702,6 @@ export class AgentSession {
 			return this._acquireSessionActionCommitFence(signal);
 		}
 		const disposeSignal = this._sessionActionCommitDisposeAbortController.signal;
-		const waitSignal = signal ? AbortSignal.any([signal, disposeSignal]) : disposeSignal;
 		while (true) {
 			this._assertSessionActionAdmissionAvailable();
 			if (this._queuedWorkPauses.size > 0) {
@@ -6686,12 +6711,7 @@ export class AgentSession {
 					this._sessionInputCheckpointWaiters.add(resolve);
 				});
 				try {
-					await waitForPromiseOrAbort(pauseReleased, waitSignal, "Update restart preparation cancelled");
-				} catch (error) {
-					if (disposeSignal.aborted) {
-						throw new Error("Cannot admit a session action because the session is disposing or disposed.");
-					}
-					throw error;
+					await this._waitForAdmissionOrDispose(pauseReleased, signal, disposeSignal);
 				} finally {
 					this._sessionInputCheckpointWaiters.delete(wake);
 				}
@@ -6722,17 +6742,13 @@ export class AgentSession {
 			resolve = release;
 		});
 		const disposeSignal = this._sessionActionCommitDisposeAbortController.signal;
-		const waitSignal = signal ? AbortSignal.any([signal, disposeSignal]) : disposeSignal;
 		this._pendingSessionActionFenceWaiters++;
 		try {
-			await waitForPromiseOrAbort(previous, waitSignal, "Update restart preparation cancelled");
+			await this._waitForAdmissionOrDispose(previous, signal, disposeSignal);
 		} catch (error) {
 			this._pendingSessionActionFenceWaiters--;
 			// A cancelled waiter remains in the FIFO chain until its predecessor releases.
 			void previous.then(resolve, resolve);
-			if (disposeSignal.aborted) {
-				throw new Error("Cannot admit a session action because the session is disposing or disposed.");
-			}
 			throw error;
 		}
 		const owner = Symbol("session-action-commit");
@@ -6997,30 +7013,37 @@ export class AgentSession {
 		direction: "forward" | "backward" = "forward",
 		options: ModelSelectOptions = {},
 	): Promise<ModelCycleResult | undefined> {
+		const availableModels = await this._modelRegistry.refreshAvailableModels();
 		if (this._scopedModels.length > 0) {
-			return this._cycleScopedModel(direction, options);
+			const scopedModels = this._scopedModels.filter((scoped) =>
+				availableModels.some((model) => modelsAreEqual(model, scoped.model)),
+			);
+			return this._cycleModels(direction, options, scopedModels, true);
 		}
-		return this._cycleAvailableModel(direction, options);
+		return this._cycleModels(
+			direction,
+			options,
+			availableModels.map((model) => ({ model })),
+			false,
+		);
 	}
 
-	private async _cycleScopedModel(
+	private async _cycleModels(
 		direction: "forward" | "backward",
 		options: ModelSelectOptions,
+		candidates: ReadonlyArray<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>,
+		isScoped: boolean,
 	): Promise<ModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.refreshAvailableModels();
-		const scopedModels = this._scopedModels.filter((scoped) =>
-			availableModels.some((model) => modelsAreEqual(model, scoped.model)),
-		);
-		if (scopedModels.length <= 1) return undefined;
+		if (candidates.length <= 1) return undefined;
 
 		const currentModel = this.model;
-		let currentIndex = scopedModels.findIndex((sm) => modelsAreEqual(sm.model, currentModel));
+		let currentIndex = candidates.findIndex((candidate) => modelsAreEqual(candidate.model, currentModel));
 
 		if (currentIndex === -1) currentIndex = 0;
-		const len = scopedModels.length;
+		const len = candidates.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
-		const next = scopedModels[nextIndex];
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+		const next = candidates[nextIndex];
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(isScoped ? next.thinkingLevel : undefined);
 		const serviceTier = this._getServiceTierForModelSwitch();
 
 		this.agent.state.model = next.model;
@@ -7041,46 +7064,7 @@ export class AgentSession {
 			model: next.model,
 			thinkingLevel: this.thinkingLevel,
 			serviceTier: this.serviceTier,
-			isScoped: true,
-		};
-	}
-
-	private async _cycleAvailableModel(
-		direction: "forward" | "backward",
-		options: ModelSelectOptions,
-	): Promise<ModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.refreshAvailableModels();
-		if (availableModels.length <= 1) return undefined;
-
-		const currentModel = this.model;
-		let currentIndex = availableModels.findIndex((m) => modelsAreEqual(m, currentModel));
-
-		if (currentIndex === -1) currentIndex = 0;
-		const len = availableModels.length;
-		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
-		const nextModel = availableModels[nextIndex];
-
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
-		const serviceTier = this._getServiceTierForModelSwitch();
-		this.agent.state.model = nextModel;
-		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
-
-		this.setThinkingLevel(thinkingLevel, { reason: "model_switch" });
-		this._clampServiceTierForModel(serviceTier);
-
-		const emitPromise = this._queueModelSelectEmit(nextModel, currentModel, "cycle");
-		if (this._shouldWaitForModelSelectEmit(options)) {
-			await emitPromise;
-		} else {
-			this._trackModelSelectEmitError(emitPromise);
-		}
-
-		return {
-			model: nextModel,
-			thinkingLevel: this.thinkingLevel,
-			serviceTier: this.serviceTier,
-			isScoped: false,
+			isScoped,
 		};
 	}
 
@@ -10956,95 +10940,18 @@ export class AgentSession {
 	}
 
 	private _isRetryableError(message: AssistantMessage): boolean {
-		if (message.stopReason !== "error" || !message.errorMessage) return false;
-
-		const contextWindow = this.model?.contextWindow ?? 0;
-		if (isContextOverflow(message, contextWindow)) return false;
-
-		if (this._isFauxProviderQueueExhausted(message)) {
-			return false;
-		}
-
-		if (this._isAgentLifecycleFailure(message)) {
-			return false;
-		}
-
-		if (this._isStructuredPermanentProviderRetryExhausted(message)) {
-			return false;
-		}
-
-		return true;
-	}
-
-	private _isFauxProviderQueueExhausted(message: AssistantMessage): boolean {
-		return message.provider === "faux" && message.errorMessage === "No more faux responses queued";
-	}
-
-	private _isAgentLifecycleFailure(message: AssistantMessage): boolean {
-		return message.diagnostics?.some((diagnostic) => diagnostic.type === "agent_lifecycle_failure") ?? false;
-	}
-
-	private _getProviderStreamFailureDetails(message: AssistantMessage): Record<string, unknown> | undefined {
-		const failure = message.diagnostics?.find((diagnostic) => diagnostic.type === "provider_stream_failure");
-		const details = failure?.details;
-		if (!details || typeof details !== "object") {
-			return undefined;
-		}
-		return details;
-	}
-
-	private _getProviderStreamFailureKind(message: AssistantMessage): string | undefined {
-		const kind = this._getProviderStreamFailureDetails(message)?.kind;
-		return typeof kind === "string" ? kind : undefined;
-	}
-
-	private _isStructuredPermanentProviderFailure(message: AssistantMessage): boolean {
-		const kind = this._getProviderStreamFailureKind(message);
-		return kind === "auth" || kind === "invalid_request" || kind === "refusal";
+		return isRetryableError(message, {
+			contextWindow: this.model?.contextWindow ?? 0,
+			retryAttempt: this._retryAttempt,
+		});
 	}
 
 	private _isStructuredPermanentProviderRetryExhausted(message: AssistantMessage): boolean {
-		return this._retryAttempt > 0 && this._isStructuredPermanentProviderFailure(message);
-	}
-
-	private _getProviderStreamFailureAuthStatus(message: AssistantMessage): number | undefined {
-		const details = this._getProviderStreamFailureDetails(message);
-		if (!details) {
-			return undefined;
-		}
-
-		const kind = details.kind;
-		if (kind !== "auth") {
-			return undefined;
-		}
-
-		const status = details.status;
-		if (typeof status === "number") {
-			return status;
-		}
-		if (typeof status === "string") {
-			const parsed = Number(status);
-			return Number.isInteger(parsed) ? parsed : undefined;
-		}
-		return undefined;
+		return isStructuredPermanentProviderRetryExhausted(message, this._retryAttempt);
 	}
 
 	private _isConcreteProviderAuthFailure(message: AssistantMessage): boolean {
-		if (message.stopReason !== "error" || !message.errorMessage) return false;
-
-		const structuredStatus = this._getProviderStreamFailureAuthStatus(message);
-		if (structuredStatus === 401 || structuredStatus === 403) {
-			return true;
-		}
-
-		if (/\b(?:401|403)\b/.test(message.errorMessage) && /\bstatus code\b/i.test(message.errorMessage)) {
-			return true;
-		}
-
-		return (
-			/\b(?:401|403)\b/.test(message.errorMessage) &&
-			/auth|unauthori[sz]ed|forbidden|api.?key|token|credential/i.test(message.errorMessage)
-		);
+		return isConcreteProviderAuthFailure(message);
 	}
 
 	private _captureRetryAuthFailureSource(message: AssistantMessage): AuthSourceToken | undefined {
