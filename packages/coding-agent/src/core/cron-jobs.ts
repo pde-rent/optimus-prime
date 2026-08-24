@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
+import { errorMessage } from "../utils/shared.js";
 import { getSessionArtifactPathForFile } from "./session-manager.js";
 
 type AgentCronJobStatus = "active" | "paused" | "completed" | "cancelled";
@@ -1664,10 +1665,6 @@ function compareOptionalIso(left: string | undefined, right: string | undefined)
 		return -1;
 	}
 	return Date.parse(left) - Date.parse(right);
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }
 
 function normalizeOptionalLabel(label: string | undefined): string | undefined {
