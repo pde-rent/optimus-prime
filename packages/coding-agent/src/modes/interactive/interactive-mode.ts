@@ -518,6 +518,30 @@ interface CustomEditorLikeHandlers {
 	onExtensionShortcut?: (data: string) => boolean | undefined;
 }
 
+interface SlashCommandContext {
+	/** Resolved builtin command name; empty for exact-text matches like /quit. */
+	name: string;
+	args: string;
+	canonicalText: string;
+	text: string;
+}
+
+interface SlashCommandEntry {
+	/** Resolved builtin names (after alias resolution) handled by this entry. */
+	readonly names?: readonly string[];
+	/** Matches the full submitted text instead of a command name. */
+	readonly exactText?: string;
+	/** Only matches when no arguments follow the command name. */
+	readonly requireEmptyArgs?: boolean;
+	/** Echoes the submission locally before running the handler. */
+	readonly echoLocal?: boolean;
+	/** Runs the handler first and clears the editor afterwards. */
+	readonly clearAfter?: boolean;
+	/** Keeps the pre-submit prompt stash instead of restoring it after submit. */
+	readonly keepPromptStash?: boolean;
+	run: (context: SlashCommandContext) => Promise<void> | void;
+}
+
 export class InteractiveMode {
 	private static readonly EXIT_HINT_DURATION_MS = 2000;
 	private static readonly ESCAPE_REPEAT_WINDOW_MS = 500;
@@ -4000,6 +4024,181 @@ export class InteractiveMode {
 	}
 
 	private setupEditorSubmitHandler(): void {
+		const slashCommands: readonly SlashCommandEntry[] = [
+			{ names: ["btw"], run: ({ args }) => this.handleSideQuestion(args) },
+			{
+				names: ["settings"],
+				requireEmptyArgs: true,
+				clearAfter: true,
+				run: () => this.showSettingsSelector(),
+			},
+			{ names: ["scoped-models"], requireEmptyArgs: true, run: () => this.showModelsSelector() },
+			{ names: ["model"], run: ({ args }) => this.handleModelCommand(args || undefined) },
+			{ names: ["effort"], run: ({ args }) => this.handleEffortCommand(args) },
+			{ names: ["graph"], run: ({ args }) => this.handleGraphCommand(args) },
+			{
+				names: ["fast"],
+				run: ({ args }) => {
+					if (args) {
+						this.showError("Usage: /fast");
+					} else {
+						this.handleFastCommand();
+					}
+				},
+			},
+			{
+				names: ["export"],
+				clearAfter: true,
+				run: ({ canonicalText }) => this.handleExportCommand(canonicalText),
+			},
+			{
+				names: ["import"],
+				clearAfter: true,
+				run: ({ canonicalText }) => this.handleImportCommand(canonicalText),
+			},
+			{
+				names: ["share"],
+				requireEmptyArgs: true,
+				clearAfter: true,
+				run: () => this.handleShareCommand(),
+			},
+			{
+				names: ["copy"],
+				requireEmptyArgs: true,
+				clearAfter: true,
+				run: () => this.handleCopyCommand(),
+			},
+			{
+				names: ["name"],
+				clearAfter: true,
+				run: ({ canonicalText }) => this.handleNameCommand(canonicalText),
+			},
+			{ names: ["rlm-max-depth"], run: ({ args }) => this.handleRlmMaxDepthCommand(args) },
+			{
+				names: ["session"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleSessionCommand(),
+			},
+			{
+				names: ["system-prompt"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleSystemPromptCommand(),
+			},
+			{
+				names: ["context"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleContextCommand(),
+			},
+			{
+				names: ["logs"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleLogsCommand(),
+			},
+			{
+				names: ["heartbeat"],
+				clearAfter: true,
+				run: ({ canonicalText }) => this.handleHeartbeatCommand(canonicalText),
+			},
+			{
+				names: ["loop"],
+				clearAfter: true,
+				run: ({ canonicalText }) => this.handleHeartbeatCommand(canonicalText, parseLoopCommand),
+			},
+			{ names: ["heartbeats"], run: () => this.showHeartbeatManager() },
+			{
+				names: ["changelog"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleChangelogCommand(),
+			},
+			{
+				names: ["hotkeys"],
+				requireEmptyArgs: true,
+				echoLocal: true,
+				clearAfter: true,
+				run: () => this.handleHotkeysCommand(),
+			},
+			{ names: ["fork"], requireEmptyArgs: true, run: () => this.showUserMessageSelector() },
+			{ names: ["clone"], requireEmptyArgs: true, run: () => this.handleCloneCommand() },
+			{
+				names: ["tree"],
+				requireEmptyArgs: true,
+				keepPromptStash: true,
+				run: () => this.showTreeSelector(),
+			},
+			{
+				names: ["rewind"],
+				requireEmptyArgs: true,
+				keepPromptStash: true,
+				run: () => this.showRewindSelector(),
+			},
+			{ names: ["login"], requireEmptyArgs: true, run: () => this.showConfigurationMenu("providers") },
+			{ names: ["logout"], requireEmptyArgs: true, run: () => this.showLogoutSelector() },
+			{ names: ["mcp"], run: ({ args }) => this.handleMcpCommand(args) },
+			{
+				names: ["js", "ts"],
+				run: ({ name, canonicalText, args }) => this.handleReplEvalCommand(name, canonicalText, args),
+			},
+			{
+				names: ["vars"],
+				requireEmptyArgs: true,
+				run: ({ canonicalText }) => this.handleVarsCommand(canonicalText),
+			},
+			{
+				names: ["clear-vars"],
+				requireEmptyArgs: true,
+				run: ({ canonicalText }) => this.handleClearVarsCommand(canonicalText),
+			},
+			{
+				names: ["bash", "python"],
+				run: ({ name, canonicalText }) => this.handleKernelShimCommand(name, canonicalText),
+			},
+			{ names: ["resume"], run: ({ args }) => this.handleResumeCommand(args) },
+			{ names: ["reload"], requireEmptyArgs: true, run: () => this.handleReloadCommand() },
+			{ names: ["reload:harness"], run: () => this.handleReloadHarnessCommand() },
+			{
+				names: ["update"],
+				run: async ({ args }) => {
+					const updateArgs = parseCommandArgs(args);
+					if (
+						!updateArgsIncludeSelf(updateArgs) &&
+						(this.isAgentCompacting() || this.isAgentStreaming() || this.isBashRunning())
+					) {
+						this.showWarning("Wait for the current work to finish before updating.");
+						return;
+					}
+					await this.handleUpdateCommand(args);
+				},
+			},
+			{
+				names: ["fullscreen"],
+				run: ({ args }) => {
+					const arg = args.trim().toLowerCase();
+					if (arg && arg !== "on" && arg !== "off") {
+						this.showError("Usage: /fullscreen [on|off]");
+						return;
+					}
+					const enable = arg === "on" ? true : arg === "off" ? false : !this.fullscreenEnabled;
+					this.setFullscreenMode(enable);
+				},
+			},
+			{
+				names: ["debug"],
+				requireEmptyArgs: true,
+				clearAfter: true,
+				run: () => this.handleDebugCommand(),
+			},
+			{ exactText: "/quit", run: () => this.shutdown() },
+		];
 		this.defaultEditor.onSubmit = async (text: string) => {
 			const streamingBehavior = this.submittedInputBehavior;
 			this.submittedInputBehavior = "steer";
@@ -4088,187 +4287,8 @@ export class InteractiveMode {
 					this.ui.requestRender();
 					return;
 				}
-				if (commandName) {
-				}
-
-				if (commandName === "btw") {
-					this.editor.setText("");
-					await this.handleSideQuestion(commandArgs);
-					return;
-				}
-				if (commandName === "settings" && !commandArgs) {
-					await this.showSettingsSelector();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "scoped-models" && !commandArgs) {
-					this.editor.setText("");
-					await this.showModelsSelector();
-					return;
-				}
-				if (commandName === "model") {
-					const searchTerm = commandArgs || undefined;
-					this.editor.setText("");
-					await this.handleModelCommand(searchTerm);
-					return;
-				}
-				if (commandName === "effort") {
-					this.editor.setText("");
-					this.handleEffortCommand(commandArgs);
-					return;
-				}
-				if (commandName === "graph") {
-					this.editor.setText("");
-					this.handleGraphCommand(commandArgs);
-					return;
-				}
-				if (commandName === "fast") {
-					this.editor.setText("");
-					if (commandArgs) {
-						this.showError("Usage: /fast");
-					} else {
-						this.handleFastCommand();
-					}
-					return;
-				}
-				if (commandName === "export") {
-					await this.handleExportCommand(canonicalCommandText);
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "import") {
-					await this.handleImportCommand(canonicalCommandText);
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "share" && !commandArgs) {
-					await this.handleShareCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "copy" && !commandArgs) {
-					await this.handleCopyCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "name") {
-					await this.handleNameCommand(canonicalCommandText);
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "rlm-max-depth") {
-					this.editor.setText("");
-					await this.handleRlmMaxDepthCommand(commandArgs);
-					return;
-				}
-				if (commandName === "session" && !commandArgs) {
-					this.echoLocalCommand(text);
-					await this.handleSessionCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "system-prompt" && !commandArgs) {
-					this.echoLocalCommand(text);
-					await this.handleSystemPromptCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "context" && !commandArgs) {
-					this.echoLocalCommand(text);
-					await this.handleContextCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "logs" && !commandArgs) {
-					this.echoLocalCommand(text);
-					this.handleLogsCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "heartbeat") {
-					await this.handleHeartbeatCommand(canonicalCommandText);
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "loop") {
-					await this.handleHeartbeatCommand(canonicalCommandText, parseLoopCommand);
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "heartbeats") {
-					this.editor.setText("");
-					await this.showHeartbeatManager();
-					return;
-				}
-				if (commandName === "changelog" && !commandArgs) {
-					this.echoLocalCommand(text);
-					this.handleChangelogCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "hotkeys" && !commandArgs) {
-					this.echoLocalCommand(text);
-					this.handleHotkeysCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (commandName === "fork" && !commandArgs) {
-					this.editor.setText("");
-					await this.showUserMessageSelector();
-					return;
-				}
-				if (commandName === "clone" && !commandArgs) {
-					this.editor.setText("");
-					await this.handleCloneCommand();
-					return;
-				}
-				if (commandName === "tree" && !commandArgs) {
-					this.editor.setText("");
-					restorePromptStashAfterSubmit = false;
-					await this.showTreeSelector();
-					return;
-				}
-				if (commandName === "rewind" && !commandArgs) {
-					this.editor.setText("");
-					restorePromptStashAfterSubmit = false;
-					await this.showRewindSelector();
-					return;
-				}
-				if (commandName === "login" && !commandArgs) {
-					this.editor.setText("");
-					await this.showConfigurationMenu("providers");
-					return;
-				}
-				if (commandName === "logout" && !commandArgs) {
-					this.editor.setText("");
-					await this.showLogoutSelector();
-					return;
-				}
-				if (commandName === "mcp") {
-					this.editor.setText("");
-					await this.handleMcpCommand(commandArgs);
-					return;
-				}
-				if (commandName === "js" || commandName === "ts") {
-					this.editor.setText("");
-					await this.handleReplEvalCommand(commandName, canonicalCommandText, commandArgs);
-					return;
-				}
-				if (commandName === "vars" && !commandArgs) {
-					this.editor.setText("");
-					await this.handleVarsCommand(canonicalCommandText);
-					return;
-				}
-				if (commandName === "clear-vars" && !commandArgs) {
-					this.editor.setText("");
-					await this.handleClearVarsCommand(canonicalCommandText);
-					return;
-				}
-				if (commandName === "bash" || commandName === "python") {
-					this.editor.setText("");
-					this.handleKernelShimCommand(commandName, canonicalCommandText);
-					return;
-				}
+				// /clear and /new stay outside the table: they match raw names before
+				// alias resolution and restore the editor text on usage errors.
 				if (slashCommand?.name === "clear") {
 					if (commandArgs) {
 						this.editor.setText(text);
@@ -4292,53 +4312,25 @@ export class InteractiveMode {
 					await this.handleClearCommand(options);
 					return;
 				}
-				if (commandName === "resume") {
-					this.editor.setText("");
-					await this.handleResumeCommand(commandArgs);
-					return;
-				}
-				if (commandName === "reload" && !commandArgs) {
-					this.editor.setText("");
-					await this.handleReloadCommand();
-					return;
-				}
-				if (commandName === "reload:harness") {
-					this.editor.setText("");
-					await this.handleReloadHarnessCommand();
-					return;
-				}
-				if (commandName === "update") {
-					this.editor.setText("");
-					const updateArgs = parseCommandArgs(commandArgs);
-					if (
-						!updateArgsIncludeSelf(updateArgs) &&
-						(this.isAgentCompacting() || this.isAgentStreaming() || this.isBashRunning())
-					) {
-						this.showWarning("Wait for the current work to finish before updating.");
-						return;
+
+				for (const entry of slashCommands) {
+					let matched = false;
+					if (entry.exactText !== undefined) {
+						matched = text === entry.exactText;
+					} else if (entry.names !== undefined && commandName !== undefined) {
+						matched = entry.names.includes(commandName);
 					}
-					await this.handleUpdateCommand(commandArgs);
-					return;
-				}
-				if (commandName === "fullscreen") {
-					this.editor.setText("");
-					const arg = commandArgs?.trim().toLowerCase();
-					if (arg && arg !== "on" && arg !== "off") {
-						this.showError("Usage: /fullscreen [on|off]");
-						return;
-					}
-					const enable = arg === "on" ? true : arg === "off" ? false : !this.fullscreenEnabled;
-					this.setFullscreenMode(enable);
-					return;
-				}
-				if (commandName === "debug" && !commandArgs) {
-					await this.handleDebugCommand();
-					this.editor.setText("");
-					return;
-				}
-				if (text === "/quit") {
-					this.editor.setText("");
-					await this.shutdown();
+					if (!matched || (entry.requireEmptyArgs && commandArgs)) continue;
+					if (entry.echoLocal) this.echoLocalCommand(text);
+					if (entry.keepPromptStash) restorePromptStashAfterSubmit = false;
+					if (!entry.clearAfter) this.editor.setText("");
+					await entry.run({
+						name: commandName ?? "",
+						args: commandArgs,
+						canonicalText: canonicalCommandText,
+						text,
+					});
+					if (entry.clearAfter) this.editor.setText("");
 					return;
 				}
 
