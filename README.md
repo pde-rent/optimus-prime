@@ -12,51 +12,46 @@
 </p>
 
 <p align="center">
-  The most minimal harness we know of that still ships the full feature set — dynamic memory,
-  context and effort management, recursive delegation, skills, MCP, charts, web search —
-  because none of that requires bloat. Small is the discipline; features are the point.
-</p>
-
-<p align="center">
-  <a href="#install">Install</a> &bull;
-  <a href="packages/coding-agent/docs/index.md">Docs</a> &bull;
-  <a href="#numbers">Numbers</a> &bull;
-  <a href="#the-graph-resolver">Graph resolver</a> &bull;
+  <a href="#quick-start">Quick start</a> &bull;
+  <a href="#highlights">Highlights</a> &bull;
+  <a href="#the-repl">REPL</a> &bull;
+  <a href="#recursion-and-delegation">Delegation</a> &bull;
   <a href="#settings">Settings</a> &bull;
-  <a href="#what-changed">What changed</a> &bull;
+  <a href="#skills">Skills</a> &bull;
+  <a href="#mcp">MCP</a> &bull;
   <a href="#supply-chain">Supply chain</a> &bull;
+  <a href="#development">Development</a> &bull;
   <a href="#credits">Credits</a>
 </p>
 
 ---
 
-## Install
+## Quick start
 
-Prerequisites: [Bun](https://bun.sh) 1.4+ and `git`. No Node or npm in the toolchain or the
-runtime — `bun`, `bunx`, `bun run`, `bun install`, never `npm`/`npx`/`node`.
+Prerequisites: [Bun](https://bun.sh) 1.4+ and `git`. The toolchain is Bun only —
+`bun`, `bunx`, `bun run`, `bun install`; never npm/npx/node.
 
 ```sh
 git clone https://github.com/pde-rent/optimus-prime.git
 cd optimus-prime
 bun install
-bun run build          # typecheck + bundle, ~1 min the first time
+bun run build          # typecheck + bundle
 cd packages/coding-agent && bun link --global
 ```
 
-`bun link --global` symlinks the global `optimus` at this checkout, so a rebuild here updates
-the command in place — there is no second copy to keep in sync.
+`bun link --global` symlinks the global `optimus` at this checkout, so a rebuild updates the
+command in place.
 
 ### Authenticate
 
-Nothing works until a provider is configured. Either run `/login` inside the app, or export a
-key before starting:
+Run `/login` inside the app, or export a key first:
 
 ```sh
-export ANTHROPIC_API_KEY=...      # or OPENAI_API_KEY, OPENROUTER_API_KEY, ...
+export ANTHROPIC_API_KEY=...      # or OPENAI_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, ...
 ```
 
-`/login` stores credentials in `~/.optimus/agent/auth.json`; environment variables are read as a
-fallback. `/models` picks the model, `/settings` everything else.
+Credentials live in `~/.optimus/agent/auth.json`; environment variables are read as a fallback.
+`/models` picks the model, `/settings` everything else.
 
 ### Run
 
@@ -67,67 +62,53 @@ optimus -p "list the tools"    # print and exit
 optimus --help                 # every flag
 ```
 
-State lives in `~/.optimus/agent`. Nothing is inherited from an earlier install.
+State lives in `~/.optimus/agent`. To update: `git pull && bun install && bun run build`, then
+restart — the daemon keeps serving the previous bundle until its workers retire.
 
-### Update
+## Highlights
 
-```sh
-git pull && bun install && bun run build
-```
-
-Restart afterwards: the daemon caches the previous bundle and keeps serving it until its
-workers are retired. There is no automatic update check yet.
-
-`install.sh` at the repo root is a release installer for published tarballs. It is not wired up
-for this fork, so build from source as above.
+- **A persistent REPL as the primary tool.** Declarations, imports and helpers survive across
+  turns and compaction. The whole Bun standard library is in scope with nothing to install:
+  SQLite, Postgres/MySQL via tagged templates, Redis, S3, raw TCP/TLS, WebSocket, image decode,
+  YAML/TOML, hashing, compression, `%%bash` cells.
+- **Recursive delegation under a budget.** Spawn child agents that return at admission; depth,
+  effort and context budget are runtime-adjustable dials. Reach is explicit and one-way per
+  cohort. Idle kernels are snapshotted and reaped; finished children retire disk-only but stay
+  resumable.
+- **Native tools where a shell spawn adds nothing.** `grep`, `find`, `sed`, `wc`, `ln` run
+  in-process and behave identically on Windows. Batched reads fetch up to 16 files in one call;
+  re-reading an unchanged file costs one line instead of its tokens.
+- **Diffs worth reading.** Expanded edits render syntax-highlighted diff blocks — side by side on
+  wide terminals — and modal dialogs float over a dimmed transcript instead of blanking it.
+- **Sessions you can move through.** `/rewind` returns to any earlier point of the session tree,
+  `/effort` tunes reasoning mid-run, and `/js` / `/ts` / `/vars` drive the focused session's
+  REPL kernel directly.
+- **Live model discovery.** Fresh provider catalogs merge into the `/model` picker alongside the
+  generated static list; built-in logins cover Anthropic, OpenAI, OpenRouter, Grok (SuperGrok),
+  OpenCode Zen, Nous Portal, Z.ai, NVIDIA NIM, Qwen, GLM, Together AI and more.
+- **MCP without the flattening.** Configured servers are reached from the REPL through one
+  binding; their tools cost nothing until called. OAuth tokens are endpoint-bound, disk-verified
+  on removal, and discovered per RFC 9728.
+- **Honest failure surfaces.** Retries use capped exponential backoff with full jitter; provider
+  errors are visible instead of swallowed; a degeneracy guard aborts output collapsed into
+  repetition; a reasoning-loop guard steers, then stops, runs that plan without acting.
+- **Charts and data frames.** Braille terminal charts and a pandas-shaped `df` API with
+  NumPy-shaped vector math — both in-process, zero services.
+- **Continual memory.** Skills, prompt notes, memories and subagent specs curated by the agent,
+  retrieved through a local BM25F index — no embedding service, no network call.
 
 ## Numbers
 
-Measured on the same machine (M3, macOS); competitors on a 2026-08-19 clean clone, Optimus
-re-measured 2026-08-21 after another round of removals. Install weight is a production install,
-so it is what ships rather than dev tooling.
-
-| | prime-agent | pi | **Optimus** |
-|---|---|---|---|
-| Runtime dependencies | 33 | 27 | **4** |
-| Packages installed | 125 | 84 | **25** |
-| `node_modules` | 197 MB | 140 MB | **4.8 MB** |
-| Bundle | 13 MB | 11 MB | **4.5 MB** |
-| Cold start, mean of 5 | 230 ms | 350 ms | **~60 ms** |
-| Default runtime | Node | Node | **Bun** |
-
-Startup includes the runtime difference; the dependency and size figures do not. Four runtime
-dependencies, each with a written justification below. Everything else the harness needs ships
-inside Bun itself.
-
-## What changed
-
-prime-agent introduced the RLM: an agent that programs in a persistent REPL and can call
-itself. That REPL was a Python IPython kernel over ZeroMQ — an interpreter, a native module and a
-socket hop bolted next to a runtime the TUI was already using. The fork exists in large part to
-delete that: the REPL here is native Bun JS/TS, the same runtime that renders the editor, so
-everything stays in one process, one language and one toolchain.
-
-| | prime-agent | Optimus |
-|---|---|---|
-| REPL | Python IPython kernel over ZeroMQ | native Bun JS/TS |
-| Telemetry | on by default, posted to a vendor endpoint | none — the code is deleted, not disabled |
-| Provider access | 5 vendor SDKs | one fetch client, wire types vendored |
-| Editor protocol | ACP mode | removed |
-| Highlighting | highlight.js, ~350 ms import | rule data with a local tokenizer |
-| Charts | none | braille terminal charts, a matplotlib-shaped API |
-| Data work | ad hoc scripting in the kernel | `df` data frames with a pandas-shaped API and NumPy-shaped vector math |
-| Continual memory | none | harness entries — skills, prompts, memories, subagent specs — curated by the agent, searched on demand |
-| Subagent lifecycle | spawn and hope | idle kernels reaped with snapshot restore, adaptive passivation, disk-only retirement, a reasoning-loop guard |
-| Delegation shape | assembled by the agent | resolved for it, under a budget dial |
-| Cohort messaging | every sibling reachable | edges declared per child, one-way |
-| Child token cost | folded into the parent's total | itemised per child, in the roster |
-| Settings from the CLI | a few flags | every session setting, from one declarative table |
+| | |
+|---|---|
+| Runtime dependencies | **3**, each justified [below](#supply-chain) |
+| Bundle | **~4.5 MB** |
+| Default runtime | **Bun** |
+| Type coverage | strict `tsgo --noEmit` over every package — CI fails on one `any`, one suppression |
 
 ## The REPL
 
-One tool, `repl`. Declarations, imports and helpers persist across turns and compaction. The
-Bun standard library is in scope with nothing to install:
+One tool, `repl`. The Bun standard library is in scope with nothing to install:
 
 | Need | Reach for |
 |---|---|
@@ -139,7 +120,7 @@ Bun standard library is in scope with nothing to install:
 | Files, globs, processes | `Bun.file`, `Bun.write`, `Bun.Glob`, `Bun.spawn`, `$` |
 | Images | `Bun.Image` — decode, EXIF, resize, encode |
 | Parsing, hashing, compression | `Bun.YAML`/`TOML`, `Bun.CryptoHasher`, `Bun.zstd*`, `HTMLRewriter` |
-| Shell | `%%bash` cells |
+| Shell | ``%%bash`` cells |
 
 Handles resolve lazily, so a cell that never opens a database pays nothing. REPL start is ~17 ms.
 
@@ -150,7 +131,7 @@ arrive as messages or files, so a parent is never blocked on a child.
 
 | Capability | Surface |
 |---|---|
-| Spawn a child | `rlm('task')` |
+| Spawn a child | `rlm('task')` or `spawn('task')` |
 | Depth, adjustable at runtime | `rlm.get_max_depth` / `rlm.set_max_depth` |
 | Reasoning effort per child | `rlm.get_effort` / `rlm.set_effort` |
 | Context budget, session-scoped | `rlm.get_context_budget` / `rlm.set_context_budget` |
@@ -162,31 +143,17 @@ arrive as messages or files, so a parent is never blocked on a child.
 | Reusable roles | subagent specs in the harness, promoted by `refine` |
 
 Reach is bounded to parent, siblings and children. Siblings talk directly, so a cohort can
-reconcile without routing everything through the coordinator, and a repeated delegation role
-becomes a saved subagent spec instead of prompt text retyped each session. The agents view
-draws the live graph.
-
-Children are managed, not just spawned. A REPL kernel is snapshotted and reaped after ten idle
-minutes and transparently restored on the next cell, so finished subtrees stop costing memory.
-In the daemon, passivation scales with the resident child population and finished children retire
-disk-only after thirty idle minutes — their transcripts stay resumable. A reasoning-loop guard
-watches every run, including every child: planning that never acts is steered toward a concrete
-call once, then aborted with one clean continuation, then stopped.
+reconcile without routing through the coordinator, and a repeated delegation role becomes a
+saved subagent spec instead of prompt text retyped each session.
 
 The agent also manages its own headroom. Compaction triggers by default at 500k tokens under a
 666k context budget, itself hard-capped by whatever window the model actually has; both are
-settings. Unless `dynamicContext` is switched off, the agent can retune them mid-session —
-tighter before a long mechanical run, wider before an open-ended one — session-scoped, never
-persisted, and thrash-capped like every other self-adjustment it is allowed.
+settings, and unless `dynamicContext` is switched off the agent can retune them mid-session —
+session-scoped, never persisted, thrash-capped like every other self-adjustment it is allowed.
 
-## The graph resolver
+### Fan-out budget
 
-Every published comparison that holds spend constant puts one agent ahead of a cohort, and the
-top SWE-bench systems are single loops with strong scaffolding. So the default here is one agent,
-and this is **off unless you turn it on**.
-
-What it changes when you do: a task may be resolved by several agents instead of one, and you set
-how much that is allowed to cost.
+By default one agent does the work. A task may fan out into a cohort when you raise the budget:
 
 ```sh
 optimus --graph medium "audit every route handler for missing authz"
@@ -200,53 +167,24 @@ optimus --graph medium "audit every route handler for missing authz"
 | `high` | 25x | 6 | 2 |
 | `max` | 100x | 8 | 2 |
 
-One dial, not two: more budget means more tasks earn a cohort. `graphMaxTokens` only ever lowers
-a level's ceiling, and a level needing depth 2 raises `rlmMaxDepth` with it, so a spawn cannot
-throw against a depth the dial itself asked for. An explicit `/rlm-max-depth` pin still wins.
-
-**Escalation is evidence-led, never predicted.** `check` failed twice on the same diagnostic; the
-change is hard to undo; a shared symbol has more call sites than fit in one head; retrieval
-returned contradictory sources. A model's self-rated chance of being wrong comes from the same
-forward pass as the answer, and only half that error is observable — over-escalation shows up in
-the bill, under-escalation looks like an ordinary wrong answer.
-
-**Two shapes.** Work that splits into independent units fans out, one child per unit, fanning in
-through files. Work that does not split gets another pass with more context instead — N children
-on an indivisible problem return N restatements at N times the price — plus at most one checker
-when the result cannot be verified mechanically. That checker sees the problem, never the
-parent's answer.
-
-**Each cohort declares its own edges.** The spawner says who may reach whom:
+Escalation is evidence-led, never predicted: repeated check failures, changes that are hard to
+undo, contradictory retrieval. Work that splits into independent units fans out one child per
+unit and fans in through files; work that does not split gets another pass with more context
+instead. Each cohort declares who may reach whom:
 
 ```js
-await rlm('review the auth diff', { peers: ['worker-b'] });  // may message worker-b, nobody else
-await rlm('audit the routes',     { peers: [] });            // reports only to the parent
+await spawn('review the auth diff', { peers: ['worker-b'] });  // may message worker-b, nobody else
+await spawn('audit the routes',     { peers: [] });            // reports only to the parent
 ```
 
-Edges are one-way, so a reviewer returns a verdict without opening a debate. Omitting `peers`
-leaves the family default alone; `peers: []` is explicit silence. The parent is always reachable.
-The prompt teaches `[]` by default: delivery is `steer`, so a message interrupts the receiver
-mid-turn and the first critique to land reframes whoever gets it — an anchoring cascade that
-destroys the independence the cohort was for. Open an edge when a child needs another's output,
-not so they can confer.
-
-**Reconciling.** A pre-existing check written by someone other than the agent under review settles
-it; a test written by the agent whose work it validates proves nothing. Otherwise disagreement is
-the finding, surfaced with the differing lines rather than averaged away by a vote.
-
-Set it with `--graph`, `/graph`, `GRAPH_RESOLVER`, or the Graph budget row in `/settings`. At
-`off` the prompt block is not rendered at all, so the default path pays nothing for it.
-
-Three limits, stated plainly: the ceiling is soft by one child (`rlm()` returns at admission, and
-committed tokens cannot be refused retroactively); it is metered per agent per user turn, so the
-worst case is the ceiling times the number of spawners; and the 1x baseline is a constant, not a
-measurement, so the multiples are spend authority rather than a prediction.
+Set it with `--graph`, `/graph`, `GRAPH_RESOLVER`, or the Graph row in `/settings`. At `off`
+nothing renders into the prompt, so the default path pays nothing.
 
 ## Settings
 
 Every session setting is reachable three ways — a flag for one run, a slash command mid-session,
-and a row in `/settings` that persists — and they are generated from one table, so a flag cannot
-exist that the runtime quietly ignores.
+and a row in `/settings` that persists — all generated from one table, so a flag cannot exist
+that the runtime quietly ignores.
 
 | Flag | Also | Sets |
 |---|---|---|
@@ -265,15 +203,11 @@ exist that the runtime quietly ignores.
 
 Settings without flags follow the same table: `toolTimeouts.replMs` /`toolTimeouts.bashSeconds`
 (per-tool call timeouts), `replIdleTimeoutMinutes` (idle REPL kernels are snapshotted and
-reaped), `idleEvictionMinutes` (daemon worker eviction and child passivation), and
-`dynamicContext` (the agent retuning its own headroom).
+reaped), `idleEvictionMinutes` (daemon worker eviction), and `dynamicContext`.
 
 Commands answer to the names other CLIs use for them: `/exit`, `/config`, `/cost`, `/connect`,
-`/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`.
-
-Opening a session blinks the mark's eyes and plays a short sting. It never gates input, and
-`"ignition": false` (or `quietStartup`) turns it off. Playback uses whatever the platform already
-has; no player, no sound, same startup time.
+`/signin`, `/logout`, `/continue`, `/depth`, `/reasoning`. Opening a session plays a short
+startup animation; `"ignition": false` turns it off.
 
 ## Skills
 
@@ -292,16 +226,14 @@ has; no player, no sound, same startup time.
 | `chart` | Terminal charts — line, bar, candlestick, gauge, sparkline |
 | `web3` | Chain RPC, wallet balances, DeFi TVL and volume — EVM, Solana, Tron |
 | `stats` | Array statistics `Math` lacks — quantiles, stddev, correlation, describe |
-| `df` | Data frames — a pandas-shaped API over columnar data plus NumPy-shaped vector math, in-process |
+| `df` | Data frames — a pandas-shaped API over columnar data plus NumPy-shaped vector math |
 
 Memory retrieval is a local BM25F index: no embedding service, no network call.
 
 ## MCP
 
-No MCP server ships enabled. The client is built in, so adding one is configuration
-rather than installation.
-
-A server is a named entry under `mcpServers`, in either settings file:
+No MCP server ships enabled. The client is built in, so adding one is configuration rather than
+installation:
 
 ```jsonc
 // ~/.optimus/agent/settings.json      — every project
@@ -317,14 +249,9 @@ A server is a named entry under `mcpServers`, in either settings file:
 }
 ```
 
-A project entry overrides a global one of the same name. Credentials are named, never
-inlined: `bearerTokenEnvVar` reads a token from the environment, and `"oauth": true`
-uses the browser login flow instead, storing the token with the harness's other
-credentials rather than in the settings file.
-
-A server offering more tools than a project needs can be narrowed with `includeTools`
-and `excludeTools`, named as the wider convention names them. Exclusion wins, so a
-broad include list stays safe to narrow.
+A project entry overrides a global one of the same name. Credentials are named, never inlined:
+`bearerTokenEnvVar` reads a token from the environment, and `"oauth": true` uses the browser
+login flow, storing the token with the harness's other credentials.
 
 From inside a session, the REPL reaches every configured server through one binding:
 
@@ -334,39 +261,29 @@ const tools = await mcp.tools("github");          // follows pagination
 await mcp.call("github", "search_issues", { q: "is:open label:bug" });
 ```
 
-Tools are **not** flattened into the model's tool list. A server exposing eighty tools
-costs nothing until it is asked, which is also why a server's tool names cannot collide
-with the harness's own or with another server's.
-
-The client speaks both eras of the protocol — the stateless revision (`2026-07-28`) and
-the handshake revisions (`2025-11-25` and earlier) — detected per endpoint and cached, over
-Streamable HTTP. A `"type": "stdio"` entry is accepted and listed, but reports that the
-transport is not reachable rather than going missing.
+Tools are **not** flattened into the model's tool list. A server exposing eighty tools costs
+nothing until it is asked, which is also why server tool names cannot collide with the harness's
+own. The client speaks both eras of the protocol — the stateless revision (`2026-07-28`) and the
+handshake revisions (`2025-11-25` and earlier) — detected per endpoint and cached.
 
 ## Supply chain
 
-Every dependency runs with your credentials and updates without you reading the diff, and it is
-also startup cost — everything parsed before the first prompt renders. So a dependency earns its
-place or gets written out. Twenty-five installed packages instead of a hundred and twenty-five
-is an audit a person can actually perform.
+Every dependency runs with your credentials, updates without you reading the diff, and loads
+before the first prompt renders. So a dependency earns its place or gets written out.
 
 | Dependency | Why |
 |---|---|
-| `@crafter/charts` | Terminal charts. Zero deps of its own; its `typescript` peer is no longer installed now that peer auto-install is off |
+| `@crafter/charts` | Terminal charts. Zero deps of its own |
 | `@speed-highlight/core` | Highlighting rule data, zero deps |
 | `proper-lockfile` | Cross-process file locking |
-| `extract-zip` | Bun's archive API is write-only |
 
-Extensions load through a native Bun import path with virtual-module shims — the same TS
-transpilation jiti provided, without the dependency.
+Everything else was written out instead, each differential-tested against what it replaced:
+gitignore matching (1440/1440 identical), git URL parsing (20/20), globs (512/512), JSON Schema
+and validation (12/12 byte-identical, 26/26 checks), Myers diff (exact, plus 400 randomised
+reconstructions). Provider SDKs, ORMs and schema frameworks are gone.
 
-Written out instead, each differential-tested against what it replaced: gitignore matching
-(1440/1440 identical), git URL parsing (20/20), globs (512/512), JSON Schema and validation
-(12/12 byte-identical, 26/26 checks), Myers diff (exact, plus 400 randomised reconstructions).
-Provider SDKs, ORMs and schema frameworks are gone.
-
-Removing a dependency moves its work into `src` rather than deleting it, so source lines did not
-shrink. What shrank is the code nobody here wrote and nobody here reviews.
+Removing a dependency moves its work into `src` rather than deleting it. What shrank is the code
+nobody here wrote and nobody here reviews.
 
 ## Development
 
@@ -376,49 +293,32 @@ bun run check          # biome, tsgo, installer and browser smoke
 bun run test           # every package
 ```
 
-Per-package suites run from the package directory with the Vitest-compat preload:
+Per-package suites run from the package directory with the preload:
 
 ```sh
 cd packages/coding-agent
 bun test --preload ../../scripts/test-preload.ts --isolate test/bun-repl.test.ts
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) · [docs/repl-parity.md](docs/repl-parity.md) for the
-Bun-versus-kernel audit · [docs/upstream-sync.md](docs/upstream-sync.md) for tracking upstream.
+Type safety is total and enforced by CI: the whole repository typechecks with `tsgo --noEmit`
+under strict settings, and a single `any`, double cast through `unknown`, or lint suppression
+fails the build. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-Everything below shaped this harness. The first two are upstream with code carried over (their
-copyright notices are kept in [LICENSE](LICENSE) as MIT requires); the rest are influences — no
-code taken, credited where a decision landed in the source.
+Optimus Prime is a hard fork of
+[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent) (RLM
+architecture, refinement, skills, daemon), which builds on
+[earendil-works/pi](https://github.com/earendil-works/pi) by Mario Zechner (agent loop, TUI,
+provider layer, extension system). Both upstreams' copyright notices are kept in
+[LICENSE](LICENSE) as MIT requires.
 
-| Project | Relationship | What it shaped |
-|---|---|---|
-| **[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)** | hard-fork parent | the RLM architecture, refinement and skills, the daemon and agents view |
-| **[earendil-works/pi](https://github.com/earendil-works/pi)** (Mario Zechner) | upstream of the parent | the agent loop, TUI, provider layer and extension system |
-| **[xai-org/grok-build](https://github.com/xai-org/grok-build)** | influence | TUI architecture (action/effect loop, scrollback folding), per-session storage layout, compaction design (prefire passes, tool-result pruning), the subagent task tool and coordinator |
-| **[Claude Code](https://claude.com/claude-code)** | influence | tool-calling shape, SKILL.md skill definition format, overall loop conventions, session management UX |
-| **[oh-my-pi](https://github.com/can1357/oh-my-pi)** | influence | hash-anchored editing, verification through the project's own checker, suppressing repeated agent messages (`edit.src`/`edit.patch`, `check`, `agent-messages.ts`) |
-| **[Mem0](https://github.com/mem0ai/mem0)** | influence | extract-and-consolidate, retrieve-before-write, scoped recall; its per-query cost is why retrieval here stays lexical (`rlm.harness.search_memory`) |
-| **[Letta / MemGPT](https://github.com/letta-ai/letta)** | influence | agent-managed memory tiers curated through tools (`rlm.harness` CRUD) |
-| **[ponytail](https://github.com/DietrichGebert/ponytail)** | influence | reuse before adding code; what is never traded away; one runnable check for non-trivial logic (`CODE_CRAFT_PROMPT`) |
-| **[pstack](https://github.com/cursor/plugins/tree/main/pstack)** | influence | verify against the real thing; blast-radius check before widening a shared change (`VERIFICATION_PROMPT`) |
+Further design influences, credited where a decision landed in the source: grok-build (TUI
+action/effect loop, scrollback folding, compaction design), Claude Code (SKILL.md format,
+tool-calling shape), oh-my-pi (hash-anchored editing, verification through the project's own
+checker), Mem0 and Letta/MemGPT (memory curation patterns; lexical retrieval here stays local),
+ponytail and pstack (verification-first working rules).
 
-Both prompt sections are always-on defaults, not plugins — nothing to install, nothing to drift
-out of sync. A repository overrides them from its own `AGENTS.md` or `CLAUDE.md`.
-
-### Research reading
-
-Directional influences, listed honestly: not every conclusion is factored in yet. They set the
-vocabulary for what the harness is trying at, and each will be reviewed and folded in or rejected
-on evidence.
-
-- ReAct (Yao et al., 2022) — interleaving reasoning and acting
-- Reflexion (Shinn et al., 2023) — verbal self-review between attempts
-- Voyager (Wang et al., 2023) — a growing library of reusable skills
-- Executable Code Actions / CodeAct (Wang et al., 2024) — code as the action space; the RLM's foundation
-- SWE-agent and the agent–computer interface (Yang et al., 2024) — tool interfaces decide outcomes
-- mini-swe-agent — minimal scaffolding at competitive scores
-- Don't Build Multi-Agents (Cognition, 2025) — the context-engineering case against fan-out; why the graph resolver defaults off
-- The OpenHands stuck detector — semantic repetition detection for runaway runs
-- Erlang/OTP supervision trees — restart intensity limits and escalation ladders for child tasks
+Research background: ReAct, Reflexion, Voyager, CodeAct, SWE-agent's agent-computer interface,
+mini-swe-agent, Cognition's "Don't Build Multi-Agents" (why the fan-out budget defaults off),
+OpenHands' stuck detector, and Erlang/OTP supervision trees.

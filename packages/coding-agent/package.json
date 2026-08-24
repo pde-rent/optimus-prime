@@ -54,7 +54,6 @@
 		"@earendil-works/pi-ai": "^1.0.0",
 		"@earendil-works/pi-tui": "^1.0.0",
 		"@speed-highlight/core": "^1.2.24",
-		"just-bash": "3.3.0",
 		"proper-lockfile": "^4.1.2"
 	},
 	"overrides": {
