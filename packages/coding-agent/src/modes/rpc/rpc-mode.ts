@@ -4,6 +4,7 @@
 
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { errorMessage } from "../../utils/shared.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { InProcessAgentConnection } from "../agent-connection/in-process-agent-connection.js";
 import type {
@@ -444,13 +445,7 @@ async function runRpcModeWithConnectionInternal(
 		try {
 			parsed = JSON.parse(line);
 		} catch (parseError: unknown) {
-			output(
-				error(
-					undefined,
-					"parse",
-					`Failed to parse command: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
-				),
-			);
+			output(error(undefined, "parse", `Failed to parse command: ${errorMessage(parseError)}`));
 			return;
 		}
 		if (typeof parsed !== "object" || parsed === null || !("type" in parsed) || typeof parsed.type !== "string") {
@@ -480,13 +475,7 @@ async function runRpcModeWithConnectionInternal(
 				output(await handleCommand(command));
 				if (command.type === "observe") activateObservation(command.activeSessionId);
 			} catch (commandError: unknown) {
-				output(
-					error(
-						command.id,
-						command.type,
-						commandError instanceof Error ? commandError.message : String(commandError),
-					),
-				);
+				output(error(command.id, command.type, errorMessage(commandError)));
 			} finally {
 				if (isPrompt) {
 					promptResponsePending = false;

@@ -57,7 +57,6 @@ import {
 	SELF_UPDATE_NOT_ATTEMPTED_EXIT_CODE,
 	VERSION,
 } from "../../config.js";
-
 import { isAgentSessionMessage, startsAgentRun } from "../../core/agent-messages.js";
 import { compactRlmText } from "../../core/agent-session.js";
 import { isNoModelsAvailableMessage } from "../../core/auth-guidance.js";
@@ -122,6 +121,7 @@ import { copyToClipboard } from "../../utils/clipboard.js";
 import { readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { resizeImage } from "../../utils/image-resize.js";
+import { errorMessage } from "../../utils/shared.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { ensureTool, ensureToolWithStatus, formatMissingRipgrepMessage } from "../../utils/tools-manager.js";
 import { checkForNewPiVersion } from "../../utils/version-check.js";
@@ -181,6 +181,7 @@ import { ConfigurationMenuComponent, type ConfigurationMenuTab } from "./compone
 import { formatContextTree } from "./components/context-tree-format.js";
 import { isCompactAgentMessageNeighbor } from "./components/conversation-components.js";
 import { CountdownTimer } from "./components/countdown-timer.js";
+import { CtrlCExitHintController, ExpiringFlag } from "./components/ctrl-c-hint.js";
 import { CustomEditor } from "./components/custom-editor.js";
 import { CustomMessageComponent } from "./components/custom-message.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
@@ -192,7 +193,7 @@ import { runExternalEditor } from "./components/external-editor.js";
 import { FeatureHintComponent } from "./components/feature-hint.js";
 import { HeartbeatManagerComponent } from "./components/heartbeat-manager.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./components/injected-prompt-message.js";
-import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
+import { keyHint, keyText, pressAgainToExitHint, rawKeyHint } from "./components/keybinding-hints.js";
 import type { AuthSelectorProvider } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SelectModalComponent } from "./components/select-modal.js";
@@ -594,11 +595,8 @@ export class InteractiveMode {
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
-	private ctrlCExitHintExpiresAt = 0;
-	private ctrlCExitHintTimer: ReturnType<typeof setTimeout> | undefined = undefined;
-	private escapeRepeatAction: "tree" | "clear" | undefined;
-	private escapeRepeatExpiresAt = 0;
-	private escapeRepeatTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+	private ctrlCExitHint: CtrlCExitHintController;
+	private escapeRepeatFlag: ExpiringFlag<"tree" | "clear">;
 	private anthropicSubscriptionWarningShown = false;
 
 	private lastStatusSpacer: Spacer | undefined = undefined;
@@ -829,6 +827,10 @@ export class InteractiveMode {
 		this.subagentSummaryLine.onOpen = () => void this.openScopedAgentsView();
 		this.subagentSummaryLine.onCancel = () => this.focusEditor();
 		this.subagentSummaryLine.onChatAction = (data) => this.handleSubagentSummaryChatAction(data);
+		this.ctrlCExitHint = new CtrlCExitHintController(this.ui, InteractiveMode.EXIT_HINT_DURATION_MS, () =>
+			this.subagentSummaryLine.invalidate(),
+		);
+		this.escapeRepeatFlag = new ExpiringFlag<"tree" | "clear">(undefined, InteractiveMode.ESCAPE_REPEAT_WINDOW_MS);
 		this.footerDataProvider = new FooterDataProvider(this.uiServices.getInitialCwd());
 		this.setGoalAnnouncementBaseline(emptyGoalState());
 
@@ -2145,7 +2147,7 @@ export class InteractiveMode {
 	}
 
 	private async handleFatalRuntimeError(prefix: string, error: unknown): Promise<never> {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = errorMessage(error);
 		this.showError(`${prefix}: ${message}`);
 		stopThemeWatcher();
 		this.stop();
@@ -2452,7 +2454,7 @@ export class InteractiveMode {
 			for (const [shortcutStr, shortcut] of shortcuts) {
 				if (matchesKey(data, shortcutStr as KeyId)) {
 					Promise.resolve(shortcut.handler(createContext())).catch((err) => {
-						this.showError(`Shortcut handler error: ${err instanceof Error ? err.message : String(err)}`);
+						this.showError(`Shortcut handler error: ${errorMessage(err)}`);
 					});
 					return true;
 				}
@@ -3492,11 +3494,11 @@ export class InteractiveMode {
 			if (text.length > 0 && !this.isApplyingQueueSelectionText) {
 				this.latestEditorPromptStash = this.snapshotPromptStashFrom(this.editor, text);
 			}
-			if (this.escapeRepeatAction && !this.isApplyingQueueSelectionText) {
-				this.clearEscapeRepeat();
+			if (this.escapeRepeatFlag.isVisible() && !this.isApplyingQueueSelectionText) {
+				this.escapeRepeatFlag.clear();
 			}
 			if (text.length > 0) {
-				this.clearCtrlCExitHint();
+				this.ctrlCExitHint.clear();
 			}
 		};
 
@@ -3887,7 +3889,7 @@ export class InteractiveMode {
 			this.handleSideQuestionEvent({
 				...event,
 				status: "error",
-				errorMessage: error instanceof Error ? error.message : String(error),
+				errorMessage: errorMessage(error),
 			});
 		}
 	}
@@ -3982,7 +3984,7 @@ export class InteractiveMode {
 			})
 			.catch((error) => {
 				if (reportError) {
-					this.showError(error instanceof Error ? error.message : String(error));
+					this.showError(errorMessage(error));
 				}
 			});
 	}
@@ -4025,7 +4027,7 @@ export class InteractiveMode {
 						() => {},
 						(error) =>
 							this.showError(
-								`Could not re-queue the original message. Its text: "${checkedOut.originalText}" (${error instanceof Error ? error.message : String(error)})`,
+								`Could not re-queue the original message. Its text: "${checkedOut.originalText}" (${errorMessage(error)})`,
 							),
 					);
 					if (!requeued) {
@@ -4283,7 +4285,7 @@ export class InteractiveMode {
 						options = parseNewSessionCommand(text.slice(4));
 					} catch (error) {
 						this.editor.setText(text);
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 						return;
 					}
 					this.editor.setText("");
@@ -4400,7 +4402,7 @@ export class InteractiveMode {
 							// bash_end will arrive to consume the marker.
 							this.sideQuestionBashDiscarded = undefined;
 						}
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 					}
 					return;
 				}
@@ -4499,7 +4501,7 @@ export class InteractiveMode {
 					} else {
 						this.retainSubmittedDraft(rejectedDraft, submissionGeneration, submissionStashState);
 					}
-					this.showError(error instanceof Error ? error.message : String(error));
+					this.showError(errorMessage(error));
 					return;
 				}
 				this.updatePendingMessagesDisplay();
@@ -4587,7 +4589,7 @@ export class InteractiveMode {
 					this.showError(event.error ?? "Agent connection closed");
 				}
 			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			}
 		});
 	}
@@ -4610,7 +4612,7 @@ export class InteractiveMode {
 				response = await this.resolveConnectionExtensionUiRequest(request);
 			}
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			response = { cancelled: true };
 		}
 
@@ -4626,7 +4628,7 @@ export class InteractiveMode {
 		try {
 			await this.agentConnection.respondToExtensionUiRequest(request.id, response);
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -4649,7 +4651,7 @@ export class InteractiveMode {
 			this.activeConnectionExtensionUiRequests.delete(requestId);
 			activeRequest.cancelLocal();
 			void this.agentConnection.respondToExtensionUiRequest(requestId, { cancelled: true }).catch((error) => {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			});
 		}
 	}
@@ -5100,7 +5102,7 @@ export class InteractiveMode {
 					try {
 						await this.rebuildChatFromMessages();
 					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
+						const message = errorMessage(error);
 						this.showError(`Compaction succeeded, but the transcript could not be refreshed: ${message}`);
 					}
 					await this.refreshConnectionContextUsage();
@@ -5435,9 +5437,8 @@ export class InteractiveMode {
 	}
 
 	private getTrayOverrideLabel(): string | undefined {
-		if (this.isCtrlCExitHintVisible()) {
-			const clearKey = keyText("app.clear");
-			return clearKey ? `Press ${clearKey} again to exit` : "Press again to exit";
+		if (this.ctrlCExitHint.isVisible()) {
+			return pressAgainToExitHint();
 		}
 		const text = this.editor.getExpandedText?.() ?? this.editor.getText();
 		if (!this.isAgentStreaming() || !text.trim()) {
@@ -5625,7 +5626,7 @@ export class InteractiveMode {
 			await copyToClipboard(text);
 			this.showStatus("Copied selection to clipboard");
 		} catch (error) {
-			this.showError(`Failed to copy selection: ${error instanceof Error ? error.message : String(error)}`);
+			this.showError(`Failed to copy selection: ${errorMessage(error)}`);
 		}
 	}
 
@@ -6058,17 +6059,17 @@ export class InteractiveMode {
 	}
 
 	private handleEscape(): void {
-		this.clearCtrlCExitHint();
+		this.ctrlCExitHint.clear();
 		if (this.queueSelection.isBrowsing) {
 			this.cancelQueueCheckout();
 			return;
 		}
 		if (this.sideQuestionEvent) {
-			this.clearEscapeRepeat();
+			this.escapeRepeatFlag.clear();
 			this.clearSideQuestion({ abort: true });
 			return;
 		}
-		const action = this.takeEscapeRepeatAction();
+		const action = this.escapeRepeatFlag.take();
 		if (action === "tree") {
 			void this.showTreeSelector();
 			return;
@@ -6078,42 +6079,13 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.armEscapeRepeat(this.hasInterruptibleWork() || this.editor.getText().length === 0 ? "tree" : "clear");
+		this.escapeRepeatFlag.show(this.hasInterruptibleWork() || this.editor.getText().length === 0 ? "tree" : "clear");
 		this.interruptOrClearInput();
 	}
 
-	private armEscapeRepeat(action: "tree" | "clear"): void {
-		this.clearEscapeRepeat();
-		this.escapeRepeatAction = action;
-		this.escapeRepeatExpiresAt = Date.now() + InteractiveMode.ESCAPE_REPEAT_WINDOW_MS;
-		this.escapeRepeatTimer = setTimeout(() => {
-			this.clearEscapeRepeat();
-		}, InteractiveMode.ESCAPE_REPEAT_WINDOW_MS);
-		this.escapeRepeatTimer.unref?.();
-	}
-
-	private takeEscapeRepeatAction(): "tree" | "clear" | undefined {
-		if (!this.escapeRepeatAction || this.escapeRepeatExpiresAt <= Date.now()) {
-			this.clearEscapeRepeat();
-			return undefined;
-		}
-		const action = this.escapeRepeatAction;
-		this.clearEscapeRepeat();
-		return action;
-	}
-
-	private clearEscapeRepeat(): void {
-		if (this.escapeRepeatTimer) {
-			clearTimeout(this.escapeRepeatTimer);
-			this.escapeRepeatTimer = undefined;
-		}
-		this.escapeRepeatAction = undefined;
-		this.escapeRepeatExpiresAt = 0;
-	}
-
 	private handleCtrlC(): void {
-		this.clearEscapeRepeat();
-		if (this.isCtrlCExitHintVisible()) {
+		this.escapeRepeatFlag.clear();
+		if (this.ctrlCExitHint.isVisible()) {
 			void this.shutdown();
 			return;
 		}
@@ -6121,9 +6093,9 @@ export class InteractiveMode {
 	}
 
 	private handleInterruptKey(): void {
-		this.clearEscapeRepeat();
+		this.escapeRepeatFlag.clear();
 		this.interruptOrClearInput();
-		this.showCtrlCExitHint();
+		this.ctrlCExitHint.show();
 	}
 
 	private interruptOrClearInput(): void {
@@ -6144,46 +6116,9 @@ export class InteractiveMode {
 			// The queue is preserved server-side; draining resumes on the next
 			// submit or queued-message edit.
 			void this.agentConnection.abort().catch((error) => {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			});
 		}
-	}
-
-	private showCtrlCExitHint(): void {
-		if (this.ctrlCExitHintTimer) {
-			clearTimeout(this.ctrlCExitHintTimer);
-		}
-		this.ctrlCExitHintExpiresAt = Date.now() + InteractiveMode.EXIT_HINT_DURATION_MS;
-		this.ctrlCExitHintTimer = setTimeout(() => {
-			this.ctrlCExitHintTimer = undefined;
-			if (!this.isCtrlCExitHintVisible()) {
-				this.ctrlCExitHintExpiresAt = 0;
-				this.subagentSummaryLine.invalidate();
-				this.ui.requestRender();
-			}
-		}, InteractiveMode.EXIT_HINT_DURATION_MS);
-		this.ctrlCExitHintTimer.unref?.();
-		this.subagentSummaryLine.invalidate();
-		this.ui.requestRender();
-	}
-
-	private clearCtrlCExitHint(options: { render?: boolean } = {}): void {
-		if (!this.ctrlCExitHintTimer && this.ctrlCExitHintExpiresAt === 0) {
-			return;
-		}
-		if (this.ctrlCExitHintTimer) {
-			clearTimeout(this.ctrlCExitHintTimer);
-			this.ctrlCExitHintTimer = undefined;
-		}
-		this.ctrlCExitHintExpiresAt = 0;
-		if (options.render !== false) {
-			this.subagentSummaryLine.invalidate();
-			this.ui.requestRender();
-		}
-	}
-
-	private isCtrlCExitHintVisible(): boolean {
-		return this.ctrlCExitHintExpiresAt > Date.now();
 	}
 
 	private handleCtrlD(): void {
@@ -6201,7 +6136,7 @@ export class InteractiveMode {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
 		this.unregisterSignalHandlers();
-		this.clearCtrlCExitHint({ render: false });
+		this.ctrlCExitHint.clear({ render: false });
 
 		// Fetch while the connection is still alive; exit must not fail on a stats error.
 		const sessionStats = await this.agentConnection.getSessionStats().catch(() => undefined);
@@ -6496,8 +6431,7 @@ export class InteractiveMode {
 		void this.requeueCheckedOutOriginal(
 			checkout,
 			() => this.showStatus("Original message returned to the queue"),
-			(error) =>
-				this.showError(`Could not re-queue the message: ${error instanceof Error ? error.message : String(error)}`),
+			(error) => this.showError(`Could not re-queue the message: ${errorMessage(error)}`),
 		).then((requeued) => {
 			if (!requeued) return;
 			const draft = this.queueSelection.reset();
@@ -6837,7 +6771,7 @@ export class InteractiveMode {
 
 			this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
 		})().catch((error) => {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		});
 	}
 
@@ -6870,8 +6804,8 @@ export class InteractiveMode {
 	}
 
 	private clearInputBar(): void {
-		this.clearEscapeRepeat();
-		this.clearCtrlCExitHint({ render: false });
+		this.escapeRepeatFlag.clear();
+		this.ctrlCExitHint.clear({ render: false });
 		if (this.queueSelection.isBrowsing) {
 			// Leaving browse mode re-queues the checked-out original and restores
 			// the stashed draft.
@@ -6988,7 +6922,7 @@ export class InteractiveMode {
 			state = await this.agentConnection.getState();
 			this.applyConnectionStateSnapshot(state);
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		this.showSelectorModal((done) => {
@@ -7026,7 +6960,7 @@ export class InteractiveMode {
 					onAutoCompactChange: (enabled) => {
 						this.patchConnectionState({ autoCompactionEnabled: enabled });
 						void this.agentConnection.setAutoCompactionEnabled(enabled).catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onIdleEvictionMinutesChange: (value) => {
@@ -7057,18 +6991,18 @@ export class InteractiveMode {
 					onSteeringModeChange: (mode) => {
 						this.patchConnectionState({ steeringMode: mode });
 						void this.agentConnection.setSteeringMode(mode).catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onFollowUpModeChange: (mode) => {
 						this.patchConnectionState({ followUpMode: mode });
 						void this.agentConnection.setFollowUpMode(mode).catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onTransportChange: (transport) => {
 						void this.agentConnection.setTransport(transport).catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onThinkingLevelChange: (level) => {
@@ -7079,7 +7013,7 @@ export class InteractiveMode {
 								this.updateEditorBorderColor();
 							})
 							.catch((error) => {
-								this.showError(error instanceof Error ? error.message : String(error));
+								this.showError(errorMessage(error));
 							});
 					},
 					onThemeChange: (themeName) => {
@@ -7106,7 +7040,7 @@ export class InteractiveMode {
 							}
 						}
 						void this.rebuildChatFromMessages().catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onQuietStartupChange: (enabled) => {
@@ -7122,14 +7056,14 @@ export class InteractiveMode {
 						// Through the connection for the same reason as the graph dial: the session caches
 						// the resolved depth and renders it into the prompt.
 						void this.agentConnection.setRlmMaxDepth(maxDepth, { global: true }).catch((error: unknown) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onGraphResolverChange: (level) => {
 						// Same reason as `/graph`: the session caches a depth floor and a prompt block
 						// derived from this, and in daemon mode it is a different process.
 						void this.agentConnection.setGraphResolver(level).catch((error: unknown) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 					},
 					onShowHardwareCursorChange: (enabled) => {
@@ -7187,7 +7121,7 @@ export class InteractiveMode {
 				if (!(await this.ensureModelProviderConfigured(model, authFlows, providerOptions))) return;
 				await this.completeModelSelection(model);
 			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			}
 			return;
 		}
@@ -7480,7 +7414,7 @@ export class InteractiveMode {
 			.setGraphResolver(requested)
 			.then(() => this.showStatus(this.describeGraphBudget(requested, "Active now.")))
 			.catch((error: unknown) => {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			});
 	}
 
@@ -7563,7 +7497,7 @@ export class InteractiveMode {
 				this.showStatus(`Fast mode: ${state.serviceTier === "priority" ? "on" : "off"}`);
 			})
 			.catch((error) => {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			});
 	}
 
@@ -7619,7 +7553,7 @@ export class InteractiveMode {
 				this.showStatus(`Thinking level: ${level}`);
 			})
 			.catch((error) => {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			});
 	}
 
@@ -7672,7 +7606,7 @@ export class InteractiveMode {
 						if (!settled) menu.updateModels(this.getCurrentModel(), models, this.connectionConfiguredProviders);
 					})
 					.catch((error) => {
-						if (!settled) this.showError(error instanceof Error ? error.message : String(error));
+						if (!settled) this.showError(errorMessage(error));
 					});
 			};
 			const authenticate = (provider: AuthSelectorProvider, tab: "providers" | "mcp-connections") => {
@@ -7706,7 +7640,7 @@ export class InteractiveMode {
 					})
 					.catch((error) => {
 						handle?.focus();
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 					});
 			};
 
@@ -7744,7 +7678,7 @@ export class InteractiveMode {
 							completed = true;
 						} catch (error) {
 							show();
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						} finally {
 							if (completed) finish();
 						}
@@ -7762,7 +7696,7 @@ export class InteractiveMode {
 		try {
 			allModels = await this.getConnectionModelCatalog();
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 
@@ -7840,7 +7774,7 @@ export class InteractiveMode {
 		try {
 			userMessages = await this.agentConnection.getUserMessagesForForking();
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 
@@ -7869,7 +7803,7 @@ export class InteractiveMode {
 						this.showStatus("Forked to new session");
 					} catch (error: unknown) {
 						done();
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 					}
 				},
 				() => {
@@ -7900,7 +7834,7 @@ export class InteractiveMode {
 			this.editor.setText("");
 			this.showStatus("Cloned to new session");
 		} catch (error: unknown) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -7912,7 +7846,7 @@ export class InteractiveMode {
 			tree = sessionTree.tree;
 			realLeafId = sessionTree.leafId;
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		const initialFilterMode = this.settingsManager.getTreeFilterMode();
@@ -8005,7 +7939,7 @@ export class InteractiveMode {
 
 						await this.renderTreeNavigation(result);
 					} catch (error) {
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 					} finally {
 						if (summaryLoader) {
 							summaryLoader.stop();
@@ -8024,7 +7958,7 @@ export class InteractiveMode {
 							this.ui.requestRender();
 						})
 						.catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 				},
 				initialSelectedId,
@@ -8043,7 +7977,7 @@ export class InteractiveMode {
 			tree = sessionTree.tree;
 			realLeafId = sessionTree.leafId;
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 
@@ -8072,7 +8006,7 @@ export class InteractiveMode {
 						}
 						await this.renderTreeNavigation(result);
 					} catch (error) {
-						this.showError(error instanceof Error ? error.message : String(error));
+						this.showError(errorMessage(error));
 					}
 				},
 				() => {
@@ -8086,7 +8020,7 @@ export class InteractiveMode {
 							this.ui.requestRender();
 						})
 						.catch((error) => {
-							this.showError(error instanceof Error ? error.message : String(error));
+							this.showError(errorMessage(error));
 						});
 				},
 				undefined,
@@ -8234,7 +8168,7 @@ export class InteractiveMode {
 			try {
 				authStorage.removeVerified(`mcp:${server}`);
 			} catch (error) {
-				this.showError(`Could not disconnect ${server}: ${error instanceof Error ? error.message : String(error)}`);
+				this.showError(`Could not disconnect ${server}: ${errorMessage(error)}`);
 				return;
 			}
 			if (this.isAgentStreaming() || this.isAgentCompacting()) {
@@ -8327,9 +8261,7 @@ export class InteractiveMode {
 						console.error(`Warning: ${warning}`);
 					}
 				} catch (error: unknown) {
-					console.error(
-						`Warning: updated, but could not coordinate the daemon restart (${error instanceof Error ? error.message : String(error)}).`,
-					);
+					console.error(`Warning: updated, but could not coordinate the daemon restart (${errorMessage(error)}).`);
 				}
 			}
 			const relaunchResult = spawnSync(process.execPath, [...process.execArgv, entrypoint, ...relaunchArgs], {
@@ -8451,7 +8383,7 @@ export class InteractiveMode {
 			this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
 		} catch (error) {
 			dismissReloadBox(previousEditor as Component);
-			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
+			this.showError(`Reload failed: ${errorMessage(error)}`);
 		}
 	}
 
@@ -8730,7 +8662,7 @@ export class InteractiveMode {
 			await copyToClipboard(text);
 			this.showStatus("Copied last agent message to clipboard");
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -8765,7 +8697,7 @@ export class InteractiveMode {
 				);
 				this.ui.requestRender();
 			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
+				this.showError(errorMessage(error));
 			}
 			return;
 		}
@@ -8801,7 +8733,7 @@ export class InteractiveMode {
 				);
 			}
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -8889,7 +8821,7 @@ export class InteractiveMode {
 		try {
 			cell = await this.agentConnection.executeReplCell(trimmed);
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		this.chatContainer.addChild(new Spacer(1));
@@ -8903,7 +8835,7 @@ export class InteractiveMode {
 		try {
 			listing = await this.agentConnection.listReplVariables();
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		let info: string;
@@ -8927,7 +8859,7 @@ export class InteractiveMode {
 		try {
 			cleared = await this.agentConnection.clearReplVariables();
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		this.chatContainer.addChild(new Spacer(1));
@@ -8950,7 +8882,7 @@ export class InteractiveMode {
 			const width = Math.max(60, Math.min(this.ui.terminal.columns - 2, 120));
 			info = formatContextTree(tree, width);
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 
@@ -9021,7 +8953,7 @@ export class InteractiveMode {
 				}
 			}
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -9033,7 +8965,7 @@ export class InteractiveMode {
 		try {
 			await this.refreshHeartbeatCatalog();
 		} catch (error) {
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 			return;
 		}
 		const manager = new HeartbeatManagerComponent(this.heartbeats, {
@@ -9227,7 +9159,7 @@ export class InteractiveMode {
 				return;
 			}
 			restorePrompt();
-			this.showError(error instanceof Error ? error.message : String(error));
+			this.showError(errorMessage(error));
 		}
 	}
 
@@ -9264,14 +9196,14 @@ export class InteractiveMode {
 			);
 			this.ui.requestRender();
 		} catch (error: unknown) {
-			this.showError(`Failed to write debug log: ${error instanceof Error ? error.message : String(error)}`);
+			this.showError(`Failed to write debug log: ${errorMessage(error)}`);
 		}
 	}
 
 	stop(options: { preserveAltScreen?: boolean } = {}): void {
 		this.unregisterSignalHandlers();
-		this.clearCtrlCExitHint({ render: false });
-		this.clearEscapeRepeat();
+		this.ctrlCExitHint.clear({ render: false });
+		this.escapeRepeatFlag.clear();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

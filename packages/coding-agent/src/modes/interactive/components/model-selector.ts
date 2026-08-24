@@ -13,7 +13,9 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 import type { ModelRegistry } from "../../../core/model-registry.js";
+import { errorMessage } from "../../../utils/shared.js";
 import { theme } from "../theme/theme.js";
+import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint } from "./keybinding-hints.js";
 import {
 	getMenuListLayout,
@@ -142,15 +144,7 @@ function splitProviderFilter(query: string): { text: string; provider?: string }
 export class ModelSelectorComponent extends Container implements Focusable {
 	private searchInput: MenuSearchInput;
 
-	// Focusable implementation - propagate to searchInput for IME cursor positioning
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.searchInput.focused = value;
-	}
+	declare focused: boolean;
 	private listContainer: Container;
 	private allModels: ModelItem[] = [];
 	private scopedModelItems: ModelItem[] = [];
@@ -195,6 +189,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		options: ModelSelectorOptions = {},
 	) {
 		super();
+		installFocusForwarder(this, () => [this.searchInput]);
 
 		this.tui = tui;
 		this.currentModel = currentModel;
@@ -313,7 +308,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.scopedModelItems = [];
 			this.activeModels = [];
 			this.filteredModels = [];
-			this.errorMessage = error instanceof Error ? error.message : String(error);
+			this.errorMessage = errorMessage(error);
 			return;
 		}
 

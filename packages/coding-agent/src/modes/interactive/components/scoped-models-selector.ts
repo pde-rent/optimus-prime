@@ -13,6 +13,7 @@ import {
 	Text,
 } from "@earendil-works/pi-tui";
 import { getSelectListTheme, theme } from "../theme/theme.js";
+import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, keyText, selectionHints } from "./keybinding-hints.js";
 
 type EnabledIds = string[] | null;
@@ -92,14 +93,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 	private searchQuery = "";
 	private searchInput: Input;
 
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.searchInput.focused = value;
-	}
+	declare focused: boolean;
 	private selectList: SelectList;
 	private detailText: Text;
 	private footerText: Text;
@@ -109,6 +103,7 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 
 	constructor(config: ModelsConfig, callbacks: ModelsCallbacks) {
 		super();
+		installFocusForwarder(this, () => [this.searchInput]);
 		this.callbacks = callbacks;
 
 		for (const model of config.allModels) {

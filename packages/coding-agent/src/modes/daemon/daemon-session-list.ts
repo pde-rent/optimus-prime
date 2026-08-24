@@ -293,6 +293,38 @@ function isSummaryCurrent(activeSession: ActiveSessionState): boolean {
 	return status !== undefined && status.basedOnMessageCount === activeSession.runtime.session.messages.length;
 }
 
+/** Merge resident active summaries with saved-but-inactive sessions, deduped by session file. */
+export function mergeSessionLists(active: readonly SessionSummary[], saved: readonly SessionInfo[]): SessionSummary[] {
+	const activeByFile = new Map<string, SessionSummary>();
+	for (const summary of active) {
+		if (summary.sessionFile) {
+			activeByFile.set(resolve(summary.sessionFile), summary);
+		}
+	}
+	const merged: SessionSummary[] = [];
+	const seenActiveIds = new Set<string>();
+	for (const session of saved) {
+		const resident = activeByFile.get(resolve(session.path));
+		if (resident) {
+			merged.push({
+				...resident,
+				created: resident.created ?? session.created.toISOString(),
+				modified: resident.modified ?? session.modified.toISOString(),
+				firstMessage: resident.firstMessage ?? session.firstMessage,
+			});
+			seenActiveIds.add(resident.activeSessionId ?? resident.id);
+		} else {
+			merged.push(summaryForInactiveSession(session));
+		}
+	}
+	for (const summary of active) {
+		if (!seenActiveIds.has(summary.activeSessionId ?? summary.id)) {
+			merged.push(summary);
+		}
+	}
+	return merged;
+}
+
 export function summaryForInactiveSession(
 	session: SessionInfo,
 	hasRegisteredHeartbeat = false,

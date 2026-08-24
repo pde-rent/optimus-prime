@@ -14,11 +14,11 @@ import {
 	rgbTo256,
 	type SelectListTheme,
 } from "@earendil-works/pi-tui";
-
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
 import type { SourceInfo } from "../../../core/source-info.js";
 import { boldSpan, color as chalk } from "../../../utils/ansi.js";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.js";
+import { errorMessage } from "../../../utils/shared.js";
 
 // ============================================================================
 // Types & Schema
@@ -680,7 +680,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
 			try {
 				parseThemeJson(label, json);
 			} catch (error) {
-				console.error(error instanceof Error ? error.message : String(error));
+				console.error(errorMessage(error));
 			}
 		});
 		return json as ThemeJson;
@@ -925,7 +925,7 @@ export function setTheme(name: string, enableWatcher: boolean = false): { succes
 		// Don't start watcher for fallback theme
 		return {
 			success: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: errorMessage(error),
 		};
 	}
 }

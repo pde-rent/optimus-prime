@@ -9,6 +9,7 @@ import {
 	TruncatedText,
 } from "@earendil-works/pi-tui";
 import type { AgentHeartbeatManagementAction } from "../../../core/cron-jobs.js";
+import { errorMessage } from "../../../utils/shared.js";
 import type { AgentConnectionHeartbeat } from "../../agent-connection/types.js";
 import { theme } from "../theme/theme.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -243,7 +244,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			await this.options.onAction(heartbeat, action);
 			this.mode = { type: "list" };
 		} catch (error) {
-			this.error = error instanceof Error ? error.message : String(error);
+			this.error = errorMessage(error);
 		} finally {
 			this.busy = false;
 			this.options.requestRender();

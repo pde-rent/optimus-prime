@@ -4,6 +4,7 @@ import { createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
 import { deleteSessionFile } from "../../core/session-file-actions.js";
 import { readSessionInfo, type SessionInfo, SessionManager } from "../../core/session-manager.js";
+import { errorMessage } from "../../utils/shared.js";
 
 export const DAEMON_CATALOG_ROLE_ENV = "OPTIMUS_INTERNAL_DAEMON_CATALOG";
 
@@ -225,7 +226,7 @@ async function handleCatalogRequest(request: CatalogRequest): Promise<void> {
 			type: "response",
 			id: request.id,
 			success: false,
-			error: error instanceof Error ? error.message : String(error),
+			error: errorMessage(error),
 		});
 	}
 }

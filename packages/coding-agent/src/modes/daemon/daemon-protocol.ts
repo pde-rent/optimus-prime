@@ -1,17 +1,10 @@
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, ServiceTier, TextContent, Transport } from "@earendil-works/pi-ai";
-import type {
-	AgentSessionMessageDeliveryMode,
-	AgentSessionMessageReceipt,
-	AgentSessionMessageSafetyStatus,
-} from "../../core/agent-messages.js";
+import type { AgentSessionMessageDeliveryMode } from "../../core/agent-messages.js";
 import type { SessionActionRecoverySnapshot } from "../../core/agent-session.js";
 import type { AgentSessionRuntimeConfig } from "../../core/agent-session-config.js";
 import type { AgentSessionRuntimeMetadata } from "../../core/agent-session-runtime.js";
-import type { AgentAutonomousStatus } from "../../core/autonomous.js";
-import type { BashResult } from "../../core/bash-executor.js";
 import type {
-	AgentCronJob,
 	AgentHeartbeatDeliveryMode,
 	AgentHeartbeatManagementAction,
 	AgentHeartbeatUpdateAction,
@@ -22,18 +15,16 @@ import type { CustomMessage } from "../../core/messages.js";
 import type { QueuedMessageLane, QueuedMessageMutation } from "../../core/session-action-store.js";
 import type { SessionCwdIssue } from "../../core/session-cwd.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
+import { errorMessage } from "../../utils/shared.js";
 import type {
 	AgentConnectionAgentStatus,
-	AgentConnectionHeartbeat,
 	AgentConnectionQueueMode,
-	AgentConnectionResourceSnapshot,
 	AgentConnectionRlmChildAgentSnapshot,
 	AgentConnectionSavedSessionScope,
 	AgentConnectionSavedSessionState,
 	AgentConnectionScopedModel,
 	AgentConnectionSessionContext,
 	AgentConnectionSessionEvent,
-	AgentConnectionSessionHeader,
 	AgentConnectionSessionTreeNode,
 	AgentConnectionSideQuestionEvent,
 	AgentConnectionSideQuestionTurn,
@@ -842,16 +833,6 @@ export interface DaemonSavedSessionInfo {
 }
 
 export type DaemonDeleteSavedSessionResult = DeleteSessionFileResult;
-export type DaemonAutonomousStatus = AgentAutonomousStatus;
-export type DaemonBashResult = BashResult;
-export type DaemonSessionHeader = AgentConnectionSessionHeader;
-
-export type DaemonResourceSnapshot = AgentConnectionResourceSnapshot;
-
-export type DaemonCronJob = AgentCronJob;
-export type DaemonHeartbeat = AgentConnectionHeartbeat;
-export type DaemonAgentSessionMessageReceipt = AgentSessionMessageReceipt;
-export type DaemonAgentSessionMessageSafetyStatus = AgentSessionMessageSafetyStatus;
 
 export type DaemonOutbound =
 	| DaemonResponse
@@ -1190,7 +1171,7 @@ export function failure(
 		type: "response",
 		command,
 		success: false,
-		error: error instanceof Error ? error.message : String(error),
+		error: errorMessage(error),
 		...(errorInfo ? { errorInfo } : {}),
 	};
 }

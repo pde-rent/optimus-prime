@@ -5,6 +5,7 @@ import type { AuthStatus } from "../../core/auth-storage.js";
 import type { ModelRegistry } from "../../core/model-registry.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-names.js";
 import { SERPER_CREDENTIAL_ID, SERPER_CREDENTIAL_NAME } from "../../core/websearch-credential.js";
+import { errorMessage } from "../../utils/shared.js";
 import { showFullPaneOverlay } from "./components/centered-overlay.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
@@ -169,7 +170,7 @@ export class ProviderAuthFlows {
 					this.host.showStatus(message);
 					return providerOption.id;
 				} catch (error: unknown) {
-					this.host.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+					this.host.showError(`Logout failed: ${errorMessage(error)}`);
 					return null;
 				}
 			},
@@ -330,7 +331,7 @@ export class ProviderAuthFlows {
 			return await this.completeProviderAuthentication(providerId, providerName, "api_key", undefined, kind);
 		} catch (error: unknown) {
 			closeDialog();
-			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorMsg = errorMessage(error);
 			if (errorMsg !== "Login cancelled") {
 				this.host.showError(`Failed to save API key for ${providerName}: ${errorMsg}`);
 				return { status: "failed" };
@@ -441,7 +442,7 @@ export class ProviderAuthFlows {
 			return await this.completeProviderAuthentication(providerId, providerName, "oauth", undefined, kind);
 		} catch (error: unknown) {
 			closeDialog();
-			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorMsg = errorMessage(error);
 			if (errorMsg !== "Login cancelled") {
 				this.host.showError(`Failed to login to ${providerName}: ${errorMsg}`);
 				return { status: "failed" };

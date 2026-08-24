@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { readFile, stat } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { type Api, getLogger, type Model } from "@earendil-works/pi-ai";
 import { createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
 import {
@@ -107,6 +108,7 @@ import {
 import { resolveSessionPath } from "../../core/session-resolver.js";
 import type { SessionStats } from "../../core/session-stats.js";
 import { type SideQuestionRun, startSideQuestion } from "../../core/side-question.js";
+import { errorMessage } from "../../utils/shared.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import {
 	createAgentConnectionCommands,
@@ -181,7 +183,7 @@ import {
 	summaryForActiveSession,
 } from "./daemon-session-list.js";
 import { DaemonSessionSummarizer } from "./daemon-session-summarizer.js";
-import { DAEMON_COMMAND_TYPES } from "./daemon-shared.js";
+import { DAEMON_COMMAND_TYPES, promptAdmissionKey, validatePromptAdmissionFields } from "./daemon-shared.js";
 import {
 	cleanupDaemonSocketPath,
 	type DaemonSocketIdentity,
@@ -277,10 +279,6 @@ const RECOVERY_CHECKPOINT_EVENTS: ReadonlySet<string> = new Set([
 	"session_action_update",
 	"rlm_child_update",
 ]);
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
 
 type RuntimeOpenGuard = () => boolean | Promise<boolean>;
 type SupervisorGenerationClaim = Omit<Extract<DaemonWorkerCommand, { type: "worker_auth" }>, "id" | "type" | "token">;
@@ -495,7 +493,7 @@ export class AgentDaemon {
 				return () => this.mutationDrain.end();
 			},
 			onError: (job, error) => {
-				this.log(`Cron job ${job.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+				this.log(`Cron job ${job.id} failed: ${errorMessage(error)}`);
 			},
 		});
 		this.cronStore.onHeartbeatChange(() => this.broadcastGlobal({ type: "heartbeats_changed" }));
@@ -862,7 +860,7 @@ export class AgentDaemon {
 		await this.rlmSpawnLedger()
 			.appendRename({ childId, child, name })
 			.catch((error) => {
-				this.log(`failed to append RLM ledger rename: ${error instanceof Error ? error.message : String(error)}`);
+				this.log(`failed to append RLM ledger rename: ${errorMessage(error)}`);
 			});
 	}
 
@@ -884,7 +882,7 @@ export class AgentDaemon {
 			lines = (await readFile(path, "utf8")).split(/\r?\n/);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-				this.log(`failed to read RLM subagent registry: ${error instanceof Error ? error.message : String(error)}`);
+				this.log(`failed to read RLM subagent registry: ${errorMessage(error)}`);
 				if (throwOnReadError) {
 					throw error;
 				}
@@ -913,9 +911,7 @@ export class AgentDaemon {
 				}
 				latest.set(entry.childId, entry as LegacyRlmSubagentRegistryEntry);
 			} catch (error) {
-				this.log(
-					`ignored malformed RLM subagent registry entry: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				this.log(`ignored malformed RLM subagent registry entry: ${errorMessage(error)}`);
 			}
 		}
 		return [...latest.values()];
@@ -978,9 +974,7 @@ export class AgentDaemon {
 			});
 			return true;
 		} catch (error) {
-			this.log(
-				`failed to persist RLM subagent display entry: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			this.log(`failed to persist RLM subagent display entry: ${errorMessage(error)}`);
 			return false;
 		}
 	}
@@ -1059,9 +1053,7 @@ export class AgentDaemon {
 				updatedAt: new Date().toISOString(),
 			});
 		} catch (error) {
-			throw new Error(
-				`Failed to persist deletion for RLM subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			throw new Error(`Failed to persist deletion for RLM subagent ${childId}: ${errorMessage(error)}`);
 		}
 		// The ledger delete record is the topology tombstone; unlike the
 		// dual-write era it has no other writer to fall back on, so a failed
@@ -1080,9 +1072,7 @@ export class AgentDaemon {
 				this.log(`failed to delete session for removed RLM subagent ${childId}: ${result.error}`);
 			}
 		} catch (error) {
-			this.log(
-				`failed to delete session for removed RLM subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			this.log(`failed to delete session for removed RLM subagent ${childId}: ${errorMessage(error)}`);
 		}
 	}
 
@@ -2472,7 +2462,7 @@ export class AgentDaemon {
 							this.cancelScheduledJobsForSessionFile(childSessionFile);
 						} catch (error) {
 							this.log(
-								`failed to cancel scheduled jobs for deleted RLM subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
+								`failed to cancel scheduled jobs for deleted RLM subagent ${childId}: ${errorMessage(error)}`,
 							);
 						}
 						await this.deleteRlmSubagentArtifacts(childId, childSessionFile);
@@ -2627,9 +2617,7 @@ export class AgentDaemon {
 			} catch {
 				// Best-effort: a stale display file without an edge is inert.
 			}
-			throw new Error(
-				`Failed to record RLM subagent spawn for ${options.id}: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			throw new Error(`Failed to record RLM subagent spawn for ${options.id}: ${errorMessage(error)}`);
 		}
 		return runtime;
 	}
@@ -3286,10 +3274,6 @@ export class AgentDaemon {
 		});
 	}
 
-	private promptAdmissionKey(activeSessionId: string, admissionId: string): string {
-		return `${activeSessionId}\0${admissionId}`;
-	}
-
 	/**
 	 * Parse and synchronously register prompt admission before returning a promise.
 	 * This method is intentionally non-async: handleLine invokes it before its first await.
@@ -3304,17 +3288,14 @@ export class AgentDaemon {
 		};
 		if (parsed.type === "prompt" || parsed.type === "prompt_and_wait") {
 			if (parsed.admissionId !== undefined) {
-				if (typeof parsed.activeSessionId !== "string" || typeof parsed.admissionId !== "string") {
-					throw new Error("Prompt admission requires string activeSessionId and admissionId");
-				}
-				if (parsed.admissionId === "") throw new Error("admissionId must not be empty");
-				const key = this.promptAdmissionKey(parsed.activeSessionId, parsed.admissionId);
+				const { activeSessionId, admissionId } = validatePromptAdmissionFields(parsed);
+				const key = promptAdmissionKey(activeSessionId, admissionId);
 				if (this.promptAdmissions.has(key)) {
-					throw new Error(`Prompt admission id is already in use: ${parsed.admissionId}`);
+					throw new Error(`Prompt admission id is already in use: ${admissionId}`);
 				}
 				this.promptAdmissions.set(key, {
-					activeSessionId: parsed.activeSessionId,
-					admissionId: parsed.admissionId,
+					activeSessionId,
+					admissionId,
 					controller: new AbortController(),
 					status: "waiting",
 				});
@@ -3347,12 +3328,12 @@ export class AgentDaemon {
 				typeof parsed.activeSessionId === "string" &&
 				typeof (parsed as { admissionId?: unknown }).admissionId === "string"
 					? this.promptAdmissions.get(
-							this.promptAdmissionKey(parsed.activeSessionId, (parsed as { admissionId: string }).admissionId),
+							promptAdmissionKey(parsed.activeSessionId, (parsed as { admissionId: string }).admissionId),
 						)
 					: undefined;
 			clearParsedAdmission = () => {
 				if (!parsedAdmission) return;
-				const key = this.promptAdmissionKey(parsedAdmission.activeSessionId, parsedAdmission.admissionId);
+				const key = promptAdmissionKey(parsedAdmission.activeSessionId, parsedAdmission.admissionId);
 				if (this.promptAdmissions.get(key) === parsedAdmission) {
 					this.promptAdmissions.delete(key);
 				}
@@ -3928,9 +3909,7 @@ export class AgentDaemon {
 							await this.rlmSpawnLedger()
 								.appendRenameByChildPath(command.sessionPath, name)
 								.catch((error) => {
-									this.log(
-										`failed to append RLM ledger rename: ${error instanceof Error ? error.message : String(error)}`,
-									);
+									this.log(`failed to append RLM ledger rename: ${errorMessage(error)}`);
 								});
 						},
 					);
@@ -3955,7 +3934,7 @@ export class AgentDaemon {
 
 			case "cancel_prompt_admission": {
 				const admission = this.promptAdmissions.get(
-					this.promptAdmissionKey(command.activeSessionId, command.admissionId),
+					promptAdmissionKey(command.activeSessionId, command.admissionId),
 				);
 				if (!admission) {
 					return success(command.id, command.type, {
@@ -3980,7 +3959,7 @@ export class AgentDaemon {
 			case "prompt_and_wait": {
 				onPromptHandlerOwnsAdmission();
 				const admissionKey = command.admissionId
-					? this.promptAdmissionKey(command.activeSessionId, command.admissionId)
+					? promptAdmissionKey(command.activeSessionId, command.admissionId)
 					: undefined;
 				const admission = admissionKey ? this.promptAdmissions.get(admissionKey) : undefined;
 				if (command.admissionId && !admission) {
@@ -4230,9 +4209,7 @@ export class AgentDaemon {
 				});
 				void run.done.catch((error) => {
 					this.sideQuestionRuns.delete(command.sideQuestionId);
-					this.log(
-						`side question ${command.sideQuestionId} failed: ${error instanceof Error ? error.message : String(error)}`,
-					);
+					this.log(`side question ${command.sideQuestionId} failed: ${errorMessage(error)}`);
 				});
 				return success(command.id, "start_side_question");
 			}

@@ -2,6 +2,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import lockfile from "proper-lockfile";
 
 export { normalizeSocketPath } from "../../utils/daemon-socket-path.js";
@@ -262,8 +263,4 @@ function canConnectToUnixSocket(socketPath: string): Promise<boolean> {
 		socket.once("connect", () => finish(true));
 		socket.once("error", () => finish(false));
 	});
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }

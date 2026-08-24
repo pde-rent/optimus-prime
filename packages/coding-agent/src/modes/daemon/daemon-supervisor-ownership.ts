@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import lockfile from "proper-lockfile";
 import { getProcessStartId } from "../../core/session-lease.js";
 import { readJsonFile } from "../../utils/shared.js";
@@ -907,8 +908,4 @@ function startupFencePath(directory: string, socketPath: string): string {
 
 function shutdownAdmissionPath(registryDir: string): string {
 	return resolve(registryDir, SHUTDOWN_ADMISSION_FILE_NAME);
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }

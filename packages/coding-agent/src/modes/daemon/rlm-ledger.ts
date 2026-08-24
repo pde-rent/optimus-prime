@@ -20,6 +20,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { canonicalSessionPath } from "../../core/session-lease.js";
 import { getSessionArtifactPathForFile, readSessionInfo, type SessionInfo } from "../../core/session-manager.js";
 import { readFirstLineSync } from "../../utils/file-lines.js";
+import { errorMessage } from "../../utils/shared.js";
 
 /**
  * Daemon-owned RLM spawn ledger.
@@ -217,9 +218,7 @@ function parseLedgerLine(line: string, index: number): RlmLedgerRecord | RlmLedg
 	try {
 		parsed = JSON.parse(line);
 	} catch (error) {
-		throw new Error(
-			`Malformed RLM ledger line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
-		);
+		throw new Error(`Malformed RLM ledger line ${index + 1}: ${errorMessage(error)}`);
 	}
 	const record = parsed as {
 		v?: unknown;
@@ -455,7 +454,7 @@ export class RlmSpawnLedger {
 				try {
 					await this.seed();
 				} catch (error) {
-					this.log(`RLM ledger seeding failed: ${error instanceof Error ? error.message : String(error)}`);
+					this.log(`RLM ledger seeding failed: ${errorMessage(error)}`);
 				}
 			}
 			return fn();
@@ -805,9 +804,7 @@ export class RlmSpawnLedger {
 				// an in-progress or crashed append: log and ignore it. Interior
 				// malformed lines stay fail-closed.
 				if (index === rawLines.length - 1 && !endsWithNewline) {
-					this.log(
-						`RLM ledger: ignored torn final line: ${error instanceof Error ? error.message : String(error)}`,
-					);
+					this.log(`RLM ledger: ignored torn final line: ${errorMessage(error)}`);
 					continue;
 				}
 				throw error;

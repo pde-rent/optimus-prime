@@ -3,7 +3,6 @@
  */
 
 import { DAEMON_COMMAND_COMPATIBILITY } from "./daemon-protocol.js";
-import type { SessionSummary } from "./daemon-session-list.js";
 
 /**
  * Every command the daemon will route, derived from the protocol's compatibility map rather than
@@ -19,27 +18,17 @@ export function promptAdmissionKey(activeSessionId: string, admissionId: string)
 	return `${activeSessionId}\0${admissionId}`;
 }
 
-export function isSessionSummary(value: unknown): value is SessionSummary {
-	if (!value || typeof value !== "object") {
-		return false;
+/**
+ * Shared gate for prompt commands carrying an admission id: both fields must be
+ * non-empty strings before the caller registers the admission.
+ */
+export function validatePromptAdmissionFields(fields: { activeSessionId?: unknown; admissionId?: unknown }): {
+	activeSessionId: string;
+	admissionId: string;
+} {
+	if (typeof fields.activeSessionId !== "string" || typeof fields.admissionId !== "string") {
+		throw new Error("Prompt admission requires string activeSessionId and admissionId");
 	}
-	const candidate = value as Partial<SessionSummary>;
-	return (
-		typeof candidate.id === "string" &&
-		typeof candidate.sessionId === "string" &&
-		typeof candidate.cwd === "string" &&
-		typeof candidate.lifecycle === "string" &&
-		typeof candidate.activity === "string" &&
-		typeof candidate.isSessionActive === "boolean" &&
-		typeof candidate.isStreaming === "boolean" &&
-		typeof candidate.isCompacting === "boolean" &&
-		typeof candidate.attachedClients === "number" &&
-		typeof candidate.messageCount === "number" &&
-		(candidate.unfinishedActionCount === undefined || typeof candidate.unfinishedActionCount === "number") &&
-		typeof candidate.sessionActions === "object" &&
-		candidate.sessionActions !== null &&
-		typeof candidate.sessionActions.queuedCount === "number" &&
-		Array.isArray(candidate.sessionActions.steering) &&
-		Array.isArray(candidate.sessionActions.followUps)
-	);
+	if (fields.admissionId === "") throw new Error("admissionId must not be empty");
+	return { activeSessionId: fields.activeSessionId, admissionId: fields.admissionId };
 }

@@ -20,6 +20,7 @@ import type { PathMetadata, ResolvedPaths, ResolvedResource } from "../../../cor
 import type { PackageSource, SettingsManager } from "../../../core/settings-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
+import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, rawKeyHint } from "./keybinding-hints.js";
 
 type ResourceType = "extensions" | "skills" | "prompts" | "themes";
@@ -191,16 +192,10 @@ class ResourceList implements Component, Focusable {
 	public onExit?: () => void;
 	public onToggle?: (item: ResourceItem, newEnabled: boolean) => void;
 
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.searchInput.focused = value;
-	}
+	declare focused: boolean;
 
 	constructor(groups: ResourceGroup[], settingsManager: SettingsManager, cwd: string, agentDir: string) {
+		installFocusForwarder(this, () => [this.searchInput]);
 		this.groups = groups;
 		this.settingsManager = settingsManager;
 		this.cwd = cwd;
@@ -556,14 +551,7 @@ class ResourceList implements Component, Focusable {
 export class ConfigSelectorComponent extends Container implements Focusable {
 	private resourceList: ResourceList;
 
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.resourceList.focused = value;
-	}
+	declare focused: boolean;
 
 	constructor(
 		resolvedPaths: ResolvedPaths,
@@ -575,6 +563,7 @@ export class ConfigSelectorComponent extends Container implements Focusable {
 		requestRender: () => void,
 	) {
 		super();
+		installFocusForwarder(this, () => [this.resourceList]);
 
 		const groups = buildGroups(resolvedPaths);
 

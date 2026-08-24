@@ -25,6 +25,7 @@ import {
 	resolveBuiltinSlashCommandName,
 } from "../../core/slash-commands.js";
 import { canonicalizePath } from "../../utils/paths.js";
+import { errorMessage } from "../../utils/shared.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { agentStatusIndicator } from "../agent-connection/agent-status.js";
 import { DaemonAgentConnection } from "../agent-connection/daemon-agent-connection.js";
@@ -46,9 +47,9 @@ import {
 	listDaemonSavedSessions,
 	renameDaemonSavedSession,
 } from "../daemon/saved-session-catalog.js";
-import { CtrlCExitHintController } from "../interactive/components/ctrl-c-hint.js";
+import { CtrlCExitHintController, ExpiringFlag } from "../interactive/components/ctrl-c-hint.js";
 import { CustomEditor } from "../interactive/components/custom-editor.js";
-import { keyText } from "../interactive/components/keybinding-hints.js";
+import { keyText, pressAgainToExitHint } from "../interactive/components/keybinding-hints.js";
 import { formatTwoSidedRow } from "../interactive/components/row-format.js";
 import {
 	formatSubagentName,
@@ -649,8 +650,7 @@ export class AgentsViewMode implements Component, Focusable {
 	private heartbeatPollTimer: NodeJS.Timeout | undefined;
 	private animationTimer: NodeJS.Timeout | undefined;
 	private readonly ctrlCExitHint: CtrlCExitHintController;
-	private deleteConfirmExpiresAt = 0;
-	private deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined;
+	private deleteConfirmation: ExpiringFlag<"delete">;
 	private workingIconFrame = 0;
 	private rows: AgentsViewRow[] = [];
 	private lastListedSummaries: SessionSummary[] = [];
@@ -733,6 +733,7 @@ export class AgentsViewMode implements Component, Focusable {
 
 		this.ui = new TUI(new ProcessTerminal(), options.uiServices.settingsManager.getShowHardwareCursor());
 		this.ctrlCExitHint = new CtrlCExitHintController(this.ui, EXIT_HINT_DURATION_MS);
+		this.deleteConfirmation = new ExpiringFlag<"delete">(this.ui, DELETE_CONFIRM_DURATION_MS);
 		this.ui.setClearOnShrink(options.uiServices.settingsManager.getClearOnShrink());
 		this.ui.terminal.setTitle(`${APP_TITLE} - Agents`);
 		this.editor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
@@ -1080,38 +1081,16 @@ export class AgentsViewMode implements Component, Focusable {
 	}
 
 	private showDeleteConfirmation(): void {
-		if (this.deleteConfirmTimer) {
-			clearTimeout(this.deleteConfirmTimer);
-		}
-		this.deleteConfirmExpiresAt = Date.now() + DELETE_CONFIRM_DURATION_MS;
-		this.deleteConfirmTimer = setTimeout(() => {
-			this.deleteConfirmTimer = undefined;
-			if (!this.isDeleteConfirmationVisible()) {
-				this.deleteConfirmExpiresAt = 0;
-				this.ui.requestRender();
-			}
-		}, DELETE_CONFIRM_DURATION_MS);
-		this.deleteConfirmTimer.unref?.();
-		this.ui.requestRender();
+		this.deleteConfirmation.show("delete");
 	}
 
 	private clearDeleteConfirmation(options: { render?: boolean } = {}): void {
 		this.pendingKillSubagent = undefined;
-		if (!this.deleteConfirmTimer && this.deleteConfirmExpiresAt === 0) {
-			return;
-		}
-		if (this.deleteConfirmTimer) {
-			clearTimeout(this.deleteConfirmTimer);
-			this.deleteConfirmTimer = undefined;
-		}
-		this.deleteConfirmExpiresAt = 0;
-		if (options.render !== false) {
-			this.ui.requestRender();
-		}
+		this.deleteConfirmation.clear(options);
 	}
 
 	private isDeleteConfirmationVisible(): boolean {
-		return this.deleteConfirmExpiresAt > Date.now();
+		return this.deleteConfirmation.isVisible();
 	}
 
 	private setStatusMessage(
@@ -2610,9 +2589,7 @@ export class AgentsViewMode implements Component, Focusable {
 
 	private renderHints(width: number): string {
 		if (this.ctrlCExitHint.isVisible()) {
-			const clearKey = keyText("app.clear");
-			const hint = clearKey ? `Press ${clearKey} again to exit` : "Press again to exit";
-			return truncateToWidth(theme.fg("muted", hint), width);
+			return truncateToWidth(theme.fg("muted", pressAgainToExitHint()), width);
 		}
 		if (this.statusMessage) {
 			return truncateToWidth(theme.fg(this.statusMessageTone, this.statusMessage), width);
@@ -2800,7 +2777,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function formatError(prefix: string, error: unknown): string {
-	const message = error instanceof Error ? error.message : String(error);
+	const message = errorMessage(error);
 	return formatAgentsViewStatusLine(`${prefix}: ${message}`);
 }
 

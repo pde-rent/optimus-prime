@@ -1,4 +1,5 @@
 import type { Duplex } from "node:stream";
+import { errorMessage } from "../../utils/shared.js";
 
 const FRAME_PREFIX_BYTES = 8;
 
@@ -90,9 +91,7 @@ export class PrivateFrameDecoder<THeader extends object> {
 			try {
 				decoded = JSON.parse(this.buffered.toString("utf8", headerStart, payloadStart));
 			} catch (error) {
-				throw new Error(
-					`Invalid private frame header JSON: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new Error(`Invalid private frame header JSON: ${errorMessage(error)}`);
 			}
 			if (!isObjectHeader(decoded) || !this.validateHeader(decoded)) {
 				throw new Error("Invalid private frame routing header");

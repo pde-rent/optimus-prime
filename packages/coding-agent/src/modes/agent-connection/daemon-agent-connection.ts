@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, ServiceTier, Transport } from "@earendil-works/pi-ai";
 import { appendRotatingLog, getAgentLogPath, getDaemonLogPath } from "../../config.js";
@@ -20,6 +21,7 @@ import type { RlmMaxDepthStatus, SetRlmMaxDepthResult } from "../../core/rlm-max
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
 import { SessionAlreadyActiveError } from "../../core/session-lease.js";
 import type { SessionStats } from "../../core/session-stats.js";
+import { errorMessage } from "../../utils/shared.js";
 import {
 	DaemonCapabilityUnavailableError,
 	type DaemonClient,
@@ -119,12 +121,8 @@ const MAX_COMPLETED_SNAPSHOTS = 128;
 const OWNED_SESSION_DISPOSE_RECONNECT_WAIT_MS = 10_000;
 const updateTransportReconnects = new WeakMap<DaemonClient, Promise<void>>();
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function formatErrorSentence(error: unknown): string {
-	const message = (error instanceof Error ? error.message : String(error)).trim();
+	const message = errorMessage(error).trim();
 	if (!message) {
 		return "Unknown daemon error.";
 	}

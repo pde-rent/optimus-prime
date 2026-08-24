@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, wr
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Writable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { getLogger } from "@earendil-works/pi-ai";
 import { createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
 import {
@@ -45,7 +46,7 @@ import { canonicalSessionPath, getProcessStartId, SessionAlreadyActiveError } fr
 import { getSessionArtifactPathForFile, readSessionInfo, type SessionInfo } from "../../core/session-manager.js";
 import { SettingsManager } from "../../core/settings-manager.js";
 import { isProcessAlive, processIdExists, signalProcessGroupOrProcess } from "../../utils/child-process.js";
-import { writeJsonAtomically } from "../../utils/shared.js";
+import { errorMessage, writeJsonAtomically } from "../../utils/shared.js";
 import type { AgentConnectionHeartbeat } from "../agent-connection/types.js";
 import { attachJsonlLineReader, serializeJsonLine } from "../rpc/jsonl.js";
 import type { PrivateFrame } from "../session-worker/private-framing.js";
@@ -89,10 +90,11 @@ import { matchesSessionIdSuffix } from "./daemon-session-id.js";
 import {
 	classifySessionRosterStatus,
 	isSessionSummaryBusy,
+	mergeSessionLists,
 	type SessionSummary,
 	summaryForInactiveSession,
 } from "./daemon-session-list.js";
-import { DAEMON_COMMAND_TYPES } from "./daemon-shared.js";
+import { DAEMON_COMMAND_TYPES, promptAdmissionKey, validatePromptAdmissionFields } from "./daemon-shared.js";
 import {
 	acquireDaemonSocketPathLease,
 	cleanupDaemonSocketPath,
@@ -310,10 +312,6 @@ function isSupervisorShutdownAdmissionCancelled(error: unknown): boolean {
 	);
 }
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
-}
-
 function unrefDelay(ms: number): Promise<void> {
 	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms).unref());
 }
@@ -488,37 +486,6 @@ function normalizeCapabilities(
 		normalized.add("extension_ui");
 	}
 	return normalized;
-}
-
-function mergeSessionLists(active: readonly SessionSummary[], saved: readonly SessionInfo[]): SessionSummary[] {
-	const activeByFile = new Map<string, SessionSummary>();
-	for (const summary of active) {
-		if (summary.sessionFile) {
-			activeByFile.set(resolve(summary.sessionFile), summary);
-		}
-	}
-	const merged: SessionSummary[] = [];
-	const seenActiveIds = new Set<string>();
-	for (const session of saved) {
-		const resident = activeByFile.get(resolve(session.path));
-		if (resident) {
-			merged.push({
-				...resident,
-				created: resident.created ?? session.created.toISOString(),
-				modified: resident.modified ?? session.modified.toISOString(),
-				firstMessage: resident.firstMessage ?? session.firstMessage,
-			});
-			seenActiveIds.add(resident.activeSessionId ?? resident.id);
-		} else {
-			merged.push(summaryForInactiveSession(session));
-		}
-	}
-	for (const summary of active) {
-		if (!seenActiveIds.has(summary.activeSessionId ?? summary.id)) {
-			merged.push(summary);
-		}
-	}
-	return merged;
 }
 
 export async function runDaemonSupervisorMode(options: DaemonSupervisorOptions): Promise<never> {
@@ -1070,10 +1037,6 @@ export class DaemonSupervisor {
 		worker.ownerCleanupTimer.unref();
 	}
 
-	private promptAdmissionKey(activeSessionId: string, publicAdmissionId: string): string {
-		return `${activeSessionId}\0${publicAdmissionId}`;
-	}
-
 	private promptAdmissionsFor(client: DaemonSocketClient): Map<string, SupervisorPromptAdmission> {
 		let admissions = this.promptAdmissions.get(client);
 		if (!admissions) {
@@ -1088,12 +1051,12 @@ export class DaemonSupervisor {
 		activeSessionId: string,
 		publicAdmissionId: string,
 	): SupervisorPromptAdmission | undefined {
-		return this.promptAdmissions.get(client)?.get(this.promptAdmissionKey(activeSessionId, publicAdmissionId));
+		return this.promptAdmissions.get(client)?.get(promptAdmissionKey(activeSessionId, publicAdmissionId));
 	}
 
 	private deletePromptAdmission(admission: SupervisorPromptAdmission): void {
 		const admissions = this.promptAdmissions.get(admission.client);
-		const key = this.promptAdmissionKey(admission.activeSessionId, admission.publicAdmissionId);
+		const key = promptAdmissionKey(admission.activeSessionId, admission.publicAdmissionId);
 		if (admissions?.get(key) !== admission) return;
 		admissions.delete(key);
 		if (admissions.size === 0) this.promptAdmissions.delete(admission.client);
@@ -1149,19 +1112,16 @@ export class DaemonSupervisor {
 		const command = { ...envelope.command, id: envelope.id } as DaemonCommand;
 		let admission: SupervisorPromptAdmission | undefined;
 		if ((command.type === "prompt" || command.type === "prompt_and_wait") && command.admissionId !== undefined) {
-			if (typeof command.activeSessionId !== "string" || typeof command.admissionId !== "string") {
-				throw new Error("Prompt admission requires string activeSessionId and admissionId");
-			}
-			if (command.admissionId === "") throw new Error("admissionId must not be empty");
+			const { activeSessionId, admissionId } = validatePromptAdmissionFields(command);
 			const admissions = this.promptAdmissionsFor(client);
-			const key = this.promptAdmissionKey(command.activeSessionId, command.admissionId);
+			const key = promptAdmissionKey(activeSessionId, admissionId);
 			if (admissions.has(key)) {
 				throw new Error(`Prompt admission id is already in use: ${command.admissionId}`);
 			}
 			admission = {
 				client,
-				activeSessionId: command.activeSessionId,
-				publicAdmissionId: command.admissionId,
+				activeSessionId,
+				publicAdmissionId: admissionId,
 				workerAdmissionId: `supervisor-admission:${randomUUID()}`,
 				status: "waiting",
 				controller: new AbortController(),
@@ -1719,9 +1679,7 @@ export class DaemonSupervisor {
 						await this.rlmSpawnLedger()
 							.appendRenameByChildPath(command.sessionPath, target.name)
 							.catch((error) => {
-								this.log(
-									`failed to append RLM ledger rename: ${error instanceof Error ? error.message : String(error)}`,
-								);
+								this.log(`failed to append RLM ledger rename: ${errorMessage(error)}`);
 							});
 						return success(command.id, command.type);
 					}
@@ -2153,9 +2111,7 @@ export class DaemonSupervisor {
 		child.once("close", detachWorkerStderr);
 		const childClosed = new Promise<void>((resolveClose) => child.once("close", () => resolveClose()));
 		child.on("error", (error) => {
-			this.log(
-				`Session worker ${workerId} process error: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			this.log(`Session worker ${workerId} process error: ${errorMessage(error)}`);
 		});
 		const startupGate = child.stdio[WORKER_STARTUP_GATE_FD];
 		const previousDescriptor = existing?.descriptor;
@@ -2413,7 +2369,7 @@ export class DaemonSupervisor {
 				this.log(`Completed intentional stop for worker ${worker.descriptor.workerId} during supervisor adoption`);
 			} catch (error) {
 				worker.descriptor.lifecycle = "failed";
-				worker.descriptor.lastError = error instanceof Error ? error.message : String(error);
+				worker.descriptor.lastError = errorMessage(error);
 				this.persistWorker(worker);
 				this.log(`Could not complete intentional stop for worker ${worker.descriptor.workerId}: ${String(error)}`);
 			}
@@ -2821,7 +2777,7 @@ export class DaemonSupervisor {
 					worker.client = undefined;
 					worker.descriptor.consecutiveFailures++;
 					worker.descriptor.lastFailureAt = new Date().toISOString();
-					worker.descriptor.lastError = error instanceof Error ? error.message : String(error);
+					worker.descriptor.lastError = errorMessage(error);
 					this.persistWorker(worker);
 				}
 			}

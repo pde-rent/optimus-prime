@@ -13,6 +13,12 @@ export function keyHint(keybinding: Keybinding, description: string, options?: {
 	return theme.fg("dim", keyText(keybinding, options)) + theme.fg("muted", ` ${description}`);
 }
 
+/** "Press <key> again to exit" confirm hint shown after an interrupt. */
+export function pressAgainToExitHint(keybinding: Keybinding = "app.clear"): string {
+	const key = keyText(keybinding);
+	return key ? `Press ${key} again to exit` : "Press again to exit";
+}
+
 /** Canonical bracketed expand/collapse hint, e.g. `(Ctrl+O to expand)`, fully dim. */
 export function expandCollapseHint(keybinding: Keybinding, expanded: boolean): string {
 	return theme.fg("dim", `(${keyText(keybinding)} ${expanded ? "to collapse" : "to expand"})`);

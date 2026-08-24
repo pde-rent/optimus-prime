@@ -1,4 +1,5 @@
 import { fuzzyMatch } from "@earendil-works/pi-tui";
+import { errorMessage } from "../../utils/shared.js";
 export interface ParsedSearchQuery {
 	mode: "tokens" | "regex";
 	tokens: { kind: "fuzzy" | "phrase"; value: string }[];
@@ -37,7 +38,7 @@ function parseSearchQuery(query: string): ParsedSearchQuery {
 		try {
 			return { mode: "regex", tokens: [], regex: new RegExp(pattern, "i") };
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const msg = errorMessage(err);
 			return { mode: "regex", tokens: [], regex: null, error: msg };
 		}
 	}

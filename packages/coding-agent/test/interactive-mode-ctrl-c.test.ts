@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 import { setKeybindings } from "@earendil-works/pi-tui";
 import { KeybindingsManager } from "../src/core/keybindings.js";
+import { CtrlCExitHintController, ExpiringFlag } from "../src/modes/interactive/components/ctrl-c-hint.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 
 type FakeEditor = {
@@ -11,11 +12,8 @@ type FakeEditor = {
 };
 
 type FakeInteractiveMode = {
-	ctrlCExitHintExpiresAt: number;
-	ctrlCExitHintTimer: ReturnType<typeof setTimeout> | undefined;
-	escapeRepeatAction: "tree" | "clear" | undefined;
-	escapeRepeatExpiresAt: number;
-	escapeRepeatTimer: ReturnType<typeof setTimeout> | undefined;
+	ctrlCExitHint: CtrlCExitHintController;
+	escapeRepeatFlag: ExpiringFlag<"tree" | "clear">;
 	traceUploadAllAbortController: AbortController | undefined;
 	isShuttingDown: boolean;
 	editor: FakeEditor;
@@ -82,12 +80,12 @@ function createInteractiveFake(options: {
 	retryAttempt?: number;
 }): FakeInteractiveMode {
 	const editor = createEditor(options.editorText ?? "");
+	const subagentSummaryLine = { invalidate: vi.fn() };
+	const ui: FakeInteractiveMode["ui"] = { requestRender: vi.fn() };
 	const fake: FakeInteractiveMode = {
-		ctrlCExitHintExpiresAt: 0,
-		ctrlCExitHintTimer: undefined,
-		escapeRepeatAction: undefined,
-		escapeRepeatExpiresAt: 0,
-		escapeRepeatTimer: undefined,
+		// Same durations as InteractiveMode.EXIT_HINT_DURATION_MS / .ESCAPE_REPEAT_WINDOW_MS.
+		ctrlCExitHint: new CtrlCExitHintController(ui, 2_000, () => subagentSummaryLine.invalidate()),
+		escapeRepeatFlag: new ExpiringFlag<"tree" | "clear">(undefined, 500),
 		traceUploadAllAbortController: undefined,
 		isShuttingDown: false,
 		editor,
@@ -108,8 +106,8 @@ function createInteractiveFake(options: {
 			abortBranchSummary: vi.fn(),
 			abortBash: vi.fn(),
 		},
-		subagentSummaryLine: { invalidate: vi.fn() },
-		ui: { requestRender: vi.fn() },
+		subagentSummaryLine,
+		ui,
 		queueSelection: { isBrowsing: false, reset: () => "" },
 		updatePendingMessagesDisplay: vi.fn(),
 		showError: vi.fn(),
@@ -245,13 +243,12 @@ describe("InteractiveMode interrupt shortcuts", () => {
 			setText(text);
 			defaultEditor.onChange?.(text);
 		};
-		mode.escapeRepeatAction = "tree";
-		mode.escapeRepeatExpiresAt = Date.now() + 500;
+		mode.escapeRepeatFlag.show("tree");
 
 		Reflect.get(InteractiveMode.prototype, "setEditorTextFromQueueSelection").call(mode, "queued item");
 
 		expect(mode.editor.getText()).toBe("queued item");
-		expect(mode.escapeRepeatAction).toBe("tree");
+		expect(mode.escapeRepeatFlag.isVisible()).toBe(true);
 	});
 
 	it("clears an idle draft on double Escape", () => {
@@ -319,12 +316,11 @@ describe("InteractiveMode interrupt shortcuts", () => {
 
 	it("clears the Escape repeat before a separate interrupt", () => {
 		const mode = createInteractiveFake({});
-		mode.escapeRepeatAction = "tree";
-		mode.escapeRepeatExpiresAt = Date.now() + 500;
+		mode.escapeRepeatFlag.show("tree");
 
 		Reflect.get(InteractiveMode.prototype, "handleInterruptKey").call(mode);
 
-		expect(mode.escapeRepeatAction).toBeUndefined();
+		expect(mode.escapeRepeatFlag.isVisible()).toBe(false);
 	});
 
 	it("expires the Escape repeat window", async () => {

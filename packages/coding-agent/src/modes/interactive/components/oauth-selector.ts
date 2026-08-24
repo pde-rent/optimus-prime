@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AuthStatus, AuthStorage } from "../../../core/auth-storage.js";
 import { theme } from "../theme/theme.js";
+import { installFocusForwarder } from "./focus-forwarder.js";
 import {
 	MenuList,
 	MenuPanel,
@@ -53,15 +54,7 @@ const PROVIDER_SCROLL_INDICATOR_ROWS = 1;
 export class OAuthSelectorComponent extends Container implements Focusable {
 	private searchInput: MenuSearchInput;
 
-	// Delegate focus to the search input so its IME cursor remains positioned correctly.
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.searchInput.focused = value;
-	}
+	declare focused: boolean;
 
 	private listContainer: Container;
 	private tabBar?: TruncatedText;
@@ -89,6 +82,7 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 		options: OAuthSelectorOptions = {},
 	) {
 		super();
+		installFocusForwarder(this, () => [this.searchInput]);
 
 		this.mode = mode;
 		this.authStorage = authStorage;

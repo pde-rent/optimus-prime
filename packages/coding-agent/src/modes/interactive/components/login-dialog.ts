@@ -15,6 +15,7 @@ import { execFile } from "child_process";
 import { OPTIMUS_LOGO } from "../../../themes/optimus-logo.js";
 import { copyToClipboard } from "../../../utils/clipboard.js";
 import { theme } from "../theme/theme.js";
+import { installFocusForwarder } from "./focus-forwarder.js";
 import { formatKeyText, keyHint } from "./keybinding-hints.js";
 import { MenuPanel, MenuSearchInput } from "./menu-panel.js";
 import { shouldTreatAsBack } from "./modal-back.js";
@@ -59,15 +60,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	private authUrl?: string;
 	private authActions?: Text;
 
-	// Focusable implementation - propagate to input for IME cursor positioning
-	private _focused = false;
-	get focused(): boolean {
-		return this._focused;
-	}
-	set focused(value: boolean) {
-		this._focused = value;
-		this.input.focused = value;
-	}
+	declare focused: boolean;
 
 	constructor(
 		tui: TUI,
@@ -77,6 +70,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		titleOverride?: string,
 	) {
 		super();
+		installFocusForwarder(this, () => [this.input]);
 		this.tui = tui;
 
 		const providerInfo = getOAuthProviders().find((p) => p.id === providerId);

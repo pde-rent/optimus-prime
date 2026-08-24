@@ -10,6 +10,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.js";
 import { type AgentAutonomousStatus, type AutonomousLimitReason, autonomousLimitReason } from "../core/autonomous.js";
 import { flushRawStdout, writeRawStdout } from "../core/output-guard.js";
+import { errorMessage } from "../utils/shared.js";
 import { killTrackedDetachedChildren } from "../utils/shell.js";
 import { InProcessAgentConnection } from "./agent-connection/in-process-agent-connection.js";
 import type { AgentConnection } from "./agent-connection/types.js";
@@ -160,7 +161,7 @@ async function runPrintModeWithConnectionInternal(
 
 		return exitCode;
 	} catch (error: unknown) {
-		console.error(error instanceof Error ? error.message : String(error));
+		console.error(errorMessage(error));
 		return 1;
 	} finally {
 		for (const cleanup of signalCleanupHandlers) {
