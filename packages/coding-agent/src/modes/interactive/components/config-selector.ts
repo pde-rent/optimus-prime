@@ -7,11 +7,10 @@ import {
 	type Component,
 	Container,
 	type Focusable,
-	getKeybindings,
 	Input,
-	listWindow,
 	matchesKey,
 	Spacer,
+	Text,
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -22,6 +21,7 @@ import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, rawKeyHint } from "./keybinding-hints.js";
+import { MenuSelector } from "./menu-panel.js";
 
 type ResourceType = "extensions" | "skills" | "prompts" | "themes";
 
@@ -181,13 +181,14 @@ class ResourceList implements Component, Focusable {
 	private groups: ResourceGroup[];
 	private flatItems: FlatEntry[] = [];
 	private filteredItems: FlatEntry[] = [];
-	private selectedIndex = 0;
+	private readonly listContainer = new Container();
+	private readonly selector: MenuSelector<FlatEntry>;
 	private searchInput: Input;
-	private maxVisible = 15;
 	private settingsManager: SettingsManager;
 	private cwd: string;
 	private agentDir: string;
 
+	public requestRender?: () => void;
 	public onCancel?: () => void;
 	public onExit?: () => void;
 	public onToggle?: (item: ResourceItem, newEnabled: boolean) => void;
@@ -201,8 +202,18 @@ class ResourceList implements Component, Focusable {
 		this.cwd = cwd;
 		this.agentDir = agentDir;
 		this.searchInput = new Input();
+		this.selector = new MenuSelector<FlatEntry>(this.listContainer, {
+			preferredVisibleItems: 15,
+			reservedRows: () => 0,
+			comfortableItemRows: 1,
+			isSelectable: (entry) => entry.type === "item",
+		});
 		this.buildFlatList();
+		const firstItemIndex = this.flatItems.findIndex((e) => e.type === "item");
+		this.selector.setSelectedIndex(firstItemIndex >= 0 ? firstItemIndex : 0);
 		this.filteredItems = [...this.flatItems];
+		// Seeds the selector's item list so the isSelectable predicate applies from the start
+		this.selector.filter(this.filteredItems, "");
 	}
 
 	private buildFlatList(): void {
@@ -216,26 +227,12 @@ class ResourceList implements Component, Focusable {
 				}
 			}
 		}
-		// Start selection on first item (not header)
-		this.selectedIndex = this.flatItems.findIndex((e) => e.type === "item");
-		if (this.selectedIndex < 0) this.selectedIndex = 0;
-	}
-
-	private findNextItem(fromIndex: number, direction: 1 | -1): number {
-		let idx = fromIndex + direction;
-		while (idx >= 0 && idx < this.filteredItems.length) {
-			if (this.filteredItems[idx].type === "item") {
-				return idx;
-			}
-			idx += direction;
-		}
-		return fromIndex; // Stay at current if no item found
 	}
 
 	private filterItems(query: string): void {
 		if (!query.trim()) {
 			this.filteredItems = [...this.flatItems];
-			this.selectFirstItem();
+			this.selector.filter(this.filteredItems, query);
 			return;
 		}
 
@@ -280,12 +277,7 @@ class ResourceList implements Component, Focusable {
 			}
 		}
 
-		this.selectFirstItem();
-	}
-
-	private selectFirstItem(): void {
-		const firstItemIndex = this.filteredItems.findIndex((e) => e.type === "item");
-		this.selectedIndex = firstItemIndex >= 0 ? firstItemIndex : 0;
+		this.selector.filter(this.filteredItems, query);
 	}
 
 	updateItem(item: ResourceItem, enabled: boolean): void {
@@ -316,100 +308,68 @@ class ResourceList implements Component, Focusable {
 			return lines;
 		}
 
-		const { start: startIndex, end: endIndex } = listWindow(
-			this.selectedIndex,
-			this.filteredItems.length,
-			this.maxVisible,
+		const { start, end } = this.selector.renderWindow(this.filteredItems, (entry, selected) =>
+			this.makeRow(entry, selected, width),
 		);
+		lines.push(...this.listContainer.render(width));
 
-		for (let i = startIndex; i < endIndex; i++) {
-			const entry = this.filteredItems[i];
-			const isSelected = i === this.selectedIndex;
-
-			if (entry.type === "group") {
-				// Main group header (no cursor)
-				const groupLine = theme.fg("accent", theme.bold(entry.group.label));
-				lines.push(truncateToWidth(`  ${groupLine}`, width, ""));
-			} else if (entry.type === "subgroup") {
-				// Subgroup header (indented, no cursor)
-				const subgroupLine = theme.fg("muted", entry.subgroup.label);
-				lines.push(truncateToWidth(`    ${subgroupLine}`, width, ""));
-			} else {
-				// Resource item (cursor only on items)
-				const item = entry.item;
-				const cursor = isSelected ? "> " : "  ";
-				const checkbox = item.enabled ? theme.fg("success", "[x]") : theme.fg("dim", "[ ]");
-				const name = isSelected ? theme.bold(item.displayName) : item.displayName;
-				lines.push(truncateToWidth(`${cursor}    ${checkbox} ${name}`, width, "..."));
-			}
-		}
-
-		// Scroll indicator
-		if (startIndex > 0 || endIndex < this.filteredItems.length) {
+		// Scroll indicator counts resource items only, not the header rows
+		if (start > 0 || end < this.filteredItems.length) {
 			const itemCount = this.filteredItems.filter((e) => e.type === "item").length;
 			const currentItemIndex =
-				this.filteredItems.slice(0, this.selectedIndex).filter((e) => e.type === "item").length + 1;
+				this.filteredItems.slice(0, this.selector.getSelectedIndex()).filter((e) => e.type === "item").length + 1;
 			lines.push(theme.fg("dim", `  (${currentItemIndex}/${itemCount})`));
 		}
 
 		return lines;
 	}
 
-	handleInput(data: string): void {
-		const kb = getKeybindings();
+	private makeRow(entry: FlatEntry | undefined, selected: boolean, width: number): Text {
+		if (entry?.type === "group") {
+			// Main group header (no cursor)
+			return new Text(truncateToWidth(`  ${theme.fg("accent", theme.bold(entry.group.label))}`, width, ""), 0, 0);
+		}
+		if (entry?.type === "subgroup") {
+			// Subgroup header (indented, no cursor)
+			return new Text(truncateToWidth(`    ${theme.fg("muted", entry.subgroup.label)}`, width, ""), 0, 0);
+		}
+		// Resource item (cursor only on items)
+		const item = entry?.item;
+		const cursor = selected ? "> " : "  ";
+		const checkbox = item?.enabled ? theme.fg("success", "[x]") : theme.fg("dim", "[ ]");
+		const name = item && selected ? theme.bold(item.displayName) : (item?.displayName ?? "");
+		return new Text(truncateToWidth(`${cursor}    ${checkbox} ${name}`, width, "..."), 0, 0);
+	}
 
-		if (kb.matches(data, "tui.select.up")) {
-			this.selectedIndex = this.findNextItem(this.selectedIndex, -1);
-			return;
-		}
-		if (kb.matches(data, "tui.select.down")) {
-			this.selectedIndex = this.findNextItem(this.selectedIndex, 1);
-			return;
-		}
-		if (kb.matches(data, "tui.select.pageUp")) {
-			// Jump up by maxVisible, then find nearest item
-			let target = Math.max(0, this.selectedIndex - this.maxVisible);
-			while (target < this.filteredItems.length && this.filteredItems[target].type !== "item") {
-				target++;
-			}
-			if (target < this.filteredItems.length) {
-				this.selectedIndex = target;
-			}
-			return;
-		}
-		if (kb.matches(data, "tui.select.pageDown")) {
-			// Jump down by maxVisible, then find nearest item
-			let target = Math.min(this.filteredItems.length - 1, this.selectedIndex + this.maxVisible);
-			while (target >= 0 && this.filteredItems[target].type !== "item") {
-				target--;
-			}
-			if (target >= 0) {
-				this.selectedIndex = target;
-			}
-			return;
-		}
-		if (kb.matches(data, "tui.select.cancel")) {
-			this.onCancel?.();
-			return;
-		}
+	handleInput(data: string): void {
+		const handled = this.selector.handleKey(data, {
+			totalItems: this.filteredItems.length,
+			rerender: () => this.requestRender?.(),
+			onConfirm: (index) => this.toggleAt(index),
+			onCancel: () => this.onCancel?.(),
+		});
+		if (handled) return;
 		if (matchesKey(data, "ctrl+c")) {
 			this.onExit?.();
 			return;
 		}
-		if (data === " " || kb.matches(data, "tui.select.confirm")) {
-			const entry = this.filteredItems[this.selectedIndex];
-			if (entry?.type === "item") {
-				const newEnabled = !entry.item.enabled;
-				this.toggleResource(entry.item, newEnabled);
-				this.updateItem(entry.item, newEnabled);
-				this.onToggle?.(entry.item, newEnabled);
-			}
+		if (data === " ") {
+			this.toggleAt(this.selector.getSelectedIndex());
 			return;
 		}
 
 		// Pass to search input
 		this.searchInput.handleInput(data);
 		this.filterItems(this.searchInput.getValue());
+	}
+
+	private toggleAt(index: number): void {
+		const entry = this.filteredItems[index];
+		if (entry?.type !== "item") return;
+		const newEnabled = !entry.item.enabled;
+		this.toggleResource(entry.item, newEnabled);
+		this.updateItem(entry.item, newEnabled);
+		this.onToggle?.(entry.item, newEnabled);
 	}
 
 	private toggleResource(item: ResourceItem, enabled: boolean): void {
@@ -576,6 +536,7 @@ export class ConfigSelectorComponent extends Container implements Focusable {
 
 		// Resource list
 		this.resourceList = new ResourceList(groups, settingsManager, cwd, agentDir);
+		this.resourceList.requestRender = requestRender;
 		this.resourceList.onCancel = onClose;
 		this.resourceList.onExit = onExit;
 		this.resourceList.onToggle = () => requestRender();

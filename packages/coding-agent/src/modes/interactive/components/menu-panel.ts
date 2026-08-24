@@ -224,7 +224,7 @@ function surfaceWrappedLines(text: string, width: number, paddingX = PANEL_PADDI
  * (extension-selector, oauth-selector): owns the selected index, the reactive
  * list layout, keyboard navigation, and the windowed row rendering.
  */
-export interface MenuSelectorConfig extends MenuViewportProvider {
+export interface MenuSelectorConfig<T> extends MenuViewportProvider {
 	preferredVisibleItems: number;
 	comfortableItemRows: number;
 	compactItemRows?: number;
@@ -233,16 +233,22 @@ export interface MenuSelectorConfig extends MenuViewportProvider {
 	reservedRows: () => number;
 	/** Wrap single-step navigation at the ends; paging always clamps. */
 	wrapSingleStep?: boolean;
+	/**
+	 * Predicate marking selectable rows (e.g. skip headers). Defaults to every
+	 * row being selectable; navigation and paging never land on a filtered-out row.
+	 */
+	isSelectable?: (item: T, index: number) => boolean;
 }
 
 export class MenuSelector<T> {
 	private selectedIndex = 0;
 	private lastFilterQuery = "";
+	private items?: readonly T[];
 	private layout: MenuListLayout;
 
 	constructor(
 		private readonly listContainer: Container,
-		private readonly config: MenuSelectorConfig,
+		private readonly config: MenuSelectorConfig<T>,
 	) {
 		this.layout = getMenuListLayout({
 			preferredVisibleItems: config.preferredVisibleItems,
@@ -280,11 +286,41 @@ export class MenuSelector<T> {
 	filter(matches: readonly T[], query: string): void {
 		const queryChanged = query !== this.lastFilterQuery;
 		this.lastFilterQuery = query;
+		this.items = matches;
 		if (queryChanged) {
-			this.selectedIndex = 0;
+			this.selectedIndex = this.firstSelectableIndex(matches.length);
 		} else {
 			this.clampSelectedIndex(matches.length);
+			const nearest = this.nearestSelectableIndex(this.selectedIndex);
+			if (nearest >= 0) this.selectedIndex = nearest;
 		}
+	}
+
+	private isSelectableAt(index: number): boolean {
+		const predicate = this.config.isSelectable;
+		if (!predicate) return true;
+		const item = this.items?.[index];
+		return item === undefined ? true : predicate(item, index);
+	}
+
+	private firstSelectableIndex(totalItems: number): number {
+		for (let index = 0; index < totalItems; index++) {
+			if (this.isSelectableAt(index)) return index;
+		}
+		return 0;
+	}
+
+	/** Closest selectable row to the given index (forward first), or -1 when there is none. */
+	private nearestSelectableIndex(from: number): number {
+		if (!this.config.isSelectable) return from;
+		const totalItems = this.items?.length ?? 0;
+		for (let offset = 0; offset < totalItems; offset++) {
+			const forward = from + offset;
+			if (forward >= 0 && forward < totalItems && this.isSelectableAt(forward)) return forward;
+			const backward = from - offset;
+			if (backward >= 0 && backward < totalItems && this.isSelectableAt(backward)) return backward;
+		}
+		return -1;
 	}
 
 	/** Re-run the layout for `totalItems`; true when compact/visibleItems changed. */
@@ -324,11 +360,10 @@ export class MenuSelector<T> {
 		},
 	): boolean {
 		const kb = getKeybindings();
-		const wrapStep = this.config.wrapSingleStep === true;
-		if (kb.matches(keyData, "tui.select.up")) return this.applyMove(-1, options, wrapStep);
-		if (kb.matches(keyData, "tui.select.down")) return this.applyMove(1, options, wrapStep);
-		if (kb.matches(keyData, "tui.select.pageUp")) return this.applyMove(-this.layout.visibleItems, options);
-		if (kb.matches(keyData, "tui.select.pageDown")) return this.applyMove(this.layout.visibleItems, options);
+		if (kb.matches(keyData, "tui.select.up")) return this.applySingleStep(-1, options);
+		if (kb.matches(keyData, "tui.select.down")) return this.applySingleStep(1, options);
+		if (kb.matches(keyData, "tui.select.pageUp")) return this.applyPage(-1, options);
+		if (kb.matches(keyData, "tui.select.pageDown")) return this.applyPage(1, options);
 		if (kb.matches(keyData, "tui.select.confirm")) {
 			options.onConfirm(this.selectedIndex);
 			return true;
@@ -343,6 +378,65 @@ export class MenuSelector<T> {
 	private applyMove(delta: number, options: { totalItems: number; rerender: () => void }, wrap = false): boolean {
 		if (!this.moveBy(delta, options.totalItems, wrap)) return true;
 		options.rerender();
+		return true;
+	}
+
+	/** Single-step move; with a predicate it skips non-selectable rows and stays put at a boundary. */
+	private applySingleStep(direction: 1 | -1, options: { totalItems: number; rerender: () => void }): boolean {
+		if (!this.config.isSelectable) {
+			return this.applyMove(direction, options, this.config.wrapSingleStep === true);
+		}
+		const totalItems = options.totalItems;
+		const wrap = this.config.wrapSingleStep === true;
+		let target = -1;
+		if (wrap && totalItems > 0) {
+			let index = this.selectedIndex;
+			do {
+				index = (((index + direction) % totalItems) + totalItems) % totalItems;
+				if (this.isSelectableAt(index)) {
+					target = index;
+					break;
+				}
+			} while (index !== this.selectedIndex);
+		} else {
+			let index = this.selectedIndex + direction;
+			while (index >= 0 && index < totalItems) {
+				if (this.isSelectableAt(index)) {
+					target = index;
+					break;
+				}
+				index += direction;
+			}
+		}
+		if (target < 0 || target === this.selectedIndex) return true;
+		this.selectedIndex = target;
+		options.rerender();
+		return true;
+	}
+
+	/** Page move; with a predicate it clamps by pageSize then walks to the nearest selectable row. */
+	private applyPage(direction: 1 | -1, options: { totalItems: number; rerender: () => void }): boolean {
+		if (!this.config.isSelectable) {
+			return this.applyMove(direction * this.layout.visibleItems, options);
+		}
+		const totalItems = options.totalItems;
+		const pageSize = Math.max(1, this.layout.visibleItems);
+		let changed = false;
+		if (totalItems > 0) {
+			let target: number;
+			if (direction === -1) {
+				target = Math.max(0, this.selectedIndex - pageSize);
+				while (target < totalItems && !this.isSelectableAt(target)) target++;
+			} else {
+				target = Math.min(totalItems - 1, this.selectedIndex + pageSize);
+				while (target >= 0 && !this.isSelectableAt(target)) target--;
+			}
+			if (target >= 0 && target < totalItems && target !== this.selectedIndex) {
+				this.selectedIndex = target;
+				changed = true;
+			}
+		}
+		if (changed) options.rerender();
 		return true;
 	}
 
