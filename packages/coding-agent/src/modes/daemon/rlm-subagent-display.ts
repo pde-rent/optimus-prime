@@ -33,7 +33,12 @@ export interface RlmSubagentDisplayEntry {
 	 * undefined, or a rehydrated child silently regains reach its spawner denied it.
 	 */
 	peers?: string[];
-	status: "running" | "completed" | "deleted";
+	/**
+	 * Terminal states: "completed" ran to completion; "stopped" was force-killed
+	 * by the user mid-run (additive, so older readers just drop the entry);
+	 * "deleted" is the deletion tombstone.
+	 */
+	status: "running" | "completed" | "stopped" | "deleted";
 	createdAt: number;
 	updatedAt: string;
 }
@@ -51,7 +56,10 @@ function isRlmSubagentDisplayEntry(value: unknown): value is RlmSubagentDisplayE
 		typeof entry.sessionName === "string" &&
 		typeof entry.sessionDir === "string" &&
 		typeof entry.sessionFile === "string" &&
-		(entry.status === "running" || entry.status === "completed" || entry.status === "deleted") &&
+		(entry.status === "running" ||
+			entry.status === "completed" ||
+			entry.status === "stopped" ||
+			entry.status === "deleted") &&
 		(entry.rlmMaxDepth === undefined ||
 			entry.rlmMaxDepth === "unlimited" ||
 			(typeof entry.rlmMaxDepth === "number" &&

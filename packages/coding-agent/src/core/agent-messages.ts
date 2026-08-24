@@ -66,7 +66,7 @@ export interface AgentSessionMessageAgentSummary extends AgentSessionMessageEndp
 	parentSessionPath?: string;
 	rlmDepth?: number;
 	status?: AgentFamilyStatus;
-	rlmChildRegistryStatus?: "running" | "completed" | "deleted";
+	rlmChildRegistryStatus?: "running" | "completed" | "stopped" | "deleted";
 }
 
 export interface AgentSessionMessageListResult {

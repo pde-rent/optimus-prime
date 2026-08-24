@@ -311,7 +311,7 @@ interface PassiveRlmSubagentEntry {
 	spawnCode?: string;
 	model?: { provider: string; modelId: string };
 	peers?: string[];
-	status: "running" | "completed" | "deleted";
+	status: "running" | "completed" | "stopped" | "deleted";
 	createdAt: number;
 }
 
@@ -1112,7 +1112,7 @@ export class AgentDaemon {
 			spawnCode?: string;
 			model?: { provider: string; modelId: string };
 			peers?: string[];
-			status: "running" | "completed" | "deleted";
+			status: "running" | "completed" | "stopped" | "deleted";
 			createdAt: number;
 		}) => ({
 			...base,

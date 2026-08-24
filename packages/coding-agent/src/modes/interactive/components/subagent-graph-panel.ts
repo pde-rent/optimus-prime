@@ -47,10 +47,13 @@ function isRunningRow(row: SubagentGraphRow): boolean {
 	return agentDisplayStatus(row.node.child) === "running";
 }
 
-/** A run reached a terminal state; idle (finished but still attached) counts as succeeded. */
+/**
+ * A run reached a terminal state; idle (finished but still attached) counts as
+ * succeeded, and a force-stopped child stays visible but never counts as one.
+ */
 function isFinishedRow(row: SubagentGraphRow): boolean {
 	const status = agentDisplayStatus(row.node.child);
-	return status === "completed" || status === "idle" || status === "error";
+	return status === "completed" || status === "idle" || status === "error" || status === "cancelled";
 }
 
 /**
@@ -201,11 +204,16 @@ export function formatSubagentGraph(
 	const finished = rows.filter(isFinishedRow);
 	if (finished.length > 0) {
 		const failed = finished.filter((row) => row.node.child.status === "error").length;
+		// A force-stopped child is neither succeeded nor failed; it gets its own
+		// tally so the success count stays honest.
+		const stopped = finished.filter((row) => row.node.child.status === "cancelled").length;
+		const succeeded = finished.length - failed - stopped;
 		const noun = finished.length === 1 ? "agent" : "agents";
+		const stoppedNote = stopped > 0 ? `, ${stopped} stopped` : "";
 		specs.push({
 			left: theme.fg(
 				"muted",
-				`  ${finished.length} ${noun} done (${finished.length - failed} succeeded, ${failed} failed)`,
+				`  ${finished.length} ${noun} done (${succeeded} succeeded, ${failed} failed${stoppedNote})`,
 			),
 			cells: aggregateCells(finished),
 		});

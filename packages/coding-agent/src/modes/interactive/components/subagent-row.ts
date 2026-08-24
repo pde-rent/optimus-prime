@@ -1,5 +1,9 @@
 import { padStartAnsi, SPINNER_FRAMES, visibleWidth } from "@earendil-works/pi-tui";
-import { type AgentDisplayStatus, agentStatusIndicator } from "../../agent-connection/agent-status.js";
+import {
+	type AgentDisplayStatus,
+	type AgentStatusIndicator,
+	agentStatusIndicator,
+} from "../../agent-connection/agent-status.js";
 import type { SessionSummary } from "../../daemon/daemon-session-list.js";
 import { formatTokenCount } from "../agent-activity.js";
 import { theme } from "../theme/theme.js";
@@ -184,6 +188,15 @@ export function renderSubagentRowsAligned(specs: readonly SubagentAlignedRowSpec
 	return specs.map((spec) => renderAlignedSpec(spec, theme.fg("dim", joinAlignedCells(spec.cells, widths)), width));
 }
 
+/** A force-stopped child is user-interrupted, not a success; the halt marker reads in warning tone. */
+const STOPPED_INDICATOR: AgentStatusIndicator = { color: "warning", glyph: "\u25a0", label: "Stopped" };
+
+function statusIndicator(status: AgentDisplayStatus): AgentStatusIndicator {
+	// The shared map still reads cancelled as a dim cross; a killed child must
+	// not share a visual family with quiet terminal states.
+	return status === "cancelled" ? STOPPED_INDICATOR : agentStatusIndicator(status);
+}
+
 function composeSubagentLeft(model: SubagentRowModel): string {
 	let glyph: string;
 	if (model.status === "running") {
@@ -192,7 +205,7 @@ function composeSubagentLeft(model: SubagentRowModel): string {
 			model.spinnerFrame === undefined ? 0 : ((model.spinnerFrame % frames.length) + frames.length) % frames.length;
 		glyph = theme.fg("accent", frames[frame] ?? frames[0]);
 	} else {
-		const indicator = agentStatusIndicator(model.status);
+		const indicator = statusIndicator(model.status);
 		glyph = theme.fg(indicator.color, indicator.glyph);
 	}
 	// Without a session name the task excerpt doubles as the name.
