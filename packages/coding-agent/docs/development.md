@@ -41,13 +41,19 @@ OPTIMUS_CODING_AGENT_DIR=/tmp/optimus-dev /path/to/optimus/optimus.sh
 To exercise harness or daemon fixes from the current working tree without touching your live daemon or `~/.optimus/agent` state, use `scripts/dev-instance.sh`. It starts a detached daemon from source with its own agent state directory and socket, in a temp directory (override with `OPTIMUS_DEV_INSTANCE_DIR`).
 
 ```bash
-scripts/dev-instance.sh start    # replaces any previous dev instance
-scripts/dev-instance.sh status   # shows socket, state dir, and how to address it
+scripts/dev-instance.sh start             # replaces any previous dev instance (detached)
+scripts/dev-instance.sh start --attached  # runs in the foreground of this shell
+scripts/dev-instance.sh status            # shows socket, state dir, and how to address it
 scripts/dev-instance.sh cli --print -p 'hello'   # one-shot run against the instance
-scripts/dev-instance.sh cli      # interactive TUI against the instance
-scripts/dev-instance.sh stop     # graceful shutdown; state is kept
-scripts/dev-instance.sh destroy  # stop and delete all dev-instance state
+scripts/dev-instance.sh cli               # interactive TUI against the instance
+scripts/dev-instance.sh stop              # graceful shutdown; state is kept
+scripts/dev-instance.sh destroy           # stop and delete all dev-instance state
+scripts/dev-instance.sh kill-all          # stop every dev instance this user owns and, if running, the main daemon
 ```
+
+Detached `start` survives the calling shell; use it for long-lived manual testing. Prefer `start --attached` when an agent or script owns the lifecycle: the daemon runs in the foreground, INT/TERM/HUP are forwarded to it, and it shuts down when the calling shell exits, so it can never outlive its owner.
+
+`kill-all` sends SIGTERM only. It signals a pid only when the socket belongs to this user and the pid positively identifies itself on the command line as `--mode daemon` bound to a known optimus socket (the default daemon socket or a dev-instance socket under an `optimus-dev-instance-*` directory). Unrelated processes and other users' daemons are never touched.
 
 Every `cli` invocation gets `OPTIMUS_CODING_AGENT_DIR` and `--daemon-socket` pointed at the instance, so sessions, logs, and cron jobs stay fully isolated. The default daemon and default socket are never touched. A fresh agent dir has no credentials, so one-shot runs need a provider key (for example `--provider <name>` plus its environment variable, or copy an `auth.json` into the instance's agent dir).
 

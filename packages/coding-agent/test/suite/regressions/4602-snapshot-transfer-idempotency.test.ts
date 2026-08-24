@@ -411,10 +411,13 @@ describe("ENG-4602 snapshot transfer containment", () => {
 			),
 		);
 
+		// Genuine divergence invalidates the cached transfer for this session only; the worker
+		// channel stays up so the next attach fetches a fresh snapshot instead of restarting.
 		expect(worker.transcriptCaches.has(activeSessionId)).toBe(false);
 		expect(worker.snapshotCache.has(activeSessionId)).toBe(false);
 		expect(streamSnapshot).not.toHaveBeenCalled();
-		expect(close).toHaveBeenCalledOnce();
+		expect(close).not.toHaveBeenCalled();
+		expect(worker.descriptor.lifecycle).toBe("ready");
 	});
 
 	it("holds catch-up behind duplicate validation and rejects it on mismatch", async () => {
@@ -477,7 +480,9 @@ describe("ENG-4602 snapshot transfer containment", () => {
 		expect(streamSnapshot).not.toHaveBeenCalled();
 		expect(worker.snapshotCache.has(activeSessionId)).toBe(false);
 		expect(worker.transcriptCaches.has(activeSessionId)).toBe(false);
-		expect(close).toHaveBeenCalledOnce();
+		// The rejected validation fails the transfer, not the worker channel; recovery re-attaches.
+		expect(close).not.toHaveBeenCalled();
+		expect(worker.descriptor.lifecycle).toBe("ready");
 	});
 
 	it("rejects a quarantined catch-up before intentional worker stop", async () => {

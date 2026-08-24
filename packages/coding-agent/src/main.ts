@@ -1321,7 +1321,6 @@ export async function main(args: string[], options?: MainOptions) {
 			diagnostics,
 		};
 	};
-	time("createRuntime");
 	// Daemon mode never uses the bootstrap runtime, so skip the heavy
 	// createAgentSessionRuntime below and start listening immediately; sessions
 	// are created on demand through the daemon protocol via createRuntime.
@@ -1592,6 +1591,8 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 		throw error;
 	}
+	time("createRuntime");
+
 	const { services, session, modelFallbackMessage } = runtime;
 	installOwnedSessionRecoveryTracking(runtime);
 	const { settingsManager, modelRegistry } = services;

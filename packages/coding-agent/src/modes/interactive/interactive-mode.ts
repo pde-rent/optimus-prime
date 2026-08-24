@@ -115,6 +115,7 @@ import {
 	parseSlashCommand,
 	resolveBuiltinSlashCommandName,
 } from "../../core/slash-commands.js";
+import { time } from "../../core/timings.js";
 import type { KernelSentAgentMessage } from "../../core/tools/repl-types.js";
 import { formatSize, type TruncationResult, truncateTail } from "../../core/tools/truncate.js";
 import { getChangelogPath, parseChangelog } from "../../utils/changelog.js";
@@ -1083,6 +1084,7 @@ export class InteractiveMode {
 		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
 		// fd powers autocomplete, and rg is available for shell commands.
 		const [fdPath, rgResult] = await Promise.all([ensureTool("fd"), ensureToolWithStatus("rg")]);
+		time("init.ensureTools");
 		this.fdPath = fdPath;
 		if (rgResult.status === "unavailable") {
 			this.showWarning(formatMissingRipgrepMessage(rgResult));
@@ -1163,6 +1165,7 @@ export class InteractiveMode {
 		this.setupEditorSubmitHandler();
 
 		this.ui.start();
+		time("init.firstRender");
 		this.fullscreenEnabled =
 			(this.options.forceFullscreen === true || this.settingsManager.getFullscreen()) &&
 			process.stdout.isTTY === true;
@@ -1172,8 +1175,10 @@ export class InteractiveMode {
 		this.isInitialized = true;
 
 		await this.rebindCurrentSession();
+		time("init.rebindSession");
 
 		await this.renderInitialMessages();
+		time("init.renderInitialMessages");
 
 		onThemeChange(() => {
 			this.ui.invalidate();
@@ -1186,6 +1191,7 @@ export class InteractiveMode {
 		});
 
 		await this.updateAvailableProviderCount();
+		time("init.providerCount");
 	}
 
 	private updateTerminalTitle(): void {
@@ -2155,6 +2161,7 @@ export class InteractiveMode {
 		this.applyRuntimeSettings();
 		if (this.bindLocalSessionExtensions) {
 			await this.bindCurrentSessionExtensions();
+			time("rebind.extensions");
 		} else {
 			setRegisteredThemes(this.uiServices.getThemes());
 			await this.refreshConnectionCatalog();
@@ -2163,6 +2170,7 @@ export class InteractiveMode {
 		}
 		this.subscribeToAgent();
 		await Promise.all([this.refreshConnectionQueue(), this.refreshHeartbeatCatalog().catch(() => undefined)]);
+		time("rebind.queueHeartbeat");
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();

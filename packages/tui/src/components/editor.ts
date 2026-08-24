@@ -204,7 +204,8 @@ export class Editor implements Component, Focusable {
 	}
 
 	setAutocompleteProvider(provider: AutocompleteProvider): void {
-		this.cancelAutocomplete();
+		// Swapping providers must not dismiss an open popup; the autocomplete
+		// controller re-queries against the new provider instead.
 		this.autocomplete.setProvider(provider);
 	}
 

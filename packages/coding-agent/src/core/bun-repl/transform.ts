@@ -46,6 +46,148 @@ function isContinuationAfterBrace(src: string, i: number, current: string): bool
 	return false;
 }
 
+/** Keywords after which a `/` must begin a regex literal rather than be division. */
+const REGEX_HEAD_KEYWORDS = new Set([
+	"return",
+	"typeof",
+	"instanceof",
+	"in",
+	"of",
+	"new",
+	"delete",
+	"void",
+	"throw",
+	"case",
+	"do",
+	"else",
+	"yield",
+	"await",
+]);
+
+/**
+ * True when a `/` at this point in code starts a regex literal rather than being
+ * division. `prev` is the previous significant character ("" at the start of the
+ * code, "v" after an ended string/template/regex); `word` is the identifier or
+ * number that ends at this point, if any.
+ */
+function regexCanStart(prev: string, word: string): boolean {
+	if (REGEX_HEAD_KEYWORDS.has(word)) return true;
+	if (word.length > 0) return false; // after an identifier or number, `/` is division
+	return prev === "" || "([{,;=:!&|?+-*/%~^<>".includes(prev);
+}
+
+/** Index just past a regex literal starting at `start` (`src[start] === "/"`). */
+function skipRegex(src: string, start: number): number {
+	const n = src.length;
+	let inClass = false;
+	let i = start + 1;
+	while (i < n) {
+		const ch = src[i];
+		if (ch === "\\") {
+			i += 2;
+			continue;
+		}
+		if (ch === "\n") return i; // malformed: a regex cannot span lines
+		if (inClass) {
+			if (ch === "]") inClass = false;
+		} else if (ch === "[") {
+			inClass = true;
+		} else if (ch === "/") {
+			i++;
+			while (i < n && /[A-Za-z]/.test(src[i])) i++; // flags
+			return i;
+		}
+		i++;
+	}
+	return n;
+}
+
+/**
+ * Index just past the closing quote of the string or template literal whose opening
+ * quote sits at `start`. A template's ${ ... } interpolations are scanned as code
+ * (skipInterpolation), so nested strings, comments, regexes, and nested templates
+ * cannot fool the brace matching. Returns src.length when the literal never closes.
+ */
+function skipStringAt(src: string, start: number): number {
+	const quote = src[start];
+	const n = src.length;
+	let i = start + 1;
+	while (i < n) {
+		const ch = src[i];
+		if (ch === "\\") {
+			i += 2;
+			continue;
+		}
+		if (quote !== "`") {
+			if (ch === quote) return i + 1;
+			if (ch === "\n") return i; // malformed: a quoted string cannot span lines
+			i++;
+			continue;
+		}
+		if (ch === "`") return i + 1;
+		if (ch === "$" && src[i + 1] === "{") {
+			i = skipInterpolation(src, i + 2);
+			continue;
+		}
+		i++;
+	}
+	return n;
+}
+
+/**
+ * Index just past the `}` that closes a template interpolation whose expression code
+ * begins at `start`. Strings and nested templates are skipped as wholes, comments
+ * are skipped, and a `/` is treated as a regex literal wherever one can legally
+ * appear. Unterminated input returns src.length.
+ */
+function skipInterpolation(src: string, start: number): number {
+	const n = src.length;
+	let depth = 1;
+	let prev = ""; // last significant char; "" = none yet, "v" = an ended literal
+	let word = ""; // identifier/number text accumulated at the current point
+	let i = start;
+	while (i < n) {
+		const ch = src[i];
+		if (ch === "/" && src[i + 1] === "/") {
+			while (i < n && src[i] !== "\n") i++;
+			continue;
+		}
+		if (ch === "/" && src[i + 1] === "*") {
+			const end = src.indexOf("*/", i + 2);
+			i = end === -1 ? n : end + 2;
+			continue;
+		}
+		if (ch === "'" || ch === '"' || ch === "`") {
+			i = skipStringAt(src, i);
+			prev = "v";
+			word = "";
+			continue;
+		}
+		if (/[A-Za-z0-9_$]/.test(ch)) {
+			word += ch;
+			prev = "w";
+			i++;
+			continue;
+		}
+		if (ch === "/" && regexCanStart(prev, word)) {
+			i = skipRegex(src, i);
+			prev = "v";
+			word = "";
+			continue;
+		}
+		if (!/\s/.test(ch)) {
+			if (ch === "{") depth++;
+			else if (ch === "}") {
+				depth--;
+				if (depth === 0) return i + 1;
+			}
+			prev = ch;
+			word = "";
+		}
+		i++;
+	}
+	return n;
+}
 interface Seg {
 	/** Raw source of the segment. */
 	src: string;
@@ -62,7 +204,6 @@ function splitTopLevelSegments(src: string): Seg[] {
 	const segs: Seg[] = [];
 	let current = "";
 	let depth = 0; // nesting of () [] {
-	let stringMode: "'" | '"' | "`" | null = null;
 	let lineComment = false;
 	let blockComment = false;
 	let i = 0;
@@ -90,14 +231,14 @@ function splitTopLevelSegments(src: string): Seg[] {
 		const next = src[i + 1];
 
 		// Line comment
-		if (!blockComment && stringMode === null && ch === "/" && next === "/") {
+		if (!blockComment && ch === "/" && next === "/") {
 			lineComment = true;
 			current += ch + next;
 			i += 2;
 			continue;
 		}
 		// Block comment
-		if (!lineComment && stringMode === null && ch === "/" && next === "*") {
+		if (!lineComment && ch === "/" && next === "*") {
 			blockComment = true;
 			current += ch + next;
 			i += 2;
@@ -131,48 +272,12 @@ function splitTopLevelSegments(src: string): Seg[] {
 			continue;
 		}
 
-		// String / template mode
-		if (stringMode !== null) {
-			current += ch;
-			if (stringMode === "`") {
-				// handle ${ ... } nested template expressions by tracking braces
-				if (ch === "\\") {
-					current += src[i + 1] ?? "";
-					i += 2;
-					continue;
-				}
-				if (ch === "$" && next === "{") {
-					// enter nested expression: raw-include until matching }
-					current += next;
-					i += 2;
-					let tdepth = 1;
-					while (i < n && tdepth > 0) {
-						const c2 = src[i];
-						if (c2 === "{") tdepth++;
-						else if (c2 === "}") tdepth--;
-						current += c2;
-						i++;
-					}
-					continue;
-				}
-				if (ch === "`") stringMode = null;
-			} else {
-				if (ch === "\\") {
-					current += src[i + 1] ?? "";
-					i += 2;
-					continue;
-				}
-				if (ch === stringMode) stringMode = null;
-			}
-			i++;
-			continue;
-		}
-
-		// Entering a string/template
+		// A string or template literal: consume it whole, so quotes, braces, backticks,
+		// and dollar-brace interpolations inside it never affect statement splitting.
 		if (ch === "'" || ch === '"' || ch === "`") {
-			stringMode = ch;
-			current += ch;
-			i++;
+			const end = skipStringAt(src, i);
+			current += src.slice(i, end);
+			i = end;
 			continue;
 		}
 
@@ -353,24 +458,12 @@ function splitTopLevel(str: string, sep: string): string[] {
 	let cur = "";
 	let i = 0;
 	const n = str.length;
-	let quote: "'" | '"' | "`" | null = null;
 	while (i < n) {
 		const ch = str[i];
-		if (quote) {
-			cur += ch;
-			if (ch === "\\") {
-				cur += str[i + 1] ?? "";
-				i += 2;
-				continue;
-			}
-			if (ch === quote) quote = null;
-			i++;
-			continue;
-		}
 		if (ch === "'" || ch === '"' || ch === "`") {
-			quote = ch;
-			cur += ch;
-			i++;
+			const end = skipStringAt(str, i);
+			cur += str.slice(i, end);
+			i = end;
 			continue;
 		}
 		if (ch === "(" || ch === "[" || ch === "{") {
@@ -402,21 +495,10 @@ function findTopLevelChar(str: string, target: string): number {
 	let depth = 0;
 	let i = 0;
 	const n = str.length;
-	let quote: "'" | '"' | "`" | null = null;
 	while (i < n) {
 		const ch = str[i];
-		if (quote) {
-			if (ch === "\\") {
-				i += 2;
-				continue;
-			}
-			if (ch === quote) quote = null;
-			i++;
-			continue;
-		}
 		if (ch === "'" || ch === '"' || ch === "`") {
-			quote = ch;
-			i++;
+			i = skipStringAt(str, i);
 			continue;
 		}
 		if (ch === "(" || ch === "[" || ch === "{") {
@@ -493,16 +575,10 @@ function wholeStringLiteral(text: string): string | null {
 function lastTopLevelFrom(text: string): number {
 	let found = -1;
 	let depth = 0;
-	let quote: "'" | '"' | "`" | null = null;
 	for (let i = 0; i < text.length; i++) {
 		const ch = text[i];
-		if (quote) {
-			if (ch === "\\") i++;
-			else if (ch === quote) quote = null;
-			continue;
-		}
 		if (ch === "'" || ch === '"' || ch === "`") {
-			quote = ch;
+			i = skipStringAt(text, i) - 1;
 			continue;
 		}
 		if (ch === "(" || ch === "[" || ch === "{") {

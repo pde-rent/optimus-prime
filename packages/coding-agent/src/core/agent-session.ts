@@ -295,6 +295,7 @@ import {
 } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
+import { time } from "./timings.js";
 import { openTodoTasks, readTodoBoard } from "./todo/store.js";
 import { buildTodoWatchdogContinuation } from "./todo/watchdog.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
@@ -9066,8 +9067,11 @@ export class AgentSession {
 		}
 
 		this._applyExtensionBindings(this._extensionRunner);
+		time("ext.bindings");
 		await this._extensionRunner.emit(this._sessionStartEvent);
+		time("ext.sessionStartEmit");
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+		time("ext.resourcesDiscover");
 	}
 
 	private async extendResourcesFromExtensions(reason: "startup" | "reload"): Promise<void> {

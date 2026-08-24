@@ -97,10 +97,14 @@ export function createWebsearchHealthExtension(): ExtensionFactory {
 				return;
 			}
 			if (isTruthyEnvVar(process.env.PI_OFFLINE)) return;
-			const reason = await probeSearxng(searxngUrl);
-			if (reason === null) return;
-			warned = true;
-			ctx.ui.notify(searxngFailureMessage(searxngUrl, reason), "warning");
+			// Probe off the critical path: session_start blocks startup, and a dead
+			// backend would hold boot for the full probe timeout. The warning still
+			// surfaces once the probe settles.
+			void probeSearxng(searxngUrl).then((reason) => {
+				if (warned || reason === null) return;
+				warned = true;
+				ctx.ui.notify(searxngFailureMessage(searxngUrl, reason), "warning");
+			});
 		});
 	};
 }

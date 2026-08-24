@@ -5,6 +5,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import { getLogger } from "@earendil-works/pi-ai";
 import { createCliSubprocessLaunchSpec } from "../../cli/subprocess-launch.js";
 import {
@@ -2690,6 +2691,22 @@ export class DaemonSupervisor {
 		}
 	}
 
+	private duplicateChunkMessagesMatch(
+		generation: SnapshotTranscriptGeneration,
+		index: number,
+		chunk: Extract<DaemonOutbound, { type: "session_snapshot_chunk" }>,
+	): boolean {
+		try {
+			const cached = JSON.parse(generation.transcript.readChunk(index).toString("utf8")) as Extract<
+				DaemonOutbound,
+				{ type: "session_snapshot_chunk" }
+			>;
+			return isDeepStrictEqual(cached.messages, chunk.messages);
+		} catch {
+			return false;
+		}
+	}
+
 	private async recoverWorker(worker: ResidentWorker): Promise<void> {
 		if (this.isWorkerRecoveryCancelled(worker)) {
 			return;
@@ -3930,12 +3947,28 @@ export class DaemonSupervisor {
 							chunk.type !== "session_snapshot_chunk" ||
 							chunk.activeSessionId !== activeSessionId ||
 							chunk.snapshotId !== generation.transcript.snapshotId ||
-							chunk.index !== duplicateIndex ||
-							!generation.transcript.readChunk(duplicateIndex).equals(Buffer.from(frame.payload))
+							chunk.index !== duplicateIndex
 						) {
 							throw new Error(
-								`Duplicate snapshot ${generation.transcript.snapshotId} did not match cached bytes`,
+								`Duplicate snapshot ${generation.transcript.snapshotId} sent invalid chunk metadata at index ${duplicateIndex}`,
 							);
+						}
+						if (!generation.transcript.readChunk(duplicateIndex).equals(Buffer.from(frame.payload))) {
+							// A re-transfer of a completed snapshot can differ byte-for-byte while carrying the same
+							// messages, for example after a worker restart re-serializes session state. Accept those;
+							// only genuinely different content invalidates the cached transfer.
+							if (!this.duplicateChunkMessagesMatch(generation, duplicateIndex, chunk)) {
+								this.failWorkerSnapshotCache(
+									worker,
+									activeSessionId,
+									new Error(
+										`Duplicate snapshot ${generation.transcript.snapshotId} diverged from the cached transfer at chunk ${duplicateIndex}. The cached copy was invalidated; retry the attach to receive a fresh snapshot.`,
+									),
+									false,
+									generation.transcript.snapshotId,
+								);
+								return;
+							}
 						}
 						generation.duplicateChunkIndex = duplicateIndex + 1;
 					}
@@ -3982,10 +4015,14 @@ export class DaemonSupervisor {
 						end.chunkCount !== transcript.chunkCount ||
 						!generation.end?.equals(frame.payload)
 					) {
-						throw new Error(`Duplicate snapshot ${transcript.snapshotId} ended with different metadata`);
+						throw new Error(
+							`Duplicate snapshot ${transcript.snapshotId} ended with different metadata than its begin frame; the cached transfer was invalidated, retry the attach to receive a fresh snapshot.`,
+						);
 					}
 					if (!generation.duplicateResult) {
-						throw new Error(`Duplicate snapshot ${transcript.snapshotId} has no result`);
+						throw new Error(
+							`Duplicate snapshot ${transcript.snapshotId} completed without a refreshed attach result; the cached transfer was invalidated, retry the attach to receive a fresh snapshot.`,
+						);
 					}
 					generation.result = generation.duplicateResult;
 					if (worker.transcriptCaches.get(activeSessionId) === transcript) {

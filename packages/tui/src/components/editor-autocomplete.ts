@@ -111,7 +111,13 @@ export class EditorAutocomplete {
 	}
 
 	setProvider(provider: AutocompleteProvider): void {
+		const wasActive = this.isActive();
 		this.provider = provider;
+		// An open popup holds suggestions from the previous provider. Re-query
+		// instead of dismissing so background provider rebuilds (session resync,
+		// extension or settings changes) do not flush the popup while the typed
+		// trigger text is still in the buffer.
+		if (wasActive) this.update();
 	}
 
 	cancel(): void {

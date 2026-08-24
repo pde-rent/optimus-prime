@@ -311,7 +311,7 @@ under strict settings, and a single `any`, double cast through `unknown`, or lin
 fails the build. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
-To test changes against a standalone instance instead of your live daemon, run `scripts/dev-instance.sh start` (see [packages/coding-agent/docs/development.md](packages/coding-agent/docs/development.md)).
+To test changes against a standalone instance instead of your live daemon, run `scripts/dev-instance.sh start`; `scripts/dev-instance.sh kill-all` stops every dev instance this user owns and the main daemon (see [packages/coding-agent/docs/development.md](packages/coding-agent/docs/development.md)).
 ## Credits
 
 Optimus Prime is a hard fork of

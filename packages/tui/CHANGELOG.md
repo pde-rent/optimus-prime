@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Fixed the slash-command autocomplete popup being dismissed when the editor's autocomplete provider is rebuilt in the background (session resync, extension or settings changes); the popup now re-queries instead of closing while the typed text is untouched.
 - Added a `dimBackdrop` overlay option that dims the content behind a modal dialog so it reads as a separate layer.
 - Added persistent text selection: mouse selections (scrollback, tables, dock/frame, and the editor itself) keep their highlight after mouse release instead of vanishing; copy-on-release still fires. Selections are dismissed by a new click or drag, typing into the editor, or Escape. The editor now tracks selection anchor/head in `EditorState`, renders it with reverse-video styling, supports Shift+Arrow extension, and Delete/Backspace (or typing) delete/replace the selected range.
 - Fixed empty bracketed pastes being silently dropped by `Editor`: they now reach `handlePaste`, where subclasses can interpret them (e.g. clipboard image paste); the base editor ignores them as before.
