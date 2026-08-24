@@ -1,25 +1,11 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import {
-	Container,
-	type SelectItem,
-	SelectList,
-	type SelectListLayoutOptions,
-	type SettingItem,
-	SettingsList,
-	Spacer,
-	Text,
-} from "@earendil-works/pi-tui";
+import { Container, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../../../core/graph-resolver.js";
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
-import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.js";
-import { selectionHints } from "./keybinding-hints.js";
-
-const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
-	minPrimaryColumnWidth: 12,
-	maxPrimaryColumnWidth: 32,
-};
+import { getSettingsListTheme, theme } from "../theme/theme.js";
+import { SelectModalComponent } from "./select-modal.js";
 
 /** Shared with the `/effort` modal so both surfaces describe levels identically. */
 export const THINKING_LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
@@ -145,64 +131,6 @@ class WarningSettingsSubmenu extends Container {
 	}
 }
 
-class SelectSubmenu extends Container {
-	private selectList: SelectList;
-
-	constructor(
-		title: string,
-		description: string,
-		options: SelectItem[],
-		currentValue: string,
-		onSelect: (value: string) => void,
-		onCancel: () => void,
-		onSelectionChange?: (value: string) => void,
-	) {
-		super();
-
-		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 0, 0));
-
-		if (description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", description), 0, 0));
-		}
-
-		this.addChild(new Spacer(1));
-
-		this.selectList = new SelectList(
-			options,
-			Math.min(options.length, 10),
-			getSelectListTheme(),
-			SETTINGS_SUBMENU_SELECT_LIST_LAYOUT,
-		);
-
-		const currentIndex = options.findIndex((o) => o.value === currentValue);
-		if (currentIndex !== -1) {
-			this.selectList.setSelectedIndex(currentIndex);
-		}
-
-		this.selectList.onSelect = (item) => {
-			onSelect(item.value);
-		};
-
-		this.selectList.onCancel = onCancel;
-
-		if (onSelectionChange) {
-			this.selectList.onSelectionChange = (item) => {
-				onSelectionChange(item.value);
-			};
-		}
-
-		this.addChild(this.selectList);
-
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(`  ${selectionHints()}`, 0, 0));
-	}
-
-	handleInput(data: string): void {
-		this.selectList.handleInput(data);
-	}
-}
-
 export class SettingsSelectorComponent extends Container {
 	private settingsList: SettingsList;
 
@@ -317,21 +245,22 @@ export class SettingsSelectorComponent extends Container {
 				description: "Reasoning depth for thinking-capable models",
 				currentValue: config.thinkingLevel,
 				submenu: (currentValue, done) =>
-					new SelectSubmenu(
-						"Thinking Level",
-						"Select reasoning depth for thinking-capable models",
-						config.availableThinkingLevels.map((level) => ({
+					new SelectModalComponent({
+						title: "Thinking Level",
+						subtitle: "Select reasoning depth for thinking-capable models",
+						items: config.availableThinkingLevels.map((level) => ({
 							value: level,
 							label: level,
 							description: THINKING_LEVEL_DESCRIPTIONS[level],
 						})),
-						currentValue,
-						(value) => {
+						selectedValue: currentValue,
+						maxVisible: 10,
+						onSelect: (value) => {
 							callbacks.onThinkingLevelChange(value as ThinkingLevel);
 							done(value);
 						},
-						() => done(),
-					),
+						onCancel: () => done(),
+					}),
 			},
 			{
 				id: "theme",
@@ -339,28 +268,29 @@ export class SettingsSelectorComponent extends Container {
 				description: "Color theme for the interface",
 				currentValue: config.currentTheme,
 				submenu: (currentValue, done) =>
-					new SelectSubmenu(
-						"Theme",
-						"Select color theme",
-						config.availableThemes.map((t) => ({
+					new SelectModalComponent({
+						title: "Theme",
+						subtitle: "Select color theme",
+						items: config.availableThemes.map((t) => ({
 							value: t,
 							label: t,
 						})),
-						currentValue,
-						(value) => {
+						selectedValue: currentValue,
+						maxVisible: 10,
+						onSelect: (value) => {
 							callbacks.onThemeChange(value);
 							done(value);
 						},
-						() => {
+						onCancel: () => {
 							// Restore original theme on cancel
 							callbacks.onThemePreview?.(currentValue);
 							done();
 						},
-						(value) => {
+						onPreview: (value) => {
 							// Preview theme on selection change
 							callbacks.onThemePreview?.(value);
 						},
-					),
+					}),
 			},
 		];
 

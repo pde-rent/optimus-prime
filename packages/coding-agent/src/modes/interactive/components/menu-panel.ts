@@ -231,10 +231,13 @@ export interface MenuSelectorConfig extends MenuViewportProvider {
 	scrollIndicatorRows?: number;
 	/** Dynamic reserved-row count (headers, tab bars, descriptions). */
 	reservedRows: () => number;
+	/** Wrap single-step navigation at the ends; paging always clamps. */
+	wrapSingleStep?: boolean;
 }
 
 export class MenuSelector<T> {
 	private selectedIndex = 0;
+	private lastFilterQuery = "";
 	private layout: MenuListLayout;
 
 	constructor(
@@ -269,6 +272,21 @@ export class MenuSelector<T> {
 		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, totalItems - 1)));
 	}
 
+	/**
+	 * Shared post-filter cursor rule: reset to the first row when the search query
+	 * changed, otherwise clamp into the filtered result. Matchers stay in each
+	 * selector; pass the already-filtered result for `query` here.
+	 */
+	filter(matches: readonly T[], query: string): void {
+		const queryChanged = query !== this.lastFilterQuery;
+		this.lastFilterQuery = query;
+		if (queryChanged) {
+			this.selectedIndex = 0;
+		} else {
+			this.clampSelectedIndex(matches.length);
+		}
+	}
+
 	/** Re-run the layout for `totalItems`; true when compact/visibleItems changed. */
 	relayout(totalItems: number): boolean {
 		const previous = this.layout;
@@ -285,8 +303,8 @@ export class MenuSelector<T> {
 	}
 
 	/** Move the selection by `delta`; true when the selection changed. */
-	moveBy(delta: number, totalItems: number): boolean {
-		const next = moveSelection(this.selectedIndex, totalItems, delta);
+	moveBy(delta: number, totalItems: number, wrap = false): boolean {
+		const next = moveSelection(this.selectedIndex, totalItems, delta, wrap);
 		if (next === this.selectedIndex) return false;
 		this.selectedIndex = next;
 		return true;
@@ -306,8 +324,9 @@ export class MenuSelector<T> {
 		},
 	): boolean {
 		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.up")) return this.applyMove(-1, options);
-		if (kb.matches(keyData, "tui.select.down")) return this.applyMove(1, options);
+		const wrapStep = this.config.wrapSingleStep === true;
+		if (kb.matches(keyData, "tui.select.up")) return this.applyMove(-1, options, wrapStep);
+		if (kb.matches(keyData, "tui.select.down")) return this.applyMove(1, options, wrapStep);
 		if (kb.matches(keyData, "tui.select.pageUp")) return this.applyMove(-this.layout.visibleItems, options);
 		if (kb.matches(keyData, "tui.select.pageDown")) return this.applyMove(this.layout.visibleItems, options);
 		if (kb.matches(keyData, "tui.select.confirm")) {
@@ -321,8 +340,8 @@ export class MenuSelector<T> {
 		return false;
 	}
 
-	private applyMove(delta: number, options: { totalItems: number; rerender: () => void }): boolean {
-		if (!this.moveBy(delta, options.totalItems)) return true;
+	private applyMove(delta: number, options: { totalItems: number; rerender: () => void }, wrap = false): boolean {
+		if (!this.moveBy(delta, options.totalItems, wrap)) return true;
 		options.rerender();
 		return true;
 	}
