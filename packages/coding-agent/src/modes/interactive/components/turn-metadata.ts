@@ -24,9 +24,9 @@ function formatCost(usd: number): string {
 }
 
 /**
- * Turn-boundary rule: a barely-visible dotted line with right-aligned metadata
+ * Turn-boundary rule: a barely-visible solid rule with right-aligned metadata
  * (`HH:MM:SS · ↑in ↓out tok · runtime · cost`). One line per turn, mirroring
- * how chat UIs separate threads; the dots keep the divider present but quiet.
+ * how chat UIs separate threads; the rule keeps the divider present but quiet.
  */
 export class TurnMetadataComponent implements Component {
 	constructor(private readonly meta: TurnMetadata) {}
@@ -44,8 +44,8 @@ export class TurnMetadataComponent implements Component {
 		].filter((p) => p !== undefined) as string[];
 		const metaText = theme.fg("dim", parts.join(" · "));
 		const pad = Math.max(0, w - visibleWidth(parts.join(" · ")) - 1);
-		// Same muted shade as the subagent view's "..." markers, so the divider stays present but quiet.
-		const line = `${theme.fg("muted", "·".repeat(pad))} ${metaText}`;
+		// A dim solid rule reads cleaner than dots at this size; metadata stays right-aligned.
+		const line = `${theme.fg("dim", "\u2500".repeat(pad))} ${metaText}`;
 		return [truncateToWidth(line, width)];
 	}
 }

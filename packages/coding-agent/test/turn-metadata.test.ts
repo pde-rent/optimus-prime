@@ -22,7 +22,7 @@ describe("TurnMetadataComponent", () => {
 		costUsd: 0.0321,
 	};
 
-	test("right-aligns metadata behind a dot rule within the given width", () => {
+	test("right-aligns metadata behind a solid rule within the given width", () => {
 		const lines = new TurnMetadataComponent(meta).render(80);
 		expect(lines.length).toBe(1);
 		const plain = stripAnsi(lines[0]!);
@@ -32,8 +32,9 @@ describe("TurnMetadataComponent", () => {
 		expect(plain).toContain("↓57k tok");
 		expect(plain).toContain("14:32:05");
 		expect(plain).toContain("42.3s");
-		// The rule is dots up to the metadata block.
-		expect(plain.startsWith("·")).toBe(true);
+		// The rule is a solid line up to the metadata block.
+		expect(plain.startsWith("\u2500")).toBe(true);
+		expect(plain).not.toContain("·".repeat(5));
 	});
 
 	test("narrow widths truncate without throwing", () => {
