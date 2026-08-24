@@ -9,7 +9,10 @@ export {
 	CompactionOutcomeMessageComponent,
 	MalformedCompactionOutcomeMessageComponent,
 } from "./compaction-outcome-message.js";
-export { CompactionSummaryMessageComponent } from "./compaction-summary-message.js";
+export {
+	CompactionSummaryMessageComponent,
+	StreamingCompactionComponent,
+} from "./compaction-summary-message.js";
 export {
 	ConfigurationMenuComponent,
 	type ConfigurationMenuTab,

@@ -178,7 +178,10 @@ import {
 	CompactionOutcomeMessageComponent,
 	MalformedCompactionOutcomeMessageComponent,
 } from "./components/compaction-outcome-message.js";
-import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.js";
+import {
+	CompactionSummaryMessageComponent,
+	StreamingCompactionComponent,
+} from "./components/compaction-summary-message.js";
 import { ConfigurationMenuComponent, type ConfigurationMenuTab } from "./components/configuration-menu.js";
 import { formatContextTree } from "./components/context-tree-format.js";
 import { isCompactAgentMessageNeighbor } from "./components/conversation-components.js";
@@ -725,6 +728,7 @@ export class InteractiveMode {
 	private signalCleanupHandlers: Array<() => void> = [];
 
 	private autoCompactionLoader: Loader | undefined = undefined;
+	private compactionStreamingComponent: StreamingCompactionComponent | undefined = undefined;
 
 	private retryLoader: Loader | undefined = undefined;
 	private retryCountdown: CountdownTimer | undefined = undefined;
@@ -2786,6 +2790,27 @@ export class InteractiveMode {
 		);
 		this.statusContainer.addChild(this.autoCompactionLoader);
 		this.ui.requestRender();
+	}
+
+	// Live [compacting] block in the chat while the summarizer streams. Expansion
+	// follows the global tool-output toggle; per-block clicks still work.
+	private beginCompactionStream(): void {
+		this.endCompactionStream();
+		if (this.chatContainer.children.length > 0) {
+			this.chatContainer.addChild(new Spacer(1));
+		}
+		const component = new StreamingCompactionComponent();
+		component.setMarkdownTheme(this.getMarkdownThemeWithSettings());
+		component.setExpanded(this.toolOutputExpanded);
+		this.compactionStreamingComponent = component;
+		this.chatContainer.addChild(component);
+		this.ui.requestRender();
+	}
+
+	private endCompactionStream(): void {
+		if (!this.compactionStreamingComponent) return;
+		this.chatContainer.removeChild(this.compactionStreamingComponent);
+		this.compactionStreamingComponent = undefined;
 	}
 
 	private syncWorkingLoader(): void {
@@ -5083,10 +5108,18 @@ export class InteractiveMode {
 
 			case "compaction_start": {
 				this.startCompactionLoader(event.reason, event.customInstructions);
+				this.beginCompactionStream();
+				break;
+			}
+
+			case "compaction_partial": {
+				this.compactionStreamingComponent?.setPartial(event.partial);
+				this.ui.requestRender();
 				break;
 			}
 
 			case "compaction_end": {
+				this.endCompactionStream();
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
@@ -5864,6 +5897,7 @@ export class InteractiveMode {
 		if (options.clearChat) {
 			this.chatContainer.clear();
 		}
+		this.compactionStreamingComponent = undefined;
 
 		if (options.updateFooter) {
 			this.updateEditorBorderColor();

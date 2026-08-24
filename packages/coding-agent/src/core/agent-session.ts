@@ -360,6 +360,12 @@ export type AgentSessionEvent =
 			reason: CompactionReason;
 			customInstructions?: string;
 	  }
+	| {
+			type: "compaction_partial";
+			reason: CompactionReason;
+			/** Cumulative streamed summary text so far; display-only. */
+			partial: string;
+	  }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| { type: "service_tier_changed"; serviceTier: ServiceTier }
@@ -7801,6 +7807,11 @@ export class AgentSession {
 			reason: "manual",
 			customInstructions,
 		});
+		let streamedSummary = "";
+		const onTextDelta = (delta: string) => {
+			streamedSummary += delta;
+			this._emit({ type: "compaction_partial", reason: "manual", partial: streamedSummary });
+		};
 
 		try {
 			if (!this.model) {
@@ -7815,6 +7826,7 @@ export class AgentSession {
 				customInstructions,
 				force: options.force,
 				signal: this._compactionAbortController.signal,
+				onTextDelta,
 			});
 
 			this._emit({
@@ -7879,6 +7891,7 @@ export class AgentSession {
 		customInstructions?: string;
 		force?: boolean;
 		signal: AbortSignal;
+		onTextDelta?: (delta: string) => void;
 	}): Promise<CompactionResult> {
 		const { model, apiKey, headers, customInstructions, force, signal } = options;
 		const pathEntries = this.sessionManager.getBranch();
@@ -7917,7 +7930,16 @@ export class AgentSession {
 
 		const { summary, firstKeptEntryId, tokensBefore, details } =
 			extensionCompaction ??
-			(await compact(preparation, model, apiKey, headers, customInstructions, signal, this.thinkingLevel));
+			(await compact(
+				preparation,
+				model,
+				apiKey,
+				headers,
+				customInstructions,
+				signal,
+				this.thinkingLevel,
+				options.onTextDelta,
+			));
 
 		if (signal.aborted) {
 			throw new Error("Compaction cancelled");
@@ -8926,6 +8948,11 @@ export class AgentSession {
 		};
 
 		this._emit({ type: "compaction_start", reason, customInstructions });
+		let streamedSummary = "";
+		const onTextDelta = (delta: string) => {
+			streamedSummary += delta;
+			this._emit({ type: "compaction_partial", reason, partial: streamedSummary });
+		};
 		this._autoCompactionAbortController = new AbortController();
 
 		try {
@@ -8952,6 +8979,7 @@ export class AgentSession {
 				headers: authResult.headers,
 				customInstructions,
 				signal: this._autoCompactionAbortController.signal,
+				onTextDelta,
 			});
 
 			this._emit({

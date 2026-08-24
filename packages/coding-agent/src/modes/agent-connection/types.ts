@@ -602,6 +602,12 @@ export type AgentConnectionSessionEvent =
 			reason: "manual" | "threshold" | "overflow" | "requested";
 			customInstructions?: string;
 	  }
+	| {
+			type: "compaction_partial";
+			reason: "manual" | "threshold" | "overflow" | "requested";
+			/** Cumulative streamed summary text so far; display-only. */
+			partial: string;
+	  }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| { type: "service_tier_changed"; serviceTier: ServiceTier }

@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai";
+import { completeSimple, streamSimple } from "@earendil-works/pi-ai";
 import { convertToLlm } from "../messages.js";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../session-manager.js";
 import {
@@ -537,6 +537,8 @@ interface SummarizationRequest {
 	buildPrompt: (previousSummary?: string) => string;
 	previousSummary?: string;
 	errorLabel: string;
+	/** Receives summary text as it streams. When absent, the buffered completion path is used unchanged. */
+	onTextDelta?: (delta: string) => void;
 }
 
 /**
@@ -576,20 +578,30 @@ async function summarizeMessages(llmMessages: Message[], options: SummarizationR
 						headers: options.headers,
 					};
 
-		const response = await completeSimple(
-			model,
-			{
-				systemPrompt: options.systemPrompt,
-				messages: [
-					{
-						role: "user" as const,
-						content: [{ type: "text" as const, text: promptText }],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			completionOptions,
-		);
+		const context = {
+			systemPrompt: options.systemPrompt,
+			messages: [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: promptText }],
+					timestamp: Date.now(),
+				},
+			],
+		};
+
+		let response: AssistantMessage;
+		if (options.onTextDelta) {
+			// Streaming path: same request, but summary text is forwarded as it arrives.
+			const stream = streamSimple(model, context, completionOptions);
+			for await (const event of stream) {
+				if (event.type === "text_delta") {
+					options.onTextDelta(event.delta);
+				}
+			}
+			response = await stream.result();
+		} else {
+			response = await completeSimple(model, context, completionOptions);
+		}
 
 		if (response.stopReason === "error") {
 			throw new Error(`${options.errorLabel}: ${response.errorMessage || "Unknown error"}`);
@@ -618,6 +630,7 @@ export async function generateSummary(
 	customInstructions?: string,
 	previousSummary?: string,
 	thinkingLevel?: ThinkingLevel,
+	onTextDelta?: (delta: string) => void,
 ): Promise<string> {
 	// Serialize before the LLM call so it summarizes rather than continues this conversation.
 	const llmMessages = convertToLlm(currentMessages);
@@ -633,6 +646,7 @@ export async function generateSummary(
 		buildPrompt: (prev) => buildSummarizationPrompt(customInstructions, prev),
 		previousSummary,
 		errorLabel: "Summarization failed",
+		onTextDelta,
 	});
 }
 export interface CompactionPreparation {
@@ -769,6 +783,7 @@ export async function compact(
 	customInstructions?: string,
 	signal?: AbortSignal,
 	thinkingLevel?: ThinkingLevel,
+	onTextDelta?: (delta: string) => void,
 ): Promise<CompactionResult> {
 	const {
 		firstKeptEntryId,
@@ -795,6 +810,7 @@ export async function compact(
 						customInstructions,
 						previousSummary,
 						thinkingLevel,
+						onTextDelta,
 					)
 				: Promise.resolve("No prior history."),
 			generateTurnPrefixSummary(

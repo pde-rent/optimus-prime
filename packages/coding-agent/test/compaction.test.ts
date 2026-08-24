@@ -627,6 +627,31 @@ describe("LLM summarization", () => {
 		expect(compactionResult.tokensBefore).toBeGreaterThan(0);
 	});
 
+	it("streams summary deltas through onTextDelta without changing the stored result", async () => {
+		const entries = loadLargeSessionEntries();
+		const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
+		expect(preparation).toBeDefined();
+
+		const deltas: string[] = [];
+		const compactionResult = await compact(
+			preparation!,
+			faux.getModel(),
+			"faux-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			(delta) => deltas.push(delta),
+		);
+
+		expect(deltas.length).toBeGreaterThan(1);
+		const streamed = deltas.join("");
+		expect(streamed.length).toBeGreaterThan(0);
+		// The persisted summary must start with exactly what was streamed; only
+		// the trailing file-operations section may be appended afterwards.
+		expect(compactionResult.summary.startsWith(streamed)).toBe(true);
+	});
+
 	it("should produce valid session after compaction", async () => {
 		const entries = loadLargeSessionEntries();
 		const loaded = buildSessionContext(entries);
