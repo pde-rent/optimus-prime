@@ -35,6 +35,12 @@ describe("graph resolver budget", () => {
 		expect(raised.ceilingTokens).toBe(low.ceilingTokens);
 	});
 
+	it("unlimited admits always and ignores the clamp", () => {
+		const budget = graphResolverBudget("unlimited", 1)!;
+		expect(admitsGraphNode(Number.MAX_SAFE_INTEGER, budget, Number.MAX_SAFE_INTEGER - 1)).toBe(true);
+		expect(graphMinDepth("unlimited")).toBe(2);
+	});
+
 	it("validates levels", () => {
 		expect(isGraphResolverLevel("high")).toBe(true);
 		expect(isGraphResolverLevel("aggressive")).toBe(false);

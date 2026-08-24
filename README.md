@@ -166,6 +166,7 @@ optimus --graph medium "audit every route handler for missing authz"
 | `medium` | 10x | 4 | 1 |
 | `high` | 25x | 6 | 2 |
 | `max` | 100x | 8 | 2 |
+| `unlimited` | no ceiling | no cap | 2+ |
 
 Escalation is evidence-led, never predicted: repeated check failures, changes that are hard to
 undo, contradictory retrieval. Work that splits into independent units fans out one child per

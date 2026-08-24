@@ -39,6 +39,7 @@ export const GRAPH_RESOLVER_DESCRIPTIONS: Record<GraphResolverLevel, string> = {
 	medium: "6 children, ~20x budget",
 	high: "10 children, ~50x budget",
 	max: "16 children, ~200x budget",
+	unlimited: "No ceiling, no child cap",
 };
 
 export interface SettingsConfig {

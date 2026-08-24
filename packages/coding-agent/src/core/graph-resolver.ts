@@ -9,11 +9,18 @@
  * freedom. `graphMaxTokens` is a clamp: it only ever lowers a level's ceiling.
  */
 
-export type GraphResolverLevel = "off" | "min" | "low" | "medium" | "high" | "max";
+export type GraphResolverLevel = "off" | "min" | "low" | "medium" | "high" | "max" | "unlimited";
 
 export const DEFAULT_GRAPH_RESOLVER_LEVEL: GraphResolverLevel = "off";
 
-export const GRAPH_RESOLVER_LEVELS: readonly GraphResolverLevel[] = ["off", "low", "medium", "high", "max"] as const;
+export const GRAPH_RESOLVER_LEVELS: readonly GraphResolverLevel[] = [
+	"off",
+	"low",
+	"medium",
+	"high",
+	"max",
+	"unlimited",
+] as const;
 
 /**
  * Reference cost of one solo run, in tokens. A fixed constant, not a measurement: the ceiling is a
@@ -26,7 +33,10 @@ interface GraphResolverBudget {
 	maxNodes: number;
 }
 
-const LEVEL_BUDGETS: Record<Exclude<GraphResolverLevel, "off">, { multiplier: number; maxNodes: number }> = {
+const LEVEL_BUDGETS: Record<
+	Exclude<GraphResolverLevel, "off" | "unlimited">,
+	{ multiplier: number; maxNodes: number }
+> = {
 	min: { multiplier: 3, maxNodes: 2 },
 	low: { multiplier: 6, maxNodes: 4 },
 	medium: { multiplier: 20, maxNodes: 6 },
@@ -39,6 +49,7 @@ export function graphResolverBudget(
 	maxTokensClamp?: number,
 ): GraphResolverBudget | undefined {
 	if (level === "off") return undefined;
+	if (level === "unlimited") return { ceilingTokens: Number.POSITIVE_INFINITY, maxNodes: Number.POSITIVE_INFINITY };
 	const { multiplier, maxNodes } = LEVEL_BUDGETS[level];
 	const ceiling = multiplier * GRAPH_BASELINE_TOKENS;
 	return {
@@ -61,6 +72,7 @@ export function isGraphResolverLevel(value: unknown): value is GraphResolverLeve
  */
 export function graphMinDepth(level: GraphResolverLevel): number {
 	if (level === "off") return 0;
+	if (level === "unlimited") return 2;
 	return LEVEL_BUDGETS[level].maxNodes >= 6 ? 2 : 1;
 }
 
