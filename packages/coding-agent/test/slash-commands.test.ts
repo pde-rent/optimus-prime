@@ -27,7 +27,7 @@ describe("built-in slash commands", () => {
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "rlm-max-depth")).toMatchObject({
 			description:
 				"Set/view the per-chat persistent RLM max depth immediately; never interrupts or queues the running turn",
-			argumentHint: "[<int> [--global]]",
+			argumentHint: "[<n>|unlimited] [--global]",
 			takesArgument: true,
 		});
 	});
@@ -54,8 +54,8 @@ describe("built-in slash commands", () => {
 
 	test("exposes /effort for selecting the thinking level", () => {
 		expect(BUILTIN_SLASH_COMMANDS.find((command) => command.name === "effort")).toMatchObject({
-			description: "Select reasoning/thinking level (opens selector UI)",
-			argumentHint: "[level]",
+			description: "Select how deeply thinking-capable models reason before replying (opens selector UI)",
+			argumentHint: "[off|minimal|low|medium|high|xhigh|max]",
 			aliases: ["thinking", "reasoning"],
 		});
 	});

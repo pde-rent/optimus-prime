@@ -152,13 +152,17 @@ interface BuiltinSlashCommandAlias {
 const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "settings", description: "Open settings menu" },
 	{ name: "model", description: "Select model (opens selector UI)", argumentHint: "[search]", takesArgument: true },
-	{ name: "effort", description: "Select reasoning/thinking level (opens selector UI)", argumentHint: "[level]" },
+	{
+		name: "effort",
+		description: "Select how deeply thinking-capable models reason before replying (opens selector UI)",
+		argumentHint: "[off|minimal|low|medium|high|xhigh|max]",
+	},
 	{
 		name: "graph",
-		description: "Multi-agent graph budget: off, low, medium, high, max",
-		argumentHint: "[level]",
+		description: "Set the extra token budget for resolving one task with several agents",
+		argumentHint: "[off|low|medium|high|max|unlimited]",
 	},
-	{ name: "fast", description: "Toggle OpenAI Fast mode" },
+	{ name: "fast", description: "Toggle OpenAI Fast mode (priority request processing on supported GPT models)" },
 	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
 	{
 		name: "export",
@@ -272,7 +276,7 @@ const CANONICAL_BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "rlm-max-depth",
 		description:
 			"Set/view the per-chat persistent RLM max depth immediately; never interrupts or queues the running turn",
-		argumentHint: "[<int> [--global]]",
+		argumentHint: "[<n>|unlimited] [--global]",
 		takesArgument: true,
 	},
 	{

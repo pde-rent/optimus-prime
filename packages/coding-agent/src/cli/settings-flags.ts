@@ -46,7 +46,7 @@ export interface SettingsFlagValues {
 type SettingsFlagSpec<K extends keyof SettingsFlagValues> = {
 	flag: string;
 	aliases?: readonly string[];
-	/** Help summary. Enum flags get their valid values appended. */
+	/** Help summary. Enum flags spell their values inline as `<what> (<values>)`. */
 	help: string;
 	field: K;
 } & (
@@ -86,7 +86,7 @@ export const SETTINGS_FLAGS = [
 		values: THINKING_LEVELS,
 		label: "thinking level",
 		aliasLabel: "effort level",
-		help: "Set reasoning",
+		help: "Reasoning effort for thinking-capable models (off|minimal|low|medium|high|xhigh|max)",
 	}),
 	spec({
 		kind: "enum",
@@ -95,7 +95,7 @@ export const SETTINGS_FLAGS = [
 		placeholder: "<level>",
 		values: GRAPH_RESOLVER_LEVELS,
 		label: "graph level",
-		help: "Multi-agent graph budget",
+		help: "Extra token budget for resolving one task with several agents (off|low|medium|high|max|unlimited)",
 	}),
 	spec({
 		kind: "number",
@@ -104,7 +104,7 @@ export const SETTINGS_FLAGS = [
 		placeholder: "<n>",
 		accepts: (value) => Number.isFinite(value) && value > 0,
 		expected: "a positive number",
-		help: "Lower the graph token ceiling for this run",
+		help: "Lower the multi-agent graph token ceiling for this run (<positive n>)",
 	}),
 	spec({
 		kind: "number",
@@ -114,7 +114,7 @@ export const SETTINGS_FLAGS = [
 		accepts: (value) => Number.isInteger(value) && value >= 0,
 		expected: 'a non-negative integer or "unlimited"',
 		words: ["unlimited"],
-		help: "Maximum sub-agent recursion depth",
+		help: "Maximum sub-agent recursion depth (<n>|unlimited)",
 	}),
 	spec({
 		kind: "bool",
@@ -141,7 +141,7 @@ export const SETTINGS_FLAGS = [
 		placeholder: "<mode>",
 		values: DYNAMIC_EFFORT_MODES,
 		label: "dynamic effort mode",
-		help: "Adaptive reasoning",
+		help: "Let the model adapt its own reasoning effort (off|banded|free)",
 	}),
 	spec({
 		kind: "enum",
@@ -150,9 +150,14 @@ export const SETTINGS_FLAGS = [
 		placeholder: "<tier>",
 		values: SERVICE_TIERS,
 		label: "service tier",
-		help: "Request routing",
+		help: "Provider request routing tier (auto|default|flex|scale|priority)",
 	}),
-	spec({ kind: "bool", flag: "--compact", field: "compaction", help: "Automatic context compaction" }),
+	spec({
+		kind: "bool",
+		flag: "--compact",
+		field: "compaction",
+		help: "Compact context automatically when it grows too large",
+	}),
 	spec({ kind: "bool", flag: "--retry", field: "retry", help: "Automatic retry on transient API failures" }),
 ] as const;
 
@@ -172,18 +177,14 @@ function negatedFlag(entry: AnySettingsFlagSpec): string {
 	return `--no-${entry.flag.slice(2)}`;
 }
 
-/** `["--thinking, --effort <level>", "Set reasoning: off, minimal, ..."]` rows for `--help`. */
+/** `["--thinking, --effort <level>", "Reasoning effort ... (off|minimal|...)]` rows for `--help`. */
 export const SETTINGS_FLAG_HELP_ROWS: ReadonlyArray<readonly [option: string, summary: string]> = SETTINGS_FLAGS.map(
 	(entry) => {
 		if (entry.kind === "bool") {
 			return [`${entry.flag}, ${negatedFlag(entry)}`, entry.help] as const;
 		}
 		const names = [entry.flag, ...(entry.aliases ?? [])].join(", ");
-		let summary = entry.kind === "enum" ? `${entry.help}: ${entry.values.join(", ")}` : entry.help;
-		if (entry.kind === "number" && entry.words !== undefined) {
-			summary = `${summary}: ${entry.words.join(", ")}`;
-		}
-		return [`${names} ${entry.placeholder}`, summary] as const;
+		return [`${names} ${entry.placeholder}`, entry.help] as const;
 	},
 );
 
