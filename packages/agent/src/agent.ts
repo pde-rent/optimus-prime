@@ -482,6 +482,7 @@ export class Agent {
 			degeneracyGuard: this.degeneracyGuard,
 
 			beforeToolCall: this.beforeToolCall,
+			afterToolCall: this.afterToolCall,
 			shouldStopAfterTurn: async (context) => this.shouldStopAfterTurn?.(context) ?? false,
 			shouldStopBeforeTurn: () => this.shouldStopBeforeTurn?.() ?? false,
 			convertToLlm: this.convertToLlm,
