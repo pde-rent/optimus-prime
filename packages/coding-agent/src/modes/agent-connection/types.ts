@@ -581,6 +581,8 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 	repliedSinceTask?: boolean;
 	toolUseCount?: number;
 	tokenCount?: number;
+	/** Child model context window, for clients rendering a context-pressure cell. */
+	contextWindow?: number;
 	/** Prompt-side tokens (input + cache read + cache write) from the child's last assistant turn. */
 	tokensIn?: number;
 	/** Completion tokens from the child's last assistant turn. */

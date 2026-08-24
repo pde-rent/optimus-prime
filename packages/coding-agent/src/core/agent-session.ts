@@ -330,6 +330,8 @@ interface RlmChildAgentSnapshot {
 	answerPreview?: string;
 	toolUseCount?: number;
 	tokenCount?: number;
+	/** Child model context window, for the graph panel's pressure cell. */
+	contextWindow?: number;
 	recap?: string;
 	sessionDir: string;
 	activity?: RlmChildAgentActivity;
@@ -10541,6 +10543,7 @@ export class AgentSession {
 					answerPreview,
 					toolUseCount: toolUseCount > 0 ? toolUseCount : undefined,
 					tokenCount: childSession?._contextTokensForCurrentMessages(),
+					contextWindow: childModel.contextWindow,
 					...(childSession?._contextTokenSplitForCurrentMessages() ?? {}),
 					recap: childSession?.getCurrentRecap(),
 					sessionDir: childSessionDir,

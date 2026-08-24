@@ -27,7 +27,7 @@ import {
 import { canonicalizePath } from "../../utils/paths.js";
 import { errorMessage } from "../../utils/shared.js";
 import { ensureTool } from "../../utils/tools-manager.js";
-import { agentStatusIndicator } from "../agent-connection/agent-status.js";
+import type { AgentDisplayStatus } from "../agent-connection/agent-status.js";
 import { DaemonAgentConnection } from "../agent-connection/daemon-agent-connection.js";
 import type { AgentConnectionHeartbeat, AgentConnectionSavedSessionInfo } from "../agent-connection/types.js";
 import { countRowsBySection, groupBySection, sectionTitle } from "../agents-tree/agent-tree-model.js";
@@ -50,11 +50,12 @@ import {
 import { CtrlCExitHintController, ExpiringFlag } from "../interactive/components/ctrl-c-hint.js";
 import { CustomEditor } from "../interactive/components/custom-editor.js";
 import { keyText, pressAgainToExitHint } from "../interactive/components/keybinding-hints.js";
-import { formatTwoSidedRow } from "../interactive/components/row-format.js";
 import {
 	formatSubagentName,
 	formatSubagentTask,
 	renderSubagentRow,
+	type SubagentRowModel,
+	subagentColumnWidths,
 	subagentStatusForSummary,
 } from "../interactive/components/subagent-row.js";
 import { BrandSplashHeader, InteractiveMode } from "../interactive/interactive-mode.js";
@@ -68,7 +69,7 @@ import {
 	stopThemeWatcher,
 	theme,
 } from "../interactive/theme/theme.js";
-import { WORKING_ICON_INTERVAL_MS, workingIconFrame } from "../interactive/theme/working-icon.js";
+import { WORKING_ICON_INTERVAL_MS } from "../interactive/theme/working-icon.js";
 import {
 	formatPackageUpdateNotice,
 	formatTmuxWarningNotice,
@@ -80,6 +81,7 @@ import {
 	type AgentsViewRow,
 	type AgentsViewScopeFrame,
 	type AgentsViewScopeKey,
+	type AgentsViewSection,
 	type AgentsViewSelectionKey,
 	buildAgentsViewRows,
 	buildUnifiedSessionIndex,
@@ -2455,6 +2457,13 @@ export class AgentsViewMode implements Component, Focusable {
 			visibleRows - (showLeadingEllipsis ? 1 : 0) - (showTrailingEllipsis ? 1 : 0),
 		);
 		const visibleItems = displayItems.slice(start, start + contentVisibleRows);
+		// Metric cells align as table columns, so widths are computed over every
+		// roster row in the window before any of them renders.
+		const columnWidths = subagentColumnWidths(
+			visibleItems.flatMap((item) =>
+				item.type === "row" && isRosterRow(item.row) ? [this.subagentRowModelForRow(item.row)] : [],
+			),
+		);
 		const lines = visibleItems.map((item) => {
 			if (item.type === "spacer") {
 				return "";
@@ -2465,7 +2474,7 @@ export class AgentsViewMode implements Component, Focusable {
 			if (item.type === "empty") {
 				return theme.fg("dim", "  No agents");
 			}
-			return this.renderRow(item.row, width);
+			return this.renderRow(item.row, width, columnWidths);
 		});
 		if (showLeadingEllipsis) {
 			lines.unshift(theme.fg("dim", "  ..."));
@@ -2476,7 +2485,7 @@ export class AgentsViewMode implements Component, Focusable {
 		return lines;
 	}
 
-	private renderRow(row: AgentsViewRow, width: number): string {
+	private renderRow(row: AgentsViewRow, width: number, columnWidths?: readonly number[]): string {
 		const selected = row.selectable && row.identity === this.rows[this.selectedIndex]?.identity;
 		if (row.kind === "subagent-code") {
 			return this.renderCodeRow(row);
@@ -2488,40 +2497,45 @@ export class AgentsViewMode implements Component, Focusable {
 			const line = padEndAnsi(truncateToWidth(`${indent}${label}`, width, ""), width);
 			return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
 		}
-		// Live subagent rows share the chat graph panel's one-line roster renderer, so
-		// both surfaces read identically: status icon + name + task + spend.
+		// Every roster category (running, done, failed, archive) renders through
+		// the chat graph panel's one-line roster renderer, so a category entry is
+		// indistinguishable from its chat tree preview: same glyph, name
+		// truncation, status vocabulary, and aligned right cells.
+		const line = renderSubagentRow(this.subagentRowModelForRow(row), width, columnWidths);
+		return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
+	}
+
+	/** Build the shared roster model for an agent or subagent category row. */
+	private subagentRowModelForRow(row: AgentsViewRow): SubagentRowModel {
+		const age = formatSessionDuration(row.summary);
 		if (row.kind === "subagent") {
 			const pendingKill = this.isPendingKillSubagentRow(row);
-			const age = formatSessionDuration(row.summary);
-			const line = renderSubagentRow(
-				{
-					prefix: `${"  ".repeat(row.depth)} `,
-					name: pendingKill
-						? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
-						: formatSubagentName(row.summary.sessionName),
-					task: formatSubagentTask(row.summary.summary ?? row.summary.firstMessage),
-					status: subagentStatusForSummary(row.summary),
-					...(age.length > 0 ? { note: age } : {}),
-				},
-				width,
-			);
-			return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
+			return {
+				prefix: `${"  ".repeat(row.depth)} `,
+				name: pendingKill
+					? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
+					: formatSubagentName(row.summary.sessionName),
+				task: formatSubagentTask(row.summary.summary ?? row.summary.firstMessage),
+				status: subagentStatusForSummary(row.summary),
+				spinnerFrame: this.workingIconFrame,
+				...(age.length > 0 ? { note: age } : {}),
+			};
 		}
-		const pendingDelete = row.kind === "agent" && this.isPendingDeleteRow(row);
-		const icon = this.agentRowIcon(row);
-		const indent = "  ".repeat(row.depth);
-		const age = formatSessionDuration(row.summary);
+		const pendingDelete = this.isPendingDeleteRow(row);
 		const details = row.record?.saved ? `${row.summary.messageCount} · ${age}` : age;
 		const heartbeatBadge = !pendingDelete ? formatHeartbeatBadge(row.heartbeat) : "";
-		const heartbeatCell = heartbeatBadge ? theme.fg("error", heartbeatBadge) : "";
-		const title = pendingDelete ? this.getPendingDeleteTitle() : styleRowTitle(row);
-		// Keep stable model information ahead of the variable summary so narrow rows truncate the summary first.
-		const summaryText = !pendingDelete ? row.summary.summary : undefined;
-		const suffixes = [summaryText].filter((suffix): suffix is string => suffix !== undefined && suffix.length > 0);
-		const titleContent = suffixes.length > 0 ? `${title} ${theme.fg("dim", `· ${suffixes.join(" · ")}`)}` : title;
-		const left = `${indent}${icon} ${heartbeatCell ? `${heartbeatCell} ` : ""}${titleContent}`;
-		const line = formatTwoSidedRow(left, details, width, { gap: 1, minRightWidth: 10, ellipsis: "" });
-		return selected ? `${SELECTED_ROW_MARKER}${line}` : line;
+		return {
+			prefix: `${"  ".repeat(row.depth)} `,
+			name: pendingDelete ? this.getPendingDeleteTitle() : styleRowTitle(row),
+			task: !pendingDelete ? formatSubagentTask(row.summary.summary) : "",
+			status: sectionDisplayStatus(row.section),
+			spinnerFrame: this.workingIconFrame,
+			...(details.length > 0 ? { note: details } : {}),
+			...(heartbeatBadge.length > 0 ? { badge: theme.fg("error", heartbeatBadge) } : {}),
+			...(row.section === "failed" && row.summary.lastError
+				? { reason: formatSubagentTask(row.summary.lastError, FAILURE_REASON_WIDTH) }
+				: {}),
+		};
 	}
 
 	private finalizeRenderedLine(line: string, width: number): string {
@@ -2663,19 +2677,6 @@ export class AgentsViewMode implements Component, Focusable {
 	private getSplashCwd(): string {
 		return this.rows[this.selectedIndex]?.summary.cwd ?? this.options.uiServices.getInitialCwd();
 	}
-
-	// Status glyphs come from the shared agent-status vocabulary so an agents-view
-	// row reads like a graph-panel row: spinner while Running, indicator otherwise.
-	private agentRowIcon(row: AgentsViewRow): string {
-		if (row.section === "running") {
-			return theme.bold(workingIconFrame(this.workingIconFrame));
-		}
-		if (row.section === "archive") {
-			return theme.fg("dim", agentStatusIndicator("completed").glyph);
-		}
-		const indicator = agentStatusIndicator(row.section === "failed" ? "error" : "completed");
-		return theme.fg(indicator.color, indicator.glyph);
-	}
 }
 
 type DisplayItem =
@@ -2703,6 +2704,21 @@ function buildDisplayItems(rows: readonly AgentsViewRow[]): DisplayItem[] {
 		}
 	}
 	return items;
+}
+
+/** Rows rendered through the shared roster renderer (subagent-row.ts). */
+function isRosterRow(row: AgentsViewRow): boolean {
+	return row.kind === "agent" || row.kind === "subagent";
+}
+
+/** Cap for the failed category's exit-reason cell. */
+const FAILURE_REASON_WIDTH = 48;
+
+/** Category sections share the roster status vocabulary: running, error, completed. */
+function sectionDisplayStatus(section: AgentsViewSection): AgentDisplayStatus {
+	if (section === "running") return "running";
+	if (section === "failed") return "error";
+	return "completed";
 }
 
 // Explicit session names read bold so they stand out from fallback titles

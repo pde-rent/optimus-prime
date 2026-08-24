@@ -15,8 +15,10 @@ import {
 	formatSubagentRuntime,
 	formatSubagentTask,
 	formatSubagentTokens,
-	renderSubagentRow,
+	renderSubagentRowsAligned,
+	type SubagentAlignedRowSpec,
 	type SubagentRowModel,
+	subagentRowSpec,
 } from "./subagent-row.js";
 
 /** Running children rendered as individual rows before the overflow row folds the rest. */
@@ -127,16 +129,16 @@ function sumDefined(values: ReadonlyArray<number | undefined>): number | undefin
 	return any ? total : undefined;
 }
 
-/** Shared right-cell vocabulary: runtime · tokens in/out, dimmed. */
-function detailCell(
-	durationMs: number | undefined,
-	tokensIn: number | undefined,
-	tokensOut: number | undefined,
-): string {
-	return [formatSubagentRuntime(durationMs), formatSubagentTokens(tokensIn, tokensOut, undefined)]
-		.filter((part): part is string => part !== undefined && part.length > 0)
-		.map((part) => theme.fg("dim", part))
-		.join(theme.fg("dim", " · "));
+/** Shared right-cell vocabulary for an aggregated row: runtime · tokens in/out. */
+function aggregateCells(rows: readonly SubagentGraphRow[]): ReadonlyArray<string | undefined> {
+	return [
+		formatSubagentRuntime(sumDefined(rows.map((row) => row.node.child.durationMs))),
+		formatSubagentTokens(
+			sumDefined(rows.map((row) => row.node.child.tokensIn)),
+			sumDefined(rows.map((row) => row.node.child.tokensOut)),
+			undefined,
+		),
+	];
 }
 
 /** Lean display name: de-slugged session name, or the label capped to name width. */
@@ -155,6 +157,7 @@ function subagentRowModel(row: SubagentGraphRow): SubagentRowModel {
 		tokensIn: child.tokensIn,
 		tokensOut: child.tokensOut,
 		tokenCount: child.tokenCount,
+		contextWindow: child.contextWindow,
 		durationMs: child.durationMs,
 		...(child.activeSessionId !== undefined ? { openTargetId: child.id } : {}),
 	};
@@ -164,8 +167,9 @@ function subagentRowModel(row: SubagentGraphRow): SubagentRowModel {
  * Eight-row contract under the root: up to six running agents nested at their
  * real tree depth (branch prefix glued to the spinner glyph, lean name only),
  * then an overflow row summing the folded running agents and a done-summary
- * row aggregating every finished child. Right-aligned cells carry tokens in,
- * tokens out, and runtime throughout.
+ * row aggregating every finished child. Right-aligned cells carry runtime,
+ * tokens in/out, and context pressure, padded to table columns shared by
+ * every row below the root.
  */
 export function formatSubagentGraph(
 	rows: readonly SubagentGraphRow[],
@@ -180,50 +184,37 @@ export function formatSubagentGraph(
 	const rootTokens = formatSubagentTokens(undefined, undefined, totals.tokens || undefined);
 	const rootLine = `${theme.fg("accent", "●")} ${theme.bold(rootLabel)}`;
 	const rootDetail = [summary, rootTokens].filter((part) => part !== undefined && part !== "").join(" · ");
-	const lines: string[] = [formatTwoSidedRow(rootLine, theme.fg("dim", rootDetail), width, { gap: GAP })];
 
+	const specs: SubagentAlignedRowSpec[] = [];
 	const { visible, hidden } = selectRunningRows(rows);
 	for (const row of layoutVisibleForest(visible)) {
-		lines.push(renderSubagentRow({ ...subagentRowModel(row), prefix: theme.fg("dim", row.prefix) }, width));
+		specs.push(subagentRowSpec({ ...subagentRowModel(row), prefix: theme.fg("dim", row.prefix) }));
 	}
 
 	if (hidden.length > 0) {
-		lines.push(
-			formatTwoSidedRow(
-				theme.fg("muted", `  … ${hidden.length} more running`),
-				detailCell(
-					sumDefined(hidden.map((row) => row.node.child.durationMs)),
-					sumDefined(hidden.map((row) => row.node.child.tokensIn)),
-					sumDefined(hidden.map((row) => row.node.child.tokensOut)),
-				),
-				width,
-				{ gap: GAP },
-			),
-		);
+		specs.push({
+			left: theme.fg("muted", `  … ${hidden.length} more running`),
+			cells: aggregateCells(hidden),
+		});
 	}
 
 	const finished = rows.filter(isFinishedRow);
 	if (finished.length > 0) {
 		const failed = finished.filter((row) => row.node.child.status === "error").length;
 		const noun = finished.length === 1 ? "agent" : "agents";
-		lines.push(
-			formatTwoSidedRow(
-				theme.fg(
-					"muted",
-					`  ${finished.length} ${noun} done (${finished.length - failed} succeeded, ${failed} failed)`,
-				),
-				detailCell(
-					sumDefined(finished.map((row) => row.node.child.durationMs)),
-					sumDefined(finished.map((row) => row.node.child.tokensIn)),
-					sumDefined(finished.map((row) => row.node.child.tokensOut)),
-				),
-				width,
-				{ gap: GAP },
+		specs.push({
+			left: theme.fg(
+				"muted",
+				`  ${finished.length} ${noun} done (${finished.length - failed} succeeded, ${failed} failed)`,
 			),
-		);
+			cells: aggregateCells(finished),
+		});
 	}
 
-	return lines.map((line) => padEndAnsi(line, width));
+	return [
+		formatTwoSidedRow(rootLine, theme.fg("dim", rootDetail), width, { gap: GAP }),
+		...renderSubagentRowsAligned(specs, width),
+	].map((line) => padEndAnsi(line, width));
 }
 
 /**
@@ -235,12 +226,35 @@ export class SubagentGraphPanel implements Component {
 	private rows: SubagentGraphRow[] = [];
 	private anyActive = false;
 	private override: boolean | undefined;
+	/** Last context window seen per child, so finished children keep theirs. */
+	private lastContextWindows = new Map<string, number>();
 
 	setChildren(children: Iterable<AgentConnectionRlmChildAgentSnapshot>, rootId: string | undefined): void {
-		this.rows = buildSubagentGraphRows(children, rootId);
+		const list = [...children];
+		for (const child of list) {
+			if (child.contextWindow !== undefined) this.lastContextWindows.set(child.id, child.contextWindow);
+		}
+		const liveIds = new Set(list.map((child) => child.id));
+		for (const id of [...this.lastContextWindows.keys()]) {
+			if (!liveIds.has(id)) this.lastContextWindows.delete(id);
+		}
+		this.rows = buildSubagentGraphRows(this.withRetainedContextWindows(list), rootId);
 		this.anyActive = this.rows.some((row) => isChildAgentActive(row.node.child));
 		// A cleared fan-out ends the override so the next one starts from auto.
 		if (this.rows.length === 0) this.override = undefined;
+	}
+
+	// Daemon-seeded and archived snapshots can omit the window; the last live
+	// emission keeps the context cell stable instead of flickering away.
+	private withRetainedContextWindows(
+		list: readonly AgentConnectionRlmChildAgentSnapshot[],
+	): AgentConnectionRlmChildAgentSnapshot[] {
+		return list.map((child) => {
+			const retained = this.lastContextWindows.get(child.id);
+			return child.contextWindow === undefined && retained !== undefined
+				? { ...child, contextWindow: retained }
+				: child;
+		});
 	}
 
 	getRows(): readonly SubagentGraphRow[] {

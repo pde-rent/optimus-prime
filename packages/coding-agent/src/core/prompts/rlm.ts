@@ -374,6 +374,7 @@ export function buildSubagentGuidance(
 		"Delegate a read when the source is large and you need a conclusion rather than the text: a long article, a full build log, a wide search sweep. Have the child report the conclusion with its sources. Read inline when you need the actual bytes, such as a file you are about to edit.",
 		"Have children write files and read those files for fan-in.",
 		"Recover direct child handles with `await rlm.list_subagents()` (returns `{ subagents: [...] }`) after a kernel restart or compaction.",
+		'Ending your turn means the task is finished or you need input from another agent. Never end with narration of future work ("Now wave 3...", "Next I\'ll check..."): either make the tool call or deliver the final summary.',
 	];
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");

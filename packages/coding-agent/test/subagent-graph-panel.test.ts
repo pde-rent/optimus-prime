@@ -165,13 +165,43 @@ describe("subagent graph rendering", () => {
 		// The running row carries only the de-slugged name, never task text.
 		expect(lines[1]).toContain("explore auth flows");
 		expect(lines[1]).not.toContain("Audit gateway");
-		expect(lines[1]?.trimEnd().endsWith("1m 02s · ↓ 12k ↑ 400")).toBe(true);
+		expect(lines[1]?.trimEnd().endsWith("1m 02s ·  ↓ 12k ↑ 400 · 12k")).toBe(true);
 		// Finished children collapse into one aggregated branch row.
 		expect(lines[2]).toContain("2 agents done (1 succeeded, 1 failed)");
 		expect(lines[2]?.trimEnd().endsWith("59s · ↓ 8.8k ↑ 300")).toBe(true);
 		// The generated session slug never reaches the user.
 		expect(lines.join("\n")).not.toContain("a1b2c3d4");
 		expect(lines.join("\n")).not.toContain("subagent-");
+	});
+
+	it("renders a context-pressure cell against the child model window", () => {
+		const rows = nodesFromChildSnapshots(
+			[
+				child("a", "running", {
+					parentId: "root",
+					label: "alpha",
+					tokenCount: 5000,
+					tokensIn: 4800,
+					contextWindow: 100_000,
+				}),
+				child("b", "running", { parentId: "root", label: "beta", tokenCount: 9100, contextWindow: 200_000 }),
+			],
+			"root",
+		);
+		const lines = formatSubagentGraph(rows, 140).map(stripAnsi);
+		expect(lines[1]?.trimEnd().endsWith("↓ 4.8k · 5.0k/100k 5%")).toBe(true);
+		expect(lines[2]).toContain("9.1k/200k 5%");
+	});
+
+	it("keeps the last snapshotted context window when a later snapshot omits it", () => {
+		const panel = new SubagentGraphPanel();
+		panel.setChildren(
+			[child("a", "running", { parentId: "root", label: "alpha", tokenCount: 5000, contextWindow: 100_000 })],
+			"root",
+		);
+		expect(panel.render(140).map(stripAnsi).join("\n")).toContain("5.0k/100k 5%");
+		panel.setChildren([child("a", "running", { parentId: "root", label: "alpha", tokenCount: 6000 })], "root");
+		expect(panel.render(140).map(stripAnsi).join("\n")).toContain("6.0k/100k 6%");
 	});
 
 	it("never shows recaps, prompts, or error text on a row", () => {
