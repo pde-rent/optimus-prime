@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added an optional `toolAliases` hook that resolves unrecognized tool-call names to registered tools before rejecting the call, with rewritten arguments and a note appended to the tool result.
+
 ## [0.7.3] - 2026-08-17
 
 - Changed explicit `off` reasoning selections to reach providers instead of being omitted, preserving provider-specific disable behavior.

@@ -4,6 +4,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { APP_NAME } from "../config.js";
+import { BUILTIN_TOOL_NAMES } from "../core/tools/index.js";
 import { applySettingsFlag, type SettingsFlagValues, THINKING_LEVELS } from "./settings-flags.js";
 
 export type Mode = "text" | "json" | "rpc" | "daemon";
@@ -59,8 +60,7 @@ export interface Args extends SettingsFlagValues {
 	diagnostics: Array<{ type: "warning" | "error"; message: string }>;
 }
 
-const REMOVED_BUILTIN_TOOL_NAMES = new Set(["read", "write", "ls"]);
-const BUILTIN_TOOL_NAMES = ["repl"];
+const REMOVED_BUILTIN_TOOL_NAMES = new Set<string>();
 
 export const INTERNAL_RUNTIME_COMMAND_MARKER = "\0optimus-runtime-command";
 

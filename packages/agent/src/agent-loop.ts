@@ -28,6 +28,7 @@ import type {
 	AgentToolCall,
 	AgentToolResult,
 	StreamFn,
+	ToolAliasResolution,
 } from "./types.js";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -854,6 +855,8 @@ type PreparedToolCall = {
 	toolCall: AgentToolCall;
 	tool: AgentTool;
 	args: unknown;
+	/** Set when the call reached this tool through an alias; appended to the executed result. */
+	aliasNote?: string;
 };
 
 type ImmediateToolCallOutcome = {
@@ -893,6 +896,30 @@ function prepareToolCallArguments(tool: AgentTool, toolCall: AgentToolCall): Age
 	};
 }
 
+/**
+ * When the model names no registered tool, consult the app's alias table before
+ * rejecting the call. Canonical names always win: aliases are only tried on a miss.
+ */
+function resolveAliasedTool(
+	currentContext: AgentContext,
+	toolCall: AgentToolCall,
+	config: AgentLoopConfig,
+): { tool: AgentTool; toolCall: AgentToolCall; note?: string } | undefined {
+	const resolution: ToolAliasResolution | undefined = config.toolAliases?.resolve(toolCall.name);
+	if (!resolution) {
+		return undefined;
+	}
+	const aliasedTool = currentContext.tools?.find((t) => t.name === resolution.name);
+	if (!aliasedTool) {
+		return undefined;
+	}
+	return {
+		tool: aliasedTool,
+		toolCall: { ...toolCall, name: resolution.name, arguments: resolution.args },
+		note: resolution.note,
+	};
+}
+
 async function prepareToolCall(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
@@ -900,7 +927,17 @@ async function prepareToolCall(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	let tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	let effectiveCall = toolCall;
+	let aliasNote: string | undefined;
+	if (!tool) {
+		const aliased = resolveAliasedTool(currentContext, toolCall, config);
+		if (aliased) {
+			tool = aliased.tool;
+			effectiveCall = aliased.toolCall;
+			aliasNote = aliased.note;
+		}
+	}
 	if (!tool) {
 		// Naming what does exist turns a dead end into a correction: a model that guessed
 		// `bash` otherwise guesses again instead of reaching for the tool that runs shell cells.
@@ -914,14 +951,14 @@ async function prepareToolCall(
 	}
 
 	try {
-		const preparedToolCall = prepareToolCallArguments(tool, toolCall);
+		const preparedToolCall = prepareToolCallArguments(tool, effectiveCall);
 		const validatedArgs = validateToolArguments(tool, preparedToolCall);
 		if (config.beforeToolCall) {
 			const beforeResult = await maybePromiseWithAbort(
 				config.beforeToolCall(
 					{
 						assistantMessage,
-						toolCall,
+						toolCall: effectiveCall,
 						args: validatedArgs,
 						context: currentContext,
 					},
@@ -939,9 +976,10 @@ async function prepareToolCall(
 		}
 		return {
 			kind: "prepared",
-			toolCall,
+			toolCall: effectiveCall,
 			tool,
 			args: validatedArgs,
+			aliasNote,
 		};
 	} catch (error) {
 		return {
@@ -1018,6 +1056,13 @@ async function finalizeExecutedToolCall(
 ): Promise<FinalizedToolCallOutcome> {
 	let result = executed.result;
 	let isError = executed.isError;
+
+	if (prepared.aliasNote) {
+		result = {
+			...result,
+			content: [...result.content, { type: "text", text: prepared.aliasNote }],
+		};
+	}
 
 	if (config.afterToolCall) {
 		try {

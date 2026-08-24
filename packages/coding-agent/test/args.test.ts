@@ -499,13 +499,10 @@ describe("parseArgs", () => {
 			expect(result.tools).toEqual(["repl", "dynamic_tool"]);
 		});
 
-		test("rejects removed built-in tools", () => {
+		test("accepts former built-in names that now resolve as aliases", () => {
 			const result = parseArgs(["--tools", "read,bash,edit"]);
 			expect(result.tools).toEqual(["read", "bash", "edit"]);
-			expect(result.diagnostics).toContainEqual({
-				type: "error",
-				message: "Unknown built-in tool(s): read. Available built-in tools: repl",
-			});
+			expect(result.diagnostics).toEqual([]);
 		});
 
 		test("accepts native grep and find in --tools", () => {

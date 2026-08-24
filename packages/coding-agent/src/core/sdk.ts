@@ -19,7 +19,9 @@ import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { time } from "./timings.js";
+import { createToolAliasResolver } from "./tool-aliases.js";
 import {
+	BUILTIN_TOOL_NAMES,
 	createBashTool,
 	createEditTool,
 	createReadFileTool,
@@ -55,14 +57,14 @@ export interface CreateAgentSessionOptions extends AgentSessionCreationOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tool (repl)
+	 * - "builtin": disable the built-in tools
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, pi enables the default built-in tool (repl)
+	 * When omitted, pi enables every built-in tool
 	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
@@ -257,7 +259,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const allowedToolNames = options.allowedToolNames ?? options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const includeGoals = options.includeGoals ?? (options.tools !== undefined || options.noTools !== "all");
 	const initialActiveToolNames: string[] =
-		options.initialActiveToolNames ?? (options.tools ? [...options.tools] : options.noTools ? [] : ["repl"]);
+		options.initialActiveToolNames ??
+		(options.tools ? [...options.tools] : options.noTools ? [] : [...BUILTIN_TOOL_NAMES]);
 
 	let agent: Agent;
 
@@ -344,6 +347,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!runner) return messages;
 			return runner.emitContext(messages);
 		},
+		toolAliases: createToolAliasResolver(),
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
 		transport: settingsManager.getTransport(),

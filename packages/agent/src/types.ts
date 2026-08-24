@@ -64,6 +64,27 @@ export interface BeforeToolCallResult {
  * Omitted fields keep the original executed tool result values.
  * There is no deep merge for `content` or `details`.
  */
+/** Result of mapping an unrecognized tool-call name onto a registered tool. */
+export interface ToolAliasResolution {
+	/** Canonical name of a registered tool to execute instead of the requested one. */
+	name: string;
+	/** Arguments rewritten into the canonical tool's parameter names. */
+	args: Record<string, unknown>;
+	/** Alias parameter keys with no canonical mapping; reported in the tool result instead of failing the call. */
+	ignoredArgs: string[];
+	/** Explanation appended to the executed tool result so the model sees the rewrite and any dropped arguments. */
+	note?: string;
+}
+
+/**
+ * Hook consulted when a tool call names no registered tool, before the call is rejected.
+ * Lets an app accept intuitive aliases (for example `read` for `read_file`) without
+ * advertising duplicate tools to the model.
+ */
+export interface ToolAliasResolver {
+	resolve(toolCallName: string): ToolAliasResolution | undefined;
+}
+
 export interface AfterToolCallResult {
 	content?: (TextContent | ImageContent)[];
 	details?: unknown;
@@ -259,6 +280,12 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * `tool_execution_end` in completion order, then emits tool-result messages in assistant source order.
 	 */
 	toolExecution?: ToolExecutionMode;
+
+	/**
+	 * Consulted when a tool call references no registered tool, before rejecting it.
+	 * The resolution renames the call to the canonical tool and rewrites its arguments.
+	 */
+	toolAliases?: ToolAliasResolver;
 
 	/**
 	 * Abort a turn whose streamed text or reasoning collapses into a repetition loop, instead of

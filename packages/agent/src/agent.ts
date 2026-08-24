@@ -25,6 +25,7 @@ import type {
 	GetContinuationMessagesContext,
 	ShouldStopAfterTurnContext,
 	StreamFn,
+	ToolAliasResolver,
 	ToolExecutionMode,
 } from "./types.js";
 
@@ -117,6 +118,8 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 	degeneracyGuard?: boolean;
 	reasoningLoopGuard?: boolean;
+	/** Consulted when a tool call names no registered tool; see {@link AgentLoopConfig.toolAliases}. */
+	toolAliases?: ToolAliasResolver;
 }
 
 class PendingMessageQueue {
@@ -223,6 +226,7 @@ export class Agent {
 	public toolExecution: ToolExecutionMode;
 	public degeneracyGuard: boolean;
 	public reasoningLoopGuard: boolean;
+	public toolAliases?: ToolAliasResolver;
 
 	constructor(options: AgentOptions = {}) {
 		this._state = createMutableAgentState(options.initialState);
@@ -246,6 +250,7 @@ export class Agent {
 		this.toolExecution = options.toolExecution ?? "parallel";
 		this.degeneracyGuard = options.degeneracyGuard ?? true;
 		this.reasoningLoopGuard = options.reasoningLoopGuard ?? true;
+		this.toolAliases = options.toolAliases;
 	}
 
 	/**
@@ -480,6 +485,7 @@ export class Agent {
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			toolExecution: this.toolExecution,
 			degeneracyGuard: this.degeneracyGuard,
+			toolAliases: this.toolAliases,
 
 			beforeToolCall: this.beforeToolCall,
 			afterToolCall: this.afterToolCall,

@@ -196,6 +196,33 @@ type ToolName =
 	| "repl"
 	| "git"
 	| "bash";
+/**
+ * Canonical names of every built-in tool, in priority order. Keep in sync with
+ * {@link ToolName} and {@link createAllToolDefinitions}; a test pins them together.
+ */
+export const BUILTIN_TOOL_NAMES: readonly ToolName[] = [
+	"read_file",
+	"write_file",
+	"edit",
+	"todo",
+	"grep",
+	"find",
+	"git",
+	"sed",
+	"wc",
+	"head",
+	"tail",
+	"ln",
+	"processes",
+	"sysinfo",
+	"netdiag",
+	"mail",
+	"ssh",
+	"skill",
+	"repl",
+	"bash",
+];
+
 export interface ToolsOptions {
 	repl?: BunReplToolOptions;
 	/** Skill provider; defaults to an empty roster (every lookup reports no skills). */
