@@ -309,11 +309,11 @@ function resolveToolCall(json: RecordOf): CursorEnvelopeToolCall | undefined {
 // ---------------------------------------------------------------------------
 // Streaming
 
-function safeParseArguments(argumentsJson: string): Record<string, any> {
+function safeParseArguments(argumentsJson: string): Record<string, unknown> {
 	try {
 		const parsed: unknown = JSON.parse(argumentsJson);
 		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-			return parsed as Record<string, any>;
+			return parsed as Record<string, unknown>;
 		}
 		return {};
 	} catch {

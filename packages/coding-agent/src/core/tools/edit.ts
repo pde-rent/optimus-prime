@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Box, type Component, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
@@ -481,6 +480,6 @@ export function createEditToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "edit" as const });
 }
 
-export function createEditTool(cwd: string, options?: EditToolOptions): AgentTool<typeof editSchema> {
+export function createEditTool(cwd: string, options?: EditToolOptions) {
 	return wrapToolDefinition(createEditToolDefinition(cwd, options));
 }

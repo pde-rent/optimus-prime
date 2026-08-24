@@ -193,7 +193,7 @@ export class McpManager {
 			const client = await this.#clientFor(String(payload.server ?? ""));
 			const args = (payload.arguments ?? {}) as Record<string, unknown>;
 			const schema = payload.input_schema as Record<string, unknown> | undefined;
-			return (await client.callTool(name, args, schema)) as unknown as Record<string, unknown>;
+			return { ...(await client.callTool(name, args, schema)) };
 		};
 		// Only expose begin_login when an interactive login is actually wired, so the
 		// kernel doesn't get a handler whose only behavior is to throw.

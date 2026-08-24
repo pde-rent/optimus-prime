@@ -7,11 +7,16 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentSessionMessageController } from "../../src/core/agent-messages.js";
+import type { AgentObserveController } from "../../src/core/agent-observe.js";
+import type { AgentSession } from "../../src/core/agent-session.js";
 import type { CreateAgentSessionRuntimeFactory } from "../../src/core/agent-session-runtime.js";
-import type { AgentCronJob } from "../../src/core/cron-jobs.js";
-import { SessionManager } from "../../src/core/session-manager.js";
+import type { AgentCronJob, AgentCronJobStore } from "../../src/core/cron-jobs.js";
+import type { CreateRlmSubagentRuntimeOptions, SubagentRuntimeHost } from "../../src/core/rlm-runtime.js";
+import { type SessionInfo, SessionManager } from "../../src/core/session-manager.js";
 import type { ActiveSessionState, DaemonSocketClient } from "../../src/modes/daemon/active-session-state.js";
 import { AgentDaemon } from "../../src/modes/daemon/daemon-mode.js";
+import type { SessionSummary } from "../../src/modes/daemon/daemon-session-list.js";
 
 export { waitFor } from "../suite/helpers.js";
 
@@ -53,24 +58,112 @@ export function tempDir(label: string): string {
 }
 
 /**
- * Typed window into AgentDaemon private internals. The index signature keeps every
- * ad-hoc internal access a plain property read instead of a per-test cast block.
+ * Typed window into AgentDaemon private internals. Members whose results tests consume,
+ * that tests call with arguments, or that receive typed mocks carry real signatures; the
+ * Function-keyed index half keeps every remaining ad-hoc internal access a plain property
+ * read instead of a per-test cast block. (`(...args: never[]) => unknown` is the top type
+ * for functions: every concrete function is assignable to it, including Bun's `vi.fn()`
+ * mocks, which keeps mock swaps one-liners.)
  */
-export interface DaemonInternals {
+export type DaemonInternals = {
+	[key: string]: (...args: never[]) => unknown;
+} & {
 	sessions: Map<string, ActiveSessionState>;
 	clients: Set<DaemonSocketClient>;
 	closingSessions: Map<string, { promise: Promise<void>; reason: string }>;
 	openingSessions: Map<string, Promise<unknown>>;
 	reservingSessionOpens: Map<string, Promise<unknown>>;
 	bindingSessions: Map<string, Promise<unknown>>;
-	promptAdmissions: Map<string, any>;
+	passivatingSessions: Map<string, Promise<void>>;
+	promptAdmissions: Map<
+		string,
+		{
+			activeSessionId: string;
+			admissionId: string;
+			controller?: AbortController;
+			status: "waiting" | "owned" | "cancelled";
+		}
+	>;
+	supervisorClaims: Map<DaemonSocketClient, { claim: Record<string, unknown>; ownerFingerprint: string }>;
+	updateRestart?: { phase?: string };
 	agentMessageAcceptingTargets: Set<string>;
 	agentMessagePreparingTargets: Set<string>;
 	agentMessageTargetLocks: Map<string, Promise<void>>;
+	agentMessageRateLimiter: { clear(): void };
 	remoteAgentPeers: Map<string, unknown>;
 	rlmSpawnLedgerInstance?: unknown;
+	cronStore: AgentCronJobStore;
 	cronScheduler: { runDue(now: Date): Promise<number> };
-	[key: string]: any;
+
+	createRuntime(command: object): Promise<ActiveSessionState>;
+	createRlmSubagentRuntime(
+		parentState: ActiveSessionState,
+		options: CreateRlmSubagentRuntimeOptions,
+	): Promise<{ session: AgentSession }>;
+	createSubagentRuntimeHost(parentState: ActiveSessionState): SubagentRuntimeHost;
+	createAgentMessageController(getState: () => ActiveSessionState): AgentSessionMessageController;
+	createAgentObserveController(getState: () => ActiveSessionState): AgentObserveController;
+	listPassiveRlmSubagents(): Promise<PassiveRlmSubagentFixture[]>;
+	findPassiveRlmSubagent(target: string): Promise<PassiveRlmSubagentFixture | undefined>;
+	hydratePassiveRlmSubagent(
+		passive: PassiveRlmSubagentFixture,
+		clientEnv?: Record<string, string>,
+	): Promise<ActiveSessionState>;
+	getOrCreateCronJobSession(heartbeat: AgentCronJob, allowCreate: boolean): Promise<ActiveSessionState>;
+	restoreRlmHeartbeatSession(heartbeat: AgentCronJob): Promise<ActiveSessionState>;
+	getOrHydrateBoundSessionState(selector: string): Promise<ActiveSessionState>;
+	getBoundSessionState(selector: string): ActiveSessionState;
+	waitForBoundSession(state: ActiveSessionState): Promise<ActiveSessionState>;
+	setStateSessionName(state: ActiveSessionState, name: string): Promise<void>;
+	assertStateSessionNameAvailable(state: ActiveSessionState, name: string): Promise<void>;
+	createAgentFamilyRoster(state: ActiveSessionState): unknown;
+	closeSession(state: ActiveSessionState, reason: string, ...rest: unknown[]): Promise<unknown>;
+	sendAgentSessionMessage(options: object): Promise<unknown>;
+	sendRemoteAgentSessionMessage(source: ActiveSessionState, targetSelector: string, message: string): Promise<unknown>;
+	createAgentMessageListResult(state: ActiveSessionState): Promise<{
+		agents: Array<{ activeSessionId: string; unfinishedActionCount?: number }>;
+	}>;
+	createAgentObserveListResult(state: ActiveSessionState): Promise<{ current: { status: string } }>;
+	createAgentMessageAgentSummary(state: ActiveSessionState): { status: string };
+	buildSessionListWithPassiveRlmSubagents(
+		states: readonly object[],
+		savedSessions: readonly SessionInfo[],
+		scheduledJobs: readonly object[],
+	): Promise<SessionSummary[]>;
+	buildRlmChildSnapshotsWithPassiveRlmSubagents(parentState: ActiveSessionState): Promise<unknown[]>;
+	handleCommand(client: DaemonSocketClient, command: object): Promise<unknown>;
+	handleLine(client: DaemonSocketClient, line: string): unknown;
+	handleConnection(socket: Socket): void;
+	queueClientCatchup(client: DaemonSocketClient, activeSessionId: string, reason?: string): void;
+	catchUpBackpressuredClient(client: DaemonSocketClient): Promise<unknown>;
+	drainBackpressuredClientCatchups(client: DaemonSocketClient): Promise<unknown>;
+	broadcastToSession(state: ActiveSessionState, event: object): void;
+	parseCommandAndRegisterPromptAdmission(client: DaemonSocketClient, line: string): void;
+	abortWaitingPromptAdmissionsForSession(activeSessionId: string): void;
+	promptWithAgentMessagePreparingGuard(state: ActiveSessionState, message: string): Promise<unknown>;
+	runCronJob(heartbeat: AgentCronJob): Promise<unknown>;
+	passivateIdleChildren(idleEvictionMinutes: number, now: number, limit: number): Promise<number>;
+	updateRlmHeartbeatForState(state: ActiveSessionState, update: object): unknown;
+	assertAgentFamilyReachable(from: ActiveSessionState, to: ActiveSessionState): void;
+	isAgentFamilyReachable(from: ActiveSessionState, to: ActiveSessionState): unknown;
+	agentFamilyEntry(state: ActiveSessionState): unknown;
+	agentMessageRelationship(from: ActiveSessionState, to: ActiveSessionState): unknown;
+};
+
+/** Structural shape of a passive RLM child as the daemon hands it to hydration paths. */
+export interface PassiveRlmSubagentFixture {
+	rootParentState?: ActiveSessionState;
+	rootInfo?: SessionInfo;
+	entry: {
+		childId: string;
+		sessionFile: string;
+		sessionName?: string;
+		prompt?: string;
+		rlmMaxDepth?: number;
+		status?: string;
+	};
+	info: { id: string; name?: string };
+	chain: Array<{ childId: string; sessionFile: string }>;
 }
 
 export function daemonInternals(daemon: AgentDaemon): DaemonInternals {

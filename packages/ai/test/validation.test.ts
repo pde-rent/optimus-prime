@@ -46,12 +46,12 @@ describe("validateToolArguments", () => {
 			type: "toolCall",
 			id: "tool-1",
 			name: "echo",
-			arguments: { count: "42" as unknown as number },
+			arguments: { count: "42" },
 		};
 
-		globalThis.Function = (() => {
+		(globalThis as { Function: unknown }).Function = () => {
 			throw new EvalError("Code generation from strings disallowed for this context");
-		}) as unknown as FunctionConstructor;
+		};
 
 		try {
 			expect(validateToolArguments(tool, toolCall)).toEqual({ count: 42 });

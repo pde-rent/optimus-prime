@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, statfsSync } from "node:fs";
 import os from "node:os";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
@@ -396,6 +395,6 @@ export function createSysinfoToolDefinition(cwd: string): ToolDefinition<typeof 
 	return definition;
 }
 
-export function createSysinfoTool(cwd: string): AgentTool<typeof sysinfoSchema> {
+export function createSysinfoTool(cwd: string) {
 	return wrapToolDefinition(createSysinfoToolDefinition(cwd));
 }

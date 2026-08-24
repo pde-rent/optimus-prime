@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
@@ -185,9 +184,6 @@ export function createGrepToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "grep" as const });
 }
 
-export function createGrepTool(
-	cwd: string,
-	options?: { maxLines?: number; maxBytes?: number },
-): AgentTool<typeof grepSchema> {
+export function createGrepTool(cwd: string, options?: { maxLines?: number; maxBytes?: number }) {
 	return wrapToolDefinition(createGrepToolDefinition(cwd, options));
 }

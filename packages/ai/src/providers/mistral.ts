@@ -264,13 +264,13 @@ function encodeContentChunk(chunk: ContentChunk): unknown {
  * {@link consumeChatStream} reads.
  */
 async function* iterateCompletionEvents(response: Response, signal?: AbortSignal): AsyncGenerator<CompletionEvent> {
-	for await (const chunk of iterateSseJson<Record<string, any>>(response, { signal })) {
+	for await (const chunk of iterateSseJson<Record<string, unknown>>(response, { signal })) {
 		yield { data: decodeCompletionChunk(chunk) } as CompletionEvent;
 	}
 }
 
-function decodeCompletionChunk(chunk: Record<string, any>): CompletionEvent["data"] {
-	const usage = chunk.usage as Record<string, any> | undefined;
+function decodeCompletionChunk(chunk: Record<string, unknown>): CompletionEvent["data"] {
+	const usage = chunk.usage as Record<string, unknown> | undefined;
 	return {
 		...chunk,
 		...(usage && {
@@ -281,16 +281,16 @@ function decodeCompletionChunk(chunk: Record<string, any>): CompletionEvent["dat
 				totalTokens: usage.total_tokens ?? 0,
 			},
 		}),
-		choices: ((chunk.choices as Record<string, any>[] | undefined) ?? []).map((choice) => ({
+		choices: ((chunk.choices as Array<Record<string, unknown>> | undefined) ?? []).map((choice) => ({
 			...choice,
 			finishReason: choice.finish_reason ?? null,
-			delta: decodeDelta((choice.delta as Record<string, any> | undefined) ?? {}),
+			delta: decodeDelta((choice.delta as Record<string, unknown> | undefined) ?? {}),
 		})),
 	} as CompletionEvent["data"];
 }
 
-function decodeDelta(delta: Record<string, any>): CompletionEvent["data"]["choices"][number]["delta"] {
-	const toolCalls = delta.tool_calls as Record<string, any>[] | undefined;
+function decodeDelta(delta: Record<string, unknown>): CompletionEvent["data"]["choices"][number]["delta"] {
+	const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
 	return {
 		...delta,
 		...(toolCalls && { toolCalls }),
@@ -671,7 +671,7 @@ function mapToolChoice(
 ): "auto" | "none" | "any" | "required" | { type: "function"; function: { name: string } } | undefined {
 	if (!choice) return undefined;
 	if (choice === "auto" || choice === "none" || choice === "any" || choice === "required") {
-		return choice as any;
+		return choice;
 	}
 	return {
 		type: "function",

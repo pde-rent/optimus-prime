@@ -5,6 +5,7 @@ import {
 	EventStream,
 	type Message,
 	type Model,
+	type ToolResultMessage,
 	type UserMessage,
 } from "@earendil-works/pi-ai";
 import { agentLoop } from "../src/agent-loop.js";
@@ -107,6 +108,17 @@ function emptyProgress() {
 	return { toolCalls: 0, replExecutions: 0, filesChanged: 0, commandsExecuted: 0, newObservationBytes: 0 };
 }
 
+function decisionText(message: AgentMessage): string {
+	if (message.role !== "user") {
+		throw new Error(`expected user message, got role ${message.role}`);
+	}
+	const block = typeof message.content === "string" ? undefined : message.content[0];
+	if (!block || block.type !== "text") {
+		throw new Error("expected leading text block");
+	}
+	return block.text;
+}
+
 describe("ReasoningLoopGuard", () => {
 	it("fires on a pathological CoT fixture (~3k tokens of near-duplicate planning)", () => {
 		const guard = new ReasoningLoopGuard();
@@ -149,11 +161,11 @@ describe("ReasoningLoopGuard", () => {
 		expect(decisions[0].kind).toBe("steer");
 		expect(decisions[1].kind).toBe("abort_and_continue");
 		expect(decisions[2]).toEqual({ kind: "stop", reason: "reasoning_loop" });
-		const firstText = ((decisions[0] as unknown as { message: UserMessage }).message.content[0] as { text: string })
-			.text;
-		const _secondText = (decisions[1] as unknown as { message: UserMessage }).message.content[0] as { text: string };
-		const secondText = ((decisions[1] as unknown as { message: UserMessage }).message.content[0] as { text: string })
-			.text;
+		if (decisions[0].kind !== "steer" || decisions[1].kind !== "abort_and_continue") {
+			throw new Error("unexpected decision kinds");
+		}
+		const firstText = decisionText(decisions[0].message);
+		const secondText = decisionText(decisions[1].message);
 		expect(firstText).toBe(REASONING_LOOP_STEERING_MESSAGE);
 		expect(secondText).toBe(REASONING_LOOP_CONTINUATION_MESSAGE);
 	});
@@ -166,13 +178,16 @@ describe("extractTurnProgress", () => {
 			{ type: "toolCall", id: "t1", name: "repl", arguments: {} },
 			{ type: "text", text: "done" },
 		] as AssistantMessage["content"];
-		const results = [
+		const results: ToolResultMessage[] = [
 			{
 				role: "toolResult",
+				toolCallId: "t1",
+				toolName: "repl",
 				content: [{ type: "text", text: "some observation output" }],
+				isError: false,
 				timestamp: Date.now(),
 			},
-		] as any[];
+		];
 		const progress = extractTurnProgress(message, results);
 		expect(progress.toolCalls).toBe(1);
 		expect(progress.replExecutions).toBe(1);

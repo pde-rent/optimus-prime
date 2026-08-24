@@ -1,4 +1,5 @@
 import type {
+	Api,
 	AssistantMessage,
 	AssistantMessageEvent,
 	ImageContent,
@@ -95,7 +96,7 @@ export interface AfterToolCallContext {
 	/** Validated arguments for the target tool schema. */
 	args: unknown;
 	/** Executed result before any `afterToolCall` overrides. */
-	result: AgentToolResult<any>;
+	result: AgentToolResult<unknown>;
 	/** Whether the executed result is currently treated as an error. */
 	isError: boolean;
 	/** Agent context when this call is finalized. */
@@ -117,7 +118,7 @@ export interface ShouldStopAfterTurnContext {
 export type GetContinuationMessagesContext = ShouldStopAfterTurnContext;
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
-	model: Model<any>;
+	model: Model<Api>;
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
@@ -330,14 +331,14 @@ export interface AgentState {
 	/** System prompt sent with each model request. */
 	systemPrompt: string;
 	/** Model used for future turns. */
-	model: Model<any>;
+	model: Model<Api>;
 	/** Requested reasoning level for future turns. */
 	thinkingLevel: ThinkingLevel;
 	/** Requested provider service tier for future turns. */
 	serviceTier: ServiceTier;
 	/** Available tools. Assigning a new array copies its top-level array. */
-	set tools(tools: AgentTool<any>[]);
-	get tools(): AgentTool<any>[];
+	set tools(tools: AgentTool[]);
+	get tools(): AgentTool[];
 	/** Conversation transcript. Assigning a new array copies its top-level array. */
 	set messages(messages: AgentMessage[]);
 	get messages(): AgentMessage[];
@@ -365,24 +366,24 @@ export interface AgentToolResult<T> {
 }
 
 /** Callback used by tools to publish partial execution updates. */
-export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
+export type AgentToolUpdateCallback<T = unknown> = (partialResult: AgentToolResult<T>) => void;
 
 /** Tool definition used by the agent runtime. */
-export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
+export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = unknown> extends Tool<TParameters> {
 	/** Human-readable label for UI display. */
 	label: string;
 	/**
 	 * Optional compatibility shim for raw tool-call arguments before schema validation.
 	 * Must return an object that matches `TParameters`.
 	 */
-	prepareArguments?: (args: unknown) => Static<TParameters>;
+	prepareArguments?(args: unknown): Static<TParameters>;
 	/** Execute the tool call. Throw on failure instead of encoding errors in `content`. */
-	execute: (
+	execute(
 		toolCallId: string,
 		params: Static<TParameters>,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TDetails>,
-	) => Promise<AgentToolResult<TDetails>>;
+	): Promise<AgentToolResult<TDetails>>;
 	/**
 	 * Per-tool execution mode override.
 	 * - "sequential": this tool must execute one at a time with other tool calls.
@@ -404,7 +405,7 @@ export interface AgentContext {
 	/** Transcript visible to the model. */
 	messages: AgentMessage[];
 	/** Tools available for this run. */
-	tools?: AgentTool<any>[];
+	tools?: AgentTool[];
 }
 
 /**
@@ -427,6 +428,18 @@ export type AgentEvent =
 	| { type: "message_update"; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
 	| { type: "message_end"; message: AgentMessage }
 	/** Tool execution events; parallel calls may end in completion rather than source order. */
-	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
-	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any }
-	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };
+	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: AgentToolCall["arguments"] }
+	| {
+			type: "tool_execution_update";
+			toolCallId: string;
+			toolName: string;
+			args: AgentToolCall["arguments"];
+			partialResult: AgentToolResult<unknown>;
+	  }
+	| {
+			type: "tool_execution_end";
+			toolCallId: string;
+			toolName: string;
+			result: AgentToolResult<unknown>;
+			isError: boolean;
+	  };

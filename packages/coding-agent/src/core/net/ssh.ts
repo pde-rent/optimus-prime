@@ -147,7 +147,17 @@ function requireBinary(name: string, deps: Required<SshDeps>): void {
 
 function makeDeps(deps?: SshDeps): Required<SshDeps> {
 	return {
-		spawn: deps?.spawn ?? ((argv, options) => Bun.spawn(argv, { ...options }) as unknown as SshProcess),
+		spawn:
+			deps?.spawn ??
+			((argv, options) => {
+				const child = Bun.spawn(argv, { ...options });
+				return {
+					exited: child.exited,
+					stdout: child.stdout,
+					stderr: child.stderr,
+					kill: (signal) => child.kill(signal),
+				};
+			}),
 		which: deps?.which ?? ((binary) => Bun.which(binary)),
 	};
 }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
+import type { ResponseCreateParamsStreaming } from "../src/providers/openai-wire-types.js";
 import { complete, getEnvApiKey } from "../src/stream.js";
-import type { AssistantMessage, Context, Message, Tool, ToolCall } from "../src/types.js";
+import type { AssistantMessage, Context, Message, TextContent, Tool, ToolCall } from "../src/types.js";
 
 const testToolSchema = Type.Object({
 	value: Type.Number({ description: "A number to double" }),
@@ -13,6 +14,11 @@ const testTool: Tool<typeof testToolSchema> = {
 	description: "Doubles a number and returns the result",
 	parameters: testToolSchema,
 };
+
+interface ResponsesInputItem {
+	type?: string;
+	id?: string;
+}
 
 describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 	"OpenAI Responses reasoning replay e2e",
@@ -149,12 +155,12 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 				tools: [testTool],
 			};
 
-			let capturedPayload: any = null;
+			let capturedPayload: ResponseCreateParamsStreaming | null = null;
 			const response = await complete(modelB, context, {
 				apiKey,
 				reasoningEffort: "high",
 				onPayload: (payload) => {
-					capturedPayload = payload;
+					capturedPayload = payload as ResponseCreateParamsStreaming;
 				},
 			});
 
@@ -164,9 +170,10 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 			expect(response.content.length).toBeGreaterThan(0);
 
 			// Log what was sent for debugging
-			const input = capturedPayload?.input as any[];
-			const functionCalls = input?.filter((item: any) => item.type === "function_call") || [];
-			const reasoningItems = input?.filter((item: any) => item.type === "reasoning") || [];
+			const rawInput = (capturedPayload as ResponseCreateParamsStreaming | null)?.input;
+			const input: ResponsesInputItem[] = Array.isArray(rawInput) ? rawInput : [];
+			const functionCalls = input.filter((item) => item.type === "function_call");
+			const reasoningItems = input.filter((item) => item.type === "reasoning");
 
 			console.log("Payload sent to API:");
 			console.log("- function_calls:", functionCalls.length);
@@ -175,8 +182,8 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 
 			// Verify the model understood the context
 			const responseText = response.content
-				.filter((b) => b.type === "text")
-				.map((b) => (b as any).text)
+				.filter((b): b is TextContent => b.type === "text")
+				.map((b) => b.text)
 				.join("");
 			expect(responseText).toContain("42");
 		});
@@ -252,19 +259,20 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 				tools: [testTool],
 			};
 
-			let capturedPayload: any = null;
+			let capturedPayload: ResponseCreateParamsStreaming | null = null;
 			const response = await complete(openaiModel, context, {
 				apiKey: openaiApiKey,
 				reasoningEffort: "high",
 				onPayload: (payload) => {
-					capturedPayload = payload;
+					capturedPayload = payload as ResponseCreateParamsStreaming;
 				},
 			});
 
 			// Log what was sent
-			const input = capturedPayload?.input as any[];
-			const functionCalls = input?.filter((item: any) => item.type === "function_call") || [];
-			const reasoningItems = input?.filter((item: any) => item.type === "reasoning") || [];
+			const rawInput = (capturedPayload as ResponseCreateParamsStreaming | null)?.input;
+			const input: ResponsesInputItem[] = Array.isArray(rawInput) ? rawInput : [];
+			const functionCalls = input.filter((item) => item.type === "function_call");
+			const reasoningItems = input.filter((item) => item.type === "reasoning");
 
 			console.log("Payload sent to OpenAI:");
 			console.log("- function_calls:", functionCalls.length);
@@ -272,7 +280,7 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 			if (functionCalls.length > 0) {
 				console.log(
 					"- function_call IDs:",
-					functionCalls.map((fc: any) => fc.id),
+					functionCalls.map((fc) => fc.id),
 				);
 			}
 
@@ -283,8 +291,8 @@ describe.skipIf(!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)(
 
 			// Verify the model understood the context
 			const responseText = response.content
-				.filter((b) => b.type === "text")
-				.map((b) => (b as any).text)
+				.filter((b): b is TextContent => b.type === "text")
+				.map((b) => b.text)
 				.join("");
 			expect(responseText).toContain("42");
 		});

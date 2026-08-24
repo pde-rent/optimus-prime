@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { getImageDimensions, imageFallback, Text } from "@earendil-works/pi-tui";
+import type { ThemeColor } from "../../modes/interactive/theme/theme.js";
 import { stripAnsi } from "../../utils/ansi.js";
 import { sanitizeBinaryOutput } from "../../utils/shell.js";
 
@@ -63,7 +64,7 @@ export type ToolRenderResultLike<TDetails> = {
 	details: TDetails;
 };
 
-export function invalidArgText(theme: { fg: (name: any, text: string) => string }): string {
+export function invalidArgText(theme: { fg: (name: ThemeColor, text: string) => string }): string {
 	return theme.fg("error", "[invalid arg]");
 }
 
@@ -78,7 +79,7 @@ export function invalidArgText(theme: { fg: (name: any, text: string) => string 
  */
 export function errorTextComponent(
 	result: { content: Array<{ type: string; text?: string }> },
-	theme: { fg: (name: any, text: string) => string },
+	theme: { fg: (name: ThemeColor, text: string) => string },
 ): Text {
 	const errorText = result.content
 		.filter((c) => c.type === "text")

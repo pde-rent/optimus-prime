@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { link as fsLink, symlink as fsSymlink } from "fs/promises";
@@ -100,6 +99,6 @@ export function createLnToolDefinition(cwd: string): ToolDefinition<typeof lnSch
 	return Object.assign(definition, { replayBuiltInToolName: "ln" as const });
 }
 
-export function createLnTool(cwd: string): AgentTool<typeof lnSchema> {
+export function createLnTool(cwd: string) {
 	return wrapToolDefinition(createLnToolDefinition(cwd));
 }

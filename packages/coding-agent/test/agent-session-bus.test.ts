@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "bun:test";
 import {
 	AGENT_MESSAGE_SOURCE,
 	AgentSessionMessageRateLimiter,
+	type AgentSessionMessageReceipt,
+	type AgentSessionMessageSendInput,
 	assertAgentFamilyReach,
 	assertAgentMessageQueueCapacity,
 	assertAgentSessionNameAvailable,
@@ -453,11 +455,16 @@ describe("agent session bus", () => {
 describe("duplicate agent messages", () => {
 	function makeHandlers() {
 		let counter = 0;
-		const sendAgentMessage = vi.fn(async (input: { target: string; message: string }) => ({
-			id: input.target,
-			deliveryStatus: "delivered" as const,
-			deliveredAt: new Date(++counter).toISOString(),
-		}));
+		const sendAgentMessage = vi.fn(
+			async (input: AgentSessionMessageSendInput): Promise<AgentSessionMessageReceipt> => ({
+				id: input.target,
+				source: AGENT_MESSAGE_SOURCE,
+				target: { activeSessionId: input.target, sessionId: input.target },
+				message: input.message,
+				deliveryStatus: "delivered",
+				deliveredAt: new Date(++counter).toISOString(),
+			}),
+		);
 		const handlers = createAgentMessageHostHandlers({
 			roster: () => ({
 				current: { name: "builder", id: "builder", depth: 1 },
@@ -467,7 +474,7 @@ describe("duplicate agent messages", () => {
 				],
 			}),
 			sendAgentMessage,
-		} as any);
+		});
 		return { handlers, sendAgentMessage };
 	}
 

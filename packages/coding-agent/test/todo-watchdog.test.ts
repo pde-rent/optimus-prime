@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../src/config.js";
 import { AgentSession } from "../src/core/agent-session.js";
+import type { CustomMessage } from "../src/core/messages.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 import { type TodoBoard, TodoStore, todoStorePath } from "../src/core/todo/store.js";
 import { buildTodoWatchdogContinuation, TODO_WATCHDOG_CUSTOM_TYPE } from "../src/core/todo/watchdog.js";
@@ -15,9 +16,10 @@ const WATCHDOG_SETTINGS = { todoWatchdogEnabled: true, todoWatchdogDelaySeconds:
 
 const temps = makeTempDirs("todo-watchdog-test-");
 
-function watchdogMessages(harness: Harness) {
+function watchdogMessages(harness: Harness): CustomMessage[] {
 	return harness.session.messages.filter(
-		(message) => message.role === "custom" && message.customType === TODO_WATCHDOG_CUSTOM_TYPE,
+		(message): message is CustomMessage =>
+			message.role === "custom" && message.customType === TODO_WATCHDOG_CUSTOM_TYPE,
 	);
 }
 
@@ -150,7 +152,7 @@ describe("todo watchdog scheduling", () => {
 		await harness.session.prompt("go");
 		await waitFor(() => expect(watchdogMessages(harness).length).toBeGreaterThan(0), 2000);
 		const [message] = watchdogMessages(harness);
-		expect(JSON.stringify((message as any).content)).toContain("t1: unfinished");
+		expect(JSON.stringify(message.content)).toContain("t1: unfinished");
 		harness.cleanup();
 	});
 

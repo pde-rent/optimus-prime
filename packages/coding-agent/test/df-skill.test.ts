@@ -7,7 +7,7 @@ const { default: createSkill, DataFrame, Column, pack, AGGS, dtypeOf } = dfSkill
 
 const df = createSkill();
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 
 const CHAINS: Row[] = [
 	{ name: "Ethereum", symbol: "ETH", tvl: 46, volume: 2305 },
@@ -115,7 +115,7 @@ describe("filter", () => {
 	// variable outright, which is why this library exists at all.
 	it("runs a closure that captures an outer variable", () => {
 		const cutoff = 5.15;
-		const out = df(CHAINS).filter((r: Row) => r.tvl >= cutoff);
+		const out = df(CHAINS).filter((r: Row) => (r.tvl as number) >= cutoff);
 		expect(out.get_column("name")).toEqual(["Ethereum", "BSC"]);
 	});
 
@@ -137,21 +137,21 @@ describe("with_columns", () => {
 	// Same captured-variable guarantee as filter, on the expression side.
 	it("runs a closure that captures an outer variable", () => {
 		const total = 61.3;
-		const out = df(CHAINS).with_columns({ share: (r: Row) => r.tvl / total });
+		const out = df(CHAINS).with_columns({ share: (r: Row) => (r.tvl as number) / total });
 		expect(out.columns).toEqual(["name", "symbol", "tvl", "volume", "share"]);
 		expect(out.get_column("share")[0]).toBeCloseTo(46 / total, 10);
 	});
 
 	it("applies entries in order, so a later one sees an earlier one", () => {
 		const out = df([{ qty: 2, price: 10 }]).with_columns({
-			gross: (r: Row) => r.qty * r.price,
-			net: (r: Row) => r.gross * 0.5,
+			gross: (r: Row) => (r.qty as number) * (r.price as number),
+			net: (r: Row) => (r.gross as number) * 0.5,
 		});
 		expect(out.to_dicts()).toEqual([{ qty: 2, price: 10, gross: 20, net: 10 }]);
 	});
 
 	it("replaces an existing column in place", () => {
-		const out = df(CHAINS).with_columns({ tvl: (r: Row) => r.tvl * 2 });
+		const out = df(CHAINS).with_columns({ tvl: (r: Row) => (r.tvl as number) * 2 });
 		expect(out.columns).toEqual(["name", "symbol", "tvl", "volume"]);
 		expect(out.get_column("tvl")).toEqual([92, 10.4, 10.2, 10]);
 	});
@@ -165,7 +165,7 @@ describe("with_columns", () => {
 		expect(DataFrame.prototype.assign).toBe(DataFrame.prototype.with_columns);
 		expect(
 			df([{ a: 1 }])
-				.assign({ b: (r: Row) => r.a + 1 })
+				.assign({ b: (r: Row) => (r.a as number) + 1 })
 				.get_column("b"),
 		).toEqual([2]);
 	});
@@ -210,7 +210,7 @@ describe("sort", () => {
 	it("accepts a key function", () => {
 		expect(
 			df([{ n: "b" }, { n: "A" }])
-				.sort((r: Row) => r.n.toLowerCase())
+				.sort((r: Row) => (r.n as string).toLowerCase())
 				.get_column("n"),
 		).toEqual(["A", "b"]);
 	});
@@ -252,8 +252,8 @@ describe("sort", () => {
 	// polars spells the direction `descending`, pandas spells it `ascending`; a bare boolean under
 	// the polars name would mean the opposite of what a pandas hand wrote.
 	it("refuses a bare boolean on the polars sort rather than guessing its sense", () => {
-		expect(() => df(CHAINS).sort("tvl", false as any)).toThrow(TypeError);
-		expect(() => df(CHAINS).sort("tvl", false as any)).toThrow(/sort_values\(by, ascending\)/);
+		expect(() => df(CHAINS).sort("tvl", false)).toThrow(TypeError);
+		expect(() => df(CHAINS).sort("tvl", false)).toThrow(/sort_values\(by, ascending\)/);
 	});
 
 	it("orders dates and strings, not just numbers", () => {
@@ -762,7 +762,7 @@ describe("columnar storage", () => {
 		const frame = df(rows);
 		expect(frame._data.get("v").values).toBeInstanceOf(Int32Array);
 		const cutoff = n - 10;
-		expect(frame.filter((r: Row) => r.v >= cutoff).len()).toBe(10);
+		expect(frame.filter((r: Row) => (r.v as number) >= cutoff).len()).toBe(10);
 		expect(frame.sort("v", { descending: true }).get_column("v")[0]).toBe(n - 1);
 		const grouped = frame.group_by("g").agg({ v: "sum" });
 		expect(grouped.len()).toBe(4);

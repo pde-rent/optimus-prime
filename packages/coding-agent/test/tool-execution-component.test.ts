@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { type TSchema, Type } from "@earendil-works/pi-ai";
 import { Container, resetCapabilitiesCache, setCapabilities, Text, TUI, urlAtColumn } from "@earendil-works/pi-tui";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.js";
 import type { ToolDefinition } from "../src/core/extensions/types.js";
@@ -30,7 +30,7 @@ function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
 	};
 }
 
-function createMetadataOnlyToolDefinition(definition: ToolDefinition<any, any>) {
+function createMetadataOnlyToolDefinition(definition: ToolDefinition) {
 	const metadata = createAgentConnectionToolDefinition(definition);
 	if (!metadata) {
 		throw new Error("expected tool metadata");
@@ -341,7 +341,7 @@ describe("ToolExecutionComponent parity", () => {
 			"tool-3b",
 			{ command: "echo hello" },
 			{},
-			createMetadataOnlyToolDefinition(createBashToolDefinition(process.cwd())),
+			createMetadataOnlyToolDefinition(createBashToolDefinition(process.cwd()) as ToolDefinition),
 			createFakeTui(),
 			process.cwd(),
 		);
@@ -349,7 +349,7 @@ describe("ToolExecutionComponent parity", () => {
 		expect(stripAnsi(bashComponent.render(120).join("\n"))).toContain("$ echo hello");
 
 		const legacyEditMetadata = {
-			...createMetadataOnlyToolDefinition(createEditToolDefinition(process.cwd())),
+			...createMetadataOnlyToolDefinition(createEditToolDefinition(process.cwd()) as ToolDefinition),
 			description: "Legacy edit metadata from an older session.",
 			promptSnippet: "Legacy edit prompt.",
 		};
@@ -701,7 +701,7 @@ describe("ToolExecutionComponent parity", () => {
 
 	test("shares renderer state across custom call and result slots", () => {
 		type RenderState = { token?: string };
-		const toolDefinition: ToolDefinition<any, unknown, RenderState> = {
+		const toolDefinition: ToolDefinition<TSchema, unknown, RenderState> = {
 			...createBaseToolDefinition(),
 			renderCall: (_args, _theme, context) => {
 				context.state.token ??= "shared-token";

@@ -68,22 +68,23 @@ export interface AgentObserveController {
 
 export function createAgentObserveHostHandlers(controller: AgentObserveController) {
 	return {
-		"agent_observe.list": async () => controller.listAgents() as unknown as Record<string, unknown>,
+		"agent_observe.list": async () => ({ ...(await controller.listAgents()) }),
 		"agent_observe.get": async (payload: Record<string, unknown> = {}) => {
 			if (typeof payload.target !== "string") {
 				throw new Error("agent_observe.get target must be a string");
 			}
-			return (await controller.getAgent(payload.target)) as unknown as Record<string, unknown>;
+			return { ...(await controller.getAgent(payload.target)) };
 		},
 		"agent_observe.recent": async (payload: Record<string, unknown> = {}) => {
 			if (typeof payload.target !== "string") {
 				throw new Error("agent_observe.recent target must be a string");
 			}
-			return (await controller.recentMessages({
+			const recent = await controller.recentMessages({
 				target: payload.target,
 				limit: normalizeOptionalInteger(payload.limit, "agent_observe.recent limit"),
 				maxChars: normalizeOptionalInteger(payload.max_chars ?? payload.maxChars, "agent_observe.recent max_chars"),
-			})) as unknown as Record<string, unknown>;
+			});
+			return { ...recent };
 		},
 	};
 }

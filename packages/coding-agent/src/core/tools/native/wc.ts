@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
@@ -139,9 +138,6 @@ export function createWcToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "wc" as const });
 }
 
-export function createWcTool(
-	cwd: string,
-	options?: { maxLines?: number; maxBytes?: number },
-): AgentTool<typeof wcSchema> {
+export function createWcTool(cwd: string, options?: { maxLines?: number; maxBytes?: number }) {
 	return wrapToolDefinition(createWcToolDefinition(cwd, options));
 }

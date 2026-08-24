@@ -272,9 +272,60 @@ function createHarness(canConnect: () => Promise<boolean>): SupervisorMonitorHar
  * Supervisor fixture: builds a bare DaemonSupervisor shell over the given fields.
  * The index signature keeps per-test internal access a plain property read.
  */
-function supervisorFixture<T = Record<string, any>>(fields: Record<string, unknown> = {}): T {
-	return Object.assign(Object.create(DaemonSupervisor.prototype), fields) as T;
+function supervisorFixture<T extends object = SupervisorFixtureInternals>(fields: Record<string, unknown> = {}): T {
+	return Object.assign(Object.create(DaemonSupervisor.prototype) as T, fields);
 }
+
+/**
+ * Structural stand-ins for the private supervisor surface the untyped fixture call
+ * sites exercise; fields supplied per test are merged over DaemonSupervisor.prototype.
+ */
+type FixtureWorker = {
+	descriptor: { workerId: string; lifecycle?: string } & Record<string, unknown>;
+};
+
+type SupervisorFixtureInternals = {
+	shuttingDown: boolean;
+	workers: Map<string, FixtureWorker>;
+	workerStopCounts: Map<object, number>;
+	socketLease?: unknown;
+	ownership?: unknown;
+	deleteWorkerDescriptor?: unknown;
+	updateRestartPhase?: string;
+	loadWorkerDescriptors(): void;
+	launchWorker(command: unknown, existing?: unknown): Promise<FixtureWorker>;
+	stopWorker(
+		worker: object,
+		force: boolean,
+		intentionalStop?: boolean,
+		skipFinalization?: boolean,
+		removeDescriptor?: boolean,
+		extra?: unknown,
+	): Promise<unknown>;
+	shutdown(exitCode: number, graceful: boolean, waitForWorkers?: boolean, prepareRestart?: boolean): Promise<unknown>;
+	handleWorkerClose(worker: object, client: object, error: unknown): Promise<unknown>;
+	deferWorkerRecovery(worker: object, error: unknown): void;
+	handleCommand(client: object, command: unknown): unknown;
+	handleList(
+		client: object,
+		command: unknown,
+	): Promise<{
+		success: boolean;
+		data?: { sessions?: Array<{ activeSessionId?: string; id: string; workerState?: string }> };
+	}>;
+	handleLine(client: object, line: string): unknown;
+	handleWorkerFrame(worker: object, frame: unknown): void;
+	recoverWorker(worker: object): Promise<unknown>;
+	recoverUncertainWorkerOperations(worker: object, force: boolean): Promise<unknown>;
+	effectiveWorkerState(worker: object): string;
+	adoptOrRecoverWorker(worker: object): Promise<void>;
+	scheduleWorkerStopFinalization(worker: object): void;
+	reclaimStaleWorkerRegistration(worker: object): Promise<boolean>;
+	attachClient(client: object, command: unknown): Promise<unknown>;
+	subscribeWorker(worker: object, activeSessionId: string): Promise<void>;
+	prepareUpdateRestartFenced(): Promise<unknown>;
+	prepareUpdateRestart(): Promise<unknown>;
+};
 
 describe("daemon worker supervisor monitoring", () => {
 	afterEach(async () => {
@@ -2847,9 +2898,7 @@ describe("daemon worker supervisor monitoring", () => {
 			supervisor.loadWorkerDescriptors();
 
 			expect(supervisor.workers.size).toBe(1);
-			const loaded = supervisor.workers.get("worker-1") as {
-				descriptor: { supervisorSocketPath: string };
-			};
+			const loaded = supervisor.workers.get("worker-1")!;
 			expect(loaded.descriptor.supervisorSocketPath).toBe("/tmp/supervisor.sock");
 		} finally {
 			rmSync(descriptorDir, { recursive: true, force: true });

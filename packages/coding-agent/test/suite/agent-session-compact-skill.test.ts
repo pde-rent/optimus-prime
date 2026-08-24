@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
 import { type AssistantMessage, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { createHarness, type Harness } from "./harness.js";
 import { createAssistant, createTrackedHarness, trackHarnesses, waitFor } from "./helpers.js";
 
@@ -20,9 +21,9 @@ function setStreaming(harness: Harness, streaming: boolean) {
 }
 
 /** Extension that supplies compaction content so no provider call is needed. */
-function extensionCompaction() {
-	return (pi: any) => {
-		pi.on("session_before_compact", async (event: any) => ({
+function extensionCompaction(): ExtensionFactory {
+	return (pi) => {
+		pi.on("session_before_compact", async (event) => ({
 			compaction: {
 				summary: "requested summary",
 				firstKeptEntryId: event.preparation.firstKeptEntryId,
@@ -208,7 +209,7 @@ describe("AgentSession compact skill host requests", () => {
 		const harness = await createTrackedHarness(harnesses, {
 			settings: { compaction: { keepRecentTokens: 1 } },
 			extensionFactories: [
-				(pi: any) => {
+				(pi) => {
 					pi.on("session_before_compact", async () => ({ cancel: true }));
 				},
 			],

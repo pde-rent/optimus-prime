@@ -132,9 +132,9 @@ async function handleToolCall<TApi extends Api>(model: Model<TApi>, options?: St
 				expect(toolCall.name).toBe("math_operation");
 				JSON.parse(accumulatedToolArgs);
 				expect(toolCall.arguments).not.toBeUndefined();
-				expect((toolCall.arguments as any).a).toBe(15);
-				expect((toolCall.arguments as any).b).toBe(27);
-				expect((toolCall.arguments as any).operation).toBeOneOf(["add", "subtract", "multiply", "divide"]);
+				expect(toolCall.arguments.a).toBe(15);
+				expect(toolCall.arguments.b).toBe(27);
+				expect(toolCall.arguments.operation).toBeOneOf(["add", "subtract", "multiply", "divide"]);
 			}
 		}
 	}
@@ -309,7 +309,7 @@ async function multiTurn<TApi extends Api>(model: Model<TApi>, options?: StreamO
 				expect(block.id).toBeTruthy();
 				expect(block.arguments).toBeTruthy();
 
-				const { a, b, operation } = block.arguments;
+				const { a, b, operation } = block.arguments as { a: number; b: number; operation: string };
 				let result: number;
 				switch (operation) {
 					case "add":

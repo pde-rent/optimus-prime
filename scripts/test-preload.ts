@@ -12,6 +12,7 @@
  * Loaded for every package through its `bunfig.toml` `[test] preload`, so the
  * ambient declarations in types/bun-test.d.ts always hold at runtime.
  */
+import type { AsyncMatchers } from "bun:test";
 import {
 	afterAll,
 	afterEach,
@@ -32,9 +33,6 @@ setDefaultTimeout(30_000);
 // makes it the only way to yield to the real event loop mid-test.
 const realSetTimeout = globalThis.setTimeout;
 const realSetImmediate = globalThis.setImmediate;
-
-// biome-ignore lint/suspicious/noExplicitAny: patching Bun's runtime objects.
-const viAny = vi as any;
 
 /** Lets pending promise callbacks and real I/O run between timer advances. */
 function flushMicrotasks(): Promise<void> {
@@ -190,7 +188,7 @@ afterAll(() => {
 
 // --- install -----------------------------------------------------------------
 
-Object.assign(viAny, {
+Object.assign(vi, {
 	setSystemTime,
 	advanceTimersByTimeAsync,
 	advanceTimersToNextTimerAsync,
@@ -215,49 +213,52 @@ Object.assign(viAny, {
 
 // --- expect extras -----------------------------------------------------------
 
-// biome-ignore lint/suspicious/noExplicitAny: patching Bun's runtime objects.
-const expectAny = expect as any;
+type PollOptions = { timeout?: number; interval?: number; not?: boolean };
 
-expectAny.fail = (message = "expect.fail()"): never => {
-	throw new Error(message);
-};
-
-/**
- * `expect.poll(fn).toMatchObject(...)` — re-evaluates `fn` until the matcher
- * passes or the timeout elapses. Returns a proxy so every matcher name works.
- */
-expectAny.poll = (
-	// biome-ignore lint/suspicious/noExplicitAny: mirrors Vitest's untyped poll target.
-	callback: () => any,
-	options: { timeout?: number; interval?: number } = {},
-) =>
-	new Proxy(
+function makePoll(callback: () => unknown, options: PollOptions = {}): unknown {
+	return new Proxy(
 		{},
 		{
 			get(_target, matcher: string) {
-				if (matcher === "not") return expectAny.poll(callback, { ...options, not: true });
-				// biome-ignore lint/suspicious/noExplicitAny: matcher arguments are arbitrary.
-				return (...args: any[]) =>
+				if (matcher === "not") return makePoll(callback, { ...options, not: true });
+				return (...args: unknown[]) =>
 					waitFor(
 						async () => {
 							const value = await callback();
-							// biome-ignore lint/suspicious/noExplicitAny: dynamic matcher dispatch.
-							const target = (options as any).not ? expect(value).not : expect(value);
-							// biome-ignore lint/suspicious/noExplicitAny: dynamic matcher dispatch.
-							(target as any)[matcher](...args);
+							const target = options.not ? expect(value).not : expect(value);
+							const matcherFn = Reflect.get(target, matcher, target) as (...args: unknown[]) => void;
+							matcherFn.call(target, ...args);
 						},
 						options,
 					);
 			},
 		},
 	);
+}
+
+/**
+ * `expect.poll(fn).toMatchObject(...)` — re-evaluates `fn` until the matcher
+ * passes or the timeout elapses. Returns a proxy so every matcher name works.
+ */
+expect.poll = <T>(
+	callback: () => T | Promise<T>,
+	options: { timeout?: number; interval?: number } = {},
+): AsyncMatchers<Awaited<T>> => makePoll(callback, options) as AsyncMatchers<Awaited<T>>;
+
+expect.fail = (message = "expect.fail()"): never => {
+	throw new Error(message);
+};
+
+/** The shape of a mock that toHaveBeenCalledBefore inspects. */
+interface InvocationOrderMock {
+	mock?: { invocationCallOrder?: number[] };
+}
 
 expect.extend({
-	// biome-ignore lint/suspicious/noExplicitAny: matcher receives arbitrary mocks.
-	toHaveBeenCalledBefore(received: any, other: any) {
+	toHaveBeenCalledBefore(received: InvocationOrderMock, other: InvocationOrderMock) {
 		const first = (calls: number[]) => (calls.length > 0 ? Math.min(...calls) : Number.NaN);
-		const receivedFirst = first(received?.mock?.invocationCallOrder ?? []);
-		const otherFirst = first(other?.mock?.invocationCallOrder ?? []);
+		const receivedFirst = first(received.mock?.invocationCallOrder ?? []);
+		const otherFirst = first(other.mock?.invocationCallOrder ?? []);
 		if (Number.isNaN(receivedFirst)) {
 			return { pass: false, message: () => "expected mock to have been called" };
 		}
@@ -268,18 +269,23 @@ expect.extend({
 			pass: receivedFirst < otherFirst,
 			message: () =>
 				`expected mock (call #${receivedFirst}) to have been called before the other mock (call #${otherFirst})`,
-			// biome-ignore lint/suspicious/noExplicitAny: expect.extend's matcher map is untyped here.
-		} as any;
+		};
 	},
-	// biome-ignore lint/suspicious/noExplicitAny: expect.extend's matcher map is untyped here.
-} as any);
+});
 
 // --- it.runIf / describe.runIf / .sequential --------------------------------
-// biome-ignore lint/suspicious/noExplicitAny: patching Bun's runtime objects.
-for (const fn of [it, test, describe] as any[]) {
+
+/** The members the preload patches onto Bun's it/test/describe. */
+interface RunnerPatches {
+	if?: (condition: boolean) => unknown;
+	runIf?: (condition: boolean) => unknown;
+	sequential?: unknown;
+}
+
+for (const fn of [it, test, describe] as RunnerPatches[]) {
 	// Bun spells Vitest's runIf as `if`.
-	if (typeof fn?.if === "function" && typeof fn.runIf !== "function") fn.runIf = fn.if.bind(fn);
+	if (typeof fn.if === "function" && typeof fn.runIf !== "function") fn.runIf = fn.if.bind(fn);
 	// Bun runs test files sequentially unless --concurrent is passed, so Vitest's
 	// explicit `.sequential` opt-in is already the default behaviour.
-	if (fn && typeof fn.sequential !== "function") fn.sequential = fn;
+	if (typeof fn.sequential !== "function") fn.sequential = fn;
 }

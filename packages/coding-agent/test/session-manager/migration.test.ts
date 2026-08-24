@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { type FileEntry, migrateSessionEntries } from "../../src/core/session-manager.js";
+import {
+	type FileEntry,
+	migrateSessionEntries,
+	type SessionHeader,
+	type SessionMessageEntry,
+} from "../../src/core/session-manager.js";
 
 describe("migrateSessionEntries", () => {
 	it("should add id/parentId to v1 entries", () => {
@@ -25,11 +30,11 @@ describe("migrateSessionEntries", () => {
 		migrateSessionEntries(entries);
 
 		// Header should have version set (v3 is current after hookMessage->custom migration)
-		expect((entries[0] as any).version).toBe(3);
+		expect((entries[0] as SessionHeader).version).toBe(3);
 
 		// Entries should have id/parentId
-		const msg1 = entries[1] as any;
-		const msg2 = entries[2] as any;
+		const msg1 = entries[1] as SessionMessageEntry;
+		const msg2 = entries[2] as SessionMessageEntry;
 
 		expect(msg1.id).toBeDefined();
 		expect(msg1.id.length).toBe(8);
@@ -71,8 +76,8 @@ describe("migrateSessionEntries", () => {
 		migrateSessionEntries(entries);
 
 		// IDs should be unchanged
-		expect((entries[1] as any).id).toBe("abc12345");
-		expect((entries[2] as any).id).toBe("def67890");
-		expect((entries[2] as any).parentId).toBe("abc12345");
+		expect((entries[1] as SessionMessageEntry).id).toBe("abc12345");
+		expect((entries[2] as SessionMessageEntry).id).toBe("def67890");
+		expect((entries[2] as SessionMessageEntry).parentId).toBe("abc12345");
 	});
 });

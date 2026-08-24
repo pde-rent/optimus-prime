@@ -56,12 +56,15 @@ export interface ChatCompletionAssistantMessageParam {
 	tool_calls?: ChatCompletionMessageToolCall[];
 	reasoning_content?: string | null;
 	reasoning?: string | null;
+	reasoning_details?: ChatCompletionReasoningDetail[];
 }
 
 export interface ChatCompletionToolMessageParam {
 	role: "tool";
 	content: string | ChatCompletionContentPartText[];
 	tool_call_id: string;
+	/** Some providers (e.g. xAI) require the function name on tool results. */
+	name?: string;
 }
 
 export type ChatCompletionMessageParam =
@@ -92,6 +95,12 @@ export interface ChatCompletionUsage {
 	cache_read_input_tokens?: number;
 }
 
+export interface ChatCompletionReasoningDetail {
+	type?: string;
+	id?: string;
+	data?: string;
+}
+
 export interface ChatCompletionChunk {
 	id?: string;
 	model?: string;
@@ -102,6 +111,7 @@ export interface ChatCompletionChunk {
 			content?: string | null;
 			reasoning_content?: string | null;
 			reasoning?: string | null;
+			reasoning_details?: ChatCompletionReasoningDetail[];
 			tool_calls?: Array<{
 				index?: number;
 				id?: string;
@@ -110,6 +120,7 @@ export interface ChatCompletionChunk {
 			}>;
 		};
 		finish_reason?: string | null;
+		usage?: ChatCompletionUsage | null;
 	}>;
 	usage?: ChatCompletionUsage | null;
 }
@@ -128,6 +139,7 @@ export declare namespace ChatCompletionChunk {
 			content?: string | null;
 			reasoning_content?: string | null;
 			reasoning?: string | null;
+			reasoning_details?: ChatCompletionReasoningDetail[];
 			tool_calls?: Array<{
 				index?: number;
 				id?: string;

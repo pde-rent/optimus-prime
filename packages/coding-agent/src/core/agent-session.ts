@@ -426,7 +426,7 @@ export interface AgentSessionConfig {
 	serviceTierPreference?: ServiceTier;
 	cwd: string;
 	agentDir?: string;
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	scopedModels?: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 	resourceLoader: ResourceLoader;
 	customTools?: ToolDefinition[];
 	modelRegistry: ModelRegistry;
@@ -870,7 +870,7 @@ function createPostCompactionContinuationSettlement(): PostCompactionContinuatio
 }
 
 export interface ModelCycleResult {
-	model: Model<any>;
+	model: Model<Api>;
 	thinkingLevel: ThinkingLevel;
 	serviceTier: ServiceTier;
 	isScoped: boolean;
@@ -1102,7 +1102,7 @@ export class AgentSession {
 	private _serviceTierPreference: ServiceTier;
 
 	private _scopedModels: Array<{
-		model: Model<any>;
+		model: Model<Api>;
 		thinkingLevel?: ThinkingLevel;
 	}>;
 
@@ -1424,7 +1424,7 @@ export class AgentSession {
 		this._subagentRuntimeHost = host;
 	}
 
-	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
+	private async _getRequiredRequestAuth(model: Model<Api>): Promise<{
 		apiKey: string;
 		headers?: Record<string, string>;
 	}> {
@@ -3879,11 +3879,10 @@ export class AgentSession {
 			return;
 		}
 
-		const targetRecord = target as unknown as Record<string, unknown>;
-		for (const key of Object.keys(targetRecord)) {
-			delete targetRecord[key];
+		for (const key of Object.keys(target)) {
+			Reflect.deleteProperty(target, key);
 		}
-		Object.assign(targetRecord, replacement);
+		Object.assign(target, replacement);
 	}
 
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
@@ -4283,7 +4282,7 @@ export class AgentSession {
 		return this.agent.state;
 	}
 
-	get model(): Model<any> | undefined {
+	get model(): Model<Api> | undefined {
 		return this.agent.state.model;
 	}
 
@@ -4441,13 +4440,13 @@ export class AgentSession {
 	}
 
 	get scopedModels(): ReadonlyArray<{
-		model: Model<any>;
+		model: Model<Api>;
 		thinkingLevel?: ThinkingLevel;
 	}> {
 		return this._scopedModels;
 	}
 
-	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
+	setScopedModels(scopedModels: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>): void {
 		this._scopedModels = scopedModels;
 	}
 
@@ -6898,8 +6897,8 @@ export class AgentSession {
 	}
 
 	private async _emitModelSelect(
-		nextModel: Model<any>,
-		previousModel: Model<any> | undefined,
+		nextModel: Model<Api>,
+		previousModel: Model<Api> | undefined,
 		source: "set" | "cycle" | "restore",
 	): Promise<void> {
 		if (modelsAreEqual(previousModel, nextModel)) return;
@@ -6912,8 +6911,8 @@ export class AgentSession {
 	}
 
 	private _queueModelSelectEmit(
-		nextModel: Model<any>,
-		previousModel: Model<any> | undefined,
+		nextModel: Model<Api>,
+		previousModel: Model<Api> | undefined,
 		source: "set" | "cycle" | "restore",
 	): Promise<void> {
 		const emit = () =>
@@ -6930,7 +6929,7 @@ export class AgentSession {
 		return promise;
 	}
 
-	async setModel(model: Model<any>, options: ModelSelectOptions = {}): Promise<void> {
+	async setModel(model: Model<Api>, options: ModelSelectOptions = {}): Promise<void> {
 		if (!this._modelRegistry.hasConfiguredAuth(model)) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -7714,7 +7713,7 @@ export class AgentSession {
 	 * Error("Compaction cancelled") on abort or extension cancel.
 	 */
 	private async _performCompaction(options: {
-		model: Model<any>;
+		model: Model<Api>;
 		apiKey: string;
 		headers?: Record<string, string>;
 		customInstructions?: string;
@@ -9351,7 +9350,7 @@ export class AgentSession {
 				if (typeof requested !== "number") {
 					throw new Error("rlm.set_max_depth maxDepth must be a number");
 				}
-				return (await this.setModelRequestedMaxDepth(requested)) as unknown as Record<string, unknown>;
+				return { ...(await this.setModelRequestedMaxDepth(requested)) };
 			},
 			"rlm.get_max_depth": async () => ({
 				max_depth: this._rlmMaxDepth,
@@ -9371,9 +9370,9 @@ export class AgentSession {
 						throw new Error("rlm.set_context_budget compactAtTokens must be a number");
 					request.compactAtTokens = p.compactAtTokens;
 				}
-				return this.setModelRequestedContextBudget(request) as unknown as Record<string, unknown>;
+				return this.setModelRequestedContextBudget(request);
 			},
-			"rlm.get_context_budget": async () => this.getContextBudgetState() as unknown as Record<string, unknown>,
+			"rlm.get_context_budget": async () => ({ ...this.getContextBudgetState() }),
 			"rlm.find_models": createRlmFindModelsHostHandler((query, limit) => this.findRlmModels(query, limit)),
 			"rlm.list_subagents": createRlmListSubagentsHostHandler(() => this.listRlmSubagents()),
 			"rlm.delete_subagent": createRlmDeleteSubagentHostHandler((target) => this.deleteRlmSubagent(target)),
@@ -9653,7 +9652,7 @@ export class AgentSession {
 		sessionName: string;
 		spawnCode?: string;
 		sessionDir: string;
-		model: Model<any>;
+		model: Model<Api>;
 		effort?: ThinkingLevel;
 		peerNames?: string[];
 	}): CreateRlmSubagentRuntimeOptions {

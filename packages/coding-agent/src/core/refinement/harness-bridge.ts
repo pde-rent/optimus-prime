@@ -570,10 +570,10 @@ export function handleHarnessHostRequest(
 		return consolidateMemories(payload, ctx);
 	}
 	if (type === "harness.search_memory") {
-		return searchMemory(payload, ctx) as unknown as Record<string, unknown>;
+		return { ...searchMemory(payload, ctx) };
 	}
 	if (type === "harness.get_memory") {
-		return getMemory(payload, ctx) as unknown as Record<string, unknown>;
+		return { ...getMemory(payload, ctx) };
 	}
 	const match = /^harness\.(create|update|delete)_(.+)$/.exec(type);
 	const kind = match ? KIND_BY_SUFFIX[match[2]] : undefined;

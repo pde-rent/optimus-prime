@@ -30,10 +30,10 @@ function startScriptedServer(
 		hostname: "127.0.0.1",
 		port: 0,
 		socket: {
-			open(socket: any) {
+			open(socket: Bun.TCPSocket) {
 				socket.write("220 fake ready\r\n");
 			},
-			data(socket: any, data: Uint8Array) {
+			data(socket: Bun.TCPSocket, data: Uint8Array) {
 				const chunk = new TextDecoder().decode(data);
 				written.push(chunk);
 				if (typeof script === "function") {

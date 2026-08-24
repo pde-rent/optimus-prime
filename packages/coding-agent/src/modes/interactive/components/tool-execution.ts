@@ -1,6 +1,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { type Component, Container, Image, Text, type TUI } from "@earendil-works/pi-tui";
-import type { ToolDefinition, ToolRenderContext, ToolRenderResultOptions } from "../../../core/extensions/types.js";
+import type { ToolRenderContext, ToolRenderResultOptions } from "../../../core/extensions/types.js";
 import { createBashToolDefinition } from "../../../core/tools/bash.js";
 import { createEditToolDefinition } from "../../../core/tools/edit.js";
 import { createAllToolDefinitions } from "../../../core/tools/index.js";
@@ -28,15 +29,21 @@ export interface ToolExecutionOptions {
 	includeImageDimensions?: boolean;
 }
 
+/**
+ * Renderer callbacks are invoked with raw (unvalidated) tool-call arguments, so
+ * they are declared as methods: method signatures are compared bivariantly,
+ * which lets concrete ToolDefinition renderers be stored and called through one
+ * untyped-boundary shape.
+ */
 export interface ToolExecutionRendererDefinition {
 	renderShell?: "default" | "self";
-	renderCall?: (args: any, theme: Theme, context: ToolRenderContext<any, any>) => Component;
-	renderResult?: (
-		result: AgentToolResult<any>,
+	renderCall?(args: unknown, theme: Theme, context: ToolRenderContext): Component;
+	renderResult?(
+		result: AgentToolResult<unknown>,
 		options: ToolRenderResultOptions,
 		theme: Theme,
-		context: ToolRenderContext<any, any>,
-	) => Component;
+		context: ToolRenderContext,
+	): Component;
 }
 export type ToolExecutionDefinition = AgentConnectionToolDefinition & Partial<ToolExecutionRendererDefinition>;
 
@@ -58,7 +65,7 @@ function createReplayBuiltInToolDefinition(
 	toolName: string,
 	cwd: string,
 	toolDefinition: ToolExecutionDefinition | undefined,
-): ToolDefinition<any, any> | undefined {
+): ToolExecutionDefinition | undefined {
 	if (toolName === "repl") {
 		return createAllToolDefinitions(cwd).repl;
 	}
@@ -110,11 +117,11 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
 	private replCellComponent?: ReplCellComponent;
-	private rendererState: any = {};
+	private rendererState: Record<string, unknown> = {};
 	private imageComponents: Image[] = [];
 	private toolName: string;
 	private toolCallId: string;
-	private args: any;
+	private args: unknown;
 	private agentMessagesExpanded = false;
 	private editDiffsExpanded = false;
 	private showExpandHint = true;
@@ -122,23 +129,23 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 	private includeImageDimensions: boolean;
 	private isPartial = true;
 	private toolDefinition?: ToolExecutionDefinition;
-	private builtInToolDefinition?: ToolDefinition<any, any>;
+	private builtInToolDefinition?: ToolExecutionDefinition;
 	private ui: TUI;
 	private cwd: string;
 	private executionStarted = false;
 	private argsComplete = false;
 	private pendingSentAgentMessages: KernelSentAgentMessage[] = [];
 	private result?: {
-		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+		content: Array<TextContent | ImageContent>;
 		isError: boolean;
-		details?: any;
+		details?: unknown;
 	};
 	private hideComponent = false;
 
 	constructor(
 		toolName: string,
 		toolCallId: string,
-		args: any,
+		args: unknown,
 		options: ToolExecutionOptions = {},
 		toolDefinition: ToolExecutionDefinition | undefined,
 		ui: TUI,
@@ -171,7 +178,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		this.updateDisplay();
 	}
 
-	private getCallRenderer(): ToolDefinition<any, any>["renderCall"] | undefined {
+	private getCallRenderer(): ToolExecutionRendererDefinition["renderCall"] {
 		if (!this.builtInToolDefinition) {
 			return this.toolDefinition?.renderCall;
 		}
@@ -181,7 +188,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		return this.toolDefinition.renderCall ?? this.builtInToolDefinition.renderCall;
 	}
 
-	private getResultRenderer(): ToolDefinition<any, any>["renderResult"] | undefined {
+	private getResultRenderer(): ToolExecutionRendererDefinition["renderResult"] {
 		if (!this.builtInToolDefinition) {
 			return this.toolDefinition?.renderResult;
 		}
@@ -266,7 +273,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		return new Text(theme.fg("toolOutput", output), 0, 0);
 	}
 
-	updateArgs(args: any): void {
+	updateArgs(args: unknown): void {
 		this.args = args;
 		this.updateDisplay();
 	}
@@ -285,8 +292,8 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 
 	updateResult(
 		result: {
-			content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-			details?: any;
+			content: Array<TextContent | ImageContent>;
+			details?: unknown;
 			isError: boolean;
 		},
 		isPartial = false,
@@ -446,7 +453,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 		this.imageComponents = [];
 
 		if (this.result) {
-			const imageBlocks = this.result.content.filter((c) => c.type === "image");
+			const imageBlocks = this.result.content.filter((c): c is ImageContent => c.type === "image");
 			for (let i = 0; i < imageBlocks.length; i++) {
 				const img = imageBlocks[i];
 				if (!this.showImages || !img.data || !img.mimeType) continue;
@@ -510,7 +517,7 @@ export class ToolExecutionComponent extends ExpandableComponent implements Colla
 			} else {
 				try {
 					const component = resultRenderer(
-						{ content: this.result.content as any, details: this.result.details },
+						{ content: this.result.content, details: this.result.details },
 						{ expanded: this.expanded, isPartial: this.isPartial },
 						theme,
 						this.getRenderContext(this.resultRendererComponent),

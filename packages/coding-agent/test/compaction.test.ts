@@ -16,6 +16,7 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "../src/core/compaction/index.js";
+import type { CompactionSummaryMessage } from "../src/core/messages.js";
 import {
 	buildSessionContext,
 	type CompactionEntry,
@@ -449,7 +450,9 @@ describe("buildSessionContext", () => {
 		const loaded = buildSessionContext(entries);
 		// summary + kept from u3 (u3, c) + after (u4, d) = 5
 		expect(loaded.messages.length).toBe(5);
-		expect((loaded.messages[0] as any).summary).toContain("Second summary");
+		const summaryMessage = loaded.messages[0];
+		expect(summaryMessage.role).toBe("compactionSummary");
+		expect((summaryMessage as CompactionSummaryMessage).summary).toContain("Second summary");
 	});
 
 	it("should keep all messages when firstKeptEntryId is first entry", () => {
@@ -649,6 +652,6 @@ describe("LLM summarization", () => {
 		// Should have summary + kept messages
 		expect(reloaded.messages.length).toBeLessThan(loaded.messages.length);
 		expect(reloaded.messages[0].role).toBe("compactionSummary");
-		expect((reloaded.messages[0] as any).summary).toContain(compactionResult.summary);
+		expect((reloaded.messages[0] as CompactionSummaryMessage).summary).toContain(compactionResult.summary);
 	});
 });

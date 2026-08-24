@@ -1,4 +1,4 @@
-import { type Model, modelsAreEqual } from "@earendil-works/pi-ai";
+import { type Api, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import {
 	type Component,
 	Container,
@@ -28,11 +28,11 @@ import { shouldTreatAsBack } from "./modal-back.js";
 interface ModelItem {
 	provider: string;
 	id: string;
-	model: Model<any>;
+	model: Model<Api>;
 }
 
 interface ScopedModelItem {
-	model: Model<any>;
+	model: Model<Api>;
 	thinkingLevel?: string;
 }
 
@@ -108,7 +108,7 @@ function scoreModelSearch(item: ModelItem, query: string): ModelSearchMatch | nu
 }
 
 export interface ModelSelectorOptions {
-	availableModels?: ReadonlyArray<Model<any>>;
+	availableModels?: ReadonlyArray<Model<Api>>;
 	configuredProviders?: ReadonlySet<string>;
 	header?: Component;
 	getHeaderRows?: () => number;
@@ -158,11 +158,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private filteredModels: ModelItem[] = [];
 	private selectedIndex: number = 0;
 	private searchQuery = "";
-	private currentModel?: Model<any>;
+	private currentModel?: Model<Api>;
 	private modelRegistry: ModelRegistry;
-	private onSelectCallback: (model: Model<any>) => void;
+	private onSelectCallback: (model: Model<Api>) => void;
 	private onCancelCallback: () => void;
-	private availableModels?: ReadonlyArray<Model<any>>;
+	private availableModels?: ReadonlyArray<Model<Api>>;
 	private configuredProviders?: ReadonlySet<string>;
 	private recentRank: Map<string, number>;
 	private errorMessage?: string;
@@ -186,10 +186,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	constructor(
 		tui: TUI,
-		currentModel: Model<any> | undefined,
+		currentModel: Model<Api> | undefined,
 		modelRegistry: ModelRegistry,
 		scopedModels: ReadonlyArray<ScopedModelItem>,
-		onSelect: (model: Model<any>) => void,
+		onSelect: (model: Model<Api>) => void,
 		onCancel: () => void,
 		initialSearchInput?: string,
 		options: ModelSelectorOptions = {},
@@ -257,12 +257,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.tui.requestRender();
 	}
 
-	updateAvailableModels(availableModels: ReadonlyArray<Model<any>>): void {
+	updateAvailableModels(availableModels: ReadonlyArray<Model<Api>>): void {
 		this.updateState(this.currentModel, availableModels);
 	}
 
 	updateState(
-		currentModel: Model<any> | undefined,
+		currentModel: Model<Api> | undefined,
 		availableModels = this.availableModels,
 		configuredProviders = this.configuredProviders,
 	): void {
@@ -299,11 +299,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		}
 
 		// Load available models (built-in models still work even if models.json failed)
-		let availableModels: ReadonlyArray<Model<any>>;
+		let availableModels: ReadonlyArray<Model<Api>>;
 		try {
 			availableModels =
 				this.availableModels !== undefined ? this.availableModels : this.modelRegistry.getAvailable();
-			models = availableModels.map((model: Model<any>) => ({
+			models = availableModels.map((model: Model<Api>) => ({
 				provider: model.provider,
 				id: model.id,
 				model,
@@ -541,7 +541,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.updateList();
 	}
 
-	private handleSelect(model: Model<any>): void {
+	private handleSelect(model: Model<Api>): void {
 		this.onSelectCallback(model);
 	}
 

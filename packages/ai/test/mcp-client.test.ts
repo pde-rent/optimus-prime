@@ -7,19 +7,20 @@ afterEach(() => {
 	for (const server of servers.splice(0)) server.stop(true);
 });
 
-/**
- * Test fixtures speak raw JSON-RPC and reach into whatever the case under test sent, so this is
- * deliberately unconstrained rather than a partial shape every fixture would have to narrow.
- */
-// biome-ignore-start lint/suspicious/noExplicitAny: raw JSON-RPC fixture bodies
-type Body = any;
-// biome-ignore-end lint/suspicious/noExplicitAny: raw JSON-RPC fixture bodies
+interface Body {
+	id?: unknown;
+	method?: string;
+	params: {
+		cursor?: unknown;
+		_meta?: Record<string, string>;
+	};
+}
 
 function serve(handler: (request: Request, body: Body) => Response | Promise<Response>): string {
 	const server = Bun.serve({
 		port: 0,
 		async fetch(request) {
-			const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+			const body = (request.method === "POST" ? await request.json().catch(() => ({})) : {}) as Body;
 			return await handler(request, body);
 		},
 	});
@@ -45,7 +46,7 @@ describe("modern servers", () => {
 		const url = serve((request, body) => {
 			seen = {
 				header: request.headers.get("MCP-Protocol-Version"),
-				meta: body.params._meta["io.modelcontextprotocol/protocolVersion"],
+				meta: body.params._meta?.["io.modelcontextprotocol/protocolVersion"],
 			};
 			return rpc(body.id, { tools: [] });
 		});
@@ -59,7 +60,7 @@ describe("modern servers", () => {
 	it("retries once at a version the server actually supports", async () => {
 		const asked: string[] = [];
 		const url = serve((_request, body) => {
-			asked.push(body.params._meta["io.modelcontextprotocol/protocolVersion"]);
+			asked.push(body.params._meta?.["io.modelcontextprotocol/protocolVersion"] ?? "");
 			if (asked.length === 1) {
 				return rpcError(body.id, -32022, "Unsupported protocol version", { supported: ["2025-11-25"] });
 			}

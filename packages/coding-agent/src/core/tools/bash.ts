@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
@@ -297,7 +296,7 @@ function rebuildBashResultRenderComponent(
 	const state = component.state;
 	component.clear();
 
-	const output = getTextOutput(result as any, showImages, { includeImageDimensions }).trim();
+	const output = getTextOutput(result, showImages, { includeImageDimensions }).trim();
 
 	if (output) {
 		const styledOutput = output
@@ -542,7 +541,7 @@ export function createBashToolDefinition(
 				(context.lastComponent as BashResultRenderComponent | undefined) ?? new BashResultRenderComponent();
 			rebuildBashResultRenderComponent(
 				component,
-				result as any,
+				result,
 				options,
 				context.showImages,
 				context.includeImageDimensions,
@@ -557,6 +556,6 @@ export function createBashToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "bash" as const });
 }
 
-export function createBashTool(cwd: string, options?: BashToolOptions): AgentTool<typeof bashSchema> {
+export function createBashTool(cwd: string, options?: BashToolOptions) {
 	return wrapToolDefinition(createBashToolDefinition(cwd, options));
 }

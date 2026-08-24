@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { AssistantMessage, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -388,7 +389,7 @@ describe("SessionManager append and tree traversal", () => {
 			const entry2 = session.getEntry(id2);
 			expect(entry2).toBeDefined();
 			if (entry2?.type === "message" && entry2.message.role === "assistant") {
-				expect((entry2.message.content as any)[0].text).toBe("second");
+				expect((entry2.message.content[0] as TextContent).text).toBe("second");
 			}
 		});
 	});
@@ -408,9 +409,9 @@ describe("SessionManager append and tree traversal", () => {
 			const ctx = session.buildSessionContext();
 			expect(ctx.messages).toHaveLength(3); // msg1, msg2, msg4-branch (not msg3)
 
-			expect((ctx.messages[0] as any).content).toBe("msg1");
-			expect((ctx.messages[1] as any).content[0].text).toBe("msg2");
-			expect((ctx.messages[2] as any).content[0].text).toBe("msg4-branch");
+			expect((ctx.messages[0] as UserMessage).content).toBe("msg1");
+			expect(((ctx.messages[1] as AssistantMessage).content[0] as TextContent).text).toBe("msg2");
+			expect(((ctx.messages[2] as AssistantMessage).content[0] as TextContent).text).toBe("msg4-branch");
 		});
 	});
 });

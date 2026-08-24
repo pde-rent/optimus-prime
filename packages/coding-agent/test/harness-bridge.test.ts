@@ -11,6 +11,24 @@ import {
 } from "../src/core/refinement/index.js";
 import { cleanupTempDirs, makeTempDir } from "./test-helpers.js";
 
+interface SearchMemoryResponse {
+	top_k?: number;
+	scope?: string;
+	total_matches?: number;
+	query_terms?: string[];
+	results: { id: string; scope: string; key?: string }[];
+}
+
+interface GetMemoryResponse {
+	id?: string;
+	scope?: string;
+	title?: string;
+	content?: string;
+	content_chars?: number;
+	truncated?: boolean;
+	metadata?: Record<string, unknown>;
+}
+
 /**
  * Read a cell's result as data.
  *
@@ -37,6 +55,11 @@ function makeContext(): HarnessBridgeContext & { rebuilds: number } {
 		},
 	};
 	return ctx;
+}
+
+/** Typed view over a handler response; the bridge itself returns `Record<string, unknown>`. */
+function hostRequest<T>(type: string, payload: Record<string, unknown>, ctx: HarnessBridgeContext): T {
+	return handleHarnessHostRequest(type, payload, ctx) as T;
 }
 
 function hostHandlers(
@@ -155,7 +178,11 @@ describe("harness host handlers", () => {
 		expect(existsSync(getHarnessStatePath(ctx.localDir!))).toBe(true);
 
 		// The merged view the model reads carries both, tagged by scope.
-		const merged = handleHarnessHostRequest("harness.get_state", {}, ctx) as any;
+		const merged = hostRequest<{ entries: { memory: Record<string, { scope?: string }> } }>(
+			"harness.get_state",
+			{},
+			ctx,
+		);
 		expect(merged.entries.memory.local_fact.scope).toBe("local");
 		expect(merged.entries.memory.global_fact.scope).toBe("global");
 	});
@@ -177,8 +204,8 @@ describe("harness host handlers", () => {
 
 	it("accepts a valid skill entry and rejects malformed ones", () => {
 		const ctx = makeContext();
-		const created = handleHarnessHostRequest("harness.create_skill", { ...VALID_SKILL }, ctx);
-		expect((created as any).id).toBe("deploy_checker");
+		const created = hostRequest<{ id: string }>("harness.create_skill", { ...VALID_SKILL }, ctx);
+		expect(created.id).toBe("deploy_checker");
 
 		expect(() =>
 			handleHarnessHostRequest(
@@ -260,7 +287,7 @@ describe("harness host handlers", () => {
 		const ctx = makeContext();
 		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content: "auth uses jwt" }, ctx);
 		const topK = (payload: Record<string, unknown>) =>
-			(handleHarnessHostRequest("harness.search_memory", { query: "auth", ...payload }, ctx) as any).top_k;
+			hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "auth", ...payload }, ctx).top_k;
 
 		expect(topK({})).toBe(5);
 		expect(topK({ top_k: 0 })).toBe(1);
@@ -287,26 +314,30 @@ describe("harness host handlers", () => {
 			/scope must be "local" or "global"/,
 		);
 
-		const globalOnly = handleHarnessHostRequest("harness.search_memory", { query: "auth", global: true }, ctx) as any;
+		const globalOnly = hostRequest<SearchMemoryResponse>(
+			"harness.search_memory",
+			{ query: "auth", global: true },
+			ctx,
+		);
 		expect(globalOnly.scope).toBe("global");
 		expect(globalOnly.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_global"]);
 
-		const localOnly = handleHarnessHostRequest(
+		const localOnly = hostRequest<SearchMemoryResponse>(
 			"harness.search_memory",
 			{ query: "auth", scope: "local" },
 			ctx,
-		) as any;
+		);
 		expect(localOnly.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_local"]);
 
 		// An explicit scope wins over a disagreeing global flag.
-		const conflicting = handleHarnessHostRequest(
+		const conflicting = hostRequest<SearchMemoryResponse>(
 			"harness.search_memory",
 			{ query: "auth", scope: "local", global: true },
 			ctx,
-		) as any;
+		);
 		expect(conflicting.results.map((hit: { id: string }) => hit.id)).toEqual(["auth_local"]);
 
-		const both = handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx) as any;
+		const both = hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "auth" }, ctx);
 		expect(both.scope).toBe("all");
 		expect(both.total_matches).toBe(2);
 		expect(both.query_terms).toEqual(["auth"]);
@@ -320,19 +351,19 @@ describe("harness host handlers", () => {
 
 		// Default responses omit `key`: it is `scope:id`, so `scope` already
 		// disambiguates a collision and the model fetches with `get_memory({ id, scope })`.
-		const found = handleHarnessHostRequest("harness.search_memory", { query: "bun" }, ctx) as any;
+		const found = hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "bun" }, ctx);
 		expect(found.results).toHaveLength(2);
 		expect(found.results.every((hit: { id: string }) => hit.id === "build_cmd")).toBe(true);
 		expect(found.results.map((hit: { scope: string }) => hit.scope).sort()).toEqual(["global", "local"]);
 		expect(found.results.every((hit: { key?: string }) => hit.key === undefined)).toBe(true);
 		// Both are reachable and distinct despite sharing an id.
-		const local = handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", scope: "local" }, ctx) as any;
-		const global = handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", scope: "global" }, ctx) as any;
+		const local = hostRequest<GetMemoryResponse>("harness.get_memory", { id: "build_cmd", scope: "local" }, ctx);
+		const global = hostRequest<GetMemoryResponse>("harness.get_memory", { id: "build_cmd", scope: "global" }, ctx);
 		expect(local.scope).toBe("local");
 		expect(global.scope).toBe("global");
 
-		const verbose = handleHarnessHostRequest("harness.search_memory", { query: "bun", verbose: true }, ctx) as any;
-		const keys = verbose.results.map((hit: { key: string }) => hit.key).sort();
+		const verbose = hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "bun", verbose: true }, ctx);
+		const keys = verbose.results.map((hit) => hit.key).sort();
 		expect(keys).toEqual(["build_cmd", "local:build_cmd"]);
 		expect(new Set(keys).size).toBe(2);
 	});
@@ -345,10 +376,10 @@ describe("harness host handlers", () => {
 			ctx,
 		);
 
-		const lean = handleHarnessHostRequest("harness.search_memory", { query: "auth" }, ctx) as any;
+		const lean = hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "auth" }, ctx);
 		expect(Object.keys(lean.results[0]).sort()).toEqual(["id", "path", "scope", "score", "snippet", "title"]);
 
-		const verbose = handleHarnessHostRequest("harness.search_memory", { query: "auth", verbose: true }, ctx) as any;
+		const verbose = hostRequest<SearchMemoryResponse>("harness.search_memory", { query: "auth", verbose: true }, ctx);
 		const keys = Object.keys(verbose.results[0]);
 		for (const field of ["key", "version", "updated_at", "coverage", "matched_terms", "content_chars"]) {
 			expect(keys).toContain(field);
@@ -362,7 +393,7 @@ describe("harness host handlers", () => {
 		const content = "auth uses jwt with a 15 minute expiry and refresh on the hour";
 		handleHarnessHostRequest("harness.create_memory", { title: "Auth flow", content }, ctx);
 
-		const got = handleHarnessHostRequest("harness.get_memory", { id: "auth_flow" }, ctx) as any;
+		const got = hostRequest<GetMemoryResponse>("harness.get_memory", { id: "auth_flow" }, ctx);
 		expect(got.id).toBe("auth_flow");
 		expect(got.scope).toBe("local");
 		expect(got.content).toBe(content);
@@ -372,7 +403,7 @@ describe("harness host handlers", () => {
 		expect(got.metadata).toEqual({});
 
 		// The display-only merged prefix resolves the same entry.
-		expect((handleHarnessHostRequest("harness.get_memory", { id: "local:auth_flow" }, ctx) as any).content).toBe(
+		expect(hostRequest<GetMemoryResponse>("harness.get_memory", { id: "local:auth_flow" }, ctx).content).toBe(
 			content,
 		);
 
@@ -388,14 +419,14 @@ describe("harness host handlers", () => {
 			{ title: "Build cmd", content: "global body", global: true },
 			ctx,
 		);
-		expect((handleHarnessHostRequest("harness.get_memory", { id: "build_cmd" }, ctx) as any).scope).toBe("local");
-		expect(
-			(handleHarnessHostRequest("harness.get_memory", { id: "build_cmd", global: true }, ctx) as any).scope,
-		).toBe("global");
+		expect(hostRequest<GetMemoryResponse>("harness.get_memory", { id: "build_cmd" }, ctx).scope).toBe("local");
+		expect(hostRequest<GetMemoryResponse>("harness.get_memory", { id: "build_cmd", global: true }, ctx).scope).toBe(
+			"global",
+		);
 
 		const huge = "x".repeat(25_000);
 		handleHarnessHostRequest("harness.create_memory", { title: "Huge note", content: huge }, ctx);
-		const got = handleHarnessHostRequest("harness.get_memory", { id: "huge_note" }, ctx) as any;
+		const got = hostRequest<GetMemoryResponse>("harness.get_memory", { id: "huge_note" }, ctx);
 		expect(got.content).toHaveLength(20_000);
 		expect(got.content_chars).toBe(25_000);
 		expect(got.truncated).toBe(true);

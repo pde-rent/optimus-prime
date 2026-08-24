@@ -91,7 +91,7 @@ export class CustomEditor extends Editor {
 		if (!match) {
 			return displayText;
 		}
-		const [token, leadingWhitespace, name] = match as unknown as [string, string, string];
+		const [token, leadingWhitespace, name] = match;
 		if (!this.isArgumentCommand(name)) {
 			return displayText;
 		}

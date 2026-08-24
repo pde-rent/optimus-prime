@@ -13,7 +13,13 @@ interface CapturedRequest {
 	url: string;
 	method: string;
 	headers: Record<string, string>;
-	body: Record<string, any>;
+	body: CapturedGoogleBody;
+}
+
+interface CapturedGoogleBody {
+	tools: Array<{ functionDeclarations: Array<{ name?: string }> }>;
+	generationConfig: Record<string, unknown>;
+	[key: string]: unknown;
 }
 
 const SIGNATURE = "c2lnbmF0dXJl";

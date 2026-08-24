@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
@@ -246,6 +245,6 @@ export function createTodoToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "todo" as const });
 }
 
-export function createTodoTool(cwd: string, options?: TodoToolOptions): AgentTool<typeof todoSchema> {
+export function createTodoTool(cwd: string, options?: TodoToolOptions) {
 	return wrapToolDefinition(createTodoToolDefinition(cwd, options));
 }

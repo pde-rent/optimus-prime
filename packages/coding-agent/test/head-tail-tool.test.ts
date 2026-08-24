@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { createHeadTool, createTailTool } from "../src/core/tools/native/head-tail.js";
+import { createHeadTool, createTailTool, type WindowToolDetails } from "../src/core/tools/native/head-tail.js";
 
-function getText(result: any): string {
-	return (
-		result.content
-			?.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n") ?? ""
-	);
+function getText(result: AgentToolResult<unknown>): string {
+	return result.content
+		.filter((c): c is Extract<(typeof result.content)[number], { type: "text" }> => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
 }
 
 describe("head/tail tools", () => {
@@ -52,7 +51,7 @@ describe("head/tail tools", () => {
 		const def = createTailTool(dir);
 		const res = await def.execute("t1", { path: p, lines: 5 } as never);
 		expect(getText(res)).toBe(lines.slice(-5).join("\n"));
-		expect(res.details.readBytes).toBeLessThanOrEqual(1024 * 1024); // windowed, not whole-file
+		expect((res.details as WindowToolDetails).readBytes).toBeLessThanOrEqual(1024 * 1024); // windowed, not whole-file
 	});
 
 	it("bytes mode matches head/tail -c semantics", async () => {

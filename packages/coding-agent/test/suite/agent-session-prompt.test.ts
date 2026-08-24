@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model, Type } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import type { BashResult } from "../../src/core/bash-executor.js";
 import type { PromptTemplate } from "../../src/core/prompt-templates.js";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.js";
@@ -1931,7 +1931,7 @@ stale post-hook extension instructions`,
 	it("throws when prompting without a model", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		harness.session.agent.state.model = undefined as unknown as Model<any>;
+		delete (harness.session.agent.state as { model?: unknown }).model;
 
 		await expect(harness.session.prompt("hi")).rejects.toThrow("No model selected.");
 	});

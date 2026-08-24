@@ -2,13 +2,32 @@ import { describe, expect, it } from "bun:test";
 // @ts-expect-error - bundled skill is plain JS with JSDoc types, no .d.ts
 import createSkill from "../skills/chart/skill.js";
 
+/** The pyplot facade surface these tests exercise; the bundled skill itself is plain JS. */
+interface ChartPlt {
+	show(): string;
+	[method: string]: (...args: unknown[]) => unknown;
+}
+
+/** The callable chart function plus its pyplot facade. */
+interface Chart {
+	(data: number[], opts?: Record<string, unknown>): string;
+	bar(data: number[], opts?: Record<string, unknown>): string;
+	spark(data: number[]): string;
+	line(
+		data: number[] | readonly (number[] | { name: string; data: number[] })[],
+		opts?: Record<string, unknown>,
+	): string;
+	plt: ChartPlt;
+	pyplot: ChartPlt;
+}
+
 /** A fresh skill instance per test: the pyplot figure is per-instance state. */
-function makeChart(): any {
+function makeChart(): Chart {
 	return createSkill({ cwd: process.cwd(), env: process.env, display: () => {}, hostRequest: async () => ({}) });
 }
 
 /** The pyplot surface, plus a `render` that always yields a plain string. */
-function makePlt(): { plt: any; render: () => string } {
+function makePlt(): { plt: ChartPlt; render: () => string } {
 	const plt = makeChart().plt;
 	return { plt, render: () => String(plt.show()) };
 }
@@ -471,7 +490,7 @@ describe("legend with more series than the renderer can distinguish", () => {
 	];
 
 	/** Ten series of eight points, as percent change from the first day — the transcript's shape. */
-	function tenSeries(plt: any, opts?: Record<string, unknown>) {
+	function tenSeries(plt: ChartPlt, opts?: Record<string, unknown>) {
 		if (opts) plt.figure(opts);
 		for (const [i, name] of CHAINS.entries()) {
 			const base = 100 + i * 30;

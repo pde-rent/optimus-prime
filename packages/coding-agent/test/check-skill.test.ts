@@ -24,7 +24,7 @@ describe("check.detect", () => {
 		const nested = join(root, "packages", "thing");
 		mkdirSync(nested, { recursive: true });
 
-		const check = createSkill({ cwd: nested }) as any;
+		const check = createSkill({ cwd: nested });
 		const detected = await check.detect();
 		expect(detected).toHaveLength(1);
 		expect(detected[0].name).toBe("typescript");
@@ -33,7 +33,7 @@ describe("check.detect", () => {
 
 	it("reports nothing for a directory with no recognised project", async () => {
 		const empty = mkdtempSync(join(tmpdir(), "check-empty-"));
-		const check = createSkill({ cwd: empty }) as any;
+		const check = createSkill({ cwd: empty });
 		expect(await check.detect()).toEqual([]);
 		const result = await check();
 		expect(result.ok).toBe(true);
@@ -44,7 +44,7 @@ describe("check.detect", () => {
 describe("check", () => {
 	it("passes when the project's checker exits zero", async () => {
 		const root = makeProject("Cargo.toml", "cargo", "exit 0");
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const result = await check();
 		expect(result.ok).toBe(true);
 		expect(result.results[0].checker).toBe("rust");
@@ -53,7 +53,7 @@ describe("check", () => {
 
 	it("fails and reports the checker's own output", async () => {
 		const root = makeProject("Cargo.toml", "cargo", 'echo "src/x.rs:3:1 error: mismatched types" >&2; exit 1');
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const result = await check();
 		expect(result.ok).toBe(false);
 		expect(result.results[0].output).toContain("mismatched types");
@@ -63,7 +63,7 @@ describe("check", () => {
 		// Deliberately no ledger: several agents can share a working tree, so hiding a
 		// previously-reported error would show a clean result on a broken project.
 		const root = makeProject("Cargo.toml", "cargo", 'echo "pre-existing error" >&2; exit 1');
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const first = await check();
 		const second = await check();
 		expect(second.ok).toBe(false);
@@ -76,7 +76,7 @@ describe("check", () => {
 		// checker ran, or it reported itself skipped, and neither is a failure.
 		const root = mkdtempSync(join(tmpdir(), "check-nobin-"));
 		writeFileSync(join(root, "go.mod"), "module x\n");
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const [result] = (await check("go")).results;
 		if (result.skipped) {
 			expect(result.skipped).toContain("no go");
@@ -89,7 +89,7 @@ describe("check", () => {
 	it("selects a single checker by name", async () => {
 		const root = makeProject("Cargo.toml", "cargo", "exit 0");
 		writeFileSync(join(root, "go.mod"), "module x\n");
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		expect((await check("rust")).results).toHaveLength(1);
 		expect((await check()).results).toHaveLength(2);
 	});
@@ -98,14 +98,14 @@ describe("check", () => {
 		// Two cells asking the same question must not run `cargo check` twice and
 		// contend on its target lock.
 		const root = makeProject("Cargo.toml", "cargo", 'echo run >> "$0.runs"; exit 0');
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const [a, b] = await Promise.all([check(), check()]);
 		expect(a.results[0]).toBe(b.results[0]);
 	});
 
 	it("bounds a long report and says how much it dropped", async () => {
 		const root = makeProject("Cargo.toml", "cargo", 'for i in $(seq 1 400); do echo "line $i"; done; exit 1');
-		const check = createSkill({ cwd: root }) as any;
+		const check = createSkill({ cwd: root });
 		const result = await check();
 		expect(result.results[0].droppedLines).toBeGreaterThan(0);
 		expect(result.results[0].output).toContain("lines omitted");

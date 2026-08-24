@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { NetAuthError, NetError } from "../../net/core.js";
@@ -158,6 +157,6 @@ export function createMailToolDefinition(cwd: string): ToolDefinition<typeof mai
 	return definition;
 }
 
-export function createMailTool(cwd: string): AgentTool<typeof mailSchema> {
+export function createMailTool(cwd: string) {
 	return wrapToolDefinition(createMailToolDefinition(cwd));
 }

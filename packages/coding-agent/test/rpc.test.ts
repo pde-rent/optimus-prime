@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import { ENV_AGENT_DIR } from "../src/config.js";
 import { DaemonClient } from "../src/modes/daemon/daemon-client.js";
 import { RpcClient } from "../src/modes/rpc/rpc-client.js";
@@ -198,11 +199,13 @@ describe("RPC mode", () => {
 		const messageEndEvents = events.filter((e) => e.type === "message_end") as AgentEvent[];
 		const assistantMessage = messageEndEvents.find(
 			(e) => e.type === "message_end" && e.message?.role === "assistant",
-		) as any;
+		);
 
 		expect(assistantMessage).toBeDefined();
 
-		const textContent = assistantMessage.message.content.find((c: any) => c.type === "text");
+		const textContent = (assistantMessage as { message: AssistantMessage }).message.content.find(
+			(c): c is TextContent => c.type === "text",
+		);
 		expect(textContent?.text).toContain(uniqueValue);
 	}, 90000);
 

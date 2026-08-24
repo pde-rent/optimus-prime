@@ -18,8 +18,10 @@
 
 import { createConnection } from "node:net";
 import { basename } from "node:path";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { isTruthyEnvVar } from "../../../utils/shared.js";
-import type { ExtensionAPI, ExtensionFactory } from "../types.js";
+import type { AgentEndEvent, ExtensionAPI, ExtensionContext, ExtensionFactory } from "../types.js";
 
 type AgentState = "working" | "blocked" | "idle";
 
@@ -61,9 +63,9 @@ function parseDurationEnv(name: string, fallback: number): number {
 	return parsed;
 }
 
-function lastAssistantMessage(messages: unknown[]): any | undefined {
+function lastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | undefined {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const message = messages[i] as any;
+		const message = messages[i];
 		if (message?.role === "assistant") {
 			return message;
 		}
@@ -81,8 +83,8 @@ function lastAssistantMessage(messages: unknown[]): any | undefined {
  * window: if a retry starts, agent_start keeps the pane working; if none
  * does, the hold settles to blocked with the error message.
  */
-function errorHoldMessage(event: any): string | undefined {
-	const messages = Array.isArray(event?.messages) ? event.messages : [];
+function errorHoldMessage(event: AgentEndEvent): string | undefined {
+	const messages = Array.isArray(event.messages) ? event.messages : [];
 	const assistant = lastAssistantMessage(messages);
 	if (assistant?.stopReason !== "error") {
 		return undefined;
@@ -182,23 +184,23 @@ function herdrAgentStateExtensionImpl(pi: ExtensionAPI, getLoadedExtensionPaths:
 		});
 	}
 
-	function isBoundSession(ctx: any): boolean {
+	function isBoundSession(ctx: ExtensionContext): boolean {
 		if (boundSessionManager === undefined) {
 			return true;
 		}
-		return ctx?.sessionManager === boundSessionManager;
+		return ctx.sessionManager === boundSessionManager;
 	}
 
-	function updateSessionRef(ctx: any): void {
+	function updateSessionRef(ctx: ExtensionContext): void {
 		try {
-			const file = ctx?.sessionManager?.getSessionFile?.();
+			const file = ctx.sessionManager.getSessionFile();
 			currentAgentSessionPath = typeof file === "string" && file.startsWith("/") ? file : undefined;
 		} catch {
 			currentAgentSessionPath = undefined;
 		}
 
 		try {
-			const id = ctx?.sessionManager?.getSessionId?.();
+			const id = ctx.sessionManager.getSessionId();
 			currentAgentSessionId = typeof id === "string" && id.length > 0 ? id : undefined;
 		} catch {
 			currentAgentSessionId = undefined;
@@ -372,7 +374,8 @@ function herdrAgentStateExtensionImpl(pi: ExtensionAPI, getLoadedExtensionPaths:
 		publishState(true);
 	});
 
-	const unsubscribeBlocked = pi.events.on("herdr:blocked", (data: any) => {
+	const unsubscribeBlocked = pi.events.on("herdr:blocked", (raw: unknown) => {
+		const data = raw as { active?: unknown; label?: unknown };
 		if (!data?.active) {
 			blockedCount = Math.max(0, blockedCount - 1);
 			if (blockedCount === 0) {
@@ -391,7 +394,7 @@ function herdrAgentStateExtensionImpl(pi: ExtensionAPI, getLoadedExtensionPaths:
 			failureBlocked = true;
 		}
 		blockedCount += 1;
-		blockedMessage = data.label;
+		blockedMessage = typeof data.label === "string" ? data.label : undefined;
 		publishState();
 	});
 

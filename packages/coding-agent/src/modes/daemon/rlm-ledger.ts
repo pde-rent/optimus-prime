@@ -241,7 +241,7 @@ function parseLedgerLine(line: string, index: number): RlmLedgerRecord | RlmLedg
 			if (typeof record.sessionsDir !== "string") {
 				throw new Error(`Malformed RLM ledger line ${index + 1}: meta without sessionsDir`);
 			}
-			return record as unknown as RlmLedgerMetaRecord;
+			return { v: 1, op: "meta", at: record.at, sessionsDir: record.sessionsDir };
 		case "spawn":
 			if (
 				typeof record.childId !== "string" ||
@@ -254,7 +254,16 @@ function parseLedgerLine(line: string, index: number): RlmLedgerRecord | RlmLedg
 			) {
 				throw new Error(`Malformed RLM ledger line ${index + 1}: invalid spawn record`);
 			}
-			return record as unknown as RlmLedgerSpawnRecord;
+			return {
+				v: 1,
+				op: "spawn",
+				at: record.at,
+				childId: record.childId,
+				parent: record.parent,
+				child: record.child,
+				depth: record.depth,
+				name: record.name,
+			};
 		case "rename":
 			if (
 				typeof record.childId !== "string" ||
@@ -263,12 +272,19 @@ function parseLedgerLine(line: string, index: number): RlmLedgerRecord | RlmLedg
 			) {
 				throw new Error(`Malformed RLM ledger line ${index + 1}: invalid rename record`);
 			}
-			return record as unknown as RlmLedgerRenameRecord;
+			return { v: 1, op: "rename", at: record.at, childId: record.childId, child: record.child, name: record.name };
 		case "delete":
 			if (typeof record.childId !== "string" || typeof record.child !== "string" || !isDeleteReason(record.reason)) {
 				throw new Error(`Malformed RLM ledger line ${index + 1}: invalid delete record`);
 			}
-			return record as unknown as RlmLedgerDeleteRecord;
+			return {
+				v: 1,
+				op: "delete",
+				at: record.at,
+				childId: record.childId,
+				child: record.child,
+				reason: record.reason,
+			};
 		default:
 			return undefined;
 	}

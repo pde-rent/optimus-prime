@@ -619,7 +619,7 @@ export class BunReplManager {
 		this._sendToChild(response);
 	}
 
-	private _sendToChild(msg: BunReplHostResponse | Record<string, unknown>): void {
+	private _sendToChild(msg: BunReplHostToRepl): void {
 		if (!this._child?.stdin?.writable) return;
 		this._child.stdin.write(`${JSON.stringify(msg)}\n`);
 	}
@@ -647,7 +647,7 @@ export class BunReplManager {
 					reject(error);
 				},
 			});
-			this._sendToChild(msg as unknown as Record<string, unknown>);
+			this._sendToChild(msg);
 		});
 	}
 
@@ -766,7 +766,7 @@ export class BunReplManager {
 					shellPath: this._options.shellPath,
 					commandPrefix: this._options.commandPrefix,
 				};
-				this._sendToChild(req as unknown as Record<string, unknown>);
+				this._sendToChild(req);
 
 				const resultMsg = await resultPromise;
 				settled = true;

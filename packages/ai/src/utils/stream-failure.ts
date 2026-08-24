@@ -254,7 +254,7 @@ export function failAssistantStream(
 ): void {
 	for (const block of output.content) {
 		for (const key of options.scratchKeys ?? []) {
-			delete (block as unknown as Record<string, unknown>)[key];
+			Reflect.deleteProperty(block, key);
 		}
 	}
 	output.stopReason = options.aborted ? "aborted" : "error";

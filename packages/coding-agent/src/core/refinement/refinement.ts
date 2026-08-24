@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../config.js";
 import { writeJsonAtomically } from "../../utils/shared.js";
@@ -199,11 +199,11 @@ const AUTO_REFINE_REVIEW_MAX_OUTPUT_TOKENS = 4_096;
 const TRUNCATED_JSON_ERROR =
 	"the model stopped before completing its JSON object. This usually means the output budget was exhausted; retry with a smaller request.";
 
-function refinementMaxOutputTokens(model: Model<any>): number {
+function refinementMaxOutputTokens(model: Model<Api>): number {
 	return Math.min(model.maxTokens, REFINEMENT_MAX_OUTPUT_TOKENS);
 }
 
-function autoRefineReviewMaxOutputTokens(model: Model<any>): number {
+function autoRefineReviewMaxOutputTokens(model: Model<Api>): number {
 	return Math.min(model.maxTokens, AUTO_REFINE_REVIEW_MAX_OUTPUT_TOKENS);
 }
 
@@ -391,7 +391,7 @@ export function loadHarnessState(
 				// the session with it. Coerce rather than drop: skipping the entry is the
 				// same data loss as a corrupt file, only quieter.
 				state.entries[kind][id] = {
-					...(entry as unknown as HarnessEntry),
+					...entry,
 					id: typeof entry.id === "string" ? entry.id : id,
 					kind,
 					title: typeof entry.title === "string" ? entry.title : id,
@@ -1067,7 +1067,7 @@ export async function planRefinement(
 	messages: AgentMessage[],
 	state: HarnessState,
 	history: RefinementResult[],
-	model: Model<any>,
+	model: Model<Api>,
 	apiKey: string,
 	options: RefineOptions = {},
 	headers?: Record<string, string>,
@@ -1153,7 +1153,7 @@ export async function reviewAutoRefine(
 	messages: AgentMessage[],
 	state: HarnessState,
 	history: RefinementResult[],
-	model: Model<any>,
+	model: Model<Api>,
 	apiKey: string,
 	context: AutoRefineReviewContext,
 	headers?: Record<string, string>,
@@ -1204,7 +1204,7 @@ export async function refineHarness(
 	messages: AgentMessage[],
 	state: HarnessState,
 	history: RefinementResult[],
-	model: Model<any>,
+	model: Model<Api>,
 	apiKey: string,
 	options: RefineOptions = {},
 	headers?: Record<string, string>,

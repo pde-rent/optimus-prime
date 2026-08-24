@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
+import type { OpenAICompletionsOptions } from "../src/providers/openai-completions.js";
 import { streamSimple } from "../src/stream.js";
 import type { Tool } from "../src/types.js";
 import { completionsStopChunk, mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
@@ -49,7 +50,7 @@ describe("openai-completions tool_choice", () => {
 				onPayload: (params: unknown) => {
 					payload = params;
 				},
-			} as unknown as Parameters<typeof streamSimple>[2],
+			} as OpenAICompletionsOptions,
 		).result();
 
 		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_choice?: string; tools?: unknown[] };
@@ -93,7 +94,7 @@ describe("openai-completions tool_choice", () => {
 				onPayload: (params: unknown) => {
 					payload = params;
 				},
-			} as unknown as Parameters<typeof streamSimple>[2],
+			},
 		).result();
 
 		const params = (payload ?? fetchMock.requests.at(-1)?.body) as {

@@ -280,7 +280,7 @@ describe("Agent", () => {
 		agent.state.thinkingLevel = "high";
 		expect(agent.state.thinkingLevel).toBe("high");
 
-		const tools = [{ name: "test", description: "test tool" } as any];
+		const tools = [{ name: "test", description: "test tool" } as AgentTool];
 		agent.state.tools = tools;
 		expect(agent.state.tools).toEqual(tools);
 		expect(agent.state.tools).not.toBe(tools); // Should be a copy
@@ -291,7 +291,7 @@ describe("Agent", () => {
 		expect(agent.state.messages).not.toBe(messages); // Should be a copy
 
 		const newMessage = { role: "assistant" as const, content: [{ type: "text" as const, text: "Hi" }] };
-		agent.state.messages.push(newMessage as any);
+		agent.state.messages.push(newMessage as AgentMessage);
 		expect(agent.state.messages).toHaveLength(2);
 		expect(agent.state.messages[1]).toBe(newMessage);
 

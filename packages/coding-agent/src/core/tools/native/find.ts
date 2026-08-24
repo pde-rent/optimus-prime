@@ -1,5 +1,4 @@
 import { type Stats, statSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import type { ToolDefinition } from "../../extensions/types.js";
@@ -196,9 +195,6 @@ export function createFindToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "find" as const });
 }
 
-export function createFindTool(
-	cwd: string,
-	options?: { maxLines?: number; maxBytes?: number },
-): AgentTool<typeof findSchema> {
+export function createFindTool(cwd: string, options?: { maxLines?: number; maxBytes?: number }) {
 	return wrapToolDefinition(createFindToolDefinition(cwd, options));
 }

@@ -639,7 +639,7 @@ async function parseEntriesFromBufferAsync(buffer: Buffer): Promise<FileEntry[]>
 function finalizeLoadedEntries(entries: FileEntry[]): FileEntry[] {
 	if (entries.length === 0) return entries;
 	const header = entries[0];
-	if (header.type !== "session" || typeof (header as any).id !== "string") {
+	if (header.type !== "session" || typeof header.id !== "string") {
 		return [];
 	}
 	applyChildUsageAttributions(entries);

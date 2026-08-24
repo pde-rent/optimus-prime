@@ -501,6 +501,22 @@ export function formatAgentDepthLabel(depth: number | undefined, hasChildren: bo
 	return `depth ${depth}`;
 }
 
+/**
+ * Duck-typed surface of editors that extend CustomEditor. `instanceof` is
+ * unreliable across extension module boundaries, so the shared handlers are
+ * copied over structurally.
+ */
+interface CustomEditorLikeHandlers {
+	actionHandlers?: Map<AppKeybinding, () => void>;
+	onEscape?: () => void;
+	onCtrlD?: () => void;
+	onPasteImage?: () => void;
+	onPasteText?: (text: string) => boolean;
+	onMoveBelowPrompt?: () => boolean | undefined;
+	onAgentsBack?: () => boolean | undefined;
+	onExtensionShortcut?: (data: string) => boolean | undefined;
+}
+
 export class InteractiveMode {
 	private static readonly EXIT_HINT_DURATION_MS = 2000;
 	private static readonly ESCAPE_REPEAT_WINDOW_MS = 500;
@@ -3251,10 +3267,10 @@ export class InteractiveMode {
 				newEditor.setAutocompleteProvider(this.autocompleteProvider);
 			}
 
-			// If extending CustomEditor, copy app-level handlers
-			// Use duck typing since instanceof fails across extension module boundaries
-			const customEditor = newEditor as unknown as Record<string, unknown>;
-			if ("actionHandlers" in customEditor && customEditor.actionHandlers instanceof Map) {
+			// If extending CustomEditor, copy app-level handlers. Duck typing:
+			// instanceof fails across extension module boundaries.
+			const customEditor = "actionHandlers" in newEditor ? (newEditor as CustomEditorLikeHandlers) : undefined;
+			if (customEditor?.actionHandlers instanceof Map) {
 				if (!customEditor.onEscape) {
 					customEditor.onEscape = () => this.defaultEditor.onEscape?.();
 				}
@@ -3278,7 +3294,7 @@ export class InteractiveMode {
 				}
 				// Copy action handlers (clear, suspend, model switching, etc.)
 				for (const [action, handler] of this.defaultEditor.actionHandlers) {
-					(customEditor.actionHandlers as Map<string, () => void>).set(action, handler);
+					customEditor.actionHandlers.set(action, handler);
 				}
 			}
 
@@ -7384,7 +7400,7 @@ export class InteractiveMode {
 	}
 
 	private async maybeWarnAboutAnthropicSubscriptionAuth(
-		model: Model<any> | undefined = this.getCurrentModel(),
+		model: Model<Api> | undefined = this.getCurrentModel(),
 	): Promise<void> {
 		if (this.settingsManager.getWarnings().anthropicExtraUsage === false) {
 			return;

@@ -2,7 +2,6 @@ import { Resolver } from "node:dns";
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
@@ -399,7 +398,8 @@ async function runResolve(
 			return String(record);
 		});
 	} finally {
-		(resolver as unknown as { close: () => void }).close();
+		const close = Reflect.get(resolver, "close") as (() => void) | undefined;
+		close?.();
 	}
 }
 
@@ -551,6 +551,6 @@ function fmtNum(value: number | null): string {
 	return value === null ? "-" : String(value);
 }
 
-export function createNetdiagTool(cwd: string): AgentTool<typeof netdiagSchema> {
+export function createNetdiagTool(cwd: string) {
 	return wrapToolDefinition(createNetdiagToolDefinition(cwd));
 }

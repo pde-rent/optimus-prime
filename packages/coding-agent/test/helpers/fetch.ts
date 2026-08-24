@@ -15,16 +15,19 @@ export function stubRawFetch(
 	return calls;
 }
 
+/** Parsed JSON request body. Bodies may be arrays or objects at any depth. */
+type JsonBody = JsonBody[] & { [key: string]: JsonBody };
+
 /**
  * Replace globalThis.fetch with a stub whose handler receives (url, parsedJsonBody, init).
  * JSON body parsing matches what JSON-RPC style callers post. Returns recorded calls.
  */
 export function stubJsonFetch(
-	handler: (url: string, body: any, init?: RequestInit) => unknown,
-): { url: string; body: any; init?: RequestInit }[] {
-	const calls: { url: string; body: any; init?: RequestInit }[] = [];
+	handler: (url: string, body: JsonBody, init?: RequestInit) => unknown,
+): { url: string; body: JsonBody; init?: RequestInit }[] {
+	const calls: { url: string; body: JsonBody; init?: RequestInit }[] = [];
 	globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-		const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+		const body = (init?.body ? JSON.parse(String(init.body)) : undefined) as JsonBody;
 		calls.push({ url: String(url), body, init });
 		return handler(String(url), body, init);
 	}) as unknown as typeof fetch;

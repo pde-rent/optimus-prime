@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import type { AssistantMessage, TextContent, UserMessage } from "@earendil-works/pi-ai";
+import type { BranchSummaryMessage, CompactionSummaryMessage } from "../../src/core/messages.js";
 import {
 	type BranchSummaryEntry,
 	buildSessionContext,
@@ -148,11 +150,11 @@ describe("buildSessionContext", () => {
 			const ctx = buildSessionContext(entries);
 
 			expect(ctx.messages).toHaveLength(5);
-			expect((ctx.messages[0] as any).summary).toContain("Summary of first two turns");
-			expect((ctx.messages[1] as any).content).toBe("second");
-			expect((ctx.messages[2] as any).content[0].text).toBe("response2");
-			expect((ctx.messages[3] as any).content).toBe("third");
-			expect((ctx.messages[4] as any).content[0].text).toBe("response3");
+			expect((ctx.messages[0] as CompactionSummaryMessage).summary).toContain("Summary of first two turns");
+			expect((ctx.messages[1] as UserMessage).content).toBe("second");
+			expect(((ctx.messages[2] as AssistantMessage).content[0] as TextContent).text).toBe("response2");
+			expect((ctx.messages[3] as UserMessage).content).toBe("third");
+			expect(((ctx.messages[4] as AssistantMessage).content[0] as TextContent).text).toBe("response3");
 		});
 
 		it("handles compaction keeping from first message", () => {
@@ -165,7 +167,7 @@ describe("buildSessionContext", () => {
 			const ctx = buildSessionContext(entries);
 
 			expect(ctx.messages).toHaveLength(4);
-			expect((ctx.messages[0] as any).summary).toContain("Empty summary");
+			expect((ctx.messages[0] as CompactionSummaryMessage).summary).toContain("Empty summary");
 		});
 
 		it("carries customInstructions onto the summary message", () => {
@@ -177,8 +179,8 @@ describe("buildSessionContext", () => {
 			];
 			const ctx = buildSessionContext(entries);
 
-			expect((ctx.messages[0] as any).summary).toContain("Summary");
-			expect((ctx.messages[0] as any).customInstructions).toBe("focus on the auth refactor");
+			expect((ctx.messages[0] as CompactionSummaryMessage).summary).toContain("Summary");
+			expect((ctx.messages[0] as CompactionSummaryMessage).customInstructions).toBe("focus on the auth refactor");
 		});
 
 		it("multiple compactions uses latest", () => {
@@ -194,7 +196,7 @@ describe("buildSessionContext", () => {
 			const ctx = buildSessionContext(entries);
 
 			expect(ctx.messages).toHaveLength(4);
-			expect((ctx.messages[0] as any).summary).toContain("Second summary");
+			expect((ctx.messages[0] as CompactionSummaryMessage).summary).toContain("Second summary");
 		});
 	});
 
@@ -209,11 +211,11 @@ describe("buildSessionContext", () => {
 
 			const ctxA = buildSessionContext(entries, "3");
 			expect(ctxA.messages).toHaveLength(3);
-			expect((ctxA.messages[2] as any).content).toBe("branch A");
+			expect((ctxA.messages[2] as UserMessage).content).toBe("branch A");
 
 			const ctxB = buildSessionContext(entries, "4");
 			expect(ctxB.messages).toHaveLength(3);
-			expect((ctxB.messages[2] as any).content).toBe("branch B");
+			expect((ctxB.messages[2] as UserMessage).content).toBe("branch B");
 		});
 
 		it("includes branch summary in path", () => {
@@ -227,8 +229,8 @@ describe("buildSessionContext", () => {
 			const ctx = buildSessionContext(entries, "5");
 
 			expect(ctx.messages).toHaveLength(4);
-			expect((ctx.messages[2] as any).summary).toContain("Summary of abandoned work");
-			expect((ctx.messages[3] as any).content).toBe("new direction");
+			expect((ctx.messages[2] as BranchSummaryMessage).summary).toContain("Summary of abandoned work");
+			expect((ctx.messages[3] as UserMessage).content).toBe("new direction");
 		});
 
 		it("complex tree with multiple branches and compaction", () => {
@@ -248,19 +250,19 @@ describe("buildSessionContext", () => {
 
 			const ctxMain = buildSessionContext(entries, "7");
 			expect(ctxMain.messages).toHaveLength(5);
-			expect((ctxMain.messages[0] as any).summary).toContain("Compacted history");
-			expect((ctxMain.messages[1] as any).content).toBe("q2");
-			expect((ctxMain.messages[2] as any).content[0].text).toBe("r2");
-			expect((ctxMain.messages[3] as any).content).toBe("q3");
-			expect((ctxMain.messages[4] as any).content[0].text).toBe("r3");
+			expect((ctxMain.messages[0] as CompactionSummaryMessage).summary).toContain("Compacted history");
+			expect((ctxMain.messages[1] as UserMessage).content).toBe("q2");
+			expect(((ctxMain.messages[2] as AssistantMessage).content[0] as TextContent).text).toBe("r2");
+			expect((ctxMain.messages[3] as UserMessage).content).toBe("q3");
+			expect(((ctxMain.messages[4] as AssistantMessage).content[0] as TextContent).text).toBe("r3");
 
 			const ctxBranch = buildSessionContext(entries, "11");
 			expect(ctxBranch.messages).toHaveLength(5);
-			expect((ctxBranch.messages[0] as any).content).toBe("start");
-			expect((ctxBranch.messages[1] as any).content[0].text).toBe("r1");
-			expect((ctxBranch.messages[2] as any).content).toBe("q2");
-			expect((ctxBranch.messages[3] as any).summary).toContain("Tried wrong approach");
-			expect((ctxBranch.messages[4] as any).content).toBe("better approach");
+			expect((ctxBranch.messages[0] as UserMessage).content).toBe("start");
+			expect(((ctxBranch.messages[1] as AssistantMessage).content[0] as TextContent).text).toBe("r1");
+			expect((ctxBranch.messages[2] as UserMessage).content).toBe("q2");
+			expect((ctxBranch.messages[3] as BranchSummaryMessage).summary).toContain("Tried wrong approach");
+			expect((ctxBranch.messages[4] as UserMessage).content).toBe("better approach");
 		});
 	});
 

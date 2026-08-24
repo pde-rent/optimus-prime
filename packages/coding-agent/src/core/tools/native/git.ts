@@ -1,5 +1,4 @@
 import { isAbsolute, relative } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { checkout, createBranch, deleteBranch, listBranches, listTags } from "../../git/branch.js";
@@ -811,6 +810,6 @@ export function createGitToolDefinition(cwd: string): ToolDefinition<typeof gitS
 	return Object.assign(definition, { replayBuiltInToolName: undefined });
 }
 
-export function createGitTool(cwd: string): AgentTool<typeof gitSchema> {
+export function createGitTool(cwd: string) {
 	return wrapToolDefinition(createGitToolDefinition(cwd));
 }

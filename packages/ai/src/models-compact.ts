@@ -109,7 +109,7 @@ export function expandModels<const D extends Readonly<Record<string, ProviderRec
 			const headers = o?.h;
 			const compat = o == null ? pdata.compat : "c" in o ? o.c : pdata.compat;
 			const thinkingLevelMap = o?.t;
-			const input = inputFlag === 1 ? ["text", "image"] : ["text"];
+			const input: ("text" | "image")[] = inputFlag === 1 ? ["text", "image"] : ["text"];
 			const costFull = {
 				input: cost?.[0] ?? 0,
 				output: cost?.[1] ?? 0,
@@ -117,7 +117,7 @@ export function expandModels<const D extends Readonly<Record<string, ProviderRec
 				cacheWrite: cost?.[3] ?? 0,
 			};
 			// Property order mirrors the field order of the previous literal-based generated file.
-			const model = { id, name, api, provider: providerId } as Record<string, unknown>;
+			const model: Partial<Model<Api>> = { id, name, api, provider: providerId };
 			if (baseUrl !== undefined) {
 				model.baseUrl = baseUrl;
 			}
@@ -125,11 +125,11 @@ export function expandModels<const D extends Readonly<Record<string, ProviderRec
 				model.headers = headers;
 			}
 			if (compat !== undefined) {
-				model.compat = compat;
+				model.compat = compat as Model<Api>["compat"];
 			}
 			model.reasoning = reasoning;
 			if (thinkingLevelMap) {
-				model.thinkingLevelMap = thinkingLevelMap;
+				model.thinkingLevelMap = thinkingLevelMap as ThinkingLevelMap;
 			}
 			model.input = input;
 			model.cost = costFull;
@@ -138,7 +138,7 @@ export function expandModels<const D extends Readonly<Record<string, ProviderRec
 			if (o?.f) {
 				model.featured = true;
 			}
-			models[id] = model as unknown as Model<Api>;
+			models[id] = model as Model<Api>;
 		}
 		providers[providerId] = models;
 	}

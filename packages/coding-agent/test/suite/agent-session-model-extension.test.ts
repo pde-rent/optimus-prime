@@ -617,9 +617,9 @@ describe("AgentSession model and extension characterization", () => {
 		await harness.session.prompt("hi");
 
 		expect(getAssistantTexts(harness)).toContain("patched result");
-		expect(
-			harness.session.messages.find((message) => message.role === "toolResult" && message.details?.patched === true),
-		).toBeDefined();
+		const toolResultMessage = harness.session.messages.find((message) => message.role === "toolResult");
+		const details = toolResultMessage?.details as { patched?: boolean } | undefined;
+		expect(details?.patched).toBe(true);
 	});
 
 	it("allows extension context handlers to modify messages before the LLM call", async () => {

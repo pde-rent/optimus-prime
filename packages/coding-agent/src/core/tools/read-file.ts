@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
@@ -445,6 +444,6 @@ export function createReadFileToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "read_file" as const });
 }
 
-export function createReadFileTool(cwd: string, options?: ReadFileToolOptions): AgentTool<typeof readFileSchema> {
+export function createReadFileTool(cwd: string, options?: ReadFileToolOptions) {
 	return wrapToolDefinition(createReadFileToolDefinition(cwd, options));
 }

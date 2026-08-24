@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "@earendil-works/pi-ai";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
@@ -156,6 +155,6 @@ export function createBunReplToolDefinition(
 	};
 }
 
-export function createBunReplTool(options?: BunReplToolOptions): AgentTool<typeof bunReplSchema> {
+export function createBunReplTool(options?: BunReplToolOptions) {
 	return wrapToolDefinition(createBunReplToolDefinition(options ?? {}));
 }

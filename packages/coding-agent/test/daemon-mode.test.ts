@@ -22,6 +22,7 @@ import {
 	sessionNameReservationKey,
 } from "../src/core/agent-messages.js";
 import type { AgentObserveController } from "../src/core/agent-observe.js";
+import type { AgentSession } from "../src/core/agent-session.js";
 import type { CreateAgentSessionRuntimeFactory } from "../src/core/agent-session-runtime.js";
 import type { AgentCronJob, AgentCronJobStore } from "../src/core/cron-jobs.js";
 import {
@@ -558,7 +559,7 @@ describe("daemon mode helpers", () => {
 
 		const controller = internals.createAgentMessageController(() => parentState);
 		const subagentSummary = (await controller.listAgents()).agents.find(
-			(agent: any) => agent.activeSessionId === subagentState.activeSessionId,
+			(agent: { activeSessionId: string }) => agent.activeSessionId === subagentState.activeSessionId,
 		);
 		expect(subagentSummary).toMatchObject({
 			sessionName: defaultSubagentName,
@@ -721,12 +722,14 @@ describe("daemon mode helpers", () => {
 				daemon as unknown as { closeSession(state: ActiveSessionState, reason: "shutdown"): Promise<void> }
 			).closeSession(childState, "shutdown");
 
-			expect((await internals.listPassiveRlmSubagents()).map(({ entry }: any) => entry.childId)).toContain(
-				"child-1",
-			);
+			expect(
+				(await internals.listPassiveRlmSubagents()).map(
+					({ entry }: { entry: { childId: string } }) => entry.childId,
+				),
+			).toContain("child-1");
 			expect((await internals.findPassiveRlmSubagent("real-worker"))?.entry.childId).toBe("child-1");
 			const roster = await internals.createAgentMessageController(() => parentState).roster?.();
-			const passiveRosterEntry = roster?.entries.find((entry: any) => entry.name === "real-worker");
+			const passiveRosterEntry = roster?.entries.find((entry: { name?: string }) => entry.name === "real-worker");
 			expect(passiveRosterEntry).toMatchObject({ relationship: "child", status: "inactive" });
 			expect(passiveRosterEntry).not.toHaveProperty("repliedSinceTask");
 			const listed = await internals.buildSessionListWithPassiveRlmSubagents(
@@ -769,9 +772,11 @@ describe("daemon mode helpers", () => {
 			};
 			const parentState = await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
 
-			expect((await internals.listPassiveRlmSubagents()).map(({ entry }) => entry.childId)).toContain(
-				fixture.childId,
-			);
+			expect(
+				(await internals.listPassiveRlmSubagents()).map(
+					({ entry }: { entry: { childId: string } }) => entry.childId,
+				),
+			).toContain(fixture.childId);
 			await expect(internals.createAgentMessageController(() => parentState).roster?.()).resolves.toMatchObject({
 				entries: [expect.objectContaining({ relationship: "child", name: "renamed-worker" })],
 			});
@@ -924,7 +929,7 @@ describe("daemon mode helpers", () => {
 
 			expect(await internals.cronScheduler.runDue(new Date("2026-07-16T00:00:00.000Z"))).toBe(0);
 			expect(promptHeartbeat).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				runCount: 0,
 			});
@@ -937,7 +942,7 @@ describe("daemon mode helpers", () => {
 			await childRuntimePromise;
 			expect(await internals.cronScheduler.runDue(new Date("2027-01-01T00:00:00.000Z"))).toBe(1);
 			expect(promptHeartbeat).toHaveBeenCalledOnce();
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				runCount: 1,
 			});
@@ -1871,7 +1876,7 @@ describe("daemon mode helpers", () => {
 					fromState,
 					origin: "agent",
 				})
-				.catch((error: any) => {
+				.catch((error: unknown) => {
 					errors.push(error);
 				});
 		}
@@ -2252,12 +2257,9 @@ describe("daemon mode helpers", () => {
 		const messaging = internals.createAgentMessageController(() => child);
 		const observe = internals.createAgentObserveController(() => child);
 
-		expect((await observe.listAgents()).agents.map((agent: any) => agent.activeSessionId)).toEqual([
-			"root",
-			"child",
-			"sibling",
-			"grandchild",
-		]);
+		expect(
+			(await observe.listAgents()).agents.map((agent: { activeSessionId: string }) => agent.activeSessionId),
+		).toEqual(["root", "child", "sibling", "grandchild"]);
 		await expect(observe.getAgent("cousin")).rejects.toThrow(
 			"Agent reach is limited to parent, siblings, and children",
 		);
@@ -3883,7 +3885,7 @@ describe("daemon mode helpers", () => {
 				rlmChildId: childId,
 			});
 			expect(createRuntime).toHaveBeenCalledTimes(2);
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 				activeSessionId: childState.activeSessionId,
 				sessionId: childManager.getSessionId(),
@@ -3988,7 +3990,7 @@ describe("daemon mode helpers", () => {
 
 			await expect(internals.getOrCreateCronJobSession(heartbeat, true)).resolves.toBeUndefined();
 			expect(abort).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "cancelled",
 			});
 			expect(createRuntime).toHaveBeenCalledTimes(2);
@@ -4114,7 +4116,7 @@ describe("daemon mode helpers", () => {
 
 			await expect(internals.getOrCreateCronJobSession(heartbeat, true)).resolves.toBeUndefined();
 			expect(createRuntime).not.toHaveBeenCalled();
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "cancelled",
 			});
 		});
@@ -5837,12 +5839,15 @@ describe("daemon mode helpers", () => {
 			hasNonPassiveDescendants: state === nonLeaf,
 			isHydrating: false,
 		}));
-		internals.passivateSession = vi.fn(async () => true);
+		const passivateSession = vi.fn(
+			async (_state: ActiveSessionState, _idleEvictionMinutes?: unknown, _now?: number) => true,
+		);
+		internals.passivateSession = passivateSession;
 
 		await expect(internals.passivateIdleChildren(90, 200 * 60_000, 2)).resolves.toBe(2);
 		expect(internals.sessionPassivationSnapshot).toHaveBeenCalledTimes(states.length);
 		expect(internals.passivateSession).toHaveBeenCalledTimes(2);
-		expect(internals.passivateSession.mock.calls.map((call: any) => call[0])).toEqual([oldestLeaf, nextLeaf]);
+		expect(passivateSession.mock.calls.map((call) => call[0])).toEqual([oldestLeaf, nextLeaf]);
 		expect(internals.passivateSession).not.toHaveBeenCalledWith(nonLeaf, expect.anything(), expect.anything());
 		expect(internals.passivateSession).not.toHaveBeenCalledWith(queuedLeaf, expect.anything(), expect.anything());
 	});
@@ -6462,7 +6467,7 @@ describe("daemon mode helpers", () => {
 				rlmDepth: 1,
 				rlmMaxDepth: 2,
 				rlmParentNodeId: "child-1",
-				onSessionPublished: (session: any) => {
+				onSessionPublished: (session: AgentSession) => {
 					expect(session.sessionName).toBe(childSessionName);
 					const state = [...internals.sessions.values()].find(
 						(candidate) => candidate.runtime.session === session,
@@ -6701,7 +6706,9 @@ describe("daemon mode helpers", () => {
 			expect(messageSettled).toBe(false);
 			expect(attachSettled).toBe(false);
 			expect(
-				(await internals.createAgentMessageListResult(fromState)).agents.map((agent: any) => agent.activeSessionId),
+				(await internals.createAgentMessageListResult(fromState)).agents.map(
+					(agent: { activeSessionId: string }) => agent.activeSessionId,
+				),
 			).toEqual([fromState.activeSessionId]);
 
 			releaseBind();
@@ -6710,7 +6717,9 @@ describe("daemon mode helpers", () => {
 			await attach.catch(() => undefined);
 
 			expect(
-				(await internals.createAgentMessageListResult(fromState)).agents.map((agent: any) => agent.activeSessionId),
+				(await internals.createAgentMessageListResult(fromState)).agents.map(
+					(agent: { activeSessionId: string }) => agent.activeSessionId,
+				),
 			).toEqual(expect.arrayContaining([fromState.activeSessionId, bindingId]));
 		});
 	});
@@ -6806,8 +6815,8 @@ describe("daemon mode helpers", () => {
 			});
 
 			for (const id of [cron.id, heartbeat.id, rlmHeartbeat.id]) {
-				expect(internals.cronStore.list().find((job: any) => job.id === id)).toMatchObject({ status: "cancelled" });
-				expect(internals.cronStore.list().find((job: any) => job.id === id)).not.toHaveProperty("nextRunAt");
+				expect(internals.cronStore.list().find((job) => job.id === id)).toMatchObject({ status: "cancelled" });
+				expect(internals.cronStore.list().find((job) => job.id === id)).not.toHaveProperty("nextRunAt");
 			}
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${heartbeat.id}`);
 			expect(removeQueuedFollowUp).toHaveBeenCalledWith(`heartbeat:${rlmHeartbeat.id}`);
@@ -6891,7 +6900,7 @@ describe("daemon mode helpers", () => {
 				releaseDispose();
 
 				await expect(Promise.all([joinedClose, kill])).resolves.toBeDefined();
-				expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+				expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({
 					status: "cancelled",
 				});
 				expect(appendSessionState).toHaveBeenCalledOnce();
@@ -6939,7 +6948,7 @@ describe("daemon mode helpers", () => {
 			rejectClose(new Error("dispose failed"));
 
 			await expect(kill).rejects.toThrow("dispose failed");
-			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({
 				status: "cancelled",
 			});
 			expect(appendSessionState).toHaveBeenCalledWith({ status: "archived" });
@@ -6990,7 +6999,7 @@ describe("daemon mode helpers", () => {
 			await expect(internals.closeSession(parent, "killed")).rejects.toThrow("archive failed");
 
 			for (const job of jobs) {
-				expect(internals.cronStore.list().find((candidate: any) => candidate.id === job.id)).toMatchObject({
+				expect(internals.cronStore.list().find((candidate) => candidate.id === job.id)).toMatchObject({
 					status: "cancelled",
 				});
 			}
@@ -7097,13 +7106,13 @@ describe("daemon mode helpers", () => {
 				sessionPath: sessionFile,
 			});
 
-			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({
 				status: "cancelled",
 			});
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "cancelled",
 			});
-			expect(internals.cronStore.list().find((job: any) => job.id === unrelated.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === unrelated.id)).toMatchObject({
 				status: "active",
 			});
 		});
@@ -7227,8 +7236,8 @@ describe("daemon mode helpers", () => {
 			expect(deleteSavedSessionFile).toHaveBeenCalledWith(sessionFile, {
 				afterFileRemoved: expect.any(Function),
 			});
-			expect(internals.cronStore.list().find((job: any) => job.id === cron.id)).toMatchObject({ status: "active" });
-			expect(internals.cronStore.list().find((job: any) => job.id === heartbeat.id)).toMatchObject({
+			expect(internals.cronStore.list().find((job) => job.id === cron.id)).toMatchObject({ status: "active" });
+			expect(internals.cronStore.list().find((job) => job.id === heartbeat.id)).toMatchObject({
 				status: "active",
 			});
 		});
@@ -7988,13 +7997,13 @@ describe("daemon mode helpers", () => {
 				prompt: "first instruction",
 				deliveryMode: "follow_up",
 			});
-			const replacement = await internals.handleCommand(client, {
+			const replacement = (await internals.handleCommand(client, {
 				id: "command-2",
 				type: "heartbeat_set",
 				activeSessionId: state.activeSessionId,
 				schedule: "every 10m",
 				prompt: "replacement instruction",
-			});
+			})) as { data: { heartbeat: { prompt: string; deliveryMode: string } } };
 
 			expect(replacement.data.heartbeat).toMatchObject({
 				prompt: "replacement instruction",

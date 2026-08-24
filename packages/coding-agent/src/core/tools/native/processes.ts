@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
@@ -583,6 +582,6 @@ export function createProcessesToolDefinition(
 	return definition;
 }
 
-export function createProcessesTool(cwd: string): AgentTool<typeof processesSchema> {
+export function createProcessesTool(cwd: string) {
 	return wrapToolDefinition(createProcessesToolDefinition(cwd));
 }

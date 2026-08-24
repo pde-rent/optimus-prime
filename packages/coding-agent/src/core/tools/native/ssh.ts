@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { NetError } from "../../net/core.js";
@@ -163,6 +162,6 @@ function normalizeError(error: unknown): unknown {
 	return error;
 }
 
-export function createSshTool(cwd: string): AgentTool<typeof sshSchema> {
+export function createSshTool(cwd: string) {
 	return wrapToolDefinition(createSshToolDefinition(cwd));
 }

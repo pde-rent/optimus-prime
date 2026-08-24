@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import {
+	type Api,
 	type AssistantMessage,
 	type AssistantMessageEvent,
 	EventStream,
@@ -91,7 +92,7 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): {
+function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number; model?: Model<Api> }): {
 	runtimeHost: AgentSessionRuntime;
 	session: AgentSession;
 	cleanup: () => Promise<void>;
@@ -168,7 +169,7 @@ function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number
 	};
 }
 
-async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
+async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<Api> }): Promise<{
 	lineHandler: (line: string) => void;
 	session: AgentSession;
 	cleanup: () => Promise<void>;

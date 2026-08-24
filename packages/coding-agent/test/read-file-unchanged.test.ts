@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, statSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { withFileMutationQueue } from "../src/core/tools/file-mutation-queue.js";
-import { createReadFileTool } from "../src/core/tools/read-file.js";
+import { createReadFileTool, type ReadFileToolDetails } from "../src/core/tools/read-file.js";
 import { createWriteFileTool } from "../src/core/tools/write-file.js";
 import { getTextOutput } from "./helpers/render.js";
 import { makeTempDirs } from "./helpers/temp.js";
+
+/** Single-file reads always return ReadFileToolDetails; the declared tool type is the union. */
+function singleFileDetails(result: { details?: unknown }): ReadFileToolDetails {
+	return result.details as ReadFileToolDetails;
+}
 
 describe("read_file unchanged short-circuit", () => {
 	const temps = makeTempDirs("read-unchanged-test-");
@@ -26,8 +31,8 @@ describe("read_file unchanged short-circuit", () => {
 
 		const second = await tool.execute("c2", { path });
 		expect(getTextOutput(second)).toBe("[file unchanged since your last read: lines 1-3 of 3]");
-		expect(second.details.startLine).toBe(1);
-		expect(second.details.endLine).toBe(3);
+		expect(singleFileDetails(second).startLine).toBe(1);
+		expect(singleFileDetails(second).endLine).toBe(3);
 	});
 
 	it("re-emits content when a different window is requested", async () => {

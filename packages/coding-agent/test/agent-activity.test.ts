@@ -90,7 +90,7 @@ describe("AgentActivityTracker", () => {
 			type: "tool_execution_end",
 			toolCallId: "t1",
 			toolName: "repl",
-			result: {},
+			result: { content: [], details: undefined },
 			isError: false,
 		});
 		expect(tracker.getStatus().activity).toBe("waiting");
@@ -109,7 +109,7 @@ describe("AgentActivityTracker", () => {
 			type: "tool_execution_end",
 			toolCallId: "t1",
 			toolName: "repl",
-			result: {},
+			result: { content: [], details: undefined },
 			isError: false,
 		});
 		expect(tracker.getStatus().activity).toBe("executing");
@@ -117,7 +117,7 @@ describe("AgentActivityTracker", () => {
 			type: "tool_execution_end",
 			toolCallId: "t2",
 			toolName: "repl",
-			result: {},
+			result: { content: [], details: undefined },
 			isError: false,
 		});
 		expect(tracker.getStatus().activity).toBe("waiting");

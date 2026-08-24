@@ -461,7 +461,7 @@ async function* mapCodexEvents(events: AsyncIterable<Record<string, unknown>>): 
 			return;
 		}
 
-		yield event as unknown as ResponseStreamEvent;
+		yield event as ResponseStreamEvent;
 	}
 }
 
@@ -652,7 +652,7 @@ type WebSocketConstructor = new (
 function getWebSocketConstructor(): WebSocketConstructor | null {
 	const ctor = (globalThis as { WebSocket?: unknown }).WebSocket;
 	if (typeof ctor !== "function") return null;
-	return ctor as unknown as WebSocketConstructor;
+	return ctor as WebSocketConstructor;
 }
 
 class WebSocketCloseError extends Error {

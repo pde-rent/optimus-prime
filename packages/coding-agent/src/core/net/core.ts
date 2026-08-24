@@ -338,9 +338,7 @@ class NodeSocketConnection extends BaseConnection {
 				rejectUnauthorized: options?.rejectUnauthorized ?? true,
 				handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
 			};
-			const socket = (tlsConnect as unknown as (opts: typeof options_, cb: () => void) => TLSSocket)(options_, () =>
-				resolve(socket),
-			);
+			const socket = tlsConnect(options_, () => resolve(socket));
 			socket.once("error", reject);
 		});
 		upgraded.once("error", () => this.handleEnd());

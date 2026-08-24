@@ -1,5 +1,4 @@
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../../extensions/types.js";
 import { throwIfAborted } from "../abortable.js";
@@ -355,10 +354,10 @@ export function createTailToolDefinition(cwd: string): ToolDefinition<typeof tai
 	return makeDefinition("tail", cwd, tailSchema);
 }
 
-export function createHeadTool(cwd: string): AgentTool<typeof headSchema> {
+export function createHeadTool(cwd: string) {
 	return wrapToolDefinition(createHeadToolDefinition(cwd));
 }
 
-export function createTailTool(cwd: string): AgentTool<typeof tailSchema> {
+export function createTailTool(cwd: string) {
 	return wrapToolDefinition(createTailToolDefinition(cwd));
 }

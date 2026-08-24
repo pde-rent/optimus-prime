@@ -8,6 +8,18 @@ import { ExtensionRunner } from "../src/core/extensions/runner.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { SessionManager } from "../src/core/session-manager.js";
 
+/**
+ * The extension scripts under test set globalThis.testVar from their sandbox.
+ * This typed view is the only place the test suite touches it.
+ */
+function testVar(): string | boolean | undefined {
+	return (globalThis as { testVar?: string | boolean }).testVar;
+}
+
+function setTestVar(value: string | boolean): void {
+	(globalThis as { testVar?: string | boolean }).testVar = value;
+}
+
 describe("Input Event", () => {
 	let tempDir: string;
 	let extensionsDir: string;
@@ -16,7 +28,7 @@ describe("Input Event", () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-input-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
-		delete (globalThis as any).testVar;
+		delete (globalThis as { testVar?: string | boolean }).testVar;
 	});
 
 	afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
@@ -70,13 +82,13 @@ describe("Input Event", () => {
 	});
 
 	it("short-circuits on handled and skips subsequent handlers", async () => {
-		(globalThis as any).testVar = false;
+		setTestVar(false);
 		const r = await createRunner(
 			`export default p => p.on("input", async () => ({ action: "handled" }));`,
 			`export default p => p.on("input", async () => { globalThis.testVar = true; });`,
 		);
 		expect(await r.emitInput("X", undefined, "interactive")).toEqual({ action: "handled" });
-		expect((globalThis as any).testVar).toBe(false);
+		expect(testVar()).toBe(false);
 	});
 
 	it("passes source correctly for all source types", async () => {
@@ -85,7 +97,7 @@ describe("Input Event", () => {
 		);
 		for (const source of ["interactive", "rpc", "extension"] as const) {
 			await r.emitInput("x", undefined, source);
-			expect((globalThis as any).testVar).toBe(source);
+			expect(testVar()).toBe(source);
 		}
 	});
 

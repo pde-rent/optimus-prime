@@ -62,6 +62,10 @@ describe("web3.rpc", () => {
 
 	type ErrorValue = { error: string; code?: number; status?: number; data?: unknown };
 	type Probe = { url: string; ok: boolean; ms: number; detail: string; tier: string };
+	/** One JSON-RPC request envelope as a POST body carries it; fields read back as unknown. */
+	type Envelope = Record<string, unknown>;
+	/** A stubbed endpoint reply: bodies arrive as one envelope or a batch of them. */
+	type StubReply = (body: Envelope & Iterable<Envelope>) => unknown;
 
 	const rpc = createRpc();
 	const URL_ = "https://node.test/rpc";
@@ -175,9 +179,9 @@ describe("web3.rpc", () => {
 		});
 
 		it("throws a TypeError on a bad url or method - those are caller bugs", async () => {
-			expect(rpc.call(undefined as any, "m")).rejects.toThrow(TypeError);
+			expect(rpc.call(undefined, "m")).rejects.toThrow(TypeError);
 			expect(rpc.call(URL_, "")).rejects.toThrow(TypeError);
-			expect(rpc.call(URL_, "m", "not-params" as any)).rejects.toThrow(TypeError);
+			expect(rpc.call(URL_, "m", "not-params")).rejects.toThrow(TypeError);
 		});
 	});
 
@@ -185,7 +189,7 @@ describe("web3.rpc", () => {
 		it("sends one request for N calls and returns results in call order", async () => {
 			const calls = stubJsonFetch((_url, body) =>
 				// Answer out of order on purpose: matching must be by id, not position.
-				response([...body].reverse().map((r: any) => ({ id: r.id, result: `${r.method}-ok` }))),
+				response([...body].reverse().map((r) => ({ id: r.id, result: `${r.method}-ok` }))),
 			);
 			const out = await rpc.batch(URL_, [
 				{ method: "a" },
@@ -202,7 +206,7 @@ describe("web3.rpc", () => {
 		it("isolates a single failing call - siblings keep their results", async () => {
 			stubJsonFetch((_url, body) =>
 				response(
-					body.map((r: any) =>
+					body.map((r: Envelope) =>
 						r.method === "bad"
 							? { id: r.id, error: { code: -32601, message: "method not found" } }
 							: { id: r.id, result: 7 },
@@ -249,8 +253,8 @@ describe("web3.rpc", () => {
 		});
 
 		it("throws on a non-array or an unrecognised call shape", async () => {
-			expect(rpc.batch(URL_, "a" as any)).rejects.toThrow(TypeError);
-			expect(rpc.batch(URL_, [42 as any])).rejects.toThrow(TypeError);
+			expect(rpc.batch(URL_, "a")).rejects.toThrow(TypeError);
+			expect(rpc.batch(URL_, [42])).rejects.toThrow(TypeError);
 		});
 
 		it("normalizeCall accepts all three shapes", () => {
@@ -289,8 +293,8 @@ describe("web3.rpc", () => {
 			expect(() => toBigInt("")).toThrow(TypeError);
 			expect(() => toBigInt("1.5")).toThrow(TypeError);
 			expect(() => toBigInt("0xzz")).toThrow(TypeError);
-			expect(() => toBigInt(null as any)).toThrow(TypeError);
-			expect(() => toBigInt({} as any)).toThrow(TypeError);
+			expect(() => toBigInt(null)).toThrow(TypeError);
+			expect(() => toBigInt({})).toThrow(TypeError);
 		});
 	});
 
@@ -374,7 +378,7 @@ describe("web3.rpc", () => {
 			expect(() => toUnits("", 18)).toThrow(TypeError);
 			expect(() => toUnits(Number.NaN, 18)).toThrow(TypeError);
 			expect(() => toUnits(Number.POSITIVE_INFINITY, 18)).toThrow(TypeError);
-			expect(() => toUnits(null as any, 18)).toThrow(TypeError);
+			expect(() => toUnits(null, 18)).toThrow(TypeError);
 			expect(() => toUnits("1", 300)).toThrow(TypeError);
 		});
 
@@ -442,7 +446,7 @@ describe("web3.rpc", () => {
 		return stubJsonFetch(async (url, body) => {
 			if (url === CHAINLIST) return response(REGISTRY);
 			const reply = replies[url];
-			if (typeof reply === "function") return (reply as (b: any) => unknown)(body);
+			if (typeof reply === "function") return (reply as StubReply)(body);
 			return response({ id: body?.id, result: reply ?? "0x1" });
 		});
 	}
@@ -492,7 +496,7 @@ describe("web3.rpc", () => {
 
 		it("sorts healthy-then-fastest with { rank: false }, still reporting the tier", async () => {
 			stubChain({
-				[OFFICIAL]: async (body: any) => {
+				[OFFICIAL]: async (body: Envelope) => {
 					await sleep(40);
 					return response({ id: body.id, result: "0x1" });
 				},
@@ -592,12 +596,12 @@ describe("web3.rpc", () => {
 		});
 
 		it("throws a TypeError on an argument that cannot name a chain", async () => {
-			expect(rpc.endpoints(undefined as any)).rejects.toThrow(TypeError);
+			expect(rpc.endpoints(undefined)).rejects.toThrow(TypeError);
 			expect(rpc.endpoints(0)).rejects.toThrow(TypeError);
 			expect(rpc.endpoints(-1)).rejects.toThrow(TypeError);
 			expect(rpc.endpoints(1.5)).rejects.toThrow(TypeError);
 			expect(rpc.endpoints("  ")).rejects.toThrow(TypeError);
-			expect(rpc.endpoints({} as any)).rejects.toThrow(TypeError);
+			expect(rpc.endpoints({})).rejects.toThrow(TypeError);
 		});
 	});
 
@@ -661,7 +665,9 @@ describe("web3.rpc", () => {
 	describe("rpc.tron", () => {
 		it("posts a JSON body to the wallet REST path and returns the parsed reply", async () => {
 			const calls = stubJsonFetch(() => response({ block_header: { raw_data: { number: 71_000_000 } } }));
-			const block = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as any;
+			const block = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as {
+				block_header: { raw_data: { number: number } };
+			};
 
 			expect(calls[0].url).toBe("https://api.trongrid.io/wallet/getnowblock");
 			expect(calls[0].init?.method).toBe("POST");
@@ -688,7 +694,7 @@ describe("web3.rpc", () => {
 			const out = (await rpc.tron("https://api.trongrid.io", "wallet/getnowblock")) as ErrorValue;
 			expect(out.status).toBe(429);
 
-			expect(rpc.tron(undefined as any, "wallet/getnowblock")).rejects.toThrow(TypeError);
+			expect(rpc.tron(undefined, "wallet/getnowblock")).rejects.toThrow(TypeError);
 			expect(rpc.tron("https://api.trongrid.io", "")).rejects.toThrow(TypeError);
 		});
 
@@ -710,10 +716,10 @@ describe("web3.rpc", () => {
 	 * follows to `answers[url]` - so an endpoint can pass discovery and fail the real request, which
 	 * is exactly how a public endpoint degrades mid-session.
 	 */
-	function stubLadder(answers: Record<string, (body: any) => unknown> = {}) {
+	function stubLadder(answers: Record<string, StubReply> = {}) {
 		return stubJsonFetch(async (url, body) => {
 			if (url === CHAINLIST) return response(REGISTRY);
-			const one = Array.isArray(body) ? body[0] : body;
+			const one: Envelope = Array.isArray(body) ? body[0] : body;
 			if (one?.method === "eth_chainId") return response({ id: one.id, result: "0x1" });
 			const answer = answers[url];
 			return answer ? answer(body) : response({ id: one?.id, result: "0x10" });
@@ -721,10 +727,10 @@ describe("web3.rpc", () => {
 	}
 
 	/** The URLs the call itself hit: the registry fetch and the health probes filtered out. */
-	function served(calls: { url: string; body: any }[]) {
+	function served(calls: { url: string; body: unknown }[]) {
 		return calls
 			.filter((c) => c.url !== CHAINLIST)
-			.filter((c) => (Array.isArray(c.body) ? c.body[0]?.method : c.body?.method) !== "eth_chainId")
+			.filter((c) => (Array.isArray(c.body) ? c.body[0]?.method : (c.body as Envelope)?.method) !== "eth_chainId")
 			.map((c) => c.url);
 	}
 
@@ -732,7 +738,7 @@ describe("web3.rpc", () => {
 		it("rolls past a 429 and returns the next endpoint's result", async () => {
 			const calls = stubLadder({
 				[OFFICIAL]: () => response("rate limited", { status: 429 }),
-				[PROVIDER]: (body) => response({ id: body.id, result: "0x10" }),
+				[PROVIDER]: (body: Envelope) => response({ id: body.id, result: "0x10" }),
 			});
 			const out = await rpc.call(1, "eth_blockNumber");
 
@@ -769,7 +775,8 @@ describe("web3.rpc", () => {
 
 		it("returns a JSON-RPC error at once, without spending another endpoint", async () => {
 			const calls = stubLadder({
-				[OFFICIAL]: (body) => response({ id: body.id, error: { code: -32000, message: "execution reverted" } }),
+				[OFFICIAL]: (body: Envelope) =>
+					response({ id: body.id, error: { code: -32000, message: "execution reverted" } }),
 			});
 			const out = (await rpc.call(1, "eth_call", [{ to: "0xabc" }])) as ErrorValue;
 
@@ -780,8 +787,9 @@ describe("web3.rpc", () => {
 
 		it("rolls a -32601 over, because a node's method list is its own choice", async () => {
 			const calls = stubLadder({
-				[OFFICIAL]: (body) => response({ id: body.id, error: { code: -32601, message: "method not found" } }),
-				[PROVIDER]: (body) => response({ id: body.id, result: ["trace"] }),
+				[OFFICIAL]: (body: Envelope) =>
+					response({ id: body.id, error: { code: -32601, message: "method not found" } }),
+				[PROVIDER]: (body: Envelope) => response({ id: body.id, result: ["trace"] }),
 			});
 			expect(await rpc.call(1, "trace_block", ["0x1"])).toEqual(["trace"]);
 			expect(served(calls)).toEqual([OFFICIAL, PROVIDER]);
@@ -811,7 +819,7 @@ describe("web3.rpc", () => {
 		it("evicts the endpoint it gave up on, so the memo cannot hand it back", async () => {
 			stubLadder({
 				[OFFICIAL]: () => response("rate limited", { status: 429 }),
-				[PROVIDER]: (body) => response({ id: body.id, result: "0x10" }),
+				[PROVIDER]: (body: Envelope) => response({ id: body.id, result: "0x10" }),
 			});
 			expect(await rpc.pick(1)).toBe(OFFICIAL); // the memo starts on what is about to die
 			await rpc.call(1, "eth_blockNumber");
@@ -825,10 +833,10 @@ describe("web3.rpc", () => {
 				[OTHER]: () => response("boom", { status: 500 }),
 			});
 			await rpc.call(1, "eth_blockNumber");
-			const probes = calls.filter((c) => c.body?.method === "eth_chainId").length;
+			const probes = calls.filter((c) => (c.body as Envelope)?.method === "eth_chainId").length;
 
 			expect(await rpc.pick(1)).toBe(OFFICIAL);
-			expect(calls.filter((c) => c.body?.method === "eth_chainId").length).toBeGreaterThan(probes);
+			expect(calls.filter((c) => (c.body as Envelope)?.method === "eth_chainId").length).toBeGreaterThan(probes);
 		});
 
 		it("surfaces the first failure with { failover: false }", async () => {
@@ -842,7 +850,7 @@ describe("web3.rpc", () => {
 		it("waits out a Retry-After inside the bound and keeps the endpoint", async () => {
 			let hits = 0;
 			const calls = stubLadder({
-				[OFFICIAL]: (body) => {
+				[OFFICIAL]: (body: Envelope) => {
 					hits += 1;
 					return hits === 1
 						? response("slow down", { status: 429, headers: { "Retry-After": "0.05" } })
@@ -858,7 +866,7 @@ describe("web3.rpc", () => {
 			const started = Date.now();
 			const calls = stubLadder({
 				[OFFICIAL]: () => response("slow down", { status: 429, headers: { "Retry-After": "30" } }),
-				[PROVIDER]: (body) => response({ id: body.id, result: "0x12" }),
+				[PROVIDER]: (body: Envelope) => response({ id: body.id, result: "0x12" }),
 			});
 			expect(await rpc.call(1, "eth_blockNumber")).toBe("0x12");
 
@@ -875,8 +883,8 @@ describe("web3.rpc", () => {
 		});
 
 		it("resolves solana through its seed list, never touching the registry", async () => {
-			const calls = stubJsonFetch((_url, body) =>
-				body?.method === "getSlot"
+			const calls = stubJsonFetch((_url, body: Envelope) =>
+				body.method === "getSlot"
 					? response({ id: body.id, result: 315_000_000 })
 					: response({ id: body.id, result: { value: 42 } }),
 			);
@@ -915,7 +923,8 @@ describe("web3.rpc", () => {
 		it("fails a batch over and still returns one entry per call", async () => {
 			const calls = stubLadder({
 				[OFFICIAL]: () => response("boom", { status: 502 }),
-				[PROVIDER]: (body) => response(body.map((r: any) => ({ id: r.id, result: r.method }))),
+				[PROVIDER]: (body: Iterable<Envelope>) =>
+					response(Array.from(body, (r) => ({ id: r.id, result: r.method }))),
 			});
 			const out = await rpc.batch(1, ["eth_blockNumber", "eth_gasPrice"]);
 
@@ -939,7 +948,7 @@ describe("web3.rpc", () => {
 				expect.objectContaining({ error: expect.stringContaining("not in the registry") }),
 				expect.objectContaining({ error: expect.stringContaining("not in the registry") }),
 			]);
-			expect(rpc.call(undefined as any, "m")).rejects.toThrow(TypeError);
+			expect(rpc.call(undefined, "m")).rejects.toThrow(TypeError);
 		});
 	});
 
@@ -2190,7 +2199,18 @@ describe("web3.hypersync", () => {
 	const { createHypersync, clearHypersyncCache, candidateChains } = hypersyncModule;
 
 	type ErrorValue = { error: string; status?: number };
+	/** One request body as a POST carries it; fields read back as unknown. */
+	type Envelope = Record<string, unknown>;
 	type LogRow = { block_number: number; address?: string; topic0?: string; data?: string; transaction_hash?: string };
+	type LogsResult = {
+		rows: LogRow[];
+		complete: boolean;
+		nextBlock: number | null;
+		archiveHeight?: number;
+		queries?: number;
+		error?: string;
+	};
+	type QueryResult = { next_block: unknown; data: { logs: LogRow[] }[] };
 
 	const hs = createHypersync();
 	const realFetch = globalThis.fetch;
@@ -2239,7 +2259,7 @@ describe("web3.hypersync", () => {
 	it("flattens rows out of the nested data[i].logs envelope", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
 		stubJsonFetch(() => page([row(0), row(1)], null, 5_000_000));
-		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as LogsResult;
 
 		expect(out.rows).toHaveLength(2);
 		expect(out.rows[0].block_number).toBe(100);
@@ -2251,10 +2271,10 @@ describe("web3.hypersync", () => {
 
 	it("paginates on next_block until the range completes", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		const calls = stubJsonFetch((_url, body) =>
+		const calls = stubJsonFetch((_url, body: Envelope) =>
 			body.from_block === 0 ? page([row(0)], 200) : page([row(1), row(2)], null),
 		);
-		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as LogsResult;
 
 		expect(calls).toHaveLength(2);
 		expect(calls[1].body.from_block).toBe(200);
@@ -2265,8 +2285,11 @@ describe("web3.hypersync", () => {
 
 	it("stops at the maxRows budget and hands back the cursor to resume from", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubJsonFetch((_url, body) => page([row(body.from_block), row(body.from_block + 1)], body.from_block + 100));
-		const out = (await hs.logs("eth", { fromBlock: 0, maxRows: 3 })) as any;
+		stubJsonFetch((_url, raw: unknown) => {
+			const fromBlock = (raw as { from_block: number }).from_block;
+			return page([row(fromBlock), row(fromBlock + 1)], fromBlock + 100);
+		});
+		const out = (await hs.logs("eth", { fromBlock: 0, maxRows: 3 })) as LogsResult;
 
 		// Two pages of 2 rows overshoot the budget of 3 - the server completes block groups.
 		expect(out.rows).toHaveLength(4);
@@ -2277,7 +2300,7 @@ describe("web3.hypersync", () => {
 	it("treats to_block as exclusive", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
 		const calls = stubJsonFetch(() => page([row(0)], 2_000_000));
-		const out = (await hs.logs("eth", { fromBlock: 0, toBlock: 2_000_000 })) as any;
+		const out = (await hs.logs("eth", { fromBlock: 0, toBlock: 2_000_000 })) as LogsResult;
 
 		expect(calls).toHaveLength(1);
 		expect(calls[0].body.to_block).toBe(2_000_000);
@@ -2344,10 +2367,10 @@ describe("web3.hypersync", () => {
 
 	it("returns a mid-scan failure with the rows already collected and the resume cursor", async () => {
 		process.env.HYPERSYNC_API_KEY = "k";
-		stubJsonFetch((_url, body) =>
+		stubJsonFetch((_url, body: Envelope) =>
 			body.from_block === 0 ? page([row(0)], 500) : httpResponse("boom", { status: 500 }),
 		);
-		const out = (await hs.logs("eth", { fromBlock: 0 })) as any;
+		const out = (await hs.logs("eth", { fromBlock: 0 })) as LogsResult;
 
 		expect(out.error).toContain("500");
 		expect(out.rows).toHaveLength(1);
@@ -2362,7 +2385,7 @@ describe("web3.hypersync", () => {
 
 		expect(await hs.height("base")).toBe(1_234_567);
 		expect(calls[0].init?.method).toBe("GET");
-		const out = (await hs.query("base", { from_block: 1 })) as any;
+		const out = (await hs.query("base", { from_block: 1 })) as QueryResult;
 		expect(out.next_block).toBeNull();
 		expect(out.data[0].logs).toHaveLength(1);
 		expect(calls[1].init?.method).toBe("POST");

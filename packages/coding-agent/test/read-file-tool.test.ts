@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
-import { createReadFileTool } from "../src/core/tools/read-file.js";
+import { createReadFileTool, type ReadFileToolDetails } from "../src/core/tools/read-file.js";
 import { getTextOutput } from "./helpers/render.js";
 import { makeTempDirs } from "./helpers/temp.js";
+
+/** Single-file reads always return ReadFileToolDetails; the declared tool type is the union. */
+function singleFileDetails(result: { details?: unknown }): ReadFileToolDetails {
+	return result.details as ReadFileToolDetails;
+}
 
 describe("read_file tool", () => {
 	const temps = makeTempDirs("read-file-test-");
@@ -22,10 +27,10 @@ describe("read_file tool", () => {
 		const result = await tool.execute("call-1", { path });
 
 		expect(getTextOutput(result)).toBe("line 1\nline 2\nline 3");
-		expect(result.details.totalLines).toBe(3);
-		expect(result.details.startLine).toBe(1);
-		expect(result.details.endLine).toBe(3);
-		expect(result.details.truncated).toBe(false);
+		expect(singleFileDetails(result).totalLines).toBe(3);
+		expect(singleFileDetails(result).startLine).toBe(1);
+		expect(singleFileDetails(result).endLine).toBe(3);
+		expect(singleFileDetails(result).truncated).toBe(false);
 	});
 
 	it("accepts relative paths resolved against cwd", async () => {
@@ -47,8 +52,8 @@ describe("read_file tool", () => {
 		const text = getTextOutput(result);
 		expect(text.split("\n")[0]).toBe("line 4");
 		expect(text.split("\n")[2]).toBe("line 6");
-		expect(result.details.startLine).toBe(4);
-		expect(result.details.endLine).toBe(6);
+		expect(singleFileDetails(result).startLine).toBe(4);
+		expect(singleFileDetails(result).endLine).toBe(6);
 		expect(text).toContain("[Showing lines 4-6 of 10.]");
 	});
 
@@ -77,8 +82,8 @@ describe("read_file tool", () => {
 		expect(text).toContain(
 			"[Showing lines 1-10 of 50 (line limit reached). Re-read with a higher offset to continue.]",
 		);
-		expect(result.details.truncated).toBe(true);
-		expect(result.details.endLine).toBe(10);
+		expect(singleFileDetails(result).truncated).toBe(true);
+		expect(singleFileDetails(result).endLine).toBe(10);
 	});
 
 	it("truncates by byte cap without splitting a UTF-8 sequence", async () => {

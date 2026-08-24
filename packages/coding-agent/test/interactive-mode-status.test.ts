@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test, vi } from "bun:test";
+import { beforeAll, describe, expect, type Mock, test, vi } from "bun:test";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -14,6 +14,7 @@ import {
 	type TUI,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
+import type { AgentSessionMessage } from "../src/core/agent-messages.js";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.js";
 import { formatNoModelsAvailableMessage } from "../src/core/auth-guidance.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
@@ -77,6 +78,157 @@ function createConnectionState(overrides: Partial<AgentConnectionState> = {}): A
 		contextUsage: undefined,
 		...overrides,
 	};
+}
+
+// The fakes below invoke private InteractiveMode methods through
+// Function.prototype.call; these helpers give those calls static types.
+interface ShowStatusHarness {
+	chatContainer: Container;
+	ui: { requestRender(): void };
+	lastStatusSpacer?: unknown;
+	lastStatusText?: unknown;
+}
+
+interface ShowLoadedResourcesHarness {
+	options: { verbose: boolean };
+	toolOutputExpanded: boolean;
+	chatContainer: Container;
+	settingsManager: { getQuietStartup(): boolean };
+	sessionManager: { getCwd(): string };
+	connectionResourceSnapshot: AgentConnectionResourceSnapshot;
+	extensionRunner: {
+		getCommandDiagnostics(): AgentConnectionResourceDiagnostic[];
+		getShortcutDiagnostics(): AgentConnectionResourceDiagnostic[];
+	};
+	formatDisplayPath(p: string): string;
+	formatExtensionDisplayPath(path: string): string;
+	formatContextPath(p: string): string;
+	getCurrentCwd(): string;
+	getStartupExpansionState(): boolean;
+	buildScopeGroups(items: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>): unknown[];
+	formatScopeGroups(groups: unknown, formatOptions: unknown): string;
+	isPackageSource(sourceInfo?: AgentConnectionSourceInfo): boolean;
+	getShortPath(fullPath: string, sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactPathLabel(resourcePath: string, sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactPackageSourceLabel(sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactExtensionLabel(resourcePath: string, sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactDisplayPathSegments(resourcePath: string): string[];
+	getCompactNonPackageExtensionLabel(
+		resourcePath: string,
+		index: number,
+		allPaths: Array<{ path: string; segments: string[] }>,
+	): string;
+	getCompactExtensionLabels(extensions: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>): string[];
+	formatDiagnostics(
+		diagnostics: readonly AgentConnectionResourceDiagnostic[],
+		sourceInfos: Map<string, AgentConnectionSourceInfo>,
+	): string;
+	getBuiltInCommandConflictDiagnostics(commands: readonly unknown[]): AgentConnectionResourceDiagnostic[];
+	getScopeGroup?(sourceInfo?: AgentConnectionSourceInfo): "user" | "project" | "path";
+}
+
+interface ExpansionFakeThis {
+	toolOutputExpanded: boolean;
+	agentMessagesExpanded: boolean;
+	editDiffsExpanded: boolean;
+	customHeader: undefined;
+	builtInHeader: { setExpanded(expanded: boolean): void };
+	chatContainer: { children: unknown[] };
+	ui: {
+		requestRender(): void;
+		requestRenderPreservingViewport(): void;
+		isFullscreen(): boolean;
+	};
+	setToolsExpanded(expanded: boolean): void;
+	toggleAgentMessageExpansion(): void;
+	toggleEditDiffExpansion(): void;
+}
+
+interface ThemeSettingsManager {
+	getTheme(): string;
+	setTheme(theme: string): unknown;
+}
+
+interface ThemeSettingsHarness {
+	session: { settingsManager: ThemeSettingsManager };
+	settingsManager: ThemeSettingsManager;
+	ui: { requestRender(): void };
+}
+
+interface AutocompleteWrappersHarness {
+	autocompleteProviderWrappers: AutocompleteProviderFactory[];
+	setupAutocompleteProvider: Mock<() => void>;
+}
+
+interface SetupAutocompleteHarness {
+	createBaseAutocompleteProvider(): AutocompleteProvider;
+	defaultEditor: { setAutocompleteProvider(provider: AutocompleteProvider): void };
+	editor: { setAutocompleteProvider(provider: AutocompleteProvider): void };
+	autocompleteProviderWrappers: AutocompleteProviderFactory[];
+}
+
+interface PrivateProtoApi {
+	showStatus(this: ShowStatusHarness, message: string, tone?: "dim" | "warning"): void;
+	showLoadedResources(
+		this: ShowLoadedResourcesHarness,
+		options?: {
+			extensions?: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>;
+			force?: boolean;
+			showDiagnosticsWhenQuiet?: boolean;
+		},
+	): void;
+	formatDisplayPath(this: ShowLoadedResourcesHarness, p: string): string;
+	formatExtensionDisplayPath(this: ShowLoadedResourcesHarness, path: string): string;
+	formatContextPath(this: ShowLoadedResourcesHarness, p: string): string;
+	getStartupExpansionState(this: ShowLoadedResourcesHarness): boolean;
+	buildScopeGroups(
+		this: ShowLoadedResourcesHarness,
+		items: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>,
+	): unknown[];
+	formatScopeGroups(this: ShowLoadedResourcesHarness, groups: unknown, formatOptions: unknown): string;
+	formatDiagnostics(
+		this: ShowLoadedResourcesHarness,
+		diagnostics: readonly AgentConnectionResourceDiagnostic[],
+		sourceInfos: Map<string, AgentConnectionSourceInfo>,
+	): string;
+	getShortPath(this: ShowLoadedResourcesHarness, fullPath: string, sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactPathLabel(
+		this: ShowLoadedResourcesHarness,
+		resourcePath: string,
+		sourceInfo?: AgentConnectionSourceInfo,
+	): string;
+	// No longer on the prototype: the fakes keep the historical lazy lookups,
+	// which nothing invokes.
+	isPackageSource(this: ShowLoadedResourcesHarness, sourceInfo?: AgentConnectionSourceInfo): boolean;
+	getCompactPackageSourceLabel(this: ShowLoadedResourcesHarness, sourceInfo?: AgentConnectionSourceInfo): string;
+	getCompactExtensionLabel(
+		this: ShowLoadedResourcesHarness,
+		resourcePath: string,
+		sourceInfo?: AgentConnectionSourceInfo,
+	): string;
+	getCompactDisplayPathSegments(this: ShowLoadedResourcesHarness, resourcePath: string): string[];
+	getCompactNonPackageExtensionLabel(
+		this: ShowLoadedResourcesHarness,
+		resourcePath: string,
+		index: number,
+		allPaths: Array<{ path: string; segments: string[] }>,
+	): string;
+	getScopeGroup(this: ShowLoadedResourcesHarness, sourceInfo?: AgentConnectionSourceInfo): "user" | "project" | "path";
+	getCompactExtensionLabels(
+		this: ShowLoadedResourcesHarness,
+		extensions: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>,
+	): string[];
+	createExtensionUIContext(this: ThemeSettingsHarness | AutocompleteWrappersHarness): {
+		setTheme(theme: string): { success: boolean };
+		addAutocompleteProvider(providerFactory: AutocompleteProviderFactory): void;
+	};
+	setupAutocompleteProvider(this: SetupAutocompleteHarness): void;
+}
+
+function methodOf<K extends keyof PrivateProtoApi>(name: K): PrivateProtoApi[K] {
+	const proto: object = InteractiveMode.prototype;
+	const method: unknown = (proto as Record<string, unknown>)[name];
+	return method as PrivateProtoApi[K];
 }
 
 describe("InteractiveMode update notifications", () => {
@@ -143,18 +295,18 @@ describe("InteractiveMode.showStatus", () => {
 	});
 
 	test("coalesces immediately-sequential status messages", () => {
-		const fakeThis: any = {
+		const fakeThis: ShowStatusHarness = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
 			lastStatusSpacer: undefined,
 			lastStatusText: undefined,
 		};
 
-		(InteractiveMode as any).prototype.showStatus.call(fakeThis, "STATUS_ONE");
+		methodOf("showStatus").call(fakeThis, "STATUS_ONE");
 		expect(fakeThis.chatContainer.children).toHaveLength(2);
 		expect(renderLastLine(fakeThis.chatContainer)).toContain("STATUS_ONE");
 
-		(InteractiveMode as any).prototype.showStatus.call(fakeThis, "STATUS_TWO");
+		methodOf("showStatus").call(fakeThis, "STATUS_TWO");
 		// second status updates the previous line instead of appending
 		expect(fakeThis.chatContainer.children).toHaveLength(2);
 		expect(renderLastLine(fakeThis.chatContainer)).toContain("STATUS_TWO");
@@ -162,21 +314,21 @@ describe("InteractiveMode.showStatus", () => {
 	});
 
 	test("appends a new status line if something else was added in between", () => {
-		const fakeThis: any = {
+		const fakeThis: ShowStatusHarness = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
 			lastStatusSpacer: undefined,
 			lastStatusText: undefined,
 		};
 
-		(InteractiveMode as any).prototype.showStatus.call(fakeThis, "STATUS_ONE");
+		methodOf("showStatus").call(fakeThis, "STATUS_ONE");
 		expect(fakeThis.chatContainer.children).toHaveLength(2);
 
 		// Something else gets added to the chat in between status updates
 		fakeThis.chatContainer.addChild({ render: () => ["OTHER"], invalidate: () => {} });
 		expect(fakeThis.chatContainer.children).toHaveLength(3);
 
-		(InteractiveMode as any).prototype.showStatus.call(fakeThis, "STATUS_TWO");
+		methodOf("showStatus").call(fakeThis, "STATUS_TWO");
 		// adds spacer + text
 		expect(fakeThis.chatContainer.children).toHaveLength(5);
 		expect(renderLastLine(fakeThis.chatContainer)).toContain("STATUS_TWO");
@@ -225,6 +377,8 @@ function createRenderSessionContextHarness(overrides: Partial<RenderSessionConte
 	chatContainer: Container;
 	addMessageToChat: ReturnType<typeof vi.fn>;
 	addToHistory: ReturnType<typeof vi.fn>;
+	replToolComponents: Map<string, unknown>;
+	lateReplSentAgentMessages: Map<string, unknown[]>;
 } {
 	const chatContainer = overrides.chatContainer ?? new Container();
 	const addMessageToChat = vi.fn(() => {
@@ -251,7 +405,14 @@ function createRenderSessionContextHarness(overrides: Partial<RenderSessionConte
 		...overrides,
 	};
 	Object.setPrototypeOf(harness, InteractiveMode.prototype);
-	return { harness, chatContainer, addMessageToChat, addToHistory };
+	return {
+		harness,
+		chatContainer,
+		addMessageToChat,
+		addToHistory,
+		replToolComponents: harness.replToolComponents,
+		lateReplSentAgentMessages: harness.lateReplSentAgentMessages,
+	};
 }
 
 function userMessage(content: string, timestamp: number): Extract<AgentMessage, { role: "user" }> {
@@ -300,32 +461,13 @@ describe("InteractiveMode.renderSessionContext", () => {
 		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
 		try {
 			const chatContainer = new Container();
-			const replToolComponents = new Map([["stale-tool", {}]]);
-			const lateReplSentAgentMessages = new Map([["stale-tool", []]]);
-			const fakeThis: any = {
-				pendingTools: new Map(),
-				replToolComponents,
-				lateReplSentAgentMessages,
-				expandedBlocks: new Map(),
-				toolOutputExpanded: false,
+			const { harness, replToolComponents, lateReplSentAgentMessages } = createRenderSessionContextHarness({
 				chatContainer,
-				updateEditorBorderColor: vi.fn(),
-				resetPendingToolState: vi.fn(),
-				preloadToolDefinitions: vi.fn(async () => {}),
-				settingsManager: {
-					getShowImages: () => true,
-				},
-				getCachedToolDefinition: () => undefined,
-				getCurrentCwd: () => process.cwd(),
-				getRetryAttempt: () => 0,
-				ui: { requestRender: vi.fn() },
-				addMessageToChat: vi.fn(() => {
-					chatContainer.addChild({ render: () => ["assistant"], invalidate: () => {} });
-				}),
-			};
-			Object.setPrototypeOf(fakeThis, InteractiveMode.prototype);
+				replToolComponents: new Map<string, unknown>([["stale-tool", {}]]),
+				lateReplSentAgentMessages: new Map<string, unknown[]>([["stale-tool", []]]),
+			});
 
-			await (InteractiveMode as any).prototype.renderSessionContext.call(fakeThis, {
+			await renderSessionContext.call(harness, {
 				messages: [
 					{
 						role: "assistant",
@@ -337,8 +479,9 @@ describe("InteractiveMode.renderSessionContext", () => {
 						content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
 						isError: false,
 					},
-				],
+				] as AgentMessage[],
 				thinkingLevel: "medium",
+				serviceTier: "default",
 				model: null,
 			});
 
@@ -356,37 +499,20 @@ describe("InteractiveMode.renderSessionContext", () => {
 		try {
 			const chatContainer = new Container();
 			const pendingTools = new Map<string, ToolExecutionComponent>();
-			const fakeThis: any = {
-				pendingTools,
-				replToolComponents: new Map(),
-				lateReplSentAgentMessages: new Map(),
-				expandedBlocks: new Map(),
-				toolOutputExpanded: false,
+			const { harness } = createRenderSessionContextHarness({
 				chatContainer,
-				updateEditorBorderColor: vi.fn(),
-				resetPendingToolState: vi.fn(),
-				preloadToolDefinitions: vi.fn(async () => {}),
-				settingsManager: {
-					getShowImages: () => true,
-				},
-				getCachedToolDefinition: () => undefined,
-				getCurrentCwd: () => process.cwd(),
-				getRetryAttempt: () => 0,
-				ui: { requestRender: vi.fn() },
-				addMessageToChat: vi.fn(() => {
-					chatContainer.addChild({ render: () => ["assistant"], invalidate: () => {} });
-				}),
-			};
-			Object.setPrototypeOf(fakeThis, InteractiveMode.prototype);
+				pendingTools,
+			});
 
-			await (InteractiveMode as any).prototype.renderSessionContext.call(fakeThis, {
+			await renderSessionContext.call(harness, {
 				messages: [
 					{
 						role: "assistant",
 						content: [{ type: "toolCall", name: "custom_tool", id: "tool-1", arguments: {} }],
 					},
-				],
+				] as AgentMessage[],
 				thinkingLevel: "medium",
+				serviceTier: "default",
 				model: null,
 			});
 
@@ -3364,22 +3490,25 @@ describe("truncatePathMiddle", () => {
 });
 
 describe("InteractiveMode.setToolsExpanded", () => {
-	function createExpansionFakeThis(chatChildren: unknown[]): any {
-		const fakeThis: any = {
+	function createExpansionFakeThis(chatChildren: unknown[]): ExpansionFakeThis {
+		const base: Omit<
+			ExpansionFakeThis,
+			"setToolsExpanded" | "toggleAgentMessageExpansion" | "toggleEditDiffExpansion"
+		> = {
 			toolOutputExpanded: false,
 			agentMessagesExpanded: false,
 			editDiffsExpanded: false,
 			customHeader: undefined,
-			builtInHeader: { setExpanded: vi.fn() },
+			builtInHeader: { setExpanded: vi.fn<(expanded: boolean) => void>() },
 			chatContainer: { children: chatChildren },
 			ui: {
-				requestRender: vi.fn(),
-				requestRenderPreservingViewport: vi.fn(),
-				isFullscreen: vi.fn().mockReturnValue(false),
+				requestRender: vi.fn<() => void>(),
+				requestRenderPreservingViewport: vi.fn<() => void>(),
+				isFullscreen: vi.fn<() => boolean>().mockReturnValue(false),
 			},
 		};
-		Object.setPrototypeOf(fakeThis, InteractiveMode.prototype);
-		return fakeThis;
+		Object.setPrototypeOf(base, InteractiveMode.prototype);
+		return base as ExpansionFakeThis;
 	}
 
 	test("applies expansion state to the active header and chat entries", () => {
@@ -3398,14 +3527,15 @@ describe("InteractiveMode.setToolsExpanded", () => {
 	test("toggles agent messages separately from tools", () => {
 		const toolChild = { setExpanded: vi.fn() };
 		const replChild = { setExpanded: vi.fn(), setAgentMessagesExpanded: vi.fn(), setEditDiffsExpanded: vi.fn() };
+		const senderlessDetails: unknown = { id: "agentmsg_split", message: "Ping.", from: null };
 		const messageChild = new AgentMessageComponent({
 			role: "custom",
 			customType: "agent_message",
 			content: "Ping.",
 			display: true,
-			details: { id: "agentmsg_split", message: "Ping.", from: null },
+			details: senderlessDetails as AgentSessionMessage["details"],
 			timestamp: 123,
-		} as any);
+		} as AgentSessionMessage);
 		const messageSetExpanded = vi.spyOn(messageChild, "setExpanded");
 		const fakeThis = createExpansionFakeThis([toolChild, replChild, messageChild]);
 
@@ -3459,13 +3589,13 @@ describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 				currentTheme = theme;
 			}),
 		};
-		const fakeThis: any = {
+		const fakeThis: ThemeSettingsHarness = {
 			session: { settingsManager },
 			settingsManager,
 			ui: { requestRender: vi.fn() },
 		};
 
-		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
+		const uiContext = methodOf("createExtensionUIContext").call(fakeThis);
 		const result = uiContext.setTheme("light");
 
 		expect(result.success).toBe(true);
@@ -3481,13 +3611,13 @@ describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 			getTheme: vi.fn(() => "dark"),
 			setTheme: vi.fn(),
 		};
-		const fakeThis: any = {
+		const fakeThis: ThemeSettingsHarness = {
 			session: { settingsManager },
 			settingsManager,
 			ui: { requestRender: vi.fn() },
 		};
 
-		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
+		const uiContext = methodOf("createExtensionUIContext").call(fakeThis);
 		const result = uiContext.setTheme("__missing_theme__");
 
 		expect(result.success).toBe(false);
@@ -3499,12 +3629,12 @@ describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 describe("InteractiveMode.createExtensionUIContext addAutocompleteProvider", () => {
 	test("stores wrapper factories and rebuilds autocomplete immediately", () => {
 		const wrapper: AutocompleteProviderFactory = (current) => current;
-		const fakeThis = {
-			autocompleteProviderWrappers: [] as AutocompleteProviderFactory[],
-			setupAutocompleteProvider: vi.fn(),
+		const fakeThis: AutocompleteWrappersHarness = {
+			autocompleteProviderWrappers: [],
+			setupAutocompleteProvider: vi.fn<() => void>(),
 		};
 
-		const uiContext = (InteractiveMode as any).prototype.createExtensionUIContext.call(fakeThis);
+		const uiContext = methodOf("createExtensionUIContext").call(fakeThis);
 		uiContext.addAutocompleteProvider(wrapper);
 
 		expect(fakeThis.autocompleteProviderWrappers).toEqual([wrapper]);
@@ -3514,8 +3644,8 @@ describe("InteractiveMode.createExtensionUIContext addAutocompleteProvider", () 
 
 describe("InteractiveMode.setupAutocompleteProvider", () => {
 	test("stacks wrapper factories over a fresh base provider", () => {
-		const defaultEditor = { setAutocompleteProvider: vi.fn() };
-		const customEditor = { setAutocompleteProvider: vi.fn() };
+		const defaultEditor = { setAutocompleteProvider: vi.fn<(provider: AutocompleteProvider) => void>() };
+		const customEditor = { setAutocompleteProvider: vi.fn<(provider: AutocompleteProvider) => void>() };
 		const calls: string[] = [];
 
 		const wrap1: AutocompleteProviderFactory = (current): AutocompleteProvider => ({
@@ -3547,14 +3677,14 @@ describe("InteractiveMode.setupAutocompleteProvider", () => {
 			},
 		});
 
-		const fakeThis = {
+		const fakeThis: SetupAutocompleteHarness = {
 			createBaseAutocompleteProvider: () => new CombinedAutocompleteProvider([], "/tmp/project", undefined),
 			defaultEditor,
 			editor: customEditor,
 			autocompleteProviderWrappers: [wrap1, wrap2],
 		};
 
-		(InteractiveMode as any).prototype.setupAutocompleteProvider.call(fakeThis);
+		methodOf("setupAutocompleteProvider").call(fakeThis);
 
 		expect(defaultEditor.setAutocompleteProvider).toHaveBeenCalledTimes(1);
 		expect(customEditor.setAutocompleteProvider).toHaveBeenCalledTimes(1);
@@ -3599,7 +3729,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			getCommandDiagnostics: () => [],
 			getShortcutDiagnostics: () => [],
 		};
-		const fakeThis: any = {
+		const fakeThis: ShowLoadedResourcesHarness = {
 			options: { verbose: options.verbose ?? false },
 			toolOutputExpanded: options.toolOutputExpanded ?? false,
 			chatContainer: new Container(),
@@ -3611,33 +3741,31 @@ describe("InteractiveMode.showLoadedResources", () => {
 			},
 			connectionResourceSnapshot,
 			extensionRunner,
-			formatDisplayPath: (p: string) => (InteractiveMode as any).prototype.formatDisplayPath.call(fakeThis, p),
-			formatExtensionDisplayPath: (p: string) =>
-				(InteractiveMode as any).prototype.formatExtensionDisplayPath.call(fakeThis, p),
-			formatContextPath: (p: string) => (InteractiveMode as any).prototype.formatContextPath.call(fakeThis, p),
+			formatDisplayPath: (p: string) => methodOf("formatDisplayPath").call(fakeThis, p),
+			formatExtensionDisplayPath: (p: string) => methodOf("formatExtensionDisplayPath").call(fakeThis, p),
+			formatContextPath: (p: string) => methodOf("formatContextPath").call(fakeThis, p),
 			getCurrentCwd: () => options.cwd ?? "/tmp/project",
-			getStartupExpansionState: () => (InteractiveMode as any).prototype.getStartupExpansionState.call(fakeThis),
+			getStartupExpansionState: () => methodOf("getStartupExpansionState").call(fakeThis),
 			buildScopeGroups: () => [],
 			formatScopeGroups: () => "resource-list",
 			isPackageSource: (sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.isPackageSource.call(fakeThis, sourceInfo),
+				methodOf("isPackageSource").call(fakeThis, sourceInfo),
 			getShortPath: (p: string, sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.getShortPath.call(fakeThis, p, sourceInfo),
+				methodOf("getShortPath").call(fakeThis, p, sourceInfo),
 			getCompactPathLabel: (p: string, sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactPathLabel.call(fakeThis, p, sourceInfo),
+				methodOf("getCompactPathLabel").call(fakeThis, p, sourceInfo),
 			getCompactPackageSourceLabel: (sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactPackageSourceLabel.call(fakeThis, sourceInfo),
+				methodOf("getCompactPackageSourceLabel").call(fakeThis, sourceInfo),
 			getCompactExtensionLabel: (p: string, sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactExtensionLabel.call(fakeThis, p, sourceInfo),
-			getCompactDisplayPathSegments: (p: string) =>
-				(InteractiveMode as any).prototype.getCompactDisplayPathSegments.call(fakeThis, p),
+				methodOf("getCompactExtensionLabel").call(fakeThis, p, sourceInfo),
+			getCompactDisplayPathSegments: (p: string) => methodOf("getCompactDisplayPathSegments").call(fakeThis, p),
 			getCompactNonPackageExtensionLabel: (
 				p: string,
 				index: number,
 				allPaths: Array<{ path: string; segments: string[] }>,
-			) => (InteractiveMode as any).prototype.getCompactNonPackageExtensionLabel.call(fakeThis, p, index, allPaths),
+			) => methodOf("getCompactNonPackageExtensionLabel").call(fakeThis, p, index, allPaths),
 			getCompactExtensionLabels: (extensions: ExtensionFixture[]) =>
-				(InteractiveMode as any).prototype.getCompactExtensionLabels.call(fakeThis, extensions),
+				methodOf("getCompactExtensionLabels").call(fakeThis, extensions),
 			formatDiagnostics: () => "diagnostics",
 			getBuiltInCommandConflictDiagnostics: () => [],
 		};
@@ -3646,16 +3774,16 @@ describe("InteractiveMode.showLoadedResources", () => {
 			fakeThis.formatDiagnostics = (
 				diagnostics: readonly AgentConnectionResourceDiagnostic[],
 				sourceInfos: Map<string, AgentConnectionSourceInfo>,
-			) => (InteractiveMode as any).prototype.formatDiagnostics.call(fakeThis, diagnostics, sourceInfos);
+			) => methodOf("formatDiagnostics").call(fakeThis, diagnostics, sourceInfos);
 		}
 
 		if (options.useRealScopeGroups) {
 			fakeThis.getScopeGroup = (sourceInfo?: AgentConnectionSourceInfo) =>
-				(InteractiveMode as any).prototype.getScopeGroup.call(fakeThis, sourceInfo);
+				methodOf("getScopeGroup").call(fakeThis, sourceInfo);
 			fakeThis.buildScopeGroups = (items: Array<{ path: string; sourceInfo?: AgentConnectionSourceInfo }>) =>
-				(InteractiveMode as any).prototype.buildScopeGroups.call(fakeThis, items);
+				methodOf("buildScopeGroups").call(fakeThis, items);
 			fakeThis.formatScopeGroups = (groups: unknown, formatOptions: unknown) =>
-				(InteractiveMode as any).prototype.formatScopeGroups.call(fakeThis, groups, formatOptions);
+				methodOf("formatScopeGroups").call(fakeThis, groups, formatOptions);
 		}
 
 		return fakeThis;
@@ -3768,7 +3896,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: false,
 		});
 
@@ -3781,7 +3909,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3798,7 +3926,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3816,7 +3944,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: false,
 		});
 
@@ -3832,7 +3960,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			extensions: [{ path: "/tmp/extensions/answer.ts" }, { path: "/tmp/extensions/btw.ts" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3849,7 +3977,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3896,7 +4024,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3925,7 +4053,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3954,7 +4082,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -3992,7 +4120,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4030,7 +4158,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4068,7 +4196,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4097,7 +4225,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4126,7 +4254,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4143,7 +4271,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealScopeGroups: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4175,7 +4303,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			contextFiles: [{ path: path.join(home, ".pi", "agent", "AGENTS.md") }, { path: path.join(cwd, "AGENTS.md") }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4195,7 +4323,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			contextFiles: [{ path: path.join(home, ".pi", "agent", "AGENTS.md") }, { path: path.join(cwd, "AGENTS.md") }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: true,
 		});
 
@@ -4212,7 +4340,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skills: [{ filePath: "/tmp/skill/SKILL.md", name: "commit" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			extensions: [{ path: "/tmp/ext/index.ts" }],
 			force: false,
 			showDiagnosticsWhenQuiet: true,
@@ -4228,7 +4356,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			skillDiagnostics: [{ type: "warning", message: "duplicate skill name" }],
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: false,
 			showDiagnosticsWhenQuiet: true,
 		});
@@ -4250,7 +4378,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			useRealDiagnostics: true,
 		});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+		methodOf("showLoadedResources").call(fakeThis, {
 			force: false,
 			showDiagnosticsWhenQuiet: true,
 		});

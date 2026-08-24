@@ -718,9 +718,9 @@ describe("ExtensionRunner", () => {
 			runtime.registerProvider(
 				"broken-provider",
 				{
-					streamSimple: (() => {
+					streamSimple: () => {
 						throw new Error("should not run");
-					}) as any,
+					},
 				},
 				"/tmp/broken-extension.ts",
 			);

@@ -872,9 +872,9 @@ describe("ModelRegistry", () => {
 
 			expect(() =>
 				registry.registerProvider("broken-provider", {
-					streamSimple: (() => {
+					streamSimple: () => {
 						throw new Error("should not run");
-					}) as any,
+					},
 				}),
 			).toThrow('Provider broken-provider: "api" is required when registering streamSimple.');
 

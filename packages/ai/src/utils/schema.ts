@@ -111,8 +111,11 @@ export const Type = {
 	/** Escape hatch for a schema whose TypeScript type cannot be derived from its shape. */
 	Unsafe: <T>(schema: TSchema) => schema as SchemaOf<T>,
 
-	Optional: <T extends TSchema>(schema: T) =>
-		({ ...schema, [OPTIONAL]: true }) as unknown as T & { readonly [OPTIONAL_MARKER]?: true },
+	Optional: <T extends TSchema>(schema: T) => {
+		const marked: T = { ...schema };
+		(marked as Record<symbol, unknown>)[OPTIONAL] = true;
+		return marked as T & { readonly [OPTIONAL_MARKER]?: true };
+	},
 
 	Object: <P extends TProperties>(properties: P, options?: Options) => {
 		const required: string[] = [];

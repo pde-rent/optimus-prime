@@ -16,7 +16,6 @@ import { bashCommand, parseCell } from "./cell.js";
 import type {
 	BunReplExecuteRequest,
 	BunReplHostRequest,
-	BunReplHostResponse,
 	BunReplHostToRepl,
 	BunReplReplToHost,
 	BunReplResolvedRef,
@@ -1005,13 +1004,25 @@ function functionSource(fn: (...args: never) => unknown): string | null {
  * Values of a type not listed here (class instances, ArrayBuffers) pass through untouched:
  * cross-realm is still better than dropped.
  */
+interface VmIntrinsics {
+	Array: new () => unknown[];
+	Map: new () => Map<unknown, unknown>;
+	Set: new () => Set<unknown>;
+	Date: new (time: number) => Date;
+	RegExp: new (source: string, flags: string) => RegExp;
+	Error: new (message: string) => Error;
+	Object: new () => Record<string, unknown>;
+	/** Typed-array and other constructor lookups by name. */
+	[name: string]: unknown;
+}
+
 function makeReRealmer(): (value: unknown) => unknown {
 	const VM = runInContext(
 		"({ Object, Array, Map, Set, Date, RegExp, Error, Uint8Array, Int8Array, Uint8ClampedArray," +
 			" Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array," +
 			" BigInt64Array, BigUint64Array })",
 		context,
-	) as Record<string, any>;
+	) as VmIntrinsics;
 	const seen = new WeakMap<object, unknown>();
 
 	const walk = (value: unknown): unknown => {
@@ -1041,8 +1052,10 @@ function makeReRealmer(): (value: unknown) => unknown {
 		if (value instanceof Date) return new VM.Date(value.getTime());
 		if (value instanceof RegExp) return new VM.RegExp(value.source, value.flags);
 		if (ArrayBuffer.isView(value)) {
-			const Ctor = VM[value.constructor.name];
-			if (typeof Ctor === "function") return new Ctor(value);
+			const Ctor: unknown = VM[value.constructor.name];
+			if (typeof Ctor === "function") {
+				return new (Ctor as new (value: unknown) => object)(value);
+			}
 			return value;
 		}
 		if (value instanceof Error) {
@@ -1325,14 +1338,13 @@ process.stdin.on("data", (chunk: string) => {
 				break;
 			}
 			case "hostResponse": {
-				const resp = msg as unknown as BunReplHostResponse;
-				const pending = pendingHostRequests.get(resp.requestId);
+				const pending = pendingHostRequests.get(msg.requestId);
 				if (pending) {
-					pendingHostRequests.delete(resp.requestId);
-					if (resp.status === "ok") {
-						pending.resolve(resp.data);
+					pendingHostRequests.delete(msg.requestId);
+					if (msg.status === "ok") {
+						pending.resolve(msg.data);
 					} else {
-						pending.reject(new Error(resp.error ?? "Host request failed"));
+						pending.reject(new Error(msg.error ?? "Host request failed"));
 					}
 				}
 				break;

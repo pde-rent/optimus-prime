@@ -20,6 +20,19 @@ Security vulnerabilities go through [SECURITY.md](SECURITY.md), not a public iss
 4. `bun run check` and the affected suites pass locally. Say in the PR what you ran.
 5. Comments explain constraints the code cannot show, not what the code already says.
 
+## Type safety is 100% enforced
+
+The whole repository typechecks with `tsgo --noEmit` under strict settings, and CI runs it on
+every push and pull request. There are no exceptions:
+
+- No `any`. Not in source, tests, examples, or scripts. Lint (`biome`) fails the build on one.
+- No double casts through `unknown` (`as unknown as X`). At genuinely untyped boundaries use
+  `unknown` and narrow at runtime, or parse/validate into a real type.
+- No `biome-ignore`, `@ts-ignore`, `@ts-expect-error`, or any other suppression. If the types
+  fight you, the types are telling you something about the design; fix the design.
+
+If a change needs a type relaxation to land, it is not ready to land.
+
 ## Setup
 
 ```sh

@@ -608,7 +608,7 @@ export function createAgentMessageHostHandlers(
 	return {
 		"agent_message.list_agents": async () => {
 			if (!controller.roster) throw new Error("agent family roster is not available in this session");
-			return (await controller.roster()) as unknown as Record<string, unknown>;
+			return { ...(await controller.roster()) };
 		},
 		"agent_message.send": async (payload) => {
 			if (typeof payload.message !== "string") {
@@ -643,7 +643,7 @@ export function createAgentMessageHostHandlers(
 								error: result.reason instanceof Error ? result.reason.message : String(result.reason),
 							},
 				);
-				return { receipts } as unknown as Record<string, unknown>;
+				return { receipts };
 			} else {
 				const role = payload.receiver_role;
 				if (role !== "parent" && role !== "sibling" && role !== "child") {
@@ -691,11 +691,12 @@ export function createAgentMessageHostHandlers(
 				}
 				target = matched.id;
 			}
-			return (await sendOnce({
+			const receipt = await sendOnce({
 				target,
 				message: payload.message,
 				receiverRole: payload.receiver_role as AgentFamilyRelationship,
-			})) as unknown as Record<string, unknown>;
+			});
+			return { ...receipt };
 		},
 	};
 }

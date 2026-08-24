@@ -219,7 +219,7 @@ export function createRlmRunHostHandler(handler: RlmRunHandler): HostRequestHand
 			kwargs,
 			cellSourceCode,
 		});
-		return result as unknown as Record<string, unknown>;
+		return result;
 	};
 }
 
@@ -315,10 +315,10 @@ export interface CreateRlmSubagentRuntimeOptions {
 	prompt: string;
 	sessionName: string;
 	sessionDir: string;
-	model: Model<any>;
+	model: Model<Api>;
 	thinkingLevel: ThinkingLevel;
 	serviceTier: ServiceTier;
-	scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	scopedModels: Array<{ model: Model<Api>; thinkingLevel?: ThinkingLevel }>;
 	activeToolNames: string[];
 	allowedToolNames?: string[];
 	customTools: ToolDefinition[];

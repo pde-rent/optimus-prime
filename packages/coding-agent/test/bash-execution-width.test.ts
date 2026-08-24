@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { BashExecutionComponent } from "../src/modes/interactive/components/bash-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 /** Minimal TUI stub that only exposes terminal.columns */
-function createTuiStub(columns: number): { columns: number; stub: any } {
+function createTuiStub(columns: number): { columns: number; stub: TUI } {
 	const state = { columns };
 	const stub = {
 		terminal: {
@@ -15,11 +15,8 @@ function createTuiStub(columns: number): { columns: number; stub: any } {
 				return 24;
 			},
 		},
-		// Loader calls ui.addInterval / ui.removeInterval
-		addInterval: (_cb: () => void, _ms: number) => ({ dispose: () => {} }),
-		removeInterval: () => {},
 		requestRender: () => {},
-	};
+	} as TUI;
 	return { columns: state.columns, stub };
 }
 

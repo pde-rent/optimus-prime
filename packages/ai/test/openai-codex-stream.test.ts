@@ -830,7 +830,7 @@ describe("openai-codex streaming", () => {
 			}
 		}
 
-		globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+		(globalThis as { WebSocket: unknown }).WebSocket = MockWebSocket;
 
 		const model: Model<"openai-codex-responses"> = {
 			id: "gpt-5.1-codex",
@@ -953,7 +953,7 @@ describe("openai-codex streaming", () => {
 			}
 		}
 
-		globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+		(globalThis as { WebSocket: unknown }).WebSocket = MockWebSocket;
 
 		const model: Model<"openai-codex-responses"> = {
 			id: "gpt-5.1-codex",

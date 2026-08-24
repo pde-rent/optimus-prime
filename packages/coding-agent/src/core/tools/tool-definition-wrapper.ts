@@ -1,11 +1,12 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { TSchema } from "@earendil-works/pi-ai";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.js";
 
 /** Wrap a ToolDefinition into an AgentTool for the core runtime. */
-export function wrapToolDefinition<TDetails = unknown>(
-	definition: ToolDefinition<any, TDetails>,
+export function wrapToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, _TState = unknown>(
+	definition: ToolDefinition<TParams, TDetails>,
 	ctxFactory?: () => ExtensionContext,
-): AgentTool<any, TDetails> {
+): AgentTool<TParams, TDetails> {
 	return {
 		name: definition.name,
 		label: definition.label,
@@ -21,10 +22,7 @@ export function wrapToolDefinition<TDetails = unknown>(
 }
 
 /** Wrap multiple ToolDefinitions into AgentTools for the core runtime. */
-export function wrapToolDefinitions(
-	definitions: ToolDefinition<any, any>[],
-	ctxFactory?: () => ExtensionContext,
-): AgentTool<any>[] {
+export function wrapToolDefinitions(definitions: ToolDefinition[], ctxFactory?: () => ExtensionContext): AgentTool[] {
 	return definitions.map((definition) => wrapToolDefinition(definition, ctxFactory));
 }
 
@@ -34,12 +32,14 @@ export function wrapToolDefinitions(
  * This keeps AgentSession's internal registry definition-first even when a caller
  * provides plain AgentTool overrides that do not include prompt metadata or renderers.
  */
-export function createToolDefinitionFromAgentTool(tool: AgentTool<any>): ToolDefinition<any, unknown> {
+export function createToolDefinitionFromAgentTool<TParams extends TSchema = TSchema, TDetails = unknown>(
+	tool: AgentTool<TParams, TDetails>,
+): ToolDefinition<TParams, TDetails> {
 	return {
 		name: tool.name,
 		label: tool.label,
 		description: tool.description,
-		parameters: tool.parameters as any,
+		parameters: tool.parameters,
 		prepareArguments: tool.prepareArguments,
 		executionMode: tool.executionMode,
 		kind: tool.kind,

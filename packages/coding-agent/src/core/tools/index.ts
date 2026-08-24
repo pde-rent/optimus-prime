@@ -168,8 +168,8 @@ import { createReadFileTool, createReadFileToolDefinition } from "./read-file.js
 import { createSkillTool, createSkillToolDefinition, type SkillToolOptions } from "./skill.js";
 import { createWriteFileTool, createWriteFileToolDefinition } from "./write-file.js";
 
-export type Tool = AgentTool<any>;
-export type ToolDef = ToolDefinition<any, any>;
+export type Tool = AgentTool;
+export type ToolDef = ToolDefinition;
 /**
  * Priority-ordered: agents should pick the first tool that fits the job and
  * treat bash as the last resort (mission rule - natives run in-process on

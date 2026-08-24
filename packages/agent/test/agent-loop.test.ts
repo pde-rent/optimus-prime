@@ -108,6 +108,15 @@ function identityConverter(messages: AgentMessage[]): Message[] {
 	return messages.filter((m) => m.role === "user" || m.role === "assistant" || m.role === "toolResult") as Message[];
 }
 
+/** Custom agent messages are caller-managed; the loop treats them opaquely. */
+function asAgentMessage(message: object): AgentMessage {
+	return message as AgentMessage;
+}
+
+function isCustomMessage(message: AgentMessage): message is AgentMessage & { role: "custom"; text: string } {
+	return (message as { role: string }).role === "custom";
+}
+
 describe("agentLoop with AgentMessage", () => {
 	it("should preserve a terminal response when abort fires after done", async () => {
 		const context: AgentContext = {
@@ -551,7 +560,7 @@ describe("agentLoop with AgentMessage", () => {
 
 		const context: AgentContext = {
 			systemPrompt: "You are helpful.",
-			messages: [notification as unknown as AgentMessage], // Custom message in context
+			messages: [asAgentMessage(notification)], // Custom message in context
 			tools: [],
 		};
 
@@ -1953,9 +1962,11 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(messages.length).toBe(1);
 		expect(messages[0].role).toBe("assistant");
 
-		const messageEndEvents = events.filter((e) => e.type === "message_end");
+		const messageEndEvents = events.filter(
+			(e): e is Extract<AgentEvent, { type: "message_end" }> => e.type === "message_end",
+		);
 		expect(messageEndEvents.length).toBe(1);
-		expect((messageEndEvents[0] as any).message.role).toBe("assistant");
+		expect(messageEndEvents[0]?.message.role).toBe("assistant");
 	});
 
 	it("should allow custom message types as last message (caller responsibility)", async () => {
@@ -1973,7 +1984,7 @@ describe("agentLoopContinue with AgentMessage", () => {
 
 		const context: AgentContext = {
 			systemPrompt: "You are helpful.",
-			messages: [customMessage as unknown as AgentMessage],
+			messages: [asAgentMessage(customMessage)],
 			tools: [],
 		};
 
@@ -1982,10 +1993,10 @@ describe("agentLoopContinue with AgentMessage", () => {
 			convertToLlm: (messages) => {
 				return messages
 					.map((m) => {
-						if ((m as any).role === "custom") {
+						if (isCustomMessage(m)) {
 							return {
 								role: "user" as const,
-								content: (m as any).text,
+								content: m.text,
 								timestamp: m.timestamp,
 							};
 						}

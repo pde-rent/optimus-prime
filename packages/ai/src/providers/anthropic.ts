@@ -224,8 +224,14 @@ export interface AnthropicOptions extends StreamOptions {
  */
 export interface AnthropicMessagesClient {
 	messages: {
-		/** `any` mirrors the SDK's overloaded `create` so an SDK instance still satisfies this. */
-		create(body: any, options?: any): { asResponse(): Promise<Response> };
+		/**
+		 * `object` mirrors the SDK's overloaded `create` so an SDK instance still satisfies this;
+		 * the options subset is what this provider actually passes.
+		 */
+		create(
+			body: object,
+			options?: { signal?: AbortSignal; timeout?: number; maxRetries?: number },
+		): { asResponse(): Promise<Response> };
 	};
 }
 
@@ -377,7 +383,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 			const requestId = response.headers.get("request-id") ?? undefined;
 			stream.push({ type: "start", partial: output });
 
-			type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & { index: number };
+			type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & { index?: number };
 			const blocks = output.content as Block[];
 
 			for await (const event of iterateAnthropicEvents(response, options?.signal, requestId)) {
@@ -438,7 +444,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 							name: isOAuth
 								? fromClaudeCodeName(event.content_block.name, context.tools)
 								: event.content_block.name,
-							arguments: (event.content_block.input as Record<string, any>) ?? {},
+							arguments: (event.content_block.input as Record<string, unknown>) ?? {},
 							partialJson: "",
 							index: event.index,
 						};
@@ -495,7 +501,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					const index = blocks.findIndex((b) => b.index === event.index);
 					const block = blocks[index];
 					if (block) {
-						delete (block as any).index;
+						delete block.index;
 						if (block.type === "text") {
 							stream.push({
 								type: "text_end",
@@ -879,13 +885,7 @@ function buildParams(
 				// Adaptive thinking: Claude decides when and how much to think.
 				params.thinking = { type: "adaptive", display };
 				if (options.effort) {
-					// The Anthropic SDK types can lag newly supported effort values such as "xhigh"/"max".
-					params.output_config =
-						options.effort === "xhigh" || options.effort === "max"
-							? ({ effort: options.effort } as unknown as NonNullable<
-									MessageCreateParamsStreaming["output_config"]
-								>)
-							: { effort: options.effort };
+					params.output_config = { effort: options.effort };
 				}
 			} else {
 				params.thinking = {
@@ -1064,7 +1064,7 @@ function convertMessages(
 					lastBlock &&
 					(lastBlock.type === "text" || lastBlock.type === "image" || lastBlock.type === "tool_result")
 				) {
-					(lastBlock as any).cache_control = cacheControl;
+					lastBlock.cache_control = cacheControl;
 				}
 			} else if (typeof lastMessage.content === "string") {
 				lastMessage.content = [
@@ -1073,7 +1073,7 @@ function convertMessages(
 						text: lastMessage.content,
 						cache_control: cacheControl,
 					},
-				] as any;
+				];
 			}
 		}
 	}

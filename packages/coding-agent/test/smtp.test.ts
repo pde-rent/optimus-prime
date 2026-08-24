@@ -44,10 +44,10 @@ function startFakeSmtp(opts: FakeSmtpOptions = {}): FakeSmtpServer {
 		port: 0,
 		tls: opts.tls ? { key: opts.tls.key, cert: opts.tls.cert } : undefined,
 		socket: {
-			open(socket: any) {
+			open(socket: Bun.TCPSocket) {
 				socket.write("220 fake ESMTP ready\r\n");
 			},
-			data(socket: any, data: Uint8Array) {
+			data(socket: Bun.TCPSocket, data: Uint8Array) {
 				for (const raw of new TextDecoder().decode(data).split("\r\n")) {
 					if (!raw) continue;
 					transcript.push(raw);

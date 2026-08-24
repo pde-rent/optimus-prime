@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { appendFileSync } from "node:fs";
 import { AgentContinueError, type AgentMessage, type ShouldStopAfterTurnContext } from "@earendil-works/pi-agent-core";
-import { type AssistantMessage, fauxAssistantMessage, type Model, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { type AssistantMessage, fauxAssistantMessage, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { SessionManager } from "../../src/core/session-manager.js";
 import { createHarness, getMessageText } from "./harness.js";
 import { createAssistant, createTrackedHarness, createUsage, trackHarnesses, waitFor } from "./helpers.js";
@@ -291,7 +291,7 @@ describe("AgentSession compaction characterization", () => {
 	it("throws when compacting without a model", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
-		harness.session.agent.state.model = undefined as unknown as Model<any>;
+		delete (harness.session.agent.state as { model?: unknown }).model;
 
 		await expect(harness.session.compact()).rejects.toThrow("No model selected");
 	});

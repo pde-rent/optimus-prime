@@ -5,6 +5,19 @@ import { join } from "node:path";
 // @ts-expect-error - bundled skill is plain JS with JSDoc types, no .d.ts
 import createSkill from "../skills/edit/skill.js";
 
+/** Minimal structural type for the untyped skill module's documented calls. */
+interface EditPatchHunk {
+	at?: [number, number];
+	after?: number;
+	text?: string;
+}
+
+interface EditSkill {
+	(path: string, oldText: string, newText: string): Promise<unknown>;
+	src(path: string, from?: number, to?: number): Promise<string>;
+	patch(path: string, tag: string, hunks: EditPatchHunk[]): Promise<string>;
+}
+
 const SOURCE = [
 	"function greet(name) {",
 	"  const msg = 'hi ' + name;",
@@ -18,7 +31,7 @@ function makeSkill(content = SOURCE, name = "a.ts") {
 	const path = join(dir, name);
 	writeFileSync(path, content);
 	// The skill module is untyped JS; the tests exercise it through its documented calls.
-	const edit = createSkill({ display: () => {}, cwd: dir }) as any;
+	const edit = createSkill({ display: () => {}, cwd: dir }) as EditSkill;
 	return { edit, path, dir };
 }
 
@@ -87,7 +100,9 @@ describe("edit.patch", () => {
 		const tag = tagOf(await edit.src("a.ts"));
 		writeFileSync(path, SOURCE.replace("greet('world');", "greet('everyone');"));
 
-		const error = await edit.patch("a.ts", tag, [{ at: [1, 1], text: "x" }]).catch((caught: Error) => caught);
+		const error = (await edit
+			.patch("a.ts", tag, [{ at: [1, 1], text: "x" }])
+			.catch((caught: Error) => caught)) as Error;
 		expect(error.message).toContain(`changed since tag #${tag}`);
 		// Everything needed to retry without a re-read.
 		expect(error.message).toMatch(/it now hashes to #[0-9A-F]{4}/);
@@ -97,7 +112,9 @@ describe("edit.patch", () => {
 
 	it("says so when the tag was never issued in this session", async () => {
 		const { edit } = makeSkill();
-		const error = await edit.patch("a.ts", "0000", [{ at: [1, 1], text: "x" }]).catch((caught: Error) => caught);
+		const error = (await edit
+			.patch("a.ts", "0000", [{ at: [1, 1], text: "x" }])
+			.catch((caught: Error) => caught)) as Error;
 		expect(error.message).toContain("not issued in this session");
 	});
 
@@ -112,28 +129,30 @@ describe("edit.patch", () => {
 	it("throws instead of quietly doing nothing when the body already matches", async () => {
 		const { edit } = makeSkill();
 		const tag = tagOf(await edit.src("a.ts"));
-		const error = await edit
+		const error = (await edit
 			.patch("a.ts", tag, [{ at: [1, 1], text: "function greet(name) {" }])
-			.catch((caught: Error) => caught);
+			.catch((caught: Error) => caught)) as Error;
 		expect(error.message).toContain("byte-identical");
 	});
 
 	it("refuses overlapping hunks rather than applying them in some order", async () => {
 		const { edit } = makeSkill();
 		const tag = tagOf(await edit.src("a.ts"));
-		const error = await edit
+		const error = (await edit
 			.patch("a.ts", tag, [
 				{ at: [1, 3], text: "a" },
 				{ at: [2, 4], text: "b" },
 			])
-			.catch((caught: Error) => caught);
+			.catch((caught: Error) => caught)) as Error;
 		expect(error.message).toContain("overlap");
 	});
 
 	it("rejects a range past the end of the file without writing", async () => {
 		const { edit, path } = makeSkill();
 		const tag = tagOf(await edit.src("a.ts"));
-		const error = await edit.patch("a.ts", tag, [{ at: [4, 99], text: "x" }]).catch((caught: Error) => caught);
+		const error = (await edit
+			.patch("a.ts", tag, [{ at: [4, 99], text: "x" }])
+			.catch((caught: Error) => caught)) as Error;
 		expect(error.message).toContain("outside 1..5");
 		expect(await Bun.file(path).text()).toBe(SOURCE);
 	});

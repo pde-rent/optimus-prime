@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
@@ -194,6 +193,6 @@ export function createWriteFileToolDefinition(
 	return Object.assign(definition, { replayBuiltInToolName: "write_file" as const });
 }
 
-export function createWriteFileTool(cwd: string, options?: WriteFileToolOptions): AgentTool<typeof writeFileSchema> {
+export function createWriteFileTool(cwd: string, options?: WriteFileToolOptions) {
 	return wrapToolDefinition(createWriteFileToolDefinition(cwd, options));
 }

@@ -53,16 +53,16 @@ export function sessionJsonlToMarkdown(jsonl: string): string {
 
 	for (const line of jsonl.split("\n")) {
 		if (!line.trim()) continue;
-		const entry = JSON.parse(line) as Record<string, any>;
+		const entry = JSON.parse(line) as Record<string, unknown>;
 
 		switch (entry.type) {
 			case "session":
-				sections.push(`# Session ${entry.id}\n\n\`${entry.cwd}\``);
+				sections.push(`# Session ${String(entry.id)}\n\n\`${String(entry.cwd)}\``);
 				break;
 			case "message": {
-				const message = entry.message as Record<string, any>;
+				const message = entry.message as Record<string, unknown>;
 				if (message.role === "toolResult") {
-					const label = `${message.toolName || "tool"} result${message.isError ? " (error)" : ""}`;
+					const label = `${String(message.toolName || "tool")} result${message.isError ? " (error)" : ""}`;
 					sections.push(`### ${label}\n\n${fence(contentToMarkdown(message.content))}`);
 					break;
 				}
@@ -72,20 +72,20 @@ export function sessionJsonlToMarkdown(jsonl: string): string {
 					break;
 				}
 				const body = contentToMarkdown(message.content);
-				if (body) sections.push(`## ${message.role}\n\n${body}`);
+				if (body) sections.push(`## ${String(message.role)}\n\n${body}`);
 				break;
 			}
 			case "custom_message": {
 				if (!entry.display) break;
 				const body = contentToMarkdown(entry.content);
-				if (body) sections.push(`## ${entry.customType}\n\n${body}`);
+				if (body) sections.push(`## ${String(entry.customType)}\n\n${body}`);
 				break;
 			}
 			case "compaction":
-				sections.push(`## compaction\n\n${entry.summary}`);
+				sections.push(`## compaction\n\n${String(entry.summary)}`);
 				break;
 			case "branch_summary":
-				sections.push(`## branch summary\n\n${entry.summary}`);
+				sections.push(`## branch summary\n\n${String(entry.summary)}`);
 				break;
 		}
 	}

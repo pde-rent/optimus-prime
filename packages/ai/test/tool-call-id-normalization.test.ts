@@ -14,7 +14,7 @@ import { describe, expect, it } from "bun:test";
 import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { completeSimple, getEnvApiKey } from "../src/stream.js";
-import type { AssistantMessage, Message, Tool, ToolResultMessage } from "../src/types.js";
+import type { AssistantMessage, Message, Tool, ToolCall, ToolResultMessage } from "../src/types.js";
 import { resolveApiKey } from "./oauth.js";
 
 // Resolve API keys
@@ -68,7 +68,7 @@ describe("Tool Call ID Normalization - Live Handoff", () => {
 
 			expect(assistantResponse.stopReason, `Copilot error: ${assistantResponse.errorMessage}`).toBe("toolUse");
 
-			const toolCall = assistantResponse.content.find((c) => c.type === "toolCall");
+			const toolCall = assistantResponse.content.find((c): c is ToolCall => c.type === "toolCall");
 			expect(toolCall).toBeDefined();
 			expect(toolCall!.type).toBe("toolCall");
 
@@ -81,7 +81,7 @@ describe("Tool Call ID Normalization - Live Handoff", () => {
 			// Create tool result
 			const toolResult: ToolResultMessage = {
 				role: "toolResult",
-				toolCallId: (toolCall as any).id,
+				toolCallId: toolCall?.id ?? "",
 				toolName: "echo",
 				content: [{ type: "text", text: "hello world" }],
 				isError: false,
@@ -138,13 +138,13 @@ describe("Tool Call ID Normalization - Live Handoff", () => {
 
 			expect(assistantResponse.stopReason, `Copilot error: ${assistantResponse.errorMessage}`).toBe("toolUse");
 
-			const toolCall = assistantResponse.content.find((c) => c.type === "toolCall");
+			const toolCall = assistantResponse.content.find((c): c is ToolCall => c.type === "toolCall");
 			expect(toolCall).toBeDefined();
 
 			// Create tool result
 			const toolResult: ToolResultMessage = {
 				role: "toolResult",
-				toolCallId: (toolCall as any).id,
+				toolCallId: toolCall?.id ?? "",
 				toolName: "echo",
 				content: [{ type: "text", text: "test message" }],
 				isError: false,

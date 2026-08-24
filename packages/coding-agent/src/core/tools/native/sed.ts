@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { constants } from "fs";
@@ -236,6 +235,6 @@ export function createSedToolDefinition(cwd: string): ToolDefinition<typeof sedS
 	return Object.assign(definition, { replayBuiltInToolName: "sed" as const });
 }
 
-export function createSedTool(cwd: string): AgentTool<typeof sedSchema> {
+export function createSedTool(cwd: string) {
 	return wrapToolDefinition(createSedToolDefinition(cwd));
 }
