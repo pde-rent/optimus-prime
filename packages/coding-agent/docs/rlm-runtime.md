@@ -240,7 +240,7 @@ Unknown options fail instead of being ignored. Model search is bounded to active
 
 `AgentSession.runRlmChild()` performs the following sequence:
 
-1. Check `RLM_DEPTH < RLM_MAX_DEPTH`.
+1. Check `RLM_DEPTH < RLM_MAX_DEPTH`. `RLM_MAX_DEPTH` accepts a number or `"unlimited"`. When the ceiling is reached and a host prompt is available, the agent chooses a remedy (raise one step, go unlimited, cancel); otherwise depth rises one step with a warning. An explicit cancel rethrows the refusal to the calling agent.
 2. Resolve the requested model or inherit the parent model.
 3. Create a `sub-xxxxxxxx` child directory under the parent artifact directory.
 4. Admit the task into the parent registry and return its `RlmSpawnHandle`.

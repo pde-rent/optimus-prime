@@ -507,6 +507,12 @@ describe("parseArgs", () => {
 				message: "Unknown built-in tool(s): read. Available built-in tools: repl",
 			});
 		});
+
+		test("accepts native grep and find in --tools", () => {
+			const result = parseArgs(["--tools", "repl,grep,find"]);
+			expect(result.tools).toEqual(["repl", "grep", "find"]);
+			expect(result.diagnostics).toEqual([]);
+		});
 	});
 
 	describe("messages and file args", () => {

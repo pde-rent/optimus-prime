@@ -89,8 +89,9 @@ export function createBunReplToolDefinition(
 		name: "repl",
 		label: "repl",
 		description:
-			"Execute JavaScript/TypeScript code in a persistent Bun REPL. Variables and imports persist across calls, and are revived on a best-effort basis when a session is resumed. Use %%bash cells for shell commands.",
-		promptSnippet: "repl - persistent Bun JavaScript/TypeScript REPL for scratchpad code and %%bash orchestration",
+			"Execute JavaScript/TypeScript code in a persistent Bun REPL. Variables and imports persist across calls, and are revived on a best-effort basis when a session is resumed. Use %%bash cells for shell commands. Kernel globals need no import: read(path), write(path, text), ls(dir?), search(pattern, opts?), cd(dir), pwd(), and $ for shell commands in %%bash cells.",
+		promptSnippet:
+			"repl - persistent Bun JavaScript/TypeScript REPL for scratchpad code and %%bash orchestration; preloaded globals: read, write, ls, search, cd, pwd",
 		kind: "execute",
 		read_only: false,
 		executionMode: "sequential",

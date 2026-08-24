@@ -102,6 +102,7 @@ import {
 import { findExactModelReferenceMatch, resolveModelScopeFromModels } from "../../core/model-resolver.js";
 import { parseNewSessionCommand } from "../../core/new-session-command.js";
 import { parseCommandArgs } from "../../core/prompt-templates.js";
+import type { RlmMaxDepthValue } from "../../core/rlm-max-depth.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { SessionImportFileNotFoundError } from "../../core/session-import-errors.js";
 import { resolveSessionPath, SessionSelectorError, SessionSelectorNotFoundError } from "../../core/session-resolver.js";
@@ -7413,6 +7414,9 @@ export class InteractiveMode {
 	private describeGraphBudget(level: GraphResolverLevel, suffix: string): string {
 		const budget = graphResolverBudget(level, this.settingsManager.getGraphMaxTokens());
 		if (!budget) return `Graph budget: off — single-agent path. ${suffix}`;
+		if (!Number.isFinite(budget.ceilingTokens)) {
+			return `Graph budget: ${level} — no ceiling, no child cap. ${suffix}`;
+		}
 		const ceiling = `${Math.round(budget.ceilingTokens / 1000)}k tokens`;
 		return `Graph budget: ${level} — up to ${budget.maxNodes} children, ceiling ${ceiling}. ${suffix}`;
 	}
@@ -8695,13 +8699,14 @@ export class InteractiveMode {
 		}
 
 		const global = tokens[1] === "--global";
-		if (tokens.length > (global ? 2 : 1) || !/^\d+$/.test(tokens[0] ?? "")) {
-			this.showWarning("Usage: /rlm-max-depth [<non-negative integer> [--global]]");
+		const word = tokens[0]?.toLowerCase() === "unlimited" ? "unlimited" : undefined;
+		if (word === undefined && (tokens.length > (global ? 2 : 1) || !/^\d+$/.test(tokens[0] ?? ""))) {
+			this.showWarning("Usage: /rlm-max-depth [<non-negative integer>|unlimited [--global]]");
 			return;
 		}
-		const maxDepth = Number(tokens[0]);
-		if (!Number.isSafeInteger(maxDepth)) {
-			this.showWarning("RLM max depth must be a non-negative integer.");
+		const maxDepth: RlmMaxDepthValue = word ?? Number.parseInt(tokens[0] ?? "", 10);
+		if (maxDepth !== "unlimited" && !Number.isSafeInteger(maxDepth)) {
+			this.showWarning('RLM max depth must be a non-negative integer or "unlimited".');
 			return;
 		}
 

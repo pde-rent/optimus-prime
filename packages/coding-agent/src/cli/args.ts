@@ -59,7 +59,7 @@ export interface Args extends SettingsFlagValues {
 	diagnostics: Array<{ type: "warning" | "error"; message: string }>;
 }
 
-const REMOVED_BUILTIN_TOOL_NAMES = new Set(["read", "write", "grep", "find", "ls"]);
+const REMOVED_BUILTIN_TOOL_NAMES = new Set(["read", "write", "ls"]);
 const BUILTIN_TOOL_NAMES = ["repl"];
 
 export const INTERNAL_RUNTIME_COMMAND_MARKER = "\0optimus-runtime-command";

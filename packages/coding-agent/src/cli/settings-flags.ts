@@ -9,6 +9,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ServiceTier } from "@earendil-works/pi-ai";
 import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../core/graph-resolver.js";
+import type { RlmMaxDepthValue } from "../core/rlm-max-depth.js";
 import type { DynamicEffortMode } from "../core/settings-manager.js";
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
@@ -32,7 +33,7 @@ export interface SettingsFlagValues {
 	graphResolver?: GraphResolverLevel;
 	/** Lowers the graph ceiling for this run. Cannot raise it past the level's own budget. */
 	graphMaxTokens?: number;
-	rlmMaxDepth?: number;
+	rlmMaxDepth?: RlmMaxDepthValue;
 	dynamicDepth?: boolean;
 	degeneracyGuard?: boolean;
 	reasoningLoopGuard?: boolean;
@@ -58,7 +59,14 @@ type SettingsFlagSpec<K extends keyof SettingsFlagValues> = {
 			/** Warning noun when the flag was spelled as its alias. */
 			aliasLabel?: string;
 	  }
-	| { kind: "number"; placeholder: string; accepts: (value: number) => boolean; expected: string }
+	| {
+			kind: "number";
+			placeholder: string;
+			accepts: (value: number) => boolean;
+			expected: string;
+			/** Literal words the flag also accepts, e.g. "unlimited". */
+			words?: readonly NonNullable<SettingsFlagValues[K]>[];
+	  }
 	| { kind: "bool" }
 );
 
@@ -104,7 +112,8 @@ export const SETTINGS_FLAGS = [
 		field: "rlmMaxDepth",
 		placeholder: "<n>",
 		accepts: (value) => Number.isInteger(value) && value >= 0,
-		expected: "a non-negative integer",
+		expected: 'a non-negative integer or "unlimited"',
+		words: ["unlimited"],
 		help: "Maximum sub-agent recursion depth",
 	}),
 	spec({
@@ -170,7 +179,10 @@ export const SETTINGS_FLAG_HELP_ROWS: ReadonlyArray<readonly [option: string, su
 			return [`${entry.flag}, ${negatedFlag(entry)}`, entry.help] as const;
 		}
 		const names = [entry.flag, ...(entry.aliases ?? [])].join(", ");
-		const summary = entry.kind === "enum" ? `${entry.help}: ${entry.values.join(", ")}` : entry.help;
+		let summary = entry.kind === "enum" ? `${entry.help}: ${entry.values.join(", ")}` : entry.help;
+		if (entry.kind === "number" && entry.words !== undefined) {
+			summary = `${summary}: ${entry.words.join(", ")}`;
+		}
 		return [`${names} ${entry.placeholder}`, summary] as const;
 	},
 );
@@ -203,6 +215,11 @@ export function applySettingsFlag(
 		if (!alias && arg !== entry.flag) continue;
 		if (next === undefined) return "none";
 		if (entry.kind === "number") {
+			const word = entry.words?.find((candidate) => candidate === next.toLowerCase());
+			if (word !== undefined) {
+				write(target, entry.field, word);
+				return "value";
+			}
 			const value = Number(next);
 			if (entry.accepts(value)) {
 				write(target, entry.field, value);

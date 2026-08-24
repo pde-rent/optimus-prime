@@ -17,7 +17,7 @@ import type {
 } from "../../core/cron-jobs.js";
 import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
-import type { RlmMaxDepthStatus, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
+import type { RlmMaxDepthStatus, RlmMaxDepthValue, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
 import { SessionAlreadyActiveError } from "../../core/session-lease.js";
 import type { SessionStats } from "../../core/session-stats.js";
@@ -1242,7 +1242,7 @@ export class DaemonAgentConnection implements AgentConnection {
 		});
 	}
 
-	async setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }) {
+	async setRlmMaxDepth(maxDepth: RlmMaxDepthValue, options?: { global?: boolean }) {
 		return this.requestData<SetRlmMaxDepthResult>({
 			type: "set_rlm_max_depth",
 			activeSessionId: this.activeSessionId,

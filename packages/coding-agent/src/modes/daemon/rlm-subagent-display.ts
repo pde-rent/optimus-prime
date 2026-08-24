@@ -1,6 +1,7 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RlmMaxDepthValue } from "../../core/rlm-max-depth.js";
 
 /**
  * Per-child RLM subagent hydration/display metadata.
@@ -22,7 +23,7 @@ export interface RlmSubagentDisplayEntry {
 	sessionName: string;
 	sessionDir: string;
 	sessionFile: string;
-	rlmMaxDepth?: number;
+	rlmMaxDepth?: RlmMaxDepthValue;
 	rlmParentNodeId?: string;
 	prompt?: string;
 	spawnCode?: string;
@@ -51,7 +52,11 @@ function isRlmSubagentDisplayEntry(value: unknown): value is RlmSubagentDisplayE
 		typeof entry.sessionDir === "string" &&
 		typeof entry.sessionFile === "string" &&
 		(entry.status === "running" || entry.status === "completed" || entry.status === "deleted") &&
-		(entry.rlmMaxDepth === undefined || (Number.isSafeInteger(entry.rlmMaxDepth) && entry.rlmMaxDepth >= 0)) &&
+		(entry.rlmMaxDepth === undefined ||
+			entry.rlmMaxDepth === "unlimited" ||
+			(typeof entry.rlmMaxDepth === "number" &&
+				Number.isSafeInteger(entry.rlmMaxDepth) &&
+				entry.rlmMaxDepth >= 0)) &&
 		(entry.peers === undefined ||
 			(Array.isArray(entry.peers) && entry.peers.every((peer) => typeof peer === "string"))) &&
 		typeof entry.createdAt === "number"

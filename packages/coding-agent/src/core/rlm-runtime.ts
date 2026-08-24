@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ServiceTier } from "@earendil-works/pi-ai";
 import type { AgentSession } from "./agent-session.js";
 import type { ToolDefinition } from "./extensions/index.js";
+import type { RlmMaxDepthValue } from "./rlm-max-depth.js";
 import type { HostRequestHandler } from "./tools/repl-types.js";
 
 /** Request emitted by `rlm.run`; cellSourceCode preserves the spawning cell for display. */
@@ -268,7 +269,7 @@ export interface RlmSetEffortResult {
 }
 
 export interface RlmSetMaxDepthResult {
-	max_depth: number;
+	max_depth: RlmMaxDepthValue;
 	capped: boolean;
 	/** Why a requested change was not applied, when it was not. */
 	refused?: "cap" | "no_trigger" | "thrash" | "disabled";
@@ -318,7 +319,7 @@ export interface CreateRlmSubagentRuntimeOptions {
 	includeGoals: boolean;
 	includeCompactSkill: boolean;
 	rlmDepth: number;
-	rlmMaxDepth: number;
+	rlmMaxDepth: RlmMaxDepthValue;
 	rlmMaxDepthPinned?: boolean;
 	/** Siblings this child may message. Undefined leaves the family default. */
 	peerNames?: string[];

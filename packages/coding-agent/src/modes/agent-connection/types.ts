@@ -17,7 +17,7 @@ import type { InputSource } from "../../core/extensions/types.js";
 import type { GoalState } from "../../core/goals.js";
 import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
-import type { RlmMaxDepthStatus, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
+import type { RlmMaxDepthStatus, RlmMaxDepthValue, SetRlmMaxDepthResult } from "../../core/rlm-max-depth.js";
 import type {
 	QueuedMessageLane,
 	QueuedMessageMutation,
@@ -769,7 +769,7 @@ export interface AgentConnection {
 	exportToJsonl(outputPath?: string): Promise<string>;
 	setSessionName(name: string): Promise<void>;
 	getRlmMaxDepthStatus(): Promise<RlmMaxDepthStatus>;
-	setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }): Promise<SetRlmMaxDepthResult>;
+	setRlmMaxDepth(maxDepth: RlmMaxDepthValue, options?: { global?: boolean }): Promise<SetRlmMaxDepthResult>;
 	setGraphResolver(level: GraphResolverLevel): Promise<GraphResolverLevel>;
 	renameSavedSession(sessionPath: string, name: string): Promise<void>;
 	deleteSavedSession(sessionPath: string): Promise<DeleteSessionFileResult>;

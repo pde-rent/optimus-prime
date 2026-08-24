@@ -90,6 +90,7 @@ import {
 } from "../../core/cron-jobs.js";
 import { ORPHAN_PROCESS_JOURNAL_ENV } from "../../core/orphan-process-journal.js";
 import { PromptAdmissionCancelledError, waitForPromptAdmission } from "../../core/prompt-admission.js";
+import type { RlmMaxDepthValue } from "../../core/rlm-max-depth.js";
 import type { CreateRlmSubagentRuntimeOptions, SubagentRuntimeHost } from "../../core/rlm-runtime.js";
 import {
 	canPassivateSession,
@@ -304,7 +305,7 @@ interface PassiveRlmSubagentEntry {
 	parentSessionId: string;
 	parentSessionFile?: string;
 	rlmDepth?: number;
-	rlmMaxDepth?: number;
+	rlmMaxDepth?: RlmMaxDepthValue;
 	rlmParentNodeId?: string;
 	prompt?: string;
 	spawnCode?: string;
@@ -327,7 +328,7 @@ interface LegacyRlmSubagentRegistryEntry extends PassiveRlmSubagentEntry {
 
 /** Spread-ready optional metadata fields shared by display files and legacy registry entries. */
 function rlmSubagentMetadataFields(source: {
-	rlmMaxDepth?: number;
+	rlmMaxDepth?: RlmMaxDepthValue;
 	rlmParentNodeId?: string;
 	prompt?: string;
 	spawnCode?: string;
@@ -905,7 +906,9 @@ export class AgentDaemon {
 					typeof entry.sessionFile !== "string" ||
 					(entry.status !== "running" && entry.status !== "completed" && entry.status !== "deleted") ||
 					(entry.rlmDepth !== undefined && (!Number.isSafeInteger(entry.rlmDepth) || entry.rlmDepth < 0)) ||
-					(entry.rlmMaxDepth !== undefined && (!Number.isSafeInteger(entry.rlmMaxDepth) || entry.rlmMaxDepth < 0))
+					(entry.rlmMaxDepth !== undefined &&
+						entry.rlmMaxDepth !== "unlimited" &&
+						(!Number.isSafeInteger(entry.rlmMaxDepth) || entry.rlmMaxDepth < 0))
 				) {
 					continue;
 				}
@@ -930,7 +933,7 @@ export class AgentDaemon {
 			sessionDir: string;
 			sessionFile: string;
 			rlmDepth: number;
-			rlmMaxDepth: number;
+			rlmMaxDepth: RlmMaxDepthValue;
 			rlmParentNodeId?: string;
 			prompt?: string;
 			spawnCode?: string;
@@ -1103,7 +1106,7 @@ export class AgentDaemon {
 		const metadataFields = (source: {
 			sessionDir: string;
 			sessionFile: string;
-			rlmMaxDepth?: number;
+			rlmMaxDepth?: RlmMaxDepthValue;
 			rlmParentNodeId?: string;
 			prompt?: string;
 			spawnCode?: string;

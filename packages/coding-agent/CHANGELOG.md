@@ -1,6 +1,10 @@
 # Changelog
 
 ## [Unreleased]
+- Added an exhaustion prompt for the graph budget: when a spawn is refused, interactive sessions offer reset meter / raise one tier / unlimited / cancel (30s timeout falls back to reset); daemon and print runs apply the default remedy with a warning instead of failing silently.
+- Added the same prompt for recursion depth refusal: raise one step / unlimited / cancel; a pinned depth is only overridden by explicitly choosing unlimited.
+- Added `"unlimited"` support to `rlmMaxDepth` across settings parsing, `RLM_MAX_DEPTH`, `--rlm-max-depth`, `/rlm-max-depth`, and the /settings row, alongside numbers.
+- Fixed the /settings and `/graph` status text rendering "Infinity" for the unlimited graph tier.
 - Removed the /arminsayshi, /dementedelves, and daxnuts model easter eggs.
 - Added compact one-line call summaries for the find, grep, ln, todo, and wc tools.
 - Changed expanded edit, write, sed, and repl diffs to use the rich renderer with syntax highlighting and a side-by-side split layout on wide terminals.

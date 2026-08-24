@@ -178,6 +178,11 @@ await spawn('review the auth diff', { peers: ['worker-b'] });  // may message wo
 await spawn('audit the routes',     { peers: [] });            // reports only to the parent
 ```
 
+When a spawn is refused because the cohort has spent its budget or hit its depth ceiling, an
+interactive session prompts for the remedy — reset the meter, raise one tier (or one depth step),
+go unlimited, or cancel; left alone for 30 seconds the default applies. Headless runs take the
+default directly and say so with a warning.
+
 Set it with `--graph`, `/graph`, `GRAPH_RESOLVER`, or the Graph row in `/settings`. At `off`
 nothing renders into the prompt, so the default path pays nothing.
 
@@ -192,7 +197,7 @@ that the runtime quietly ignores.
 | `--thinking`, `--effort <level>` | `/effort` | reasoning level |
 | `--graph <level>` | `/graph` | multi-agent budget |
 | `--graph-max-tokens <n>` | | lowers the graph ceiling |
-| `--rlm-max-depth <n>` | `/rlm-max-depth` | recursion depth |
+| `--rlm-max-depth <n>` | `/rlm-max-depth` | recursion depth; `unlimited` removes the ceiling |
 | `--dynamic-depth` / `--no-` | | let the agent raise its own depth |
 | `--dynamic-effort <mode>` | | `off`, `banded`, `free` |
 | `--service-tier <tier>` | | `auto`, `default`, `flex`, `scale`, `priority` |

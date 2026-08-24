@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
 import { Container, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../../../core/graph-resolver.js";
+import type { RlmMaxDepthValue } from "../../../core/rlm-max-depth.js";
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
 import { getSettingsListTheme, theme } from "../theme/theme.js";
@@ -47,7 +48,7 @@ export interface SettingsConfig {
 	treeFilterMode: "default" | "no-tools" | "user-only" | "labeled-only" | "all";
 	graphResolver: GraphResolverLevel;
 	/** Undefined means unset, which falls through to RLM_MAX_DEPTH and then to 1. */
-	rlmMaxDepth: number | undefined;
+	rlmMaxDepth: RlmMaxDepthValue | undefined;
 	showHardwareCursor: boolean;
 	editorPaddingX: number;
 	autocompleteMaxVisible: number;
@@ -76,7 +77,7 @@ export interface SettingsCallbacks {
 	onHideThinkingBlockChange: (hidden: boolean) => void;
 	onTreeFilterModeChange: (mode: "default" | "no-tools" | "user-only" | "labeled-only" | "all") => void;
 	onGraphResolverChange: (level: GraphResolverLevel) => void;
-	onRlmMaxDepthChange: (maxDepth: number) => void;
+	onRlmMaxDepthChange: (maxDepth: RlmMaxDepthValue) => void;
 	onShowHardwareCursorChange: (enabled: boolean) => void;
 	onEditorPaddingXChange: (padding: number) => void;
 	onAutocompleteMaxVisibleChange: (maxVisible: number) => void;
@@ -208,7 +209,7 @@ export class SettingsSelectorComponent extends Container {
 				label: "Recursion depth",
 				description: "How many levels of sub-agents an agent may spawn",
 				currentValue: String(config.rlmMaxDepth ?? 1),
-				values: ["0", "1", "2", "3", "4"],
+				values: ["0", "1", "2", "3", "4", "unlimited"],
 			},
 			{
 				id: "graph-resolver",
@@ -450,7 +451,7 @@ export class SettingsSelectorComponent extends Container {
 						callbacks.onDegeneracyGuardChange(newValue === "true");
 						break;
 					case "rlm-max-depth":
-						callbacks.onRlmMaxDepthChange(Number.parseInt(newValue, 10));
+						callbacks.onRlmMaxDepthChange(newValue === "unlimited" ? "unlimited" : Number.parseInt(newValue, 10));
 						break;
 					case "graph-resolver":
 						callbacks.onGraphResolverChange(newValue as GraphResolverLevel);

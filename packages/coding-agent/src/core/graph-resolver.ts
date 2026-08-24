@@ -86,3 +86,37 @@ export function graphMinDepth(level: GraphResolverLevel): number {
 export function admitsGraphNode(spentTokens: number, budget: GraphResolverBudget, admittedNodes: number): boolean {
 	return admittedNodes < budget.maxNodes && spentTokens < budget.ceilingTokens;
 }
+
+/**
+ * The spend ladder in rising order, used to promote a session one tier when an exhausted budget
+ * prompts for a remedy. "off" has nothing to raise.
+ */
+const TIER_LADDER: readonly GraphResolverLevel[] = [
+	...(Object.keys(LEVEL_BUDGETS) as Array<Exclude<GraphResolverLevel, "off" | "unlimited">>),
+	"unlimited",
+];
+
+/** The next tier up, or "unlimited" past the top. "off" and unknown levels promote to the lowest tier. */
+export function raiseGraphResolverLevel(level: GraphResolverLevel): GraphResolverLevel {
+	if (level === "off") return TIER_LADDER[0] ?? "unlimited";
+	const index = (TIER_LADDER as readonly string[]).indexOf(level);
+	if (index === -1) return TIER_LADDER[0] ?? "unlimited";
+	return TIER_LADDER[index + 1] ?? "unlimited";
+}
+
+/** One remedy a host may offer when the graph budget refuses another child. */
+export type GraphBudgetExhaustedChoice = "reset" | "tier" | "unlimited" | "cancel";
+
+export interface GraphBudgetExhaustedInfo {
+	level: GraphResolverLevel;
+	spentTokens: number;
+	ceilingTokens: number;
+	nodes: number;
+	maxNodes: number;
+}
+
+/**
+ * Host-injected prompt shown when admission refuses. Absent means non-interactive: the caller
+ * applies its own default (usually "reset") instead of asking.
+ */
+export type GraphBudgetExhaustedCallback = (info: GraphBudgetExhaustedInfo) => Promise<GraphBudgetExhaustedChoice>;

@@ -555,3 +555,50 @@ describe("SettingsManager", () => {
 		});
 	});
 });
+
+describe("rlmMaxDepth unlimited", () => {
+	const testDir = join(process.cwd(), "test-settings-tmp");
+	const agentDir = join(testDir, "agent");
+	const projectDir = join(testDir, "project");
+
+	beforeEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true });
+		}
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(projectDir, ".optimus", "agent"), { recursive: true });
+	});
+
+	afterEach(() => {
+		if (existsSync(testDir)) {
+			rmSync(testDir, { recursive: true });
+		}
+	});
+
+	it("round-trips the literal alongside numbers", () => {
+		const manager = SettingsManager.inMemory();
+		expect(manager.getRlmMaxDepth()).toBeUndefined();
+
+		manager.setRlmMaxDepth(3);
+		expect(manager.getRlmMaxDepth()).toBe(3);
+
+		manager.setRlmMaxDepth("unlimited");
+		expect(manager.getRlmMaxDepth()).toBe("unlimited");
+	});
+
+	it("reads unlimited from the settings file and rejects malformed values", async () => {
+		const { SettingsManager: Reloaded } = await import("../src/core/settings-manager.js");
+		const settingsPath = join(agentDir, "settings.json");
+		writeFileSync(settingsPath, JSON.stringify({ rlmMaxDepth: "unlimited" }));
+		const manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getRlmMaxDepth()).toBe("unlimited");
+
+		writeFileSync(settingsPath, JSON.stringify({ rlmMaxDepth: -1 }));
+		const bad = Reloaded.create(projectDir, agentDir);
+		expect(bad.getRlmMaxDepth()).toBeUndefined();
+
+		writeFileSync(settingsPath, JSON.stringify({ rlmMaxDepth: "UNLIMITED" }));
+		const wrongCase = Reloaded.create(projectDir, agentDir);
+		expect(wrongCase.getRlmMaxDepth()).toBeUndefined();
+	});
+});

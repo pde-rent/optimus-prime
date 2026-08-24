@@ -15,8 +15,10 @@ import { AgentSession, type AgentSessionEvent, type AutoRefineReviewer } from ".
 import { AuthStorage } from "../../src/core/auth-storage.js";
 import type { AgentAutonomousConfig } from "../../src/core/autonomous.js";
 import type { ExtensionRunner } from "../../src/core/extensions/index.js";
+import type { GraphBudgetExhaustedCallback } from "../../src/core/graph-resolver.js";
 import { convertToLlm } from "../../src/core/messages.js";
 import { ModelRegistry } from "../../src/core/model-registry.js";
+import type { DepthLimitExhaustedCallback } from "../../src/core/rlm-max-depth.js";
 import type { SubagentRuntimeHost } from "../../src/core/rlm-runtime.js";
 import { SessionManager } from "../../src/core/session-manager.js";
 import type { Settings } from "../../src/core/settings-manager.js";
@@ -72,6 +74,10 @@ export interface HarnessOptions {
 	agentObserveController?: AgentObserveController;
 	agentMessageController?: AgentSessionMessageController;
 	subagentRuntimeHost?: SubagentRuntimeHost;
+	/** Prompt fired when the graph budget refuses a spawn. */
+	budgetExhausted?: GraphBudgetExhaustedCallback;
+	/** Prompt fired when a spawn hits the recursion ceiling. */
+	depthExhausted?: DepthLimitExhaustedCallback;
 	persistSession?: boolean;
 	rlmDepth?: number;
 	rlmSessionDir?: string;
@@ -235,6 +241,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		agentObserveController: options.agentObserveController,
 		agentMessageController: options.agentMessageController,
 		subagentRuntimeHost: options.subagentRuntimeHost,
+		budgetExhausted: options.budgetExhausted,
+		depthExhausted: options.depthExhausted,
 		baseToolsOverride: toolMap,
 		extensionRunnerRef,
 		rlmDepth: options.rlmDepth,

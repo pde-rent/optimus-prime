@@ -6,6 +6,7 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { ensureDir, isTruthyEnvVar } from "../utils/shared.js";
 import { acquireLockSyncWithRetry } from "./file-lock.js";
 import { DEFAULT_GRAPH_RESOLVER_LEVEL, type GraphResolverLevel, isGraphResolverLevel } from "./graph-resolver.js";
+import { isRlmMaxDepthValue, type RlmMaxDepthValue } from "./rlm-max-depth.js";
 
 type MaxRunningAgentsSetting = "auto" | number;
 
@@ -170,7 +171,7 @@ export interface Settings {
 	/** Seconds a session stays idle with open todos before the watchdog continuation fires. default: 120 */
 	todoWatchdogDelaySeconds?: number;
 	defaultServiceTier?: ServiceTier;
-	rlmMaxDepth?: number; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
+	rlmMaxDepth?: RlmMaxDepthValue; // default for new sessions; unset falls through to RLM_MAX_DEPTH, then 1
 	/** Cap on concurrently running rlm subagents. "auto" sizes it from a live memory sample; a number pins it (kill-switch). default: "auto" */
 	maxRunningAgents?: MaxRunningAgentsSetting;
 	/** Multi-agent graph budget dial. "off" keeps the single-agent path. default: "off" */
@@ -861,11 +862,12 @@ export class SettingsManager {
 		this.setGlobalField("defaultServiceTier", serviceTier);
 	}
 
-	getRlmMaxDepth(): number | undefined {
-		return this.globalSettings.rlmMaxDepth;
+	getRlmMaxDepth(): RlmMaxDepthValue | undefined {
+		const value = this.globalSettings.rlmMaxDepth;
+		return isRlmMaxDepthValue(value) ? value : undefined;
 	}
 
-	setRlmMaxDepth(maxDepth: number): void {
+	setRlmMaxDepth(maxDepth: RlmMaxDepthValue): void {
 		this.setGlobalField("rlmMaxDepth", maxDepth);
 	}
 

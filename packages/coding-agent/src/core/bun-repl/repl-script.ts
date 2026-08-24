@@ -600,10 +600,13 @@ function bunOnlyGlobal(name: string): unknown {
 // The Bun runtime object, resolved dynamically so the build needs no @types/bun.
 const bunGlobal = (globalThis as { Bun?: unknown }).Bun;
 
+// Shared so `print` aliases the sandbox console instead of the host's.
+const cellConsole = sandboxConsole();
+
 // Platform surface: what Bun would have given the cell anyway. A cell may replace any of it.
 Object.assign(context, {
 	globalThis: context,
-	console: sandboxConsole(),
+	console: cellConsole,
 	setTimeout,
 	clearTimeout,
 	setInterval,
@@ -684,6 +687,9 @@ for (const [name, value] of Object.entries({
 	pi: piObj,
 	search,
 	ls,
+	// Models reach for print() out of habit; without an alias every cell that
+	// uses it dies with a ReferenceError on the first try.
+	print: cellConsole.log,
 })) {
 	installHarnessGlobal(name, value);
 }

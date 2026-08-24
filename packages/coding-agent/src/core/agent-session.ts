@@ -472,13 +472,17 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	sessionStartEvent?: SessionStartEvent;
 	rlmDepth?: number;
-	rlmMaxDepth?: number;
+	rlmMaxDepth?: RlmMaxDepthValue;
 	rlmMaxDepthPinned?: boolean;
+	/** Prompt shown when a spawn exceeds the recursion ceiling. Absent: non-interactive default applies. */
+	depthExhausted?: DepthLimitExhaustedCallback;
 	peerNames?: readonly string[];
 	rlmSessionDir?: string;
 	rlmParentNodeId?: string;
 	rlmParentAgent?: string;
 	subagentRuntimeHost?: SubagentRuntimeHost;
+	/** Prompt shown when the graph budget refuses another child. Absent: non-interactive default applies. */
+	budgetExhausted?: GraphBudgetExhaustedCallback;
 	autonomous?: AgentAutonomousConfig;
 	prewarmReplKernel?: boolean;
 	autoRefineReviewer?: AutoRefineReviewer;
@@ -901,13 +905,30 @@ type GoalSlashCommand =
 
 type AutonomousSlashCommand = { kind: "status" } | { kind: "on" } | { kind: "off" };
 
-import { admitsGraphNode, type GraphResolverLevel, graphMinDepth, graphResolverBudget } from "./graph-resolver.js";
+import {
+	admitsGraphNode,
+	type GraphBudgetExhaustedCallback,
+	type GraphBudgetExhaustedChoice,
+	type GraphBudgetExhaustedInfo,
+	type GraphResolverLevel,
+	graphMinDepth,
+	graphResolverBudget,
+	raiseGraphResolverLevel,
+} from "./graph-resolver.js";
 import type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from "./rlm-max-depth.js";
+import {
+	admitsRlmDepth,
+	type DepthLimitExhaustedCallback,
+	type DepthLimitExhaustedChoice,
+	type DepthLimitExhaustedInfo,
+	isRlmMaxDepthValue,
+	type RlmMaxDepthValue,
+} from "./rlm-max-depth.js";
 
 export type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from "./rlm-max-depth.js";
 
 interface PersistedRlmMaxDepthState {
-	maxDepth: number;
+	maxDepth: RlmMaxDepthValue;
 	/** Absent on entries written before the model could set depth; those were all user pins. */
 	source?: "chat" | "model";
 }
@@ -959,9 +980,40 @@ const MODEL_MAX_RLM_DEPTH = 3;
 const MAX_DEPTH_CHANGES_PER_RUN = 2;
 const MAX_CONTEXT_CHANGES_PER_RUN = 2;
 const EFFORT_ESCALATION_TOOL_ERROR_THRESHOLD = 3;
+
 const BANDED_EFFORT_MIN: ThinkingLevel = "low";
 const BANDED_EFFORT_MAX: ThinkingLevel = "high";
 
+/** How long a budget or depth prompt stays open before its default remedy applies. */
+const BUDGET_PROMPT_TIMEOUT_MS = 30_000;
+
+const raiseOneDepth = (value: RlmMaxDepthValue): RlmMaxDepthValue => (value === "unlimited" ? "unlimited" : value + 1);
+
+/** Labels offered for an exhausted graph budget, paired with the choice each maps to. */
+const GRAPH_BUDGET_REMEDIES: ReadonlyArray<readonly [label: string, choice: GraphBudgetExhaustedChoice]> = [
+	["Reset meter (default)", "reset"],
+	["Raise one tier", "tier"],
+	["Unlimited", "unlimited"],
+	["Cancel", "cancel"],
+];
+
+/** Labels offered for a refused depth, paired with the choice each maps to. */
+const DEPTH_LIMIT_REMEDIES: ReadonlyArray<readonly [label: string, choice: DepthLimitExhaustedChoice]> = [
+	["Raise depth one step (default)", "raise"],
+	["Unlimited", "unlimited"],
+	["Cancel", "cancel"],
+];
+
+function choiceFromPromptAnswer<C extends string>(
+	answer: string | undefined,
+	remedies: ReadonlyArray<readonly [label: string, choice: C]>,
+	fallback: C,
+): C {
+	if (answer === undefined) return fallback;
+	const trimmed = answer.trim().toLowerCase();
+	const found = remedies.find(([label]) => label.toLowerCase() === trimmed);
+	return found !== undefined ? found[1] : fallback;
+}
 const KERNEL_STATE_LISTING_TIMEOUT_MS = 5000;
 
 /**
@@ -1014,7 +1066,7 @@ function parseDepth(value: string | undefined, fallback: number, name: string): 
 
 function isPersistedRlmMaxDepthState(value: unknown): value is PersistedRlmMaxDepthState {
 	return (
-		typeof value === "object" && value !== null && isNonNegativeInteger((value as PersistedRlmMaxDepthState).maxDepth)
+		typeof value === "object" && value !== null && isRlmMaxDepthValue((value as PersistedRlmMaxDepthState).maxDepth)
 	);
 }
 
@@ -1263,11 +1315,11 @@ export class AgentSession {
 	 * root allows 4 concurrent boots, its children 2, theirs 1.
 	 */
 	private _rlmKernelBootGate: Semaphore | undefined;
-	private readonly _configuredRlmMaxDepth: number | undefined;
+	private readonly _configuredRlmMaxDepth: RlmMaxDepthValue | undefined;
 	private readonly _rlmMaxDepthPinned: boolean;
 	/** Siblings this agent may message, when its spawner declared a cohort edge set. */
 	private readonly _peerNames?: readonly string[];
-	private _rlmMaxDepth: number;
+	private _rlmMaxDepth: RlmMaxDepthValue;
 	private _rlmMaxDepthSource: RlmMaxDepthSource;
 	private _rlmSessionDir?: string;
 	private _rlmParentNodeId?: string;
@@ -1275,6 +1327,8 @@ export class AgentSession {
 	private _repliedToParentSinceTask: boolean | undefined;
 	private _parentReplyCount = 0;
 	private _subagentRuntimeHost?: SubagentRuntimeHost;
+	private readonly _budgetExhausted?: GraphBudgetExhaustedCallback;
+	private readonly _depthExhausted?: DepthLimitExhaustedCallback;
 	private _activeRlmChildRuns = new Map<string, RlmChildRun>();
 	private _pendingRlmSubagentSessionNames = new Set<string>();
 	// Inline mode keeps finished child sessions so the inspector can still read them;
@@ -1369,8 +1423,8 @@ export class AgentSession {
 		this._configuredRlmMaxDepth = config.rlmMaxDepth;
 		this._rlmMaxDepthPinned = config.rlmMaxDepthPinned ?? false;
 		this._peerNames = config.peerNames;
-		if (this._configuredRlmMaxDepth !== undefined && !isNonNegativeInteger(this._configuredRlmMaxDepth)) {
-			throw new Error("rlmMaxDepth must be a non-negative integer");
+		if (this._configuredRlmMaxDepth !== undefined && !isRlmMaxDepthValue(this._configuredRlmMaxDepth)) {
+			throw new Error('rlmMaxDepth must be a non-negative integer or "unlimited"');
 		}
 		const resolvedRlmMaxDepth = this._resolveRlmMaxDepth();
 		this._rlmMaxDepth = resolvedRlmMaxDepth.maxDepth;
@@ -1387,6 +1441,8 @@ export class AgentSession {
 			this._rlmDepth > 0 && this.sessionManager.getBranch().some((entry) => entry.type === "message")
 				? undefined
 				: false;
+		this._budgetExhausted = config.budgetExhausted;
+		this._depthExhausted = config.depthExhausted;
 		this._subagentRuntimeHost = config.subagentRuntimeHost;
 		this._autonomousState = createAutonomousRuntimeState(config.autonomous, {
 			cwd: this._cwd,
@@ -1627,7 +1683,7 @@ export class AgentSession {
 	}
 
 	private _resolveRlmMaxDepth(): {
-		maxDepth: number;
+		maxDepth: RlmMaxDepthValue;
 		source: RlmMaxDepthSource;
 	} {
 		const base = this._resolveConfiguredRlmMaxDepth();
@@ -1641,12 +1697,13 @@ export class AgentSession {
 		// Raising either would override the more specific instruction with the more general one.
 		if (base.source === "chat" || this._rlmMaxDepthPinned) return base;
 		if (base.maxDepth === 0 && base.source !== "default") return base;
+		if (base.maxDepth === "unlimited") return base;
 		const floor = graphMinDepth(this.settingsManager.getGraphResolver());
 		return floor > base.maxDepth ? { maxDepth: floor, source: "graph" } : base;
 	}
 
 	private _resolveConfiguredRlmMaxDepth(): {
-		maxDepth: number;
+		maxDepth: RlmMaxDepthValue;
 		source: RlmMaxDepthSource;
 	} {
 		const persisted = this._loadPersistedRlmMaxDepthState();
@@ -1657,11 +1714,12 @@ export class AgentSession {
 			return { maxDepth: this._configuredRlmMaxDepth, source: "inherited" };
 		}
 		const global = this.settingsManager.getRlmMaxDepth();
-		if (global !== undefined && isNonNegativeInteger(global)) {
+		if (global !== undefined && isRlmMaxDepthValue(global)) {
 			return { maxDepth: global, source: "global" };
 		}
 		const env = process.env.RLM_MAX_DEPTH;
 		if (env !== undefined && env !== "") {
+			if (/^unlimited$/i.test(env.trim())) return { maxDepth: "unlimited", source: "env" };
 			return { maxDepth: parseDepth(env, 1, "RLM_MAX_DEPTH"), source: "env" };
 		}
 		return { maxDepth: 1, source: "default" };
@@ -4416,7 +4474,7 @@ export class AgentSession {
 		return this._rlmDepth;
 	}
 
-	get rlmMaxDepth(): number {
+	get rlmMaxDepth(): RlmMaxDepthValue {
 		return this._rlmMaxDepth;
 	}
 
@@ -4532,7 +4590,7 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
-			allowRecursion: this._rlmDepth < this._rlmMaxDepth,
+			allowRecursion: admitsRlmDepth(this._rlmDepth, this._rlmMaxDepth),
 			rlmDepth: this._rlmDepth,
 			rlmParentAgent: this._rlmParentAgent,
 			// Read here rather than captured at construction so a `/graph` change during a session
@@ -7214,18 +7272,119 @@ export class AgentSession {
 		this._effortToolErrorStreaks.clear();
 	}
 
-	/** Refuse a spawn the graph budget can no longer pay for. See `admitsGraphNode`. */
-	private _assertGraphBudgetAdmits(): void {
-		const level = this.settingsManager.getGraphResolver();
-		if (level === "off") return;
-		const budget = graphResolverBudget(level, this.settingsManager.getGraphMaxTokens());
-		if (!budget) return;
-		if (admitsGraphNode(this._graphChildTokensThisRun, budget, this._graphNodesThisRun)) return;
-		throw new Error(
-			`Graph budget exhausted (level=${level}, spent=${this._graphChildTokensThisRun}, ` +
-				`ceiling=${budget.ceilingTokens}, children=${this._graphNodesThisRun}/${budget.maxNodes}). ` +
+	private _formatGraphBudgetExhaustedError(info: GraphBudgetExhaustedInfo): Error {
+		return new Error(
+			`Graph budget exhausted (level=${info.level}, spent=${info.spentTokens}, ` +
+				`ceiling=${info.ceilingTokens}, children=${info.nodes}/${info.maxNodes}). ` +
 				`Finish with what the children already returned, or raise the budget with /graph.`,
 		);
+	}
+
+	private _formatDepthLimitError(): Error {
+		return new Error(
+			`RLM recursion depth limit reached (RLM_DEPTH=${this._rlmDepth}, RLM_MAX_DEPTH=${this._rlmMaxDepth})`,
+		);
+	}
+
+	/** The budget refusal for the next spawn, or undefined when it would be admitted. */
+	private _graphBudgetRefusal(): GraphBudgetExhaustedInfo | undefined {
+		const level = this.settingsManager.getGraphResolver();
+		if (level === "off") return undefined;
+		const budget = graphResolverBudget(level, this.settingsManager.getGraphMaxTokens());
+		if (!budget) return undefined;
+		if (admitsGraphNode(this._graphChildTokensThisRun, budget, this._graphNodesThisRun)) return undefined;
+		return {
+			level,
+			spentTokens: this._graphChildTokensThisRun,
+			ceilingTokens: budget.ceilingTokens,
+			nodes: this._graphNodesThisRun,
+			maxNodes: budget.maxNodes,
+		};
+	}
+
+	/**
+	 * Gate a child spawn on recursion depth and the graph budget. When one refuses and a host
+	 * callback or extension UI can ask, the user picks a remedy; without either, the default
+	 * remedy applies with a best-effort notify. Each remedy is applied once and admission is
+	 * rechecked exactly once — a still-refused spawn throws so the calling agent sees it.
+	 *
+	 * A pinned depth (`_rlmMaxDepthPinned`) is never raised automatically: the persisted chat
+	 * entry these remedies write outranks the pin, and only an explicit choice gets that far.
+	 */
+	private async _admitRlmSpawn(): Promise<void> {
+		for (let pass = 0; ; pass++) {
+			if (!admitsRlmDepth(this._rlmDepth, this._rlmMaxDepth)) {
+				if (pass > 0) throw this._formatDepthLimitError();
+				const info: DepthLimitExhaustedInfo = { depth: this._rlmDepth, maxDepth: this._rlmMaxDepth };
+				const choice = await this._promptDepthExhausted(info);
+				if (choice === "cancel") throw this._formatDepthLimitError();
+				await this.setRlmMaxDepth(choice === "unlimited" ? "unlimited" : raiseOneDepth(this._rlmMaxDepth), {
+					source: "chat",
+				});
+				continue;
+			}
+			const refusal = this._graphBudgetRefusal();
+			if (!refusal) return;
+			if (pass > 0) throw this._formatGraphBudgetExhaustedError(refusal);
+			switch (await this._promptGraphBudgetExhausted(refusal)) {
+				case "reset":
+					this._graphChildTokensThisRun = 0;
+					this._graphNodesThisRun = 0;
+					break;
+				case "tier":
+					this.setGraphResolver(raiseGraphResolverLevel(refusal.level));
+					break;
+				case "unlimited":
+					this.setGraphResolver("unlimited");
+					break;
+				case "cancel":
+					throw this._formatGraphBudgetExhaustedError(refusal);
+			}
+		}
+	}
+
+	private async _promptGraphBudgetExhausted(info: GraphBudgetExhaustedInfo): Promise<GraphBudgetExhaustedChoice> {
+		if (this._budgetExhausted) return await this._budgetExhausted(info);
+		const ui = this._extensionUIContext;
+		if (ui?.select) {
+			const answer = await ui.select(
+				"Graph budget exhausted",
+				GRAPH_BUDGET_REMEDIES.map(([label]) => label),
+				{ timeout: BUDGET_PROMPT_TIMEOUT_MS },
+			);
+			return choiceFromPromptAnswer(answer, GRAPH_BUDGET_REMEDIES, "reset");
+		}
+		this._notifyRefusalRemedy(
+			`Graph budget exhausted (level=${info.level}, spent ${info.spentTokens} tokens, ` +
+				`${info.nodes}/${info.maxNodes} children); resetting the meter.`,
+		);
+		return "reset";
+	}
+
+	private async _promptDepthExhausted(info: DepthLimitExhaustedInfo): Promise<DepthLimitExhaustedChoice> {
+		if (this._depthExhausted) return await this._depthExhausted(info);
+		const ui = this._extensionUIContext;
+		if (ui?.select) {
+			const answer = await ui.select(
+				"Recursion depth limit reached",
+				DEPTH_LIMIT_REMEDIES.map(([label]) => label),
+				{ timeout: BUDGET_PROMPT_TIMEOUT_MS },
+			);
+			return choiceFromPromptAnswer(answer, DEPTH_LIMIT_REMEDIES, "raise");
+		}
+		this._notifyRefusalRemedy(
+			`RLM recursion depth limit reached (${info.depth}/${info.maxDepth}); raising depth by one.`,
+		);
+		return "raise";
+	}
+
+	private _notifyRefusalRemedy(message: string): void {
+		const ui = this._extensionUIContext;
+		if (ui?.notify) {
+			ui.notify(message, "warning");
+			return;
+		}
+		console.warn(`Warning: ${message}`);
 	}
 
 	private _recordEffortToolOutcome(toolName: string, isError: boolean): void {
@@ -7391,7 +7550,7 @@ export class AgentSession {
 		if (!this.settingsManager.getDynamicDepth()) {
 			return { max_depth: current, capped: false, refused: "disabled" };
 		}
-		if (maxDepth === current) {
+		if (maxDepth === current || current === "unlimited") {
 			return { max_depth: current, capped: false };
 		}
 		const isRaise = maxDepth > current;
@@ -10455,12 +10614,7 @@ export class AgentSession {
 			normalizeRequestedRlmEffort(rawEffort),
 		);
 		if (requestedSessionName) assertDirectAgentMessageTarget(requestedSessionName);
-		if (this._rlmDepth >= this._rlmMaxDepth) {
-			throw new Error(
-				`RLM recursion depth limit reached (RLM_DEPTH=${this._rlmDepth}, RLM_MAX_DEPTH=${this._rlmMaxDepth})`,
-			);
-		}
-		this._assertGraphBudgetAdmits();
+		await this._admitRlmSpawn();
 		if (requestedSessionName) {
 			if (this._pendingRlmSubagentSessionNames.has(requestedSessionName)) {
 				throw new Error(formatAgentSessionNameUnavailable(requestedSessionName, this._rlmDepth + 1));
@@ -11448,11 +11602,11 @@ export class AgentSession {
 	}
 
 	async setRlmMaxDepth(
-		maxDepth: number,
+		maxDepth: RlmMaxDepthValue,
 		options: { global?: boolean; source?: "chat" | "model" } = {},
 	): Promise<SetRlmMaxDepthResult> {
-		if (!isNonNegativeInteger(maxDepth)) {
-			throw new Error("RLM max depth must be a non-negative integer.");
+		if (!isRlmMaxDepthValue(maxDepth)) {
+			throw new Error('RLM max depth must be a non-negative integer or "unlimited".');
 		}
 
 		const source = options.source === "model" ? "model" : "chat";

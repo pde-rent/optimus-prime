@@ -12,6 +12,7 @@ import type {
 import type { InputSource } from "../../core/extensions/types.js";
 import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { CustomMessage } from "../../core/messages.js";
+import type { RlmMaxDepthValue } from "../../core/rlm-max-depth.js";
 import type { QueuedMessageLane, QueuedMessageMutation } from "../../core/session-action-store.js";
 import type { SessionCwdIssue } from "../../core/session-cwd.js";
 import type { DeleteSessionFileResult } from "../../core/session-file-actions.js";
@@ -595,7 +596,7 @@ export type DaemonCommand =
 	| { id?: string; type: "export_jsonl"; activeSessionId: string; outputPath?: string }
 	| { id?: string; type: "set_session_name"; activeSessionId: string; name: string; workerToken?: string }
 	| { id?: string; type: "get_rlm_max_depth_status"; activeSessionId: string }
-	| { id?: string; type: "set_rlm_max_depth"; activeSessionId: string; maxDepth: number; global?: boolean }
+	| { id?: string; type: "set_rlm_max_depth"; activeSessionId: string; maxDepth: RlmMaxDepthValue; global?: boolean }
 	| { id?: string; type: "set_graph_resolver"; activeSessionId: string; level: GraphResolverLevel }
 	| { id?: string; type: "repl_execute"; activeSessionId: string; code: string; timeoutSeconds?: number }
 	| { id?: string; type: "repl_list_names"; activeSessionId: string }

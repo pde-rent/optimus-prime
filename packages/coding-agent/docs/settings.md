@@ -188,6 +188,15 @@ Optimus Prime identifies which package manager the argv names — `bun`, `npm`, 
 
 When multiple sources specify a session directory, precedence is `--session-dir`, `OPTIMUS_SESSION_DIR`, the legacy `OPTIMUS_CODING_AGENT_SESSION_DIR`, then `sessionDir` in `settings.json`.
 
+### Sub-Agents
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `rlmMaxDepth` | number or `"unlimited"` | - | Maximum sub-agent recursion depth for new sessions. Unset falls through to `RLM_MAX_DEPTH` (which also accepts `"unlimited"`), then to 1. Set via `/rlm-max-depth [<n>|unlimited] [--global]` or `--rlm-max-depth`. |
+| `graphResolver` | string | `"off"` | Multi-agent graph budget dial: `"off"`, `"low"`, `"medium"`, `"high"`, `"max"`, `"unlimited"`. `"off"` keeps the single-agent path; `"unlimited"` removes the token ceiling and the child cap entirely. Set via `/graph <level>`, `--graph <level>`, or the `GRAPH_RESOLVER` env var. |
+
+When a spawn is refused because the graph budget is exhausted or the recursion ceiling is reached, interactive sessions prompt with a choice of remedies (reset the meter, raise one tier or one depth step, go unlimited, cancel) and fall back to the default remedy after 30 seconds. Non-interactive sessions apply the default remedy directly.
+
 ### Model Cycling
 
 | Setting | Type | Default | Description |

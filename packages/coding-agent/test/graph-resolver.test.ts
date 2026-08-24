@@ -6,6 +6,7 @@ import {
 	graphMinDepth,
 	graphResolverBudget,
 	isGraphResolverLevel,
+	raiseGraphResolverLevel,
 } from "../src/core/graph-resolver.js";
 import { buildSubagentGuidance } from "../src/core/prompts/rlm.js";
 
@@ -172,5 +173,59 @@ describe("flag plumbing", () => {
 		const { parseArgs } = await import("../src/cli/args.js");
 		expect(parseArgs(["--effort", "high"]).thinking).toBe("high");
 		expect(parseArgs(["--dynamic-depth"]).dynamicDepth).toBe(true);
+	});
+});
+
+describe("unlimited tier", () => {
+	it("is a selectable level on every surface driven by GRAPH_RESOLVER_LEVELS", () => {
+		expect(GRAPH_RESOLVER_LEVELS).toContain("unlimited");
+		expect(isGraphResolverLevel("unlimited")).toBe(true);
+	});
+
+	it("has no ceiling and no node cap", () => {
+		const budget = graphResolverBudget("unlimited");
+		expect(budget?.ceilingTokens).toBe(Number.POSITIVE_INFINITY);
+		expect(budget?.maxNodes).toBe(Number.POSITIVE_INFINITY);
+	});
+
+	it("parses from --graph and the settings file", async () => {
+		const { parseArgs } = await import("../src/cli/args.js");
+		expect(parseArgs(["--graph", "unlimited"]).graphResolver).toBe("unlimited");
+
+		const { SettingsManager } = await import("../src/core/settings-manager.js");
+		const manager = SettingsManager.inMemory({ graphResolver: "unlimited" });
+		expect(manager.getGraphResolver()).toBe("unlimited");
+		manager.setGraphResolver("unlimited");
+		expect(manager.getGraphResolver()).toBe("unlimited");
+	});
+
+	it("is accepted through the GRAPH_RESOLVER env var", async () => {
+		const { SettingsManager } = await import("../src/core/settings-manager.js");
+		const previous = process.env.GRAPH_RESOLVER;
+		process.env.GRAPH_RESOLVER = "unlimited";
+		try {
+			const manager = SettingsManager.inMemory({ graphResolver: "off" });
+			expect(manager.getGraphResolver()).toBe("unlimited");
+		} finally {
+			if (previous === undefined) delete process.env.GRAPH_RESOLVER;
+			else process.env.GRAPH_RESOLVER = previous;
+		}
+	});
+});
+
+describe("raiseGraphResolverLevel", () => {
+	it("promotes one tier at a time, topping out at unlimited", () => {
+		expect(raiseGraphResolverLevel("min")).toBe("low");
+		expect(raiseGraphResolverLevel("low")).toBe("medium");
+		expect(raiseGraphResolverLevel("medium")).toBe("high");
+		expect(raiseGraphResolverLevel("high")).toBe("max");
+		expect(raiseGraphResolverLevel("max")).toBe("unlimited");
+		expect(raiseGraphResolverLevel("unlimited")).toBe("unlimited");
+	});
+
+	it("maps off to the lowest spendable tier", () => {
+		const raised = raiseGraphResolverLevel("off");
+		expect(raised).not.toBe("off");
+		expect(graphMinDepth(raised)).toBeGreaterThan(0);
 	});
 });

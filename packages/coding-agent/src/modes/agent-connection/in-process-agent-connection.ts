@@ -16,6 +16,7 @@ import type {
 import type { ExtensionUIContext } from "../../core/extensions/types.js";
 import type { GraphResolverLevel } from "../../core/graph-resolver.js";
 import type { RefinementResult } from "../../core/refinement/index.js";
+import type { RlmMaxDepthValue } from "../../core/rlm-max-depth.js";
 import { type DeleteSessionFileResult, deleteSessionFile } from "../../core/session-file-actions.js";
 import { SessionManager } from "../../core/session-manager.js";
 import type { SessionStats } from "../../core/session-stats.js";
@@ -558,7 +559,7 @@ export class InProcessAgentConnection implements AgentConnection {
 		return this.session.getRlmMaxDepthStatus();
 	}
 
-	async setRlmMaxDepth(maxDepth: number, options?: { global?: boolean }) {
+	async setRlmMaxDepth(maxDepth: RlmMaxDepthValue, options?: { global?: boolean }) {
 		return this.session.setRlmMaxDepth(maxDepth, options);
 	}
 
