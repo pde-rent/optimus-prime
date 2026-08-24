@@ -5,6 +5,7 @@ import {
 	IGNITION_EYES,
 	ignitionCellColor,
 	ignitionSoundPath,
+	shouldPlayIgnitionSound,
 } from "../src/modes/interactive/ignition.js";
 import { OPTIMUS_LOGO } from "../src/themes/optimus-logo.js";
 
@@ -63,5 +64,36 @@ describe("ignition", () => {
 		expect(ignitionCellColor(row, col, -1)).toBeUndefined();
 		expect(ignitionCellColor(row, col, IGNITION_DURATION_MS)).toBeUndefined();
 		expect(ignitionCellColor(row, col, IGNITION_DURATION_MS + 1000)).toBeUndefined();
+	});
+});
+
+describe("ignition sound gating", () => {
+	const userEnv: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" };
+
+	it("plays for a user-launched foreground session", () => {
+		expect(shouldPlayIgnitionSound({ env: userEnv, stdinIsTTY: true, stdoutIsTTY: true })).toBe(true);
+	});
+
+	it("stays silent in agent-spawned processes, terminal or not", () => {
+		// Every OPTIMUS_INTERNAL_* variable marks a process the fleet started on its own behalf:
+		// daemon workers, owned session workers, kernels. None of them is the user's session.
+		const keys = [
+			"OPTIMUS_INTERNAL_DAEMON_WORKER",
+			"OPTIMUS_INTERNAL_OWNED_WORKER",
+			"OPTIMUS_INTERNAL_DAEMON_CATALOG",
+		];
+		for (const key of keys) {
+			expect(shouldPlayIgnitionSound({ env: { [key]: "1" }, stdinIsTTY: true, stdoutIsTTY: true })).toBe(false);
+		}
+	});
+
+	it("stays silent when stdin is not a terminal (piped/headless runs)", () => {
+		expect(shouldPlayIgnitionSound({ env: userEnv, stdinIsTTY: false, stdoutIsTTY: true })).toBe(false);
+		expect(shouldPlayIgnitionSound({ env: userEnv, stdinIsTTY: undefined, stdoutIsTTY: true })).toBe(false);
+	});
+
+	it("stays silent when stdout is not a terminal (captured output)", () => {
+		expect(shouldPlayIgnitionSound({ env: userEnv, stdinIsTTY: true, stdoutIsTTY: false })).toBe(false);
+		expect(shouldPlayIgnitionSound({ env: userEnv, stdinIsTTY: true, stdoutIsTTY: undefined })).toBe(false);
 	});
 });

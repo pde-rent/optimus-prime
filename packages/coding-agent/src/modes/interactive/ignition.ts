@@ -76,6 +76,25 @@ export function ignitionSoundPath(): string | undefined {
 	return existsSync(path) ? path : undefined;
 }
 
+/**
+ * Whether this process is a genuinely user-launched foreground session.
+ *
+ * Agent-spawned instances mark themselves with an `OPTIMUS_INTERNAL_` env prefix (daemon workers,
+ * owned session workers, kernels), and any piped or captured run has no terminal on stdin/stdout.
+ * Each such instance shares the user's audio device, so without this gate one chime per spawn
+ * reads from the user's seat as "a sound plays every time a subagent runs". The prefix check
+ * mirrors the daemon wire's own internal-metadata fence (daemon-worker-protocol.ts).
+ */
+export function shouldPlayIgnitionSound(io?: {
+	env?: NodeJS.ProcessEnv;
+	stdinIsTTY?: boolean | undefined;
+	stdoutIsTTY?: boolean | undefined;
+}): boolean {
+	const env = io?.env ?? process.env;
+	if (Object.keys(env).some((key) => key.startsWith("OPTIMUS_INTERNAL_"))) return false;
+	return (io?.stdinIsTTY ?? process.stdin.isTTY) === true && (io?.stdoutIsTTY ?? process.stdout.isTTY) === true;
+}
+
 let soundStarted = false;
 
 /**
@@ -83,13 +102,15 @@ let soundStarted = false;
  *
  * Launched through a shell that backgrounds the player and exits, so the player is reparented away
  * and cannot be cut short by anything that later happens to this process or its group. Guarded so
- * a re-rendered header cannot stack a second copy over the first.
+ * a re-rendered header cannot stack a second copy over the first. Only a user-launched
+ * foreground session earns it at all: agent-spawned or non-terminal processes stay silent.
  *
  * Failure is silence: a machine with no audio, no player, or a busy device must start the agent
  * exactly as fast as one that plays the sound, so every error here is swallowed on purpose.
  */
 export function playIgnitionSound(): void {
 	if (soundStarted) return;
+	if (!shouldPlayIgnitionSound()) return;
 	const file = ignitionSoundPath();
 	if (!file) return;
 	soundStarted = true;
