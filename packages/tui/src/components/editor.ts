@@ -1,4 +1,5 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.js";
+import { BracketedPasteBuffer } from "../bracketed-paste.js";
 import type { EditorPasteSnapshot } from "../editor-component.js";
 import { getKeybindings } from "../keybindings.js";
 import { decodePrintableKey, matchesKey } from "../keys.js";
@@ -16,7 +17,7 @@ import {
 	visibleWidth,
 } from "../utils.js";
 
-import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.js";
+import { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme } from "./select-list.js";
 
 const baseSegmenter = getSegmenter();
 
@@ -308,8 +309,7 @@ export class Editor implements Component, Focusable {
 	private pastes: Map<number, string> = new Map();
 	private pasteCounter: number = 0;
 
-	private pasteBuffer: string = "";
-	private isInPaste: boolean = false;
+	private bracketedPaste = new BracketedPasteBuffer();
 
 	private history: string[] = [];
 	private historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
@@ -789,6 +789,26 @@ export class Editor implements Component, Focusable {
 		});
 	}
 
+	/**
+	 * Apply the currently selected autocomplete item to the buffer. No-op when
+	 * no provider is set. Does not dismiss the overlay or fire onChange.
+	 */
+	private applySelectedCompletion(selected: SelectItem): void {
+		if (!this.autocompleteProvider) return;
+		this.pushUndoSnapshot();
+		this.lastAction = null;
+		const result = this.autocompleteProvider.applyCompletion(
+			this.state.lines,
+			this.state.cursorLine,
+			this.state.cursorCol,
+			selected,
+			this.autocompletePrefix,
+		);
+		this.state.lines = result.lines;
+		this.state.cursorLine = result.cursorLine;
+		this.setCursorCol(result.cursorCol);
+	}
+
 	handleInput(data: string): void {
 		const kb = getKeybindings();
 
@@ -809,31 +829,18 @@ export class Editor implements Component, Focusable {
 			this.jumpMode = null;
 		}
 
-		if (data.includes("\x1b[200~")) {
-			this.isInPaste = true;
-			this.pasteBuffer = "";
-			data = data.replace("\x1b[200~", "");
-		}
-
-		if (this.isInPaste) {
-			this.pasteBuffer += data;
-			const endIndex = this.pasteBuffer.indexOf("\x1b[201~");
-			if (endIndex !== -1) {
-				const pasteContent = this.pasteBuffer.substring(0, endIndex);
-				// Empty bracketed pastes still matter: macOS terminals send them for
-				// Cmd+V when the clipboard holds only an image, and subclasses hook
-				// handlePaste to turn that into a clipboard-image attach.
-				this.handlePaste(pasteContent);
-				this.isInPaste = false;
-				const remaining = this.pasteBuffer.substring(endIndex + 6);
-				this.pasteBuffer = "";
-				if (remaining.length > 0) {
-					this.handleInput(remaining);
-				}
-				return;
+		const paste = this.bracketedPaste.feed(data);
+		if (paste) {
+			// Empty bracketed pastes still matter: macOS terminals send them for
+			// Cmd+V when the clipboard holds only an image, and subclasses hook
+			// handlePaste to turn that into a clipboard-image attach.
+			this.handlePaste(paste.content);
+			if (paste.rest.length > 0) {
+				this.handleInput(paste.rest);
 			}
 			return;
 		}
+		if (this.bracketedPaste.active) return;
 
 		if (kb.matches(data, "tui.input.copy")) {
 			return;
@@ -857,19 +864,8 @@ export class Editor implements Component, Focusable {
 
 			if (kb.matches(data, "tui.input.tab")) {
 				const selected = this.autocompleteList.getSelectedItem();
-				if (selected && this.autocompleteProvider) {
-					this.pushUndoSnapshot();
-					this.lastAction = null;
-					const result = this.autocompleteProvider.applyCompletion(
-						this.state.lines,
-						this.state.cursorLine,
-						this.state.cursorCol,
-						selected,
-						this.autocompletePrefix,
-					);
-					this.state.lines = result.lines;
-					this.state.cursorLine = result.cursorLine;
-					this.setCursorCol(result.cursorCol);
+				if (selected) {
+					this.applySelectedCompletion(selected);
 					this.cancelAutocomplete();
 					if (this.onChange) this.onChange(this.getText());
 				}
@@ -887,18 +883,7 @@ export class Editor implements Component, Focusable {
 							this.autocompletePrefix.startsWith("/"));
 					const shouldSubmitSlashCommand =
 						isSlashCommandCompletion && slashContext?.kind === "name" && slashContext.isAtPromptStart;
-					this.pushUndoSnapshot();
-					this.lastAction = null;
-					const result = this.autocompleteProvider.applyCompletion(
-						this.state.lines,
-						this.state.cursorLine,
-						this.state.cursorCol,
-						selected,
-						this.autocompletePrefix,
-					);
-					this.state.lines = result.lines;
-					this.state.cursorLine = result.cursorLine;
-					this.setCursorCol(result.cursorCol);
+					this.applySelectedCompletion(selected);
 
 					if (isSlashCommandCompletion) {
 						this.cancelAutocomplete();

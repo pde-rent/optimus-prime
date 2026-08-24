@@ -1,3 +1,4 @@
+import { BracketedPasteBuffer } from "../bracketed-paste.js";
 import { getKeybindings } from "../keybindings.js";
 import { decodeKittyPrintable } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
@@ -30,8 +31,7 @@ export class Input implements Component, Focusable {
 
 	focused: boolean = false;
 
-	private pasteBuffer: string = "";
-	private isInPaste: boolean = false;
+	private bracketedPaste = new BracketedPasteBuffer();
 
 	private killRing = new KillRing();
 	private lastAction: "kill" | "yank" | "type-word" | null = null;
@@ -52,31 +52,15 @@ export class Input implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
-		if (data.includes("\x1b[200~")) {
-			this.isInPaste = true;
-			this.pasteBuffer = "";
-			data = data.replace("\x1b[200~", "");
-		}
-
-		if (this.isInPaste) {
-			this.pasteBuffer += data;
-
-			const endIndex = this.pasteBuffer.indexOf("\x1b[201~");
-			if (endIndex !== -1) {
-				const pasteContent = this.pasteBuffer.substring(0, endIndex);
-
-				this.handlePaste(pasteContent);
-
-				this.isInPaste = false;
-
-				const remaining = this.pasteBuffer.substring(endIndex + 6); // 6 = length of \x1b[201~
-				this.pasteBuffer = "";
-				if (remaining) {
-					this.handleInput(remaining);
-				}
+		const paste = this.bracketedPaste.feed(data);
+		if (paste) {
+			this.handlePaste(paste.content);
+			if (paste.rest.length > 0) {
+				this.handleInput(paste.rest);
 			}
 			return;
 		}
+		if (this.bracketedPaste.active) return;
 
 		const kb = getKeybindings();
 

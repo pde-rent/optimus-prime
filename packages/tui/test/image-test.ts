@@ -4,7 +4,7 @@ import { Spacer } from "../src/components/spacer.js";
 import { Text } from "../src/components/text.js";
 import { ProcessTerminal } from "../src/terminal.js";
 import { getCapabilities, getImageDimensions } from "../src/terminal-image.js";
-import { TUI } from "../src/tui.js";
+import { type Component, TUI } from "../src/tui.js";
 
 const testImagePath = process.argv[2] || "/tmp/test-image.png";
 
@@ -43,14 +43,18 @@ if (dims) {
 tui.addChild(new Spacer(1));
 tui.addChild(new Text("Press Ctrl+C to exit", 1, 0));
 
-const editor = {
+const editor: Component = {
 	handleInput(data: string) {
 		if (data.charCodeAt(0) === 3) {
 			tui.stop();
 			process.exit(0);
 		}
 	},
+	invalidate(): void {},
+	render(): string[] {
+		return [];
+	},
 };
 
-tui.setFocus(editor as any);
+tui.setFocus(editor);
 tui.start();

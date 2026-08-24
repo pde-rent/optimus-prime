@@ -209,16 +209,19 @@ export interface OverlayMargin {
 /** Value that can be absolute (number) or percentage (string like "50%") */
 export type SizeValue = number | `${number}%`;
 
+/** Parse a percentage string like "50%" into its numeric percent value. */
+function parsePercentage(value: string): number | null {
+	const match = value.match(/^(\d+(?:\.\d+)?)%$/);
+	return match ? parseFloat(match[1]) : null;
+}
+
 /** Parse a SizeValue into absolute value given a reference size */
 function parseSizeValue(value: SizeValue | undefined, referenceSize: number): number | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value === "number") return value;
-	// Parse percentage string like "50%"
-	const match = value.match(/^(\d+(?:\.\d+)?)%$/);
-	if (match) {
-		return Math.floor((referenceSize * parseFloat(match[1])) / 100);
-	}
-	return undefined;
+	const percent = parsePercentage(value);
+	if (percent === null) return undefined;
+	return Math.floor((referenceSize * percent) / 100);
 }
 
 function isTermuxSession(): boolean {
@@ -1084,6 +1087,16 @@ export class TUI extends Container {
 			const event = this.terminal.mouseTrackingActive ? parseSgrMouseEvent(data) : null;
 			const leftReleaseWasDrag =
 				event?.button === MOUSE_BUTTON_LEFT && !event.press ? this.fullscreenLeftMouseDragged : false;
+			const handleRelease = (viewport: FullscreenViewport, ev: MouseEvent) => {
+				if (viewport.hasSelection()) {
+					const text = viewport.endActiveSelection();
+					if (text) this.copySelection(text);
+				} else if (ev.button === MOUSE_BUTTON_LEFT && !ev.motion && !leftReleaseWasDrag) {
+					const url = this.fullscreenPressedHyperlink ?? viewport.hyperlinkAt(ev.y - 1, ev.x - 1);
+					if (url) this.openHyperlink(url);
+				}
+				this.requestRender();
+			};
 			if (event?.button === MOUSE_BUTTON_LEFT && event.press) {
 				this.fullscreenLeftMouseDragged = event.motion;
 				if (!event.motion) {
@@ -1117,14 +1130,10 @@ export class TUI extends Container {
 					this.stopSelectionAutoScroll();
 					if (this.routeDockMouseHit(event, "release")) {
 						// Editor selection copies itself and stays persistent.
-					} else if (viewport.hasSelection()) {
-						const text = viewport.endActiveSelection();
-						if (text) this.copySelection(text);
-					} else if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
-						const url = this.fullscreenPressedHyperlink ?? viewport.hyperlinkAt(event.y - 1, event.x - 1);
-						if (url) this.openHyperlink(url);
+						this.requestRender();
+					} else {
+						handleRelease(viewport, event);
 					}
-					this.requestRender();
 				}
 			} else if (event && overlayFocused) {
 				this.stopSelectionAutoScroll();
@@ -1138,14 +1147,7 @@ export class TUI extends Container {
 					viewport.extendActiveSelection(event.y - 1, event.x - 1);
 					this.requestRender();
 				} else if (!event.press) {
-					if (viewport.hasSelection()) {
-						const text = viewport.endActiveSelection();
-						if (text) this.copySelection(text);
-					} else if (event.button === MOUSE_BUTTON_LEFT && !event.motion && !leftReleaseWasDrag) {
-						const url = this.fullscreenPressedHyperlink ?? viewport.hyperlinkAt(event.y - 1, event.x - 1);
-						if (url) this.openHyperlink(url);
-					}
-					this.requestRender();
+					handleRelease(fullscreen.viewport, event);
 				}
 			}
 			if (event?.button === MOUSE_BUTTON_LEFT && !event.press) {
@@ -1250,11 +1252,10 @@ export class TUI extends Container {
 		if (opt.row !== undefined) {
 			if (typeof opt.row === "string") {
 				// Percentage: 0% = top, 100% = bottom (overlay stays within bounds)
-				const match = opt.row.match(/^(\d+(?:\.\d+)?)%$/);
-				if (match) {
+				const percent = parsePercentage(opt.row);
+				if (percent !== null) {
 					const maxRow = Math.max(0, availHeight - effectiveHeight);
-					const percent = parseFloat(match[1]) / 100;
-					row = marginTop + Math.floor(maxRow * percent);
+					row = marginTop + Math.floor(maxRow * (percent / 100));
 				} else {
 					// Invalid format, fall back to center
 					row = this.resolveAnchorRow("center", effectiveHeight, availHeight, marginTop);
@@ -1272,11 +1273,10 @@ export class TUI extends Container {
 		if (opt.col !== undefined) {
 			if (typeof opt.col === "string") {
 				// Percentage: 0% = left, 100% = right (overlay stays within bounds)
-				const match = opt.col.match(/^(\d+(?:\.\d+)?)%$/);
-				if (match) {
+				const percent = parsePercentage(opt.col);
+				if (percent !== null) {
 					const maxCol = Math.max(0, availWidth - width);
-					const percent = parseFloat(match[1]) / 100;
-					col = marginLeft + Math.floor(maxCol * percent);
+					col = marginLeft + Math.floor(maxCol * (percent / 100));
 				} else {
 					// Invalid format, fall back to center
 					col = this.resolveAnchorCol("center", width, availWidth, marginLeft);

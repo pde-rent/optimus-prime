@@ -498,12 +498,15 @@ interface ParsedModifyOtherKeysSequence {
 
 let _lastEventType: KeyEventType = "press";
 
+/** Final characters a Kitty CSI sequence can end with before the event digit. */
+const KITTY_EVENT_TYPE_SUFFIXES = ["u", "~", "A", "B", "C", "D", "H", "F"] as const;
+
 /**
- * Check if the last parsed key event was a key release.
- * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ * Check whether data carries a Kitty keyboard protocol event of the given
+ * type digit (2 = repeat, 3 = release).
  */
-export function isKeyRelease(data: string): boolean {
-	// Don't treat bracketed paste content as key release, even if it contains
+function isKittyEventOfType(data: string, eventTypeDigit: number): boolean {
+	// Don't treat bracketed paste content as key events, even if it contains
 	// patterns like ":3F" (e.g., bluetooth MAC addresses like "90:62:3F:A5").
 	// Terminal.ts re-wraps paste content with bracketed paste markers before
 	// passing to TUI, so pasted data will always contain \x1b[200~.
@@ -511,19 +514,15 @@ export function isKeyRelease(data: string): boolean {
 		return false;
 	}
 
-	if (
-		data.includes(":3u") ||
-		data.includes(":3~") ||
-		data.includes(":3A") ||
-		data.includes(":3B") ||
-		data.includes(":3C") ||
-		data.includes(":3D") ||
-		data.includes(":3H") ||
-		data.includes(":3F")
-	) {
-		return true;
-	}
-	return false;
+	return KITTY_EVENT_TYPE_SUFFIXES.some((suffix) => data.includes(`:${eventTypeDigit}${suffix}`));
+}
+
+/**
+ * Check if the last parsed key event was a key release.
+ * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ */
+export function isKeyRelease(data: string): boolean {
+	return isKittyEventOfType(data, 3);
 }
 
 /**
@@ -531,25 +530,7 @@ export function isKeyRelease(data: string): boolean {
  * Only meaningful when Kitty keyboard protocol with flag 2 is active.
  */
 export function isKeyRepeat(data: string): boolean {
-	// Don't treat bracketed paste content as key repeat, even if it contains
-	// patterns like ":2F". See isKeyRelease() for details.
-	if (data.includes("\x1b[200~")) {
-		return false;
-	}
-
-	if (
-		data.includes(":2u") ||
-		data.includes(":2~") ||
-		data.includes(":2A") ||
-		data.includes(":2B") ||
-		data.includes(":2C") ||
-		data.includes(":2D") ||
-		data.includes(":2H") ||
-		data.includes(":2F")
-	) {
-		return true;
-	}
-	return false;
+	return isKittyEventOfType(data, 2);
 }
 
 function parseEventType(eventTypeStr: string | undefined): KeyEventType {
@@ -785,6 +766,46 @@ const FUNCTIONAL_KEY_MATCHES: Record<
 };
 
 /**
+ * Arrow keys that share one matching shape: legacy sequence when
+ * unmodified, legacy modifier sequence + Kitty sequence otherwise.
+ * Left/right additionally support ctrl-arrows and an uppercase alt literal
+ * that is only honored without the Kitty protocol.
+ */
+interface ArrowKeyMatch {
+	codepoint: number;
+	legacy: LegacyModifierKey;
+	/** Alt+arrow modifier sequence (e.g. \x1b[1;3A). */
+	altSequence: string;
+	/** Lowercase alt send-text literal some terminals emit instead (e.g. \x1bp). */
+	altLiteral: string;
+	/** Uppercase alt literal, matched only without Kitty protocol (left/right). */
+	altUppercaseLiteral?: string;
+	/** Ctrl+arrow modifier sequence (left/right only). */
+	ctrlSequence?: string;
+}
+
+const ARROW_KEY_MATCHES: Record<"up" | "down" | "left" | "right", ArrowKeyMatch> = {
+	up: { codepoint: ARROW_CODEPOINTS.up, legacy: "up", altSequence: "\x1b[1;3A", altLiteral: "\x1bp" },
+	down: { codepoint: ARROW_CODEPOINTS.down, legacy: "down", altSequence: "\x1b[1;3B", altLiteral: "\x1bn" },
+	left: {
+		codepoint: ARROW_CODEPOINTS.left,
+		legacy: "left",
+		altSequence: "\x1b[1;3D",
+		altLiteral: "\x1bb",
+		altUppercaseLiteral: "\x1bB",
+		ctrlSequence: "\x1b[1;5D",
+	},
+	right: {
+		codepoint: ARROW_CODEPOINTS.right,
+		legacy: "right",
+		altSequence: "\x1b[1;3C",
+		altLiteral: "\x1bf",
+		altUppercaseLiteral: "\x1bF",
+		ctrlSequence: "\x1b[1;5C",
+	},
+};
+
+/**
  * Match input data against a key identifier string.
  *
  * Supported key identifiers:
@@ -985,96 +1006,38 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		}
 
 		case "up":
-			if (modifier === MODIFIERS.alt) {
-				return (
-					data === "\x1b[1;3A" ||
-					data === "\x1bp" ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.up, MODIFIERS.alt)
-				);
-			}
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.up) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.up, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "up", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, ARROW_CODEPOINTS.up, modifier);
-
 		case "down":
-			if (modifier === MODIFIERS.alt) {
-				return (
-					data === "\x1b[1;3B" ||
-					data === "\x1bn" ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.down, MODIFIERS.alt)
-				);
-			}
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.down) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.down, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "down", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, ARROW_CODEPOINTS.down, modifier);
-
 		case "left":
+		case "right": {
+			const match = ARROW_KEY_MATCHES[key as keyof typeof ARROW_KEY_MATCHES];
 			if (modifier === MODIFIERS.alt) {
+				if (!_kittyProtocolActive && match.altUppercaseLiteral !== undefined) {
+					if (data === match.altUppercaseLiteral) return true;
+				}
 				return (
-					data === "\x1b[1;3D" ||
-					(!_kittyProtocolActive && data === "\x1bB") ||
-					data === "\x1bb" ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt)
+					data === match.altSequence ||
+					data === match.altLiteral ||
+					matchesKittySequence(data, match.codepoint, MODIFIERS.alt)
 				);
 			}
-			if (modifier === MODIFIERS.ctrl) {
+			if (match.ctrlSequence !== undefined && modifier === MODIFIERS.ctrl) {
 				return (
-					data === "\x1b[1;5D" ||
-					matchesLegacyModifierSequence(data, "left", MODIFIERS.ctrl) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.ctrl)
+					data === match.ctrlSequence ||
+					matchesLegacyModifierSequence(data, match.legacy, MODIFIERS.ctrl) ||
+					matchesKittySequence(data, match.codepoint, MODIFIERS.ctrl)
 				);
 			}
 			if (modifier === 0) {
 				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.left) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.left, 0)
+					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[match.legacy]) ||
+					matchesKittySequence(data, match.codepoint, 0)
 				);
 			}
-			if (matchesLegacyModifierSequence(data, "left", modifier)) {
+			if (matchesLegacyModifierSequence(data, match.legacy, modifier)) {
 				return true;
 			}
-			return matchesKittySequence(data, ARROW_CODEPOINTS.left, modifier);
-
-		case "right":
-			if (modifier === MODIFIERS.alt) {
-				return (
-					data === "\x1b[1;3C" ||
-					(!_kittyProtocolActive && data === "\x1bF") ||
-					data === "\x1bf" ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt)
-				);
-			}
-			if (modifier === MODIFIERS.ctrl) {
-				return (
-					data === "\x1b[1;5C" ||
-					matchesLegacyModifierSequence(data, "right", MODIFIERS.ctrl) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.ctrl)
-				);
-			}
-			if (modifier === 0) {
-				return (
-					matchesLegacySequence(data, LEGACY_KEY_SEQUENCES.right) ||
-					matchesKittySequence(data, ARROW_CODEPOINTS.right, 0)
-				);
-			}
-			if (matchesLegacyModifierSequence(data, "right", modifier)) {
-				return true;
-			}
-			return matchesKittySequence(data, ARROW_CODEPOINTS.right, modifier);
+			return matchesKittySequence(data, match.codepoint, modifier);
+		}
 
 		case "f1":
 		case "f2":
@@ -1274,6 +1237,18 @@ export function parseKey(data: string): string | undefined {
 }
 
 const KITTY_CSI_U_REGEX = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/;
+
+/**
+ * Parse an unmodified printable CSI-u sequence (no modifier segment) and
+ * return its codepoint, or undefined when the sequence carries modifiers or
+ * is not a CSI-u sequence at all.
+ */
+export function parseUnmodifiedKittyCsiU(data: string): number | undefined {
+	const match = data.match(KITTY_CSI_U_REGEX);
+	if (!match || match[4] !== undefined) return undefined;
+	const codepoint = parseInt(match[1]!, 10);
+	return codepoint >= 32 ? codepoint : undefined;
+}
 const KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
 
 /**

@@ -19,6 +19,8 @@
 
 import { EventEmitter } from "events";
 
+import { parseUnmodifiedKittyCsiU } from "./keys.js";
+
 const ESC = "\x1b";
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
@@ -160,14 +162,6 @@ function isCompleteApcSequence(data: string): "complete" | "incomplete" {
 /**
  * Split accumulated buffer into complete sequences
  */
-function parseUnmodifiedKittyPrintableCodepoint(sequence: string): number | undefined {
-	const match = sequence.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$/);
-	if (!match) return undefined;
-
-	const codepoint = parseInt(match[1]!, 10);
-	return codepoint >= 32 ? codepoint : undefined;
-}
-
 function extractCompleteSequences(buffer: string): { sequences: string[]; remainder: string } {
 	const sequences: string[] = [];
 	let pos = 0;
@@ -344,7 +338,7 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 			return;
 		}
 
-		this.pendingKittyPrintableCodepoint = parseUnmodifiedKittyPrintableCodepoint(sequence);
+		this.pendingKittyPrintableCodepoint = parseUnmodifiedKittyCsiU(sequence);
 		this.emit("data", sequence);
 	}
 

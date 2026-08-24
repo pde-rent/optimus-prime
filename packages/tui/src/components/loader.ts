@@ -82,17 +82,15 @@ export class Loader extends Text {
 		// stubs and embedders - fall back to a private interval so construction
 		// cannot throw and animation still runs.
 		const tick = (this.ui as { onAnimationTick?: (cb: () => void) => () => void }).onAnimationTick?.bind(this.ui);
-		if (tick) {
-			this.unsubscribeTick = tick(() => {
-				this.currentFrame = (this.currentFrame + 1) % this.frames.length;
-				this.updateDisplay();
-			});
-			return;
-		}
-		this.ownInterval = setInterval(() => {
+		const advanceFrame = () => {
 			this.currentFrame = (this.currentFrame + 1) % this.frames.length;
 			this.updateDisplay();
-		}, DEFAULT_FALLBACK_TICK_MS);
+		};
+		if (tick) {
+			this.unsubscribeTick = tick(advanceFrame);
+			return;
+		}
+		this.ownInterval = setInterval(advanceFrame, DEFAULT_FALLBACK_TICK_MS);
 	}
 
 	private updateDisplay(): void {
