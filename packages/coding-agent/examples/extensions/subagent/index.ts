@@ -19,7 +19,12 @@ import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import {
+	type ExtensionAPI,
+	getMarkdownTheme,
+	type ThemeColor,
+	withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 
@@ -63,7 +68,7 @@ function formatUsageStats(
 function formatToolCall(
 	toolName: string,
 	args: Record<string, unknown>,
-	themeFg: (color: any, text: string) => string,
+	themeFg: (color: ThemeColor, text: string) => string,
 ): string {
 	const shortenPath = (p: string) => {
 		const home = os.homedir();
@@ -94,6 +99,12 @@ function formatToolCall(
 			return themeFg("accent", toolName) + themeFg("dim", ` ${preview}`);
 		}
 	}
+}
+
+/** One line of the subagent's --mode json output. */
+interface SubagentEvent {
+	type?: string;
+	message?: Message;
 }
 
 interface UsageStats {
@@ -139,7 +150,7 @@ function getFinalOutput(messages: Message[]): string {
 	return "";
 }
 
-type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
+type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, unknown> };
 
 function getDisplayItems(messages: Message[]): DisplayItem[] {
 	const items: DisplayItem[] = [];
@@ -279,9 +290,9 @@ async function runSingleAgent(
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
-				let event: any;
+				let event: SubagentEvent;
 				try {
-					event = JSON.parse(line);
+					event = JSON.parse(line) as SubagentEvent;
 				} catch {
 					return;
 				}
