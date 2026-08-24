@@ -305,6 +305,8 @@ Type safety is total and enforced by CI: the whole repository typechecks with `t
 under strict settings, and a single `any`, double cast through `unknown`, or lint suppression
 fails the build. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+
+To test changes against a standalone instance instead of your live daemon, run `scripts/dev-instance.sh start` (see [packages/coding-agent/docs/development.md](packages/coding-agent/docs/development.md)).
 ## Credits
 
 Optimus Prime is a hard fork of
