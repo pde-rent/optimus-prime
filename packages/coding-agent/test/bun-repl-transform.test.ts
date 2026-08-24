@@ -229,3 +229,72 @@ describe("transformTopLevel: declarations preceded by comments", () => {
 		expect(r.code).toContain("globalThis.y = 2;");
 	});
 });
+
+describe("transformTopLevel: template literals", () => {
+	// A `${ ... }` interpolation used to be scanned by counting braces only, so a `}`
+	// inside a string or regex within the interpolation desynchronized the scanner.
+	// Depending on brace luck the cell then split mid-template (SyntaxError) or
+	// merged statements and captured the merged fragment as `return (...)`.
+	// `d()` restores the `${` spellings these fixtures need without tripping
+	// noTemplateCurlyInString.
+	const d = (s: string): string => s.split("@{").join("${");
+
+	it("separates statements around a template whose interpolation string holds braces", () => {
+		const result = transformTopLevel(d('let out = "";\nout += `@{items.join("{")}`;\nformat(out)'));
+		expect(result.code).toContain('globalThis.out = "";\n');
+		expect(result.lastExpression).toBe("format(out)");
+	});
+
+	it("keeps a loop intact when an interpolation string holds braces and a later statement opens a template", () => {
+		const src = d(
+			[
+				"for (const name of names) {",
+				'  const cmd = `@{name.replace("{", "")}`;',
+				"  const msg = `ok @{name}`;",
+				"  use(msg);",
+				"}",
+				"after(`t`)",
+			].join("\n"),
+		);
+		const result = transformTopLevel(src);
+		expect(result.code).toContain(d('const cmd = `@{name.replace("{", "")}`;'));
+		expect(result.code).toContain(d("const msg = `ok @{name}`;"));
+		expect(result.lastExpression).toBe("after(`t`)");
+	});
+
+	it("keeps nested templates inside interpolations verbatim", () => {
+		const src = d('const h = (t) => `a @{t.map(v => `@{v}b`).join("")}c`;');
+		expect(code(src)).toBe(d('globalThis.h = (t) => `a @{t.map(v => `@{v}b`).join("")}c`;\n'));
+	});
+
+	it("keeps escaped backticks verbatim", () => {
+		const src = d("const e = `a \\`b\\` @{1 + 1} c`;");
+		expect(code(src)).toBe(d("globalThis.e = `a \\`b\\` @{1 + 1} c`;\n"));
+	});
+
+	it("keeps a regex holding braces inside an interpolation verbatim", () => {
+		const src = d('const r = `n@{"a}b{".replace(/[{}]/g, "")}m`;');
+		expect(code(src)).toBe(d('globalThis.r = `n@{"a}b{".replace(/[{}]/g, "")}m`;\n'));
+	});
+
+	it("keeps a multi-line template with interpolations verbatim", () => {
+		const src = d('const m = `head\n@{items.map(i => `- @{i}`).join("\\n")}\ntail`;');
+		expect(code(src)).toBe(d('globalThis.m = `head\n@{items.map(i => `- @{i}`).join("\\n")}\ntail`;\n'));
+	});
+
+	it("keeps a template that references its loop variable inside the loop", () => {
+		const src = d(
+			[
+				'const names = ["a", "b"];',
+				"for (const name of names) {",
+				'  const cmd = `grep -c "\\\\b@{name}\\\\b" f.txt`;',
+				"  log(cmd);",
+				"}",
+			].join("\n"),
+		);
+		const result = transformTopLevel(src);
+		expect(result.code).toContain('globalThis.names = ["a", "b"];\n');
+		expect(result.code).toContain(d('const cmd = `grep -c "\\\\b@{name}\\\\b" f.txt`;'));
+		expect(result.lastExpression).toBeUndefined();
+	});
+});

@@ -6,6 +6,22 @@ import { TUI } from "../src/tui.js";
 import { defaultEditorTheme } from "./test-themes.js";
 import { VirtualTerminal } from "./virtual-terminal.js";
 
+const argumentProvider: AutocompleteProvider = {
+	async getSuggestions() {
+		return {
+			prefix: "/",
+			kind: "slash-command",
+			items: [{ value: "/model", label: "model", description: "Select model" }],
+		};
+	},
+	applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+		const nextLines = [...lines];
+		const line = nextLines[cursorLine] ?? "";
+		const before = line.slice(0, cursorCol - prefix.length);
+		nextLines[cursorLine] = before + item.value + line.slice(cursorCol);
+		return { lines: nextLines, cursorLine, cursorCol: before.length + item.value.length };
+	},
+};
 const autocompleteProvider: AutocompleteProvider = {
 	async getSuggestions() {
 		return {
@@ -96,6 +112,60 @@ describe("editor autocomplete overlay", () => {
 		const viewport = terminal.getViewport();
 		assert.ok(viewport[0]?.includes("hotkeys"));
 		assert.ok(viewport[1]?.includes("/"));
+		tui.stop();
+	});
+
+	it("keeps the popup open when the provider is rebuilt while suggestions are visible", async () => {
+		const terminal = new VirtualTerminal(40, 12);
+		const tui = new TUI(terminal);
+		const editor = new Editor(tui, defaultEditorTheme);
+		tui.addChild(editor);
+		tui.setFocus(editor);
+		editor.setAutocompleteProvider(autocompleteProvider);
+		tui.start();
+
+		editor.handleInput("/");
+		await Promise.resolve();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(editor.isShowingAutocomplete(), true);
+
+		// Interactive mode rebuilds the provider on background events (session
+		// resync, extension or settings changes). That swap used to cancel the
+		// popup even though the typed text was untouched.
+		editor.setAutocompleteProvider(argumentProvider);
+		assert.equal(editor.isShowingAutocomplete(), true);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.equal(editor.isShowingAutocomplete(), true);
+
+		tui.requestRender(true);
+		await terminal.waitForRender();
+		const viewport = terminal.getViewport().join("\n");
+		assert.ok(viewport.includes("Select model"));
+		tui.stop();
+	});
+
+	it("keeps the popup open across invalidate and full redraws between trigger and selection", async () => {
+		const terminal = new VirtualTerminal(40, 12);
+		const tui = new TUI(terminal);
+		const editor = new Editor(tui, defaultEditorTheme);
+		tui.addChild(editor);
+		tui.setFocus(editor);
+		editor.setAutocompleteProvider(autocompleteProvider);
+		tui.start();
+
+		editor.handleInput("/");
+		await Promise.resolve();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(editor.isShowingAutocomplete(), true);
+
+		tui.invalidate();
+		tui.requestRender(true);
+		await terminal.waitForRender();
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		assert.equal(editor.isShowingAutocomplete(), true);
+		const viewport2 = terminal.getViewport().join("\n");
+		assert.ok(viewport2.includes("hotkeys"));
 		tui.stop();
 	});
 });

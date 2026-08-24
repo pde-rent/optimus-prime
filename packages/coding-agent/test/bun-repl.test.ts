@@ -280,3 +280,58 @@ describe("snapshot excludes live handles", () => {
 		}
 	}, 60_000);
 });
+
+describe("Bun REPL: template literal cells", () => {
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "optimus-bunrepl-"));
+	});
+
+	afterEach(() => {
+		if (tempDir) {
+			rmSync(tempDir, { recursive: true, force: true });
+			tempDir = "";
+		}
+	});
+
+	// A template whose interpolations hold ternaries and nested templates used to be
+	// truncated mid-interpolation by the cell transformer (SyntaxError at a boundary).
+	// An interpolation referencing its loop variable used to run outside the loop's
+	// scope and fail with a ReferenceError at evaluation. `d()` restores the `${`
+	// spellings the cell sources need without tripping noTemplateCurlyInString.
+	it("evaluates template literals holding ternaries, nested templates, and loop variables", async () => {
+		const d = (s: string): string => s.split("@{").join("${");
+		const manager = new BunReplManager({ bunPath: "bun", cwd: tempDir });
+		await manager.start();
+		try {
+			const r1 = await manager.execute(
+				d(
+					[
+						"const fmt = (n, signed) => `@{n < 0 ? '-' : signed ? '+' : ''}@{Math.abs(n)}`;",
+						"const rows = ['a', 'b'];",
+						"fmt(-5, true) + ':' + rows.map(v => `<@{v}>`).join('')",
+					].join("\n"),
+				),
+			);
+			expect(r1.status).toBe("ok");
+			expect(r1.result).toBe(JSON.stringify("-5:<a><b>"));
+
+			const r2 = await manager.execute(
+				d(
+					[
+						'const names = ["a", "b"];',
+						"const found = [];",
+						"for (const name of names) {",
+						'  const cmd = `grep -c "\\\\b@{name}\\\\b" f.txt`;',
+						"  found.push(cmd);",
+						"}",
+						"found.join('|')",
+					].join("\n"),
+				),
+			);
+			expect(r2.status).toBe("ok");
+			expect(r2.result).toBe(JSON.stringify('grep -c "\\ba\\b" f.txt|grep -c "\\bb\\b" f.txt'));
+		} finally {
+			await manager.dispose().catch(() => {});
+		}
+	});
+});
