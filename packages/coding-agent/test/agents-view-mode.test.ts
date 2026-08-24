@@ -79,6 +79,7 @@ const { AgentsViewMode, combineAgentsViewStartupNotices, createInitialAgentsView
 // `await import` only binds a value; classes used as types need this alias.
 type AgentsViewMode = InstanceType<typeof AgentsViewMode>;
 const { resolveAgentsViewLeftResult } = await import("../src/modes/agents-view/agents-view-state.js");
+const { getAgentsViewSummaryIdentity } = await import("../src/modes/agents-tree/agent-tree-model.js");
 const { stopThemeWatcher } = await import("../src/modes/interactive/theme/theme.js");
 
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -147,6 +148,7 @@ describe("AgentsViewMode", () => {
 			success: true as const,
 			data: command.type === "cancel_rlm_child" ? { cancelled: false } : { deleted: true },
 		}));
+		const reconfirmVisible = { value: false };
 		const client = { request, supportsServerCapability: mock(() => true) };
 		const self = {
 			rows: [
@@ -169,8 +171,15 @@ describe("AgentsViewMode", () => {
 			selectedIndex: 0,
 			pendingDeleteAgent: undefined,
 			pendingKillSubagent: undefined,
-			deleteConfirmExpiresAt: 0,
-			deleteConfirmTimer: undefined,
+			deleteConfirmation: {
+				isVisible: () => reconfirmVisible.value,
+				show: mock(() => {
+					reconfirmVisible.value = true;
+				}),
+				clear: mock(() => {
+					reconfirmVisible.value = false;
+				}),
+			},
 			ui: { requestRender: mock() },
 			requireClient: () => client,
 			setStatusMessage: mock(),
@@ -254,6 +263,267 @@ describe("AgentsViewMode", () => {
 			render: false,
 			tone: "warning",
 		});
+	});
+
+	it("arms a stop on the first keypress against an active subagent", async () => {
+		const child = summary({
+			id: "live-child",
+			activeSessionId: "live-child",
+			sessionId: "live-child-session",
+			runtimeKind: "subagent",
+			rlmChildId: "child-1",
+		});
+		const request = mock(async () => ({ success: true as const, data: { cancelled: true } }));
+		const show = mock();
+		const self = {
+			rows: [
+				{
+					kind: "subagent" as const,
+					// Live but idle: the dead-end case that used to offer delete-only.
+					section: "done" as const,
+					summary: child,
+					selectable: true,
+					identity: "child-row",
+					parentIdentity: "root-row",
+				},
+			],
+			selectedIndex: 0,
+			pendingDeleteAgent: undefined,
+			pendingKillSubagent: undefined,
+			renameTarget: undefined,
+			keybindings: new KeybindingsManager(),
+			armedStop: { isVisible: () => false, show, clear: mock() },
+			armedStopIdentity: undefined,
+			requireClient: () => ({ request, supportsServerCapability: () => true }),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
+			handleStopKeypress(row: unknown) {
+				return invoke("handleStopKeypress", self, row);
+			},
+		};
+
+		await invoke("handleDeleteSelected", self);
+		expect(show).toHaveBeenCalledTimes(1);
+		expect(self.armedStopIdentity).toBe(getAgentsViewSummaryIdentity(child));
+		expect(request).not.toHaveBeenCalled();
+	});
+
+	it("stops the running child on the second keypress", async () => {
+		const child = summary({
+			id: "live-child",
+			activeSessionId: "live-child",
+			sessionId: "live-child-session",
+			runtimeKind: "subagent",
+			rlmChildId: "child-1",
+		});
+		const request = mock(async () => ({ success: true as const, data: { cancelled: true } }));
+		const self = {
+			rows: [
+				{
+					kind: "subagent" as const,
+					section: "running" as const,
+					summary: child,
+					selectable: true,
+					identity: "child-row",
+					parentIdentity: "root-row",
+				},
+				{
+					kind: "agent" as const,
+					section: "running" as const,
+					summary: summary({ id: "root-active", activeSessionId: "root-active", sessionId: "root-session" }),
+					selectable: true,
+					identity: "root-row",
+				},
+			],
+			selectedIndex: 0,
+			renameTarget: undefined,
+			keybindings: new KeybindingsManager(),
+			armedStop: { isVisible: () => true, show: mock(), clear: mock() },
+			armedStopIdentity: getAgentsViewSummaryIdentity(child),
+			requireClient: () => ({ request, supportsServerCapability: () => true }),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
+			handleStopKeypress(row: unknown) {
+				return invoke("handleStopKeypress", self, row);
+			},
+			clearArmedStop(options: unknown) {
+				return invoke("clearArmedStop", self, options);
+			},
+			stopActiveRow(row: unknown) {
+				return invoke("stopActiveRow", self, row);
+			},
+			findSubagentRootRow(row: unknown) {
+				return invoke("findSubagentRootRow", self, row);
+			},
+		};
+
+		await invoke("handleDeleteSelected", self);
+		expect(request).toHaveBeenCalledWith({
+			type: "cancel_rlm_child",
+			activeSessionId: "root-active",
+			childId: "child-1",
+		});
+		expect(self.setStatusMessage).toHaveBeenCalledWith("Subagent stopped");
+		expect(self.refreshSessions).toHaveBeenCalledOnce();
+	});
+
+	it("an expired arm re-arms instead of stopping", async () => {
+		const child = summary({
+			id: "live-child",
+			activeSessionId: "live-child",
+			sessionId: "live-child-session",
+			runtimeKind: "subagent",
+			rlmChildId: "child-1",
+		});
+		const request = mock(async () => ({ success: true as const, data: { cancelled: true } }));
+		const show = mock();
+		const self = {
+			rows: [
+				{
+					kind: "subagent" as const,
+					section: "done" as const,
+					summary: child,
+					selectable: true,
+					identity: "child-row",
+					parentIdentity: "root-row",
+				},
+			],
+			selectedIndex: 0,
+			renameTarget: undefined,
+			keybindings: new KeybindingsManager(),
+			// Identity lingers after expiry, but an invisible flag must re-arm.
+			armedStop: { isVisible: () => false, show, clear: mock() },
+			armedStopIdentity: getAgentsViewSummaryIdentity(child),
+			requireClient: () => ({ request, supportsServerCapability: () => true }),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
+			handleStopKeypress(row: unknown) {
+				return invoke("handleStopKeypress", self, row);
+			},
+		};
+
+		await invoke("handleDeleteSelected", self);
+		expect(show).toHaveBeenCalledTimes(1);
+		expect(request).not.toHaveBeenCalled();
+	});
+
+	it("escape disarms an armed stop and is consumed", () => {
+		const clear = mock();
+		const self: {
+			renameTarget: undefined;
+			armedStopIdentity: string | undefined;
+			keybindings: InstanceType<typeof KeybindingsManager>;
+			armedStop: { isVisible: () => boolean; show: ReturnType<typeof mock>; clear: typeof clear };
+			clearArmedStop?(options?: { render?: boolean }): unknown;
+		} = {
+			renameTarget: undefined,
+			armedStopIdentity: "child-row",
+			keybindings: new KeybindingsManager(),
+			armedStop: { isVisible: () => true, show: mock(), clear },
+		};
+		self.clearArmedStop = (options?: { render?: boolean }) => invoke("clearArmedStop", self, options);
+
+		expect(invoke("handleArmedStopInput", self, "\x1b")).toBe(true);
+		expect(clear).toHaveBeenCalledWith({});
+		expect(self.armedStopIdentity).toBeUndefined();
+
+		self.armedStopIdentity = "child-row";
+		expect(invoke("handleArmedStopInput", self, "a")).toBe(false);
+		expect(clear).toHaveBeenCalledWith({ render: false });
+		expect(self.armedStopIdentity).toBeUndefined();
+
+		// The stop key itself must not disarm; it completes the two-press flow.
+		self.armedStopIdentity = "child-row";
+		expect(invoke("handleArmedStopInput", self, "\x18")).toBe(false);
+		expect(clear).toHaveBeenCalledTimes(2);
+		expect(self.armedStopIdentity).toBe("child-row");
+	});
+
+	it("keeps the pre-existing delete flow once the session stopped", async () => {
+		const child = summary({
+			id: "done-child",
+			activeSessionId: undefined,
+			sessionId: "done-child-session",
+			sessionFile: "/tmp/done-child.jsonl",
+			runtimeKind: "subagent",
+			rlmChildId: "child-2",
+		});
+		const request = mock(async (command: { type: string }) =>
+			command.type === "delete_rlm_subagent"
+				? { success: true as const, data: { deleted: true } }
+				: { success: true as const, data: {} },
+		);
+		const confirmVisible = { value: false };
+		const self = {
+			rows: [
+				{
+					kind: "subagent" as const,
+					section: "done" as const,
+					summary: child,
+					selectable: true,
+					identity: "child-row",
+					parentIdentity: "root-row",
+				},
+				{
+					kind: "agent" as const,
+					section: "running" as const,
+					summary: summary({ id: "root-active", activeSessionId: "root-active", sessionId: "root-session" }),
+					selectable: true,
+					identity: "root-row",
+				},
+			],
+			selectedIndex: 0,
+			pendingDeleteAgent: undefined,
+			pendingKillSubagent: undefined,
+			deleteConfirmExpiresAt: 0,
+			deleteConfirmTimer: undefined,
+			deleteConfirmation: {
+				isVisible: () => confirmVisible.value,
+				show: mock(() => {
+					confirmVisible.value = true;
+				}),
+				clear: mock(() => {
+					confirmVisible.value = false;
+				}),
+			},
+			ui: { requestRender: mock() },
+			requireClient: () => ({ request, supportsServerCapability: () => true }),
+			setStatusMessage: mock(),
+			refreshSessions: mock(async () => true),
+			handleDeleteSelected() {
+				return invoke("handleDeleteSelected", self);
+			},
+			handleKillSubagentSelected(row: unknown) {
+				return invoke("handleKillSubagentSelected", self, row);
+			},
+			findSubagentRootRow(row: unknown) {
+				return invoke("findSubagentRootRow", self, row);
+			},
+			isDeleteConfirmationVisible() {
+				return invoke("isDeleteConfirmationVisible", self);
+			},
+			showDeleteConfirmation() {
+				return invoke("showDeleteConfirmation", self);
+			},
+			clearDeleteConfirmation(options: unknown) {
+				return invoke("clearDeleteConfirmation", self, options);
+			},
+			killSubagent(pending: unknown, row: unknown) {
+				return invoke("killSubagent", self, pending, row);
+			},
+		};
+
+		await invoke("handleDeleteSelected", self);
+		expect(self.deleteConfirmation.show).toHaveBeenCalledOnce();
+		expect(request).not.toHaveBeenCalled();
+
+		await invoke("handleDeleteSelected", self);
+		expect(request).toHaveBeenCalledWith({
+			type: "delete_rlm_subagent",
+			activeSessionId: "root-active",
+			childId: "child-2",
+		});
+		expect(self.setStatusMessage).toHaveBeenCalledWith("Subagent deleted", { render: false });
 	});
 
 	it("uses the opened session as the crash-path back target", async () => {

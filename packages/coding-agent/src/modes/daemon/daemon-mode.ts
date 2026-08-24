@@ -97,7 +97,11 @@ import {
 	type IdleEvictionMinutes,
 	type SessionPassivationSnapshot,
 } from "../../core/session-action-store.js";
-import { deleteSessionFile } from "../../core/session-file-actions.js";
+import {
+	deleteSessionFile,
+	isEmptyArchivedChildSession,
+	pruneEmptyArchivedChildSessions,
+} from "../../core/session-file-actions.js";
 import { acquireSessionLease, canonicalSessionPath, type SessionLease } from "../../core/session-lease.js";
 import {
 	getSessionArtifactPathForFile,
@@ -1193,7 +1197,14 @@ export class AgentDaemon {
 				if (!info) continue;
 				// A resident child walks its own subtree as an outer root below. Avoid
 				// both duplicate rows and attributing its descendants to an ancestor.
-				if (!includeResident && this.findSessionBySessionFile(entry.sessionFile)) continue;
+				const residentChild = this.findSessionBySessionFile(entry.sessionFile);
+				if (!includeResident && residentChild) continue;
+				// Lazy sweep: an archived child that never produced a message is pure
+				// listing noise. Prune the backlog instead of surfacing or hydrating it.
+				if (!residentChild && isEmptyArchivedChildSession(info)) {
+					await pruneEmptyArchivedChildSessions([info]);
+					continue;
+				}
 				const chain = [...parentChain, entry];
 				passive.push({ ...root, entry, info, chain });
 				await visit(root, { sessionId: info.id, sessionFile: entry.sessionFile }, chain, visited);
@@ -5852,6 +5863,23 @@ export class AgentDaemon {
 		return !this.hasScheduledJobsForSession(state.activeSessionId);
 	}
 
+	/**
+	 * True when a closed subagent leaves nothing behind but noise: zero messages,
+	 * no queued work, no scheduled jobs, nothing in flight. Its empty session file
+	 * is pruned instead of being archived into the resume and history listings.
+	 */
+	private isPrunableEmptySubagentSession(state: ActiveSessionState): boolean {
+		if (state.runtime.metadata.kind !== "subagent") return false;
+		const session = state.runtime.session;
+		// Optional-call probes: lightweight test doubles may omit these members.
+		if ((session.messages?.length ?? 0) > 0) return false;
+		if ((session.getSessionActionRecoverySnapshot?.().actions.length ?? 0) > 0) return false;
+		if ((session.getPendingNextTurnMessageSnapshots?.().length ?? 0) > 0) return false;
+		if (session.isStreaming || session.isCompacting || session.isBashRunning || session.isRetrying) return false;
+		if (session.hasRunningRlmChildren?.() || session.hasPendingAdmissionWaiters) return false;
+		return this.isEmptyDraftContent(state);
+	}
+
 	private createUpdateRestartSession(state: ActiveSessionState): DaemonUpdateRestartSession | undefined {
 		const session = state.runtime.session;
 		const queue = {
@@ -6283,6 +6311,9 @@ export class AgentDaemon {
 		// draft closed via kill/completed is never wiped.
 		const keepsResumeEntry = this.closeKeepsResumeEntry(reason);
 		const isEmptyDraftSession = !keepsResumeEntry && this.isEmptyDraftContent(state);
+		// An archived or evicted subagent that never produced a turn leaves only
+		// listing noise behind; its empty session file is pruned after disposal.
+		const prunesEmptySubagentSession = this.isPrunableEmptySubagentSession(state);
 		let persistError: unknown;
 		// Clean shutdown leaves the session un-archived so it stays in the resume list.
 		if (!keepsResumeEntry && !isEmptyDraftSession) {
@@ -6325,7 +6356,7 @@ export class AgentDaemon {
 		}
 		state.clients.clear();
 		this.sessions.delete(state.activeSessionId);
-		if (isEmptyDraftSession) {
+		if (isEmptyDraftSession || prunesEmptySubagentSession) {
 			const sessionFile = state.runtime.session.sessionFile;
 			if (sessionFile) {
 				await deleteSessionFile(sessionFile).catch(() => undefined);

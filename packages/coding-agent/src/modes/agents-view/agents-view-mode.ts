@@ -116,6 +116,7 @@ const RECONNECT_TIMEOUT_MS = 120000;
 const RECONNECT_RETRY_MS = 1000;
 const EXIT_HINT_DURATION_MS = 2000;
 const DELETE_CONFIRM_DURATION_MS = 2000;
+const STOP_ARM_DURATION_MS = 2000;
 const STATUS_MESSAGE_DURATION_MS = 4500;
 const SEARCH_PROMPT_PLACEHOLDER = "Search sessions";
 const REPLY_PROMPT_FALLBACK_PLACEHOLDER = "Write a reply to this agent";
@@ -653,6 +654,9 @@ export class AgentsViewMode implements Component, Focusable {
 	private animationTimer: NodeJS.Timeout | undefined;
 	private readonly ctrlCExitHint: CtrlCExitHintController;
 	private deleteConfirmation: ExpiringFlag<"delete">;
+	/** Armed stop: identity of the active row whose next app.agents.delete stops it. */
+	private readonly armedStop: ExpiringFlag<string>;
+	private armedStopIdentity: string | undefined;
 	private workingIconFrame = 0;
 	private rows: AgentsViewRow[] = [];
 	private lastListedSummaries: SessionSummary[] = [];
@@ -736,6 +740,7 @@ export class AgentsViewMode implements Component, Focusable {
 		this.ui = new TUI(new ProcessTerminal(), options.uiServices.settingsManager.getShowHardwareCursor());
 		this.ctrlCExitHint = new CtrlCExitHintController(this.ui, EXIT_HINT_DURATION_MS);
 		this.deleteConfirmation = new ExpiringFlag<"delete">(this.ui, DELETE_CONFIRM_DURATION_MS);
+		this.armedStop = new ExpiringFlag<string>(this.ui, STOP_ARM_DURATION_MS);
 		this.ui.setClearOnShrink(options.uiServices.settingsManager.getClearOnShrink());
 		this.ui.terminal.setTitle(`${APP_TITLE} - Agents`);
 		this.editor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
@@ -899,6 +904,9 @@ export class AgentsViewMode implements Component, Focusable {
 
 	handleInput(data: string): void {
 		this.clearStickyStatusMessage();
+		if (this.handleArmedStopInput(data)) {
+			return;
+		}
 		if (this.renameTarget) {
 			if (this.keybindings.matches(data, "tui.select.cancel")) {
 				this.exitRenameMode();
@@ -1789,6 +1797,10 @@ export class AgentsViewMode implements Component, Focusable {
 		}
 		if (row.kind === "subagent") {
 			this.pendingDeleteAgent = undefined;
+			if (row.summary.activeSessionId) {
+				await this.handleStopKeypress(row);
+				return;
+			}
 			await this.handleKillSubagentSelected(row);
 			return;
 		}
@@ -1796,6 +1808,10 @@ export class AgentsViewMode implements Component, Focusable {
 			return;
 		}
 		this.pendingKillSubagent = undefined;
+		if (row.summary.activeSessionId) {
+			await this.handleStopKeypress(row);
+			return;
+		}
 		const identity = getSummaryIdentity(row.summary);
 		if (!row.summary.activeSessionId && row.summary.sessionFile) {
 			if (this.pendingDeleteAgent?.identity === identity && this.isDeleteConfirmationVisible()) {
@@ -2512,9 +2528,11 @@ export class AgentsViewMode implements Component, Focusable {
 			const pendingKill = this.isPendingKillSubagentRow(row);
 			return {
 				prefix: `${"  ".repeat(row.depth)} `,
-				name: pendingKill
-					? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
-					: formatSubagentName(row.summary.sessionName),
+				name: this.isArmedStopRow(row)
+					? `${keyText("app.agents.delete")} again to stop`
+					: pendingKill
+						? `${keyText("app.agents.delete")} again to ${row.section === "running" ? "stop" : "delete"}`
+						: formatSubagentName(row.summary.sessionName),
 				task: formatSubagentTask(row.summary.summary ?? row.summary.firstMessage),
 				status: subagentStatusForSummary(row.summary),
 				spinnerFrame: this.workingIconFrame,
@@ -2526,7 +2544,11 @@ export class AgentsViewMode implements Component, Focusable {
 		const heartbeatBadge = !pendingDelete ? formatHeartbeatBadge(row.heartbeat) : "";
 		return {
 			prefix: `${"  ".repeat(row.depth)} `,
-			name: pendingDelete ? this.getPendingDeleteTitle() : styleRowTitle(row),
+			name: pendingDelete
+				? this.getPendingDeleteTitle()
+				: this.isArmedStopRow(row)
+					? `${keyText("app.agents.delete")} again to stop`
+					: styleRowTitle(row),
 			task: !pendingDelete ? formatSubagentTask(row.summary.summary) : "",
 			status: sectionDisplayStatus(row.section),
 			spinnerFrame: this.workingIconFrame,
@@ -2562,6 +2584,91 @@ export class AgentsViewMode implements Component, Focusable {
 		// selection background after each so the highlight spans the whole row.
 		const applySelectionBg = theme.getSelectionBackgroundColor();
 		return padded.split("\x1b[0m").map(applySelectionBg).join("\x1b[0m");
+	}
+
+	/**
+	 * Escape disarms an armed stop; any other non-delete key also disarms so the
+	 * hint never outlives the row it was armed against. Returns whether the
+	 * keypress was consumed.
+	 */
+	private handleArmedStopInput(data: string): boolean {
+		if (this.renameTarget || this.armedStopIdentity === undefined) {
+			return false;
+		}
+		if (this.keybindings.matches(data, "tui.select.cancel")) {
+			this.clearArmedStop();
+			return true;
+		}
+		if (!this.keybindings.matches(data, "app.agents.delete")) {
+			this.clearArmedStop({ render: false });
+		}
+		return false;
+	}
+
+	private async handleStopKeypress(row: AgentsViewRow): Promise<void> {
+		const identity = getSummaryIdentity(row.summary);
+		if (this.armedStop.isVisible() && this.armedStopIdentity === identity) {
+			this.clearArmedStop({ render: false });
+			await this.stopActiveRow(row);
+			return;
+		}
+		// A stale identity from an expired or re-targeted arm must not stop the
+		// newly selected row; re-arm against it instead.
+		this.armedStopIdentity = identity;
+		this.armedStop.show(identity);
+	}
+
+	/** First ctrl+x arms a stop; the second stops the live runtime in place. */
+	private async stopActiveRow(row: AgentsViewRow): Promise<void> {
+		try {
+			if (row.kind === "subagent") {
+				const childId = row.summary.rlmChildId;
+				const rootActiveSessionId = this.findSubagentRootRow(row)?.summary.activeSessionId;
+				if (!childId || !rootActiveSessionId) {
+					this.setStatusMessage("Cannot stop subagent without its parent agent");
+					return;
+				}
+				this.setStatusMessage("Stopping subagent...");
+				const data = requireDaemonData(
+					await this.requireClient().request({
+						type: "cancel_rlm_child",
+						activeSessionId: rootActiveSessionId,
+						childId,
+					}),
+				);
+				const cancelled = isRecord(data) && data.cancelled === true;
+				this.setStatusMessage(cancelled ? "Subagent stopped" : "Subagent already finished");
+			} else {
+				if (!row.summary.activeSessionId) {
+					return;
+				}
+				this.setStatusMessage("Stopping agent...");
+				try {
+					requireDaemonData(
+						await this.requireClient().request({
+							type: "kill",
+							activeSessionId: row.summary.activeSessionId,
+						}),
+					);
+				} catch (error) {
+					// As in deactivatePendingAgent: an agent that already finished counts as stopped.
+					if (!isUnknownActiveSessionError(error)) throw error;
+				}
+				this.setStatusMessage("Agent stopped");
+			}
+			await this.refreshSessions();
+		} catch (error) {
+			this.setStatusMessage(formatError("Failed to stop", error));
+		}
+	}
+
+	private clearArmedStop(options: { render?: boolean } = {}): void {
+		this.armedStopIdentity = undefined;
+		this.armedStop.clear(options);
+	}
+
+	private isArmedStopRow(row: AgentsViewRow): boolean {
+		return this.armedStop.isVisible() && getSummaryIdentity(row.summary) === this.armedStopIdentity;
 	}
 
 	private isPendingDeleteRow(row: AgentsViewRow): boolean {
@@ -2604,6 +2711,10 @@ export class AgentsViewMode implements Component, Focusable {
 	private renderHints(width: number): string {
 		if (this.ctrlCExitHint.isVisible()) {
 			return truncateToWidth(theme.fg("muted", pressAgainToExitHint()), width);
+		}
+		if (this.armedStop.isVisible()) {
+			const hint = `${keyText("app.agents.delete")} again to stop   ${keyText("tui.select.cancel")} cancel`;
+			return truncateToWidth(theme.fg("muted", hint), width);
 		}
 		if (this.statusMessage) {
 			return truncateToWidth(theme.fg(this.statusMessageTone, this.statusMessage), width);
