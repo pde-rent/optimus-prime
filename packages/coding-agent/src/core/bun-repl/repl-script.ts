@@ -346,6 +346,135 @@ function write(path: string, content: string | Uint8Array | ArrayBuffer): { path
 	}
 	return { path: target, bytes: data.byteLength };
 }
+/**
+ * Repository inspection primitives, so repo questions never need a shell grep/find.
+ *
+ * Both walk with Bun.Glob and read through the filesystem directly: no subprocess and
+ * no output the model has to truncate by hand — every knob caps its own work. Skipped
+ * directories are the ones a repo-wide grep trips over first here: node_modules,
+ * .git, dist.
+ */
+interface SearchMatch {
+	file: string;
+	line: number;
+	text: string;
+}
+
+interface SearchOptions {
+	/** Restrict which files are scanned by glob pattern. Defaults to every file. */
+	glob?: string;
+	cwd?: string;
+	maxResults?: number;
+	maxCharsPerLine?: number;
+	ignore?: "default";
+}
+
+interface LsOptions {
+	cwd?: string;
+	limit?: number;
+}
+
+const SEARCH_IGNORED_DIRS = new Set(["node_modules", ".git", "dist"]);
+const DEFAULT_SEARCH_MAX_RESULTS = 200;
+const DEFAULT_SEARCH_MAX_CHARS_PER_LINE = 300;
+const DEFAULT_LS_LIMIT = 2000;
+
+/** The slice of Bun.Glob the kernel needs, read structurally because the build has no @types/bun. */
+interface GlobScanner {
+	scanSync(options?: { cwd?: string; dot?: boolean; onlyFiles?: boolean }): Iterable<string>;
+}
+
+function globScanner(pattern: string): GlobScanner {
+	const ctor = (bunGlobal as { Glob?: new (pattern: string) => GlobScanner } | undefined)?.Glob;
+	if (!ctor) throw new Error("Bun.Glob is unavailable in this runtime");
+	return new ctor(pattern);
+}
+
+function resolveCwd(cwd?: string): string {
+	return cwd === undefined ? process.cwd() : resolve(cwd);
+}
+
+function cappedPositiveInt(value: number | undefined, fallback: number, name: string): number {
+	if (value === undefined) return fallback;
+	if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+	return value;
+}
+
+function isSkippedPath(rel: string): boolean {
+	return rel.split("/").some((part) => SEARCH_IGNORED_DIRS.has(part));
+}
+
+/**
+ * Regex search across repository files, grouped per file.
+ *
+ * `pattern` is a regex source string ('foo.*bar'), not shell-grep syntax. Results stop
+ * at maxResults overall, so a broad pattern stays cheap instead of scanning the whole
+ * tree before returning.
+ */
+function search(pattern: string, opts?: SearchOptions): SearchMatch[] {
+	if (typeof pattern !== "string" || pattern.length === 0) {
+		throw new Error(
+			"search: pattern must be a non-empty regex source string, e.g. search('TODO:', { glob: 'src/**/*.ts' })",
+		);
+	}
+	let regex: RegExp;
+	try {
+		regex = new RegExp(pattern);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`search: invalid regular expression ${JSON.stringify(pattern)}: ${message}`);
+	}
+	const cwd = resolveCwd(opts?.cwd);
+	const maxResults = cappedPositiveInt(opts?.maxResults, DEFAULT_SEARCH_MAX_RESULTS, "maxResults");
+	const maxChars = cappedPositiveInt(opts?.maxCharsPerLine, DEFAULT_SEARCH_MAX_CHARS_PER_LINE, "maxCharsPerLine");
+	const scan = globScanner(opts?.glob ?? "**/*");
+	// Sorted before scanning: the walk itself is unordered, and a stable, per-file
+	// grouped result is what both the model reading it and the cap below assume.
+	const files = [...scan.scanSync({ cwd, dot: true, onlyFiles: true })].sort();
+	const matches: SearchMatch[] = [];
+	for (const rel of files) {
+		if (matches.length >= maxResults) break;
+		if (isSkippedPath(rel)) continue;
+		// Unreadable files (permissions, mid-write races) are skipped, not fatal:
+		// one bad file must not take down a repo-wide query.
+		let bytes: Buffer;
+		try {
+			bytes = readFileSync(resolve(cwd, rel));
+		} catch {
+			continue;
+		}
+		// grep's heuristic: a NUL byte means binary, and decoding it as text only
+		// produces garbage matches on mangled line boundaries.
+		if (bytes.subarray(0, 8192).includes(0)) continue;
+		const lines = bytes.toString("utf8").split("\n");
+		for (let i = 0; i < lines.length && matches.length < maxResults; i++) {
+			if (!regex.test(lines[i])) continue;
+			const text = lines[i].length > maxChars ? `${lines[i].slice(0, maxChars)}…` : lines[i];
+			matches.push({ file: rel, line: i + 1, text });
+		}
+	}
+	return matches;
+}
+
+/**
+ * File listing through Bun.Glob. Sorted so output is stable across cells.
+ * The default-ignored directories are skipped too: '**' that walks node_modules
+ * is exactly the listing nobody wanted.
+ */
+function ls(pattern = "**", opts?: LsOptions): string[] {
+	if (typeof pattern !== "string" || pattern.length === 0) {
+		throw new Error("ls: pattern must be a non-empty glob, e.g. ls('src/**/*.ts')");
+	}
+	const cwd = resolveCwd(opts?.cwd);
+	const limit = cappedPositiveInt(opts?.limit, DEFAULT_LS_LIMIT, "limit");
+	const out: string[] = [];
+	for (const rel of globScanner(pattern).scanSync({ cwd, dot: true, onlyFiles: true })) {
+		if (isSkippedPath(rel)) continue;
+		out.push(rel);
+		if (out.length >= limit) break;
+	}
+	return out.sort();
+}
 
 function sandboxConsole() {
 	// Strings print bare and everything else through `inspect`, matching what a normal
@@ -550,7 +679,11 @@ for (const [name, value] of Object.entries({
 	rlm: rlmObj,
 	spawn: rlmObj,
 	mcp: mcpObj,
+	// Repo inspection without a shell: search()/ls() cover grep/find/ls so the
+	// model has no reason to reach for child_process to look around.
 	pi: piObj,
+	search,
+	ls,
 })) {
 	installHarnessGlobal(name, value);
 }

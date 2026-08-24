@@ -15,6 +15,7 @@ export const DEFAULT_RLM_RUNTIME_LABELS = [
 	"databases with no driver to install: `bun:sqlite` (`new Database(path)`, local and durable — reach for it before anything networked), `Bun.SQL`/`Bun.sql` (Postgres, MySQL and MariaDB through tagged templates, which parameterise rather than interpolate), `Bun.redis`/`Bun.RedisClient`",
 	"networking with nothing to install: `fetch` and `WebSocket` clients, `Bun.serve` for an HTTP/WebSocket server with static file routes, `HTMLRewriter` for streaming HTML parsing, `Bun.connect`/`Bun.listen` for raw TCP and TLS, `Bun.S3Client` for S3-compatible object storage",
 	"`pi` — REPL-only helpers with no Bun equivalent: `pi.diff(oldText, newText, { contextLines?, startLine? })` for a line-numbered diff, `pi.truncateHead(text, { maxLines?, maxBytes? })` and `pi.truncateTail(...)` to bound output without splitting a line or a UTF-8 sequence",
+	"`search()` and `ls()` — native repo inspection with no subprocess: `search(regexSource, { glob?, cwd?, maxResults?, maxCharsPerLine? })` returns `{ file, line, text }[]` grouped per file and capped overall; `ls(glob?, { cwd?, limit? })` lists files. Both skip node_modules/.git/dist and binary files by default — reach for them before shelling out to grep/find/ls",
 	"Web Crypto (crypto.randomUUID, crypto.subtle), Buffer, TextEncoder/TextDecoder, Compression/DecompressionStream, URL/URLSearchParams/URLPattern",
 	"a read-only `process` slice (platform, versions, env, cwd(), memoryUsage()); exit/chdir/kill are withheld so a cell cannot kill the kernel",
 ];
@@ -135,6 +136,7 @@ const REPL_CONTROL_PROMPT = [
 	"Important: do not install dependencies into the REPL just to make an external project import or run there. If a project import, test, script, CLI, or dependency check is needed, run it through that project's own environment and normal command interface (its documented commands, `bun run ...`, `uv run ...`, the project's own interpreter, from the repo root). Treat failures from that native environment as the relevant result.",
 	"",
 	"Read and write files with the synchronous globals `read` and `write` — no `await` needed. `const head = read('pkg/file.ts', { from: 1, to: 80 })` returns that 1-based inclusive line slice as raw text, so slice a large file instead of pulling all of it into context; `write('out/report.md', text)` creates parent directories, replaces atomically, and returns `{ path, bytes }`. Use `read` to consume content as a value and `edit.src` when the next step is an edit. Assign read and search results to named variables so you can slice, filter, and act on them without re-reading. For plain reads and writes of whole files, prefer the `read_file` and `write_file` tools instead: they are visible in the TUI and writes render reviewable diffs. Keep the `read`/`write` globals for computed or generated content and batch operations.",
+	"Inspect the repo with the `search()` and `ls()` globals instead of shell grep/find/ls: `search('TODO:', { glob: 'src/**/*.ts' })` returns `{ file, line, text }[]` across files, `ls('**')` lists paths. Both are capped and skip node_modules/.git/dist plus binary files by default.",
 	"",
 	"Each `%%bash` cell runs in a throw-away subshell, so shell-level state (`cd`, `export`, `source`, shell variables) does NOT carry to later cells. Keep dependent shell steps inside one `%%bash` cell when they need shared shell state, or use REPL-level equivalents that survive across calls: `cd('<dir>')` for the working directory and `env.VAR = '...'` for environment variables — these apply to all subsequent `%%bash` calls and to file paths resolved in later cells.",
 	"",
@@ -375,6 +377,7 @@ export function buildSubagentGuidance(
 		"Have children write files and read those files for fan-in.",
 		"Recover direct child handles with `await rlm.list_subagents()` (returns `{ subagents: [...] }`) after a kernel restart or compaction.",
 		'Ending your turn means the task is finished or you need input from another agent. Never end with narration of future work ("Now wave 3...", "Next I\'ll check..."): either make the tool call or deliver the final summary.',
+		"Stay inside this REPL for inspection and edits: read()/write(), Bun APIs, and the pre-bound $ shell cover nearly everything. Reserve child_process/spawnSync for real binaries you genuinely need (git, gh, networked CLIs) - never as a grep/sed/ls substitute: reach for Bun.Glob, fs, or string operations on text you already hold.",
 	];
 	if (options.includeRefineExamples ?? true) {
 		lines.push("Persist genuinely reusable delegation patterns with `await refine.run()`.");
