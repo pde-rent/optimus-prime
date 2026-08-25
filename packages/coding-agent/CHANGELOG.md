@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Removed never-used agent sessions with no messages from the Done and Archive lists in the agents view; running and failed sessions still show.
 - Fixed leaked daemon workers: workers whose supervising daemon died are now detected and killed at daemon startup and during eviction sweeps instead of lingering forever (observed 27 orphaned workers holding ~440 MB).
 - Fixed idle eviction sweeps failing with "Session worker did not stop": a worker that acknowledged a graceful shutdown now gets up to 30s to finish finalizing its sessions before signals fire, and a failed stop re-verifies process identity once before giving up.
 - Added live model discovery for 12 more providers (cerebras, deepinfra, deepseek, groq, huggingface, moonshotai, moonshotai-cn, prime-inference, siliconflow, togetherai, xai, zai): catalogs refresh from each provider's /models endpoint when auth is configured.

@@ -223,7 +223,23 @@ export function reconcileUnifiedSessions(
 	// Sections are derived client-side per refresh; the roster status on the
 	// wire is a legacy hint only.
 	for (const record of records) record.section = classifyUnifiedSession(record, nowMs);
-	return records;
+	return pruneEmptyFinishedSessions(records);
+}
+
+/**
+ * Done and archived sessions that never received a message (the "(no messages)"
+ * rows) carry no conversation to revisit; drop them so they don't clutter the
+ * list. Running and failed sessions always stay, a session still anchoring
+ * children stays for hierarchy, and one that gains messages reappears on the
+ * next refresh because pruning reruns per catalog reconcile.
+ */
+function pruneEmptyFinishedSessions(records: UnifiedSessionRecord[]): UnifiedSessionRecord[] {
+	const index = buildUnifiedSessionIndex(records);
+	return records.filter((record) => {
+		if (record.section !== "done" && record.section !== "archive") return true;
+		if ((record.daemon?.messageCount ?? record.saved?.messageCount ?? 0) > 0) return true;
+		return (index.childrenByParent.get(record)?.length ?? 0) > 0;
+	});
 }
 
 /** Convert a merged row to the existing live-row rendering/action shape. */

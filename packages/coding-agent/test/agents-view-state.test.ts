@@ -6,6 +6,7 @@ import type { AgentSessionRuntimeConfig } from "../src/core/agent-session-config
 import type { ModelRegistry } from "../src/core/model-registry.js";
 import type { SessionInfo } from "../src/core/session-manager.js";
 import type { SettingsManager } from "../src/core/settings-manager.js";
+import { ARCHIVE_AFTER_MS } from "../src/modes/agents-tree/agent-tree-model.js";
 import {
 	createAgentsViewListCommand,
 	createAgentsViewReplyHeadline,
@@ -1068,6 +1069,66 @@ describe("agents view state", () => {
 		const [record] = reconcileUnifiedSessions([makeSummary({ hasActiveHeartbeat: true })], []);
 		expect(record).toMatchObject({ section: "running", heartbeat: { activeCount: 1 } });
 		expect(formatHeartbeatBadge(record?.heartbeat)).toBe("♥ 1");
+	});
+
+	test("prunes message-less done and archived sessions", () => {
+		const nowMs = Date.parse("2026-01-01T12:00:00Z");
+		const emptyDone = makeSummary({ id: "empty", activeSessionId: undefined, sessionId: "empty", messageCount: 0 });
+		const emptyArchived = makeSessionInfo({
+			path: "/tmp/empty.jsonl",
+			id: "empty-saved",
+			messageCount: 0,
+			firstMessage: "(no messages)",
+			modified: new Date(nowMs - 10 * ARCHIVE_AFTER_MS),
+		});
+		const records = reconcileUnifiedSessions([emptyDone], [emptyArchived], [], nowMs);
+		expect(records).toEqual([]);
+	});
+
+	test("keeps message-less sessions that are running, failed, or anchor children", () => {
+		const running = makeSummary({
+			id: "running",
+			activeSessionId: "running",
+			sessionId: "running-session",
+			messageCount: 0,
+			activity: "working",
+			isStreaming: true,
+		});
+		const failed = makeSummary({
+			id: "failed",
+			activeSessionId: undefined,
+			sessionId: "failed-session",
+			messageCount: 0,
+			lastError: "boom",
+		});
+		const parent = makeSummary({
+			id: "parent",
+			activeSessionId: "parent",
+			sessionId: "parent-session",
+			messageCount: 0,
+		});
+		const child = makeSummary({
+			id: "child",
+			activeSessionId: "child",
+			sessionId: "child-session",
+			messageCount: 1,
+			runtimeKind: "subagent",
+			parentActiveSessionId: "parent",
+		});
+		const records = reconcileUnifiedSessions([running, failed, parent, child], []);
+		expect(records.map((record) => record.daemon?.sessionId)).toEqual([
+			"running-session",
+			"failed-session",
+			"parent-session",
+			"child-session",
+		]);
+	});
+
+	test("a pruned session reappears once it gains messages", () => {
+		const summary = makeSummary({ id: "late", activeSessionId: undefined, sessionId: "late-session" });
+		expect(reconcileUnifiedSessions([{ ...summary, messageCount: 0 }], [])).toEqual([]);
+		const [record] = reconcileUnifiedSessions([{ ...summary, messageCount: 1 }], []);
+		expect(record).toMatchObject({ section: "done" });
 	});
 
 	test("preserves live identity and row state when saved metadata adds a file alias", () => {
