@@ -630,6 +630,12 @@ describe("Generate E2E Tests", () => {
 			cases: [text(), toolCall(), streaming()],
 		},
 		{
+			name: "GMI Cloud Provider (MiniMaxAI/MiniMax-M3 via OpenAI Completions)",
+			skipIf: !process.env.GMI_API_KEY,
+			model: () => getModel("gmi", "MiniMaxAI/MiniMax-M3"),
+			cases: [text(), toolCall(), streaming()],
+		},
+		{
 			name: "Grok Provider (grok-4.6 via SuperGrok CLI proxy)",
 			skipIf: !process.env.XAI_OAUTH_TOKEN,
 			model: () => getModel("grok", "grok-4.6"),

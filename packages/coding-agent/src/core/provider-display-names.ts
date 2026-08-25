@@ -16,6 +16,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	"kimi-coding": "Kimi For Coding",
 	mistral: "Mistral",
 	nous: "Nous Portal",
+	gmi: "GMI Cloud",
 	minimax: "MiniMax",
 	"minimax-cn": "MiniMax (China)",
 	moonshotai: "Moonshot AI",

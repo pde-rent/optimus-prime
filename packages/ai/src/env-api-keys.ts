@@ -92,6 +92,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		huggingface: "HF_TOKEN",
 		fireworks: "FIREWORKS_API_KEY",
 		nous: "NOUS_API_KEY",
+		gmi: "GMI_API_KEY",
 		opencode: "OPENCODE_API_KEY",
 		"opencode-go": "OPENCODE_API_KEY",
 		"kimi-coding": "KIMI_API_KEY",
@@ -102,6 +103,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		"tencent-coding-plan": "TENCENT_CODING_PLAN_API_KEY",
 		siliconflow: "SILICONFLOW_API_KEY",
 		togetherai: "TOGETHER_API_KEY",
+		deepinfra: "DEEPINFRA_API_KEY",
 
 		"cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
 		"cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",

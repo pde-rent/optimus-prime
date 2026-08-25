@@ -38,6 +38,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	huggingface: "moonshotai/Kimi-K2.6",
 	fireworks: "accounts/fireworks/models/kimi-k2p6",
 	nous: "stealth/ox-alpha",
+	gmi: "MiniMaxAI/MiniMax-M3",
 	opencode: "kimi-k2.6",
 	"opencode-go": "kimi-k2.6",
 	"kimi-coding": "kimi-for-coding",
@@ -54,6 +55,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	togetherai: "moonshotai/Kimi-K2.6",
 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
+	deepinfra: "MiniMaxAI/MiniMax-M2.5",
 };
 
 export interface ScopedModel {

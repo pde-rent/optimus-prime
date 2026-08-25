@@ -45,6 +45,7 @@ export type KnownProvider =
 	| "huggingface"
 	| "fireworks"
 	| "nous"
+	| "gmi"
 	| "opencode"
 	| "opencode-go"
 	| "kimi-coding"
@@ -53,7 +54,8 @@ export type KnownProvider =
 	| "xiaomi"
 	| "xiaomi-token-plan-cn"
 	| "xiaomi-token-plan-ams"
-	| "xiaomi-token-plan-sgp";
+	| "xiaomi-token-plan-sgp"
+	| "deepinfra";
 export type Provider = KnownProvider | string;
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

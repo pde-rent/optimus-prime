@@ -886,6 +886,167 @@ async function fetchNousModels(): Promise<Model<any>[]> {
 	}
 }
 
+const DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1";
+
+// Curated GMI Cloud serverless catalog (https://api.gmi-serving.com/v1). The
+// live /v1/models endpoint requires a key, so these entries seed the catalog
+// and a key-configured run merges the live list over them. MiniMax M3/M2.7
+// were free-promo models (Aug 24 - Sep 6, 2026); costs are the standard rates.
+const GMI_BASE_URL = "https://api.gmi-serving.com/v1";
+const GMI_CURATED: Array<{
+	id: string;
+	name: string;
+	reasoning: boolean;
+	contextWindow: number;
+	maxTokens: number;
+	cost: [number, number];
+	featured?: boolean;
+}> = [
+	{ id: "MiniMaxAI/MiniMax-M3", name: "MiniMax M3", reasoning: true, contextWindow: 512000, maxTokens: 128000, cost: [0.3, 1.2], featured: true },
+	{ id: "MiniMaxAI/MiniMax-M2.7", name: "MiniMax M2.7", reasoning: true, contextWindow: 196608, maxTokens: 131072, cost: [0.25, 1.0] },
+	{ id: "deepseek-ai/DeepSeek-V3.2", name: "DeepSeek V3.2", reasoning: true, contextWindow: 163840, maxTokens: 16384, cost: [0.28, 1.1] },
+	{ id: "moonshotai/Kimi-K2-Thinking", name: "Kimi K2 Thinking", reasoning: true, contextWindow: 262144, maxTokens: 16384, cost: [0.6, 2.5] },
+];
+
+function createGmiModel(
+	id: string,
+	name: string,
+	reasoning: boolean,
+	contextWindow: number,
+	maxTokens: number,
+	cost: [number, number],
+	featured?: boolean,
+): Model<any> {
+	return {
+		id,
+		name,
+		api: "openai-completions",
+		provider: "gmi",
+		baseUrl: GMI_BASE_URL,
+		reasoning,
+		input: ["text"],
+		...(featured ? { featured: true } : {}),
+		cost: { input: cost[0], output: cost[1], cacheRead: 0, cacheWrite: 0 },
+		contextWindow,
+		maxTokens,
+	};
+}
+
+async function fetchGmiModels(): Promise<Model<any>[]> {
+	const curated = GMI_CURATED.map((m) => createGmiModel(m.id, m.name, m.reasoning, m.contextWindow, m.maxTokens, m.cost, m.featured));
+	const byId = new Map(curated.map((m) => [m.id.toLowerCase(), m]));
+
+	const apiKey = process.env.GMI_API_KEY;
+	if (!apiKey) {
+		console.log("GMI_API_KEY not set; using curated GMI Cloud catalog");
+		return curated;
+	}
+
+	try {
+		console.log("Fetching models from GMI Cloud API...");
+		const response = await fetch(`${GMI_BASE_URL}/models`, {
+			headers: { Authorization: `Bearer ${apiKey}` },
+		});
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		const data = await response.json();
+		const ids = (Array.isArray(data?.data) ? data.data : [])
+			.map((entry: any) => entry?.id)
+			.filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+		if (ids.length === 0) throw new Error("empty model list");
+
+		const merged = ids.map((id: string) => {
+			const known = byId.get(id.toLowerCase());
+			return known ?? createGmiModel(id, id, false, 128000, 16384, [0, 0]);
+		});
+		console.log(`Fetched ${ids.length} models from GMI Cloud`);
+		return merged;
+	} catch (error) {
+		console.error("Failed to fetch GMI Cloud models; keeping curated catalog:", error);
+		return curated;
+	}
+}
+
+async function fetchDeepInfraModels(): Promise<Model<any>[]> {
+	try {
+		console.log("Fetching models from DeepInfra API...");
+		const response = await fetch(`${DEEPINFRA_BASE_URL}/models`);
+		const data = await response.json();
+		const items = Array.isArray(data?.data) ? data.data : [];
+
+		let openRouterIndex = new Map<string, { contextWindow: number; maxTokens: number; pricing: { prompt: string; completion: string; input_cache_read?: string }; vision: boolean; reasoning: boolean }>();
+		try {
+			const orCatalog = await fetchOpenRouterCatalog();
+			for (const item of orCatalog) {
+				if (typeof item?.id !== "string" || !item.id.startsWith("deepinfra/")) continue;
+				const topProvider = isRecord(item.top_provider) ? item.top_provider : {};
+				const architecture = isRecord(item.architecture) ? item.architecture : {};
+				const modalities = Array.isArray(architecture.input_modalities) ? architecture.input_modalities : [];
+				const supportedParameters = Array.isArray(item.supported_parameters) ? item.supported_parameters : [];
+				openRouterIndex.set(item.id, {
+					contextWindow: getOptionalNumber(item.context_length) ?? getOptionalNumber(topProvider.context_length) ?? 128000,
+					maxTokens: getOptionalNumber(topProvider.max_completion_tokens) ?? 8192,
+					pricing: {
+						prompt: item.pricing?.prompt || "0",
+						completion: item.pricing?.completion || "0",
+						input_cache_read: item.pricing?.input_cache_read,
+					},
+					vision: modalities.includes("image"),
+					reasoning: supportedParameters.includes("reasoning"),
+				});
+			}
+		} catch (error) {
+			console.error("Failed to fetch OpenRouter catalog for DeepInfra metadata:", error);
+		}
+
+		const models: Model<any>[] = [];
+		for (const item of items) {
+			if (!isRecord(item) || typeof item.id !== "string") continue;
+
+			const orKey = `deepinfra/${item.id}`;
+			const orMeta = openRouterIndex.get(orKey);
+			if (!orMeta) continue;
+
+			const input: ("text" | "image")[] = ["text"];
+			if (orMeta.vision) input.push("image");
+
+			const inputCost = Math.max(0, parseFloat(orMeta.pricing.prompt) * 1_000_000);
+			const outputCost = Math.max(0, parseFloat(orMeta.pricing.completion) * 1_000_000);
+			const cacheReadCost = orMeta.pricing.input_cache_read ? Math.max(0, parseFloat(orMeta.pricing.input_cache_read) * 1_000_000) : 0;
+
+			models.push({
+				id: item.id,
+				name: item.id.split("/").pop() ?? item.id,
+				api: "openai-completions",
+				baseUrl: DEEPINFRA_BASE_URL,
+				provider: "deepinfra",
+				reasoning: orMeta.reasoning,
+				input,
+				cost: {
+					input: inputCost,
+					output: outputCost,
+					cacheRead: cacheReadCost,
+					cacheWrite: 0,
+				},
+				contextWindow: orMeta.contextWindow,
+				maxTokens: orMeta.maxTokens,
+				compat: {
+					supportsStore: false,
+					supportsDeveloperRole: false,
+					supportsReasoningEffort: false,
+					maxTokensField: "max_tokens",
+					supportsStrictMode: false,
+				} satisfies OpenAICompletionsCompat,
+			});
+		}
+
+		console.log(`Fetched ${models.length} models from DeepInfra`);
+		return models;
+	} catch (error) {
+		console.error("Failed to fetch DeepInfra models:", error);
+		return [];
+	}
+}
+
 // Cursor subscription access reaches api2.cursor.sh with OAuth credentials;
 // the catalog is seeded statically because AvailableModels requires auth and
 // is plan-gated per account.
@@ -1645,6 +1806,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			{ key: "tencent-coding-plan", provider: "tencent-coding-plan", baseUrl: "https://api.lkeap.cloud.tencent.com/coding/v3" },
 			{ key: "siliconflow", provider: "siliconflow", baseUrl: "https://api.siliconflow.com/v1" },
 			{ key: "togetherai", provider: "togetherai", baseUrl: "https://api.together.xyz/v1" },
+			{ key: "deepinfra", provider: "deepinfra", baseUrl: "https://api.deepinfra.com/v1" },
 		] as const;
 		const genericOpenAiCompat: OpenAICompletionsCompat = {
 			supportsStore: false,
@@ -2312,6 +2474,12 @@ async function generateModels() {
 
 	const nousModels = await fetchNousModels();
 	allModels.push(...nousModels);
+
+	const gmiModels = await fetchGmiModels();
+	allModels.push(...gmiModels);
+
+	const deepInfraModels = await fetchDeepInfraModels();
+	allModels.push(...deepInfraModels);
 
 	allModels.push(...fetchCursorModels());
 
