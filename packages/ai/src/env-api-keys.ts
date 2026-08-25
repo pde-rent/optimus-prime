@@ -66,6 +66,11 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		return ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"];
 	}
 
+	// DEEPINFRA_TOKEN is the historical DeepInfra variable name still in wide use.
+	if (provider === "deepinfra") {
+		return ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"];
+	}
+
 	// ANTHROPIC_OAUTH_TOKEN takes precedence over ANTHROPIC_API_KEY
 	if (provider === "anthropic") {
 		return ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
