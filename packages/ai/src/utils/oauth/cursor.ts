@@ -4,7 +4,6 @@ import type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderInterface } fr
 const LOGIN_URL = "https://cursor.com/loginDeepControl";
 const POLL_URL = "https://api2.cursor.sh/auth/poll";
 const EXCHANGE_URL = "https://api2.cursor.sh/auth/exchange_user_api_key";
-const TOKEN_URL = "https://api2.cursor.sh/oauth/token";
 
 const POLL_INTERVAL_MS = 2000;
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -18,55 +17,36 @@ function isRecord(value: unknown): value is RecordOf {
 	return typeof value === "object" && value !== null;
 }
 
-function pickString(record: RecordOf, keys: readonly string[]): string | undefined {
-	for (const key of keys) {
-		const value = record[key];
-		if (typeof value === "string" && value.length > 0) {
-			return value;
-		}
-	}
-	return undefined;
-}
-
-function pickNumber(record: RecordOf, keys: readonly string[]): number | undefined {
-	for (const key of keys) {
-		const value = record[key];
-		if (typeof value === "number") {
-			return value;
-		}
-	}
-	return undefined;
-}
-
-async function postJson(url: string, body: unknown): Promise<{ status: number; json: unknown }> {
-	const response = await fetch(url, {
-		method: "POST",
-		headers: {
-			Accept: "application/json",
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(body),
-	});
-	let json: unknown;
-	try {
-		json = await response.json();
-	} catch {
-		json = undefined;
-	}
-	return { status: response.status, json };
-}
-
-function extractAccessToken(json: unknown): string | undefined {
-	if (!isRecord(json)) {
+/**
+ * Decode the `exp` claim of a Cursor JWT access token, in ms. Undefined when
+ * the token is not a decodable JWT with an exp.
+ */
+function decodeJwtExpiryMs(token: string): number | undefined {
+	const payload = token.split(".")[1];
+	if (!payload) {
 		return undefined;
 	}
-	return (
-		pickString(json, ["accessToken", "access_token"]) ??
-		(isRecord(json.result) ? pickString(json.result, ["accessToken", "access_token"]) : undefined)
-	);
+	try {
+		const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+		if (isRecord(decoded) && typeof decoded.exp === "number") {
+			return decoded.exp * 1000;
+		}
+	} catch {
+		// Fall through to the default TTL.
+	}
+	return undefined;
 }
 
-async function pollForAccessToken(uuid: string, signal?: AbortSignal): Promise<string> {
+interface CursorTokenPair {
+	accessToken: string;
+	refreshToken: string;
+}
+
+/**
+ * Poll until the browser login completes. Pending answers are HTTP 404
+ * (unapproved uuid); success is a 200 carrying both tokens.
+ */
+async function pollForTokens(uuid: string, verifier: string, signal?: AbortSignal): Promise<CursorTokenPair> {
 	const deadline = Date.now() + LOGIN_TIMEOUT_MS;
 
 	while (Date.now() < deadline) {
@@ -74,28 +54,45 @@ async function pollForAccessToken(uuid: string, signal?: AbortSignal): Promise<s
 			throw new Error("Login cancelled");
 		}
 
-		const { status, json } = await postJson(POLL_URL, { uuid });
-		// Cursor answers with a non-2xx or an empty object until the browser
-		// login completes; only a token in the payload means success.
-		const accessToken = extractAccessToken(json);
-		if (status >= 200 && status < 300 && accessToken) {
-			return accessToken;
+		const url = `${POLL_URL}?uuid=${encodeURIComponent(uuid)}&verifier=${encodeURIComponent(verifier)}`;
+		const response = await fetch(url, { headers: { Accept: "application/json" }, signal });
+		if (response.status === 404) {
+			await sleep(POLL_INTERVAL_MS, signal);
+			continue;
+		}
+		if (!response.ok) {
+			throw new Error(`cursor login poll failed with HTTP ${response.status}`);
 		}
 
-		await new Promise<void>((resolve, reject) => {
-			const timeout = setTimeout(resolve, POLL_INTERVAL_MS);
-			signal?.addEventListener(
-				"abort",
-				() => {
-					clearTimeout(timeout);
-					reject(new Error("Login cancelled"));
-				},
-				{ once: true },
-			);
-		});
+		const json: unknown = await response.json().catch(() => undefined);
+		if (
+			isRecord(json) &&
+			typeof json.accessToken === "string" &&
+			json.accessToken.length > 0 &&
+			typeof json.refreshToken === "string" &&
+			json.refreshToken.length > 0
+		) {
+			return { accessToken: json.accessToken, refreshToken: json.refreshToken };
+		}
+
+		await sleep(POLL_INTERVAL_MS, signal);
 	}
 
 	throw new Error("Cursor login timed out");
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const timeout = setTimeout(resolve, ms);
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(timeout);
+				reject(new Error("Login cancelled"));
+			},
+			{ once: true },
+		);
+	});
 }
 
 export async function loginCursor(options: {
@@ -106,49 +103,32 @@ export async function loginCursor(options: {
 	const pkce = await generatePKCE();
 	const uuid = crypto.randomUUID();
 
-	options.onAuth(
-		`${LOGIN_URL}?challenge=${encodeURIComponent(pkce.challenge)}&uuid=${encodeURIComponent(uuid)}`,
-		"Complete authorization in your browser",
-	);
+	const params = new URLSearchParams({
+		challenge: pkce.challenge,
+		uuid,
+		mode: "login",
+		redirectTarget: "cli",
+	});
+	options.onAuth(`${LOGIN_URL}?${params}`, "Complete authorization in your browser");
 
-	const accessToken = await pollForAccessToken(uuid, options.signal);
-
-	const exchange = await postJson(EXCHANGE_URL, { accessToken });
-	const exchangedToken = extractAccessToken(exchange.json) ?? accessToken;
-	const refreshToken = isRecord(exchange.json)
-		? pickString(exchange.json, ["refreshToken", "refresh_token"])
-		: undefined;
-
-	if (!refreshToken) {
-		throw new Error("Invalid cursor exchange response: missing refresh token");
-	}
-
-	const expiresIn = isRecord(exchange.json) ? pickNumber(exchange.json, ["expiresIn", "expires_in"]) : undefined;
-	const expiresAt = isRecord(exchange.json)
-		? pickNumber(exchange.json, ["expiry", "expiresAt", "expires_at"])
-		: undefined;
+	const { accessToken, refreshToken } = await pollForTokens(uuid, pkce.verifier, options.signal);
 
 	return {
 		refresh: refreshToken,
-		access: exchangedToken,
-		expires:
-			expiresAt !== undefined
-				? expiresAt * 1000 - 5 * 60 * 1000
-				: Date.now() + (expiresIn !== undefined ? expiresIn * 1000 : DEFAULT_CREDENTIAL_TTL_MS) - 5 * 60 * 1000,
+		access: accessToken,
+		expires: (decodeJwtExpiryMs(accessToken) ?? Date.now() + DEFAULT_CREDENTIAL_TTL_MS) - 5 * 60 * 1000,
 	};
 }
 
 async function requestRefresh(refreshToken: string): Promise<OAuthCredentials> {
-	const response = await fetch(TOKEN_URL, {
+	const response = await fetch(EXCHANGE_URL, {
 		method: "POST",
 		headers: {
 			Accept: "application/json",
-			"Content-Type": "application/x-www-form-urlencoded",
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${refreshToken}`,
 		},
-		body: new URLSearchParams({
-			grant_type: "refresh_token",
-			refresh_token: refreshToken,
-		}),
+		body: "{}",
 	});
 
 	if (!response.ok) {
@@ -161,18 +141,17 @@ async function requestRefresh(refreshToken: string): Promise<OAuthCredentials> {
 		throw new Error("Invalid token refresh response");
 	}
 
-	const access = pickString(raw, ["access_token", "accessToken"]);
+	const access = typeof raw.accessToken === "string" ? raw.accessToken : undefined;
 	if (!access) {
 		throw new Error("Invalid token refresh response fields");
 	}
-
-	const nextRefresh = pickString(raw, ["refresh_token", "refreshToken"]);
-	const expiresIn = pickNumber(raw, ["expires_in", "expiresIn"]);
+	const nextRefresh =
+		typeof raw.refreshToken === "string" && raw.refreshToken.length > 0 ? raw.refreshToken : undefined;
 
 	return {
 		refresh: nextRefresh ?? refreshToken,
 		access,
-		expires: Date.now() + (expiresIn !== undefined ? expiresIn * 1000 : DEFAULT_CREDENTIAL_TTL_MS) - 5 * 60 * 1000,
+		expires: (decodeJwtExpiryMs(access) ?? Date.now() + DEFAULT_CREDENTIAL_TTL_MS) - 5 * 60 * 1000,
 	};
 }
 

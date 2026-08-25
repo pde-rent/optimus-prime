@@ -5,6 +5,7 @@ import {
 	buildCursorRequestBody,
 	ConnectEnvelopeParser,
 	CURSOR_CHAT_ENDPOINT,
+	fetchCursorAvailableModels,
 	frameConnectRequest,
 	parseCursorEnvelope,
 	streamCursorConnect,
@@ -245,5 +246,77 @@ describe("streamCursorConnect", () => {
 		const parsed = JSON.parse(new TextDecoder().decode(captured!.body.subarray(5)));
 		expect(parsed.modelName).toBe("composer-1");
 		expect(parsed.messages).toEqual([{ userMessage: { text: "hey" } }]);
+	});
+});
+
+describe("fetchCursorAvailableModels", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	function mockAvailableModels(frames: Uint8Array[], status = 200): { url?: string; body?: unknown } {
+		const captured: { url?: string; body?: unknown } = {};
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: unknown, init?: RequestInit): Promise<Response> => {
+				captured.url = String(url);
+				captured.body = JSON.parse(
+					new TextDecoder().decode(new Uint8Array(await new Response(init?.body).arrayBuffer()).subarray(5)),
+				);
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							for (const frame of frames) {
+								controller.enqueue(frame);
+							}
+							controller.close();
+						},
+					}),
+					{ status },
+				);
+			}),
+		);
+		return captured;
+	}
+
+	it("parses the AvailableModels response into model entries", async () => {
+		const payload = {
+			modelNames: ["composer-1", "gpt-5"],
+			models: [
+				{
+					name: "composer-1",
+					defaultOn: true,
+					supportsThinking: true,
+					supportsImages: false,
+					contextTokenLimit: 272000,
+					clientDisplayName: "Composer 1",
+				},
+				{ name: "gpt-5", supportsImages: true },
+			],
+		};
+		const captured = mockAvailableModels([frameBytes(0, JSON.stringify(payload)), frameBytes(2, "{}")]);
+
+		const models = await fetchCursorAvailableModels("token");
+
+		expect(captured.url).toContain("/aiserver.v1.AiService/AvailableModels");
+		expect(captured.body).toEqual({ isNightly: false, includeLongContextModels: true });
+		expect(models).toHaveLength(2);
+		expect(models[0]).toEqual({
+			name: "composer-1",
+			defaultOn: true,
+			supportsThinking: true,
+			supportsImages: false,
+			contextTokenLimit: 272000,
+			clientDisplayName: "Composer 1",
+		});
+		expect(models[1]).toEqual({ name: "gpt-5", supportsImages: true });
+	});
+
+	it("throws on HTTP errors and invalid payloads", async () => {
+		mockAvailableModels([frameBytes(0, "{}")], 401);
+		await expect(fetchCursorAvailableModels("token")).rejects.toThrow(/HTTP 401/);
+
+		mockAvailableModels([frameBytes(0, JSON.stringify({ unexpected: true }))]);
+		await expect(fetchCursorAvailableModels("token")).rejects.toThrow(/invalid payload/);
 	});
 });

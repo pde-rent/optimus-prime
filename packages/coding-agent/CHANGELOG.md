@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Fixed leaked daemon workers: workers whose supervising daemon died are now detected and killed at daemon startup and during eviction sweeps instead of lingering forever (observed 27 orphaned workers holding ~440 MB).
+- Fixed idle eviction sweeps failing with "Session worker did not stop": a worker that acknowledged a graceful shutdown now gets up to 30s to finish finalizing its sessions before signals fire, and a failed stop re-verifies process identity once before giving up.
+- Added live model discovery for 12 more providers (cerebras, deepinfra, deepseek, groq, huggingface, moonshotai, moonshotai-cn, prime-inference, siliconflow, togetherai, xai, zai): catalogs refresh from each provider's /models endpoint when auth is configured.
+- Added GMI Cloud as a provider with live model discovery; MiniMax M3 is the default model.
+- Added Cursor model discovery: the /model picker now reflects the models actually enabled for your Cursor plan (via AvailableModels), refreshed with the same TTL and cache as other providers.
+- Changed dynamic model discovery to keep curated catalog metadata for known model ids instead of replacing it with bare discovery defaults; static ids absent from the live list are still dropped.
 - Added tool-call aliasing: intuitive names from other model lineages (read, shell, python, ls, cat, and similar) resolve to the canonical built-in tools at call time, with parameter normalization and ignored-parameter notes instead of "Tool not found" errors.
 - Changed new sessions to activate every built-in tool by default instead of only repl; explicit -t allowlists and noTools still take precedence.
 - Added an exhaustion prompt for the graph budget: when a spawn is refused, interactive sessions offer reset meter / raise one tier / unlimited / cancel (30s timeout falls back to reset); daemon and print runs apply the default remedy with a warning instead of failing silently.

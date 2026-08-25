@@ -26,6 +26,7 @@ describe("ModelRegistry dynamic model discovery", () => {
 		setDynamicModelsFetcher("openrouter", undefined);
 		setDynamicModelsFetcher("nous", undefined);
 		setDynamicModelsFetcher("grok", undefined);
+		setDynamicModelsFetcher("groq", undefined);
 
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
@@ -158,6 +159,73 @@ describe("ModelRegistry dynamic model discovery", () => {
 		expect(grok.map((m) => m.id)).toEqual(["grok-4.7", "grok-build-0.2"]);
 		expect(grok[0]!.api).toBe("grok-responses");
 		expect(grok[0]!.baseUrl).toBe("https://cli-chat-proxy.grok.com/v1");
+	});
+
+	test("cursor discovery maps AvailableModels entries and keeps curated metadata", async () => {
+		authStorage.set("cursor", { type: "api_key", key: "TOKEN" });
+		const availableModels = {
+			models: [
+				{
+					name: "composer-2",
+					defaultOn: true,
+					supportsThinking: true,
+					supportsImages: false,
+					contextTokenLimit: 300000,
+				},
+				{ name: "claude-4.5-sonnet", supportsImages: true },
+			],
+		};
+		const body = new Uint8Array(5 + new TextEncoder().encode(JSON.stringify(availableModels)).length);
+		new DataView(body.buffer).setUint32(1, body.length - 5);
+		body.set(new TextEncoder().encode(JSON.stringify(availableModels)), 5);
+		const restoreFetch = globalThis.fetch;
+		globalThis.fetch = (async () => new Response(body, { status: 200 })) as typeof fetch;
+		try {
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			await registry.refreshModelCatalog();
+
+			const cursor = modelsFor(registry, "cursor");
+			expect(cursor.map((m) => m.id)).toEqual(["composer-2", "claude-4.5-sonnet"]);
+			const added = cursor.find((m) => m.id === "composer-2")!;
+			expect(added.api).toBe("cursor-connect");
+			expect(added.baseUrl).toBe("https://api2.cursor.sh");
+			expect(added.reasoning).toBe(true);
+			expect(added.contextWindow).toBe(300000);
+			// Known static id keeps its curated catalog entry.
+			const curated = cursor.find((m) => m.id === "claude-4.5-sonnet")!;
+			expect(curated.name).toBe("Claude 4.5 Sonnet");
+		} finally {
+			globalThis.fetch = restoreFetch;
+		}
+	});
+
+	test("discovery keeps curated metadata for known ids and drops removed ones", async () => {
+		authStorage.set("groq", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("groq", async () =>
+			openAIListResponse([
+				// Known static id: payload has no pricing or reasoning info, the
+				// curated catalog entry must survive intact.
+				{ id: "openai/gpt-oss-20b", name: "gpt-oss-20b" },
+				// Unknown id: parsed defaults apply.
+				{ id: "brand-new-model", name: "Brand New Model", context_length: 64000 },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const groq = modelsFor(registry, "groq");
+		expect(groq.map((m) => m.id)).toEqual(["openai/gpt-oss-20b", "brand-new-model"]);
+		const curated = groq.find((m) => m.id === "openai/gpt-oss-20b")!;
+		expect(curated.name).toBe("GPT OSS 20B");
+		expect(curated.reasoning).toBe(true);
+		expect(curated.contextWindow).toBe(131072);
+		expect(curated.cost.input).toBeCloseTo(0.075);
+		// Static ids absent from the discovery response are gone.
+		expect(groq.some((m) => m.id === "llama-3.1-8b-instant")).toBe(false);
+		const added = groq.find((m) => m.id === "brand-new-model")!;
+		expect(added.api).toBe("openai-completions");
+		expect(added.baseUrl).toBe("https://api.groq.com/openai/v1");
+		expect(added.contextWindow).toBe(64000);
 	});
 
 	test("discovery maps architecture modalities when present and omits output when absent", async () => {

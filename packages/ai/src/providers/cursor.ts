@@ -307,6 +307,89 @@ function resolveToolCall(json: RecordOf): CursorEnvelopeToolCall | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Model discovery
+
+/** One entry of the account's AvailableModels response (aiserver.v1 proto3 JSON). */
+export interface CursorAvailableModel {
+	name: string;
+	defaultOn?: boolean;
+	supportsAgent?: boolean;
+	supportsThinking?: boolean;
+	supportsImages?: boolean;
+	contextTokenLimit?: number;
+	clientDisplayName?: string;
+}
+
+const CURSOR_AVAILABLE_MODELS_ENDPOINT = `${CURSOR_API_BASE_URL}/aiserver.v1.AiService/AvailableModels`;
+
+/**
+ * List the models enabled for a Cursor subscription account via the same
+ * Connect unary framing as chat. Response is a single framed JSON message.
+ */
+export async function fetchCursorAvailableModels(
+	apiKey: string,
+	signal?: AbortSignal,
+): Promise<CursorAvailableModel[]> {
+	const headers = {
+		...(await buildCursorHeaders(apiKey, "")),
+	};
+	delete headers["x-cursor-model"];
+
+	const body = frameConnectRequest(
+		JSON.stringify({
+			isNightly: false,
+			includeLongContextModels: true,
+		}),
+	);
+	const response = await fetch(CURSOR_AVAILABLE_MODELS_ENDPOINT, { method: "POST", headers, body, signal });
+	if (!response.ok) {
+		throw new Error(`cursor model discovery failed with HTTP ${response.status}`);
+	}
+
+	const parser = new ConnectEnvelopeParser();
+	const reader = response.body!.getReader();
+	let payloadJson: unknown;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		for (const frame of parser.push(value)) {
+			if ((frame.flags & FLAGS_END) !== 0) continue;
+			try {
+				payloadJson = JSON.parse(frame.payload);
+			} catch {
+				// Non-JSON frames are ignored; the first JSON message carries the models.
+			}
+		}
+	}
+	reader.releaseLock();
+
+	if (!payloadJson || typeof payloadJson !== "object") {
+		throw new Error("cursor model discovery returned no payload");
+	}
+	const models = (payloadJson as { models?: unknown }).models;
+	if (!Array.isArray(models)) {
+		throw new Error("cursor model discovery returned an invalid payload");
+	}
+	return models.flatMap((entry) => {
+		if (typeof entry !== "object" || entry === null || typeof (entry as { name?: unknown }).name !== "string") {
+			return [];
+		}
+		const model = entry as Record<string, unknown>;
+		return [
+			{
+				name: model.name as string,
+				...(typeof model.defaultOn === "boolean" ? { defaultOn: model.defaultOn } : {}),
+				...(typeof model.supportsAgent === "boolean" ? { supportsAgent: model.supportsAgent } : {}),
+				...(typeof model.supportsThinking === "boolean" ? { supportsThinking: model.supportsThinking } : {}),
+				...(typeof model.supportsImages === "boolean" ? { supportsImages: model.supportsImages } : {}),
+				...(typeof model.contextTokenLimit === "number" ? { contextTokenLimit: model.contextTokenLimit } : {}),
+				...(typeof model.clientDisplayName === "string" ? { clientDisplayName: model.clientDisplayName } : {}),
+			} satisfies CursorAvailableModel,
+		];
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Streaming
 
 function safeParseArguments(argumentsJson: string): Record<string, unknown> {

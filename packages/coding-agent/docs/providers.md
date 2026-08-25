@@ -80,6 +80,7 @@ optimus
 | SiliconFlow | `SILICONFLOW_API_KEY` | `siliconflow` |
 | Together AI | `TOGETHER_API_KEY` | `togetherai` |
 | Nous Portal | `NOUS_API_KEY` | `nous` |
+| GMI Cloud | `GMI_API_KEY` | `gmi` |
 
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` | `xiaomi-token-plan-ams` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` | `xiaomi-token-plan-sgp` |

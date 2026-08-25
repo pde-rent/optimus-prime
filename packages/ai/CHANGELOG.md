@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+- Added the "gmi" provider for GMI Cloud serverless inference: OpenAI-compatible API at api.gmi-serving.com with `GMI_API_KEY` auth and MiniMax M3/M2.7 seeded (free promo Aug 24 - Sep 6, 2026); catalogs refresh live from /v1/models when the key is configured.
+- Fixed Cursor login hanging after browser approval: the poll now uses GET /auth/poll?uuid=&verifier= (the API requires the PKCE verifier and reads query params only), the login URL carries mode=login&redirectTarget=cli so the approval reaches the CLI session, the poll response supplies both tokens directly, and refresh goes through exchange_user_api_key with a Bearer refresh token.
+- Added `fetchCursorAvailableModels` and the `@earendil-works/pi-ai/cursor` subpath export: lists the models enabled for a Cursor subscription account via the same AvailableModels RPC the IDE model picker uses.
 - Added output modality metadata to Model (text/image/audio/video) mapped from models.dev catalogs; unknown means capable of anything.
 - Added NVIDIA NIM, Alibaba Qwen Coding Plan (intl + China), Zhipu GLM Coding Plan (China), Tencent Coding Plan, SiliconFlow, and Together AI providers with models.dev-generated catalogs.
 - Added the "cursor" provider for Cursor subscribers: Connect JSON streaming against api2.cursor.sh with PKCE browser OAuth login, `CURSOR_ACCESS_TOKEN` bypass, Cursor client headers (checksum, session id, request id), and an incremental Connect envelope parser for text and tool-call deltas.

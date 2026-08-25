@@ -26,6 +26,7 @@ import {
 	Type,
 	type Validator,
 } from "@earendil-works/pi-ai";
+import { fetchCursorAvailableModels } from "@earendil-works/pi-ai/cursor";
 import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -427,13 +428,22 @@ function _isOfflineModeEnabled(): boolean {
 const DYNAMIC_MODELS_TTL_MS = 300_000;
 const DYNAMIC_MODELS_TIMEOUT_MS = 5_000;
 
-interface DynamicModelSource {
+/** OpenAI-shaped /models discovery source. */
+interface DynamicModelEndpointSource {
 	url: string;
 	api: Api;
 	baseUrl: string;
 	/** Set when the discovery endpoint requires provider credentials; headers are resolved from configured auth. */
 	authenticated?: boolean;
 }
+
+/** Bespoke discovery: fetch and map the provider's catalog directly. */
+interface DynamicModelCustomSource {
+	authenticated?: boolean;
+	fetchModels: (apiKey: string | undefined, signal: AbortSignal) => Promise<Model<Api>[]>;
+}
+
+type DynamicModelSource = DynamicModelEndpointSource | DynamicModelCustomSource;
 
 /** Providers whose catalog is refreshed live from an OpenAI-shaped /models endpoint. */
 const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
@@ -465,6 +475,106 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		api: "openai-completions",
 		baseUrl: "https://inference-api.nousresearch.com/v1",
 	},
+
+	cerebras: {
+		url: "https://api.cerebras.ai/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.cerebras.ai/v1",
+		authenticated: true,
+	},
+	deepinfra: {
+		url: "https://api.deepinfra.com/v1/openai/models",
+		api: "openai-completions",
+		baseUrl: "https://api.deepinfra.com/v1",
+	},
+	deepseek: {
+		url: "https://api.deepseek.com/models",
+		api: "openai-completions",
+		baseUrl: "https://api.deepseek.com",
+		authenticated: true,
+	},
+	groq: {
+		url: "https://api.groq.com/openai/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.groq.com/openai/v1",
+		authenticated: true,
+	},
+	huggingface: {
+		url: "https://router.huggingface.co/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://router.huggingface.co/v1",
+		authenticated: true,
+	},
+	moonshotai: {
+		url: "https://api.moonshot.ai/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.moonshot.ai/v1",
+		authenticated: true,
+	},
+	"moonshotai-cn": {
+		url: "https://api.moonshot.cn/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.moonshot.cn/v1",
+		authenticated: true,
+	},
+	"prime-inference": {
+		url: "https://api.pinference.ai/api/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.pinference.ai/api/v1",
+		authenticated: true,
+	},
+	siliconflow: {
+		url: "https://api.siliconflow.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.siliconflow.com/v1",
+		authenticated: true,
+	},
+	togetherai: {
+		url: "https://api.together.xyz/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.together.xyz/v1",
+		authenticated: true,
+	},
+	xai: {
+		url: "https://api.x.ai/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.x.ai/v1",
+		authenticated: true,
+	},
+	zai: {
+		url: "https://api.z.ai/api/coding/paas/v4/models",
+		api: "openai-completions",
+		baseUrl: "https://api.z.ai/api/coding/paas/v4",
+		authenticated: true,
+	},
+
+	gmi: {
+		url: "https://api.gmi-serving.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://api.gmi-serving.com/v1",
+		authenticated: true,
+	},
+
+	cursor: {
+		authenticated: true,
+		fetchModels: async (apiKey, signal) => {
+			if (!apiKey) throw new Error("cursor model discovery requires configured auth");
+			const available = await fetchCursorAvailableModels(apiKey, signal);
+			return available.map((model) => ({
+				id: model.name,
+				name: model.clientDisplayName ?? model.name,
+				...(model.defaultOn ? { featured: true } : {}),
+				api: "cursor-connect" as const,
+				provider: "cursor",
+				baseUrl: "https://api2.cursor.sh",
+				reasoning: model.supportsThinking ?? false,
+				input: model.supportsImages ? (["text", "image"] as const) : (["text"] as const),
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: model.contextTokenLimit && model.contextTokenLimit > 0 ? model.contextTokenLimit : 200000,
+				maxTokens: 16384,
+			}));
+		},
+	},
 };
 
 type DynamicModelsFetcher = () => Promise<unknown>;
@@ -485,7 +595,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Parse an OpenAI-shaped `{ data: [...] }` list into model candidates. */
-function parseDynamicModelList(payload: unknown, provider: string, source: DynamicModelSource): Model<Api>[] {
+function parseDynamicModelList(payload: unknown, provider: string, source: DynamicModelEndpointSource): Model<Api>[] {
 	const data = isRecord(payload) ? payload.data : undefined;
 	if (!Array.isArray(data)) {
 		throw new Error(`Invalid model list from ${provider}`);
@@ -923,10 +1033,20 @@ export class ModelRegistry {
 		}
 
 		try {
-			let payload: unknown;
+			let models: Model<Api>[];
 			const fetcher = dynamicModelsFetchers.get(provider);
 			if (fetcher) {
-				payload = await fetcher();
+				if (!("url" in source)) {
+					throw new Error(`${provider} has no OpenAI-shaped discovery endpoint`);
+				}
+				models = parseDynamicModelList(await fetcher(), provider, source);
+			} else if ("fetchModels" in source) {
+				const seedModel = this.models.find((model) => model.provider === provider);
+				const auth = seedModel ? await this.getApiKeyAndHeaders(seedModel) : undefined;
+				if (!auth?.ok || (!auth.apiKey && !auth.headers)) {
+					throw new Error(`${provider} model discovery requires configured auth`);
+				}
+				models = await source.fetchModels(auth.apiKey, AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS));
 			} else {
 				const requestInit: RequestInit = { signal: AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS) };
 				if (source.authenticated) {
@@ -944,10 +1064,8 @@ export class ModelRegistry {
 				if (!response.ok) {
 					throw new Error(`${provider} model discovery failed with HTTP ${response.status}`);
 				}
-				payload = await response.json();
+				models = parseDynamicModelList(await response.json(), provider, source);
 			}
-
-			const models = parseDynamicModelList(payload, provider, source);
 
 			if (models.length === 0) {
 				throw new Error(`Provider ${provider} returned an empty model list`);
@@ -971,9 +1089,15 @@ export class ModelRegistry {
 			this.customModelsResult.models.filter((model) => model.provider === provider).map((model) => model.id),
 		);
 		const overrides = this.customModelsResult.modelOverrides.get(provider);
+		const staticById = new Map(
+			(getModels(provider as KnownProvider) as Model<Api>[]).map((model) => [model.id, model]),
+		);
 		const mapped = discovered.map((model) => {
-			const override = overrides?.get(model.id);
-			return override ? applyModelOverride(model, override) : model;
+			// Curated catalog metadata wins when the id is known; discovery only
+			// confirms availability and contributes ids the catalog lacks.
+			const base = staticById.get(model.id) ?? model;
+			const override = overrides?.get(base.id);
+			return override ? applyModelOverride(base, override) : base;
 		});
 		const kept = this.models.filter((model) => model.provider !== provider || customIds.has(model.id));
 		const keptIds = new Set(kept.filter((model) => model.provider === provider).map((model) => model.id));
