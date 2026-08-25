@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
@@ -161,6 +161,10 @@ const OWNED_WORKER_DISCONNECT_GRACE_MS = 30_000;
 const IDLE_EVICTION_MAX_SWEEP_INTERVAL_MS = 5 * 60_000;
 const IDLE_EVICTION_MIN_SWEEP_INTERVAL_MS = 60_000;
 const IDLE_EVICTION_DRAIN_TIMEOUT_MS = 5_000;
+/** How long a worker that acknowledged a graceful shutdown may keep finalizing sessions before signals fire. */
+const GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS = 30_000;
+/** Minimum process age before an unregistered daemon worker counts as an orphan, not a spawn in flight. */
+const ORPHAN_WORKER_MIN_AGE_SECONDS = 120;
 const CHILD_PASSIVATION_MIN_PER_SWEEP = 4;
 const CHILD_PASSIVATION_MAX_PER_SWEEP = 32;
 // Finished children are dead weight once idle and their artifacts stay fully
@@ -445,6 +449,75 @@ function descriptorKey(socketPath: string): string {
 	return createHash("sha256").update(normalizeSocketPath(socketPath)).digest("hex").slice(0, 12);
 }
 
+interface DaemonWorkerProcessMatch {
+	pid: number;
+	truncatedWorkerId: string;
+	supervisorKey: string;
+	elapsedSeconds: number;
+}
+
+function parseEtimeSeconds(etime: string): number {
+	const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());
+	if (!match) return Number.POSITIVE_INFINITY;
+	const [, days, hours, minutes, seconds] = match;
+	return Number(days ?? 0) * 86_400 + Number(hours ?? 0) * 3_600 + Number(minutes) * 60 + Number(seconds);
+}
+
+/**
+ * Enumerate live daemon worker processes in one supervisor socket directory via
+ * a single ps scan. Workers are identifiable by their launch argv: `--mode
+ * daemon --daemon-socket <dir>/worker-<supervisorKey>-<workerId>.sock`.
+ */
+async function listDaemonWorkerProcesses(socketDir: string): Promise<DaemonWorkerProcessMatch[]> {
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const { stdout } = await promisify(execFile)("ps", ["-axo", "pid=,etime=,command="], { timeout: 5_000 });
+	const pattern = new RegExp(
+		`--daemon-socket\\s+(\\S*[/\\\\]${escapeRegExp(basename(socketDir))}[/\\\\]worker-([0-9a-f]+)-([0-9a-f]+)\\.sock)`,
+	);
+	const matches: DaemonWorkerProcessMatch[] = [];
+	for (const line of stdout.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		const separator = trimmed.indexOf(" ");
+		if (separator <= 0) continue;
+		const pid = Number(trimmed.slice(0, separator));
+		if (!Number.isInteger(pid) || pid <= 0) continue;
+		const match = pattern.exec(trimmed);
+		if (!match) continue;
+		const fields = trimmed
+			.slice(separator + 1)
+			.trim()
+			.split(/\s+/);
+		matches.push({
+			pid,
+			truncatedWorkerId: match[3],
+			supervisorKey: match[2],
+			elapsedSeconds: parseEtimeSeconds(fields[0] ?? ""),
+		});
+	}
+	return matches;
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A supervisor key is alive when its daemon socket accepts a connection. */
+async function isSupervisorSocketAlive(socketPath: string): Promise<boolean> {
+	const net = await import("node:net");
+	return new Promise((resolveAlive) => {
+		const socket = net.connect(socketPath);
+		const done = (value: boolean) => {
+			socket.destroy();
+			resolveAlive(value);
+		};
+		socket.once("connect", () => done(true));
+		socket.once("error", () => done(false));
+		setTimeout(() => done(false), 500).unref();
+	});
+}
+
 function defaultWorkerDescriptorDir(agentDir: string, socketPath: string): string {
 	return join(agentDir, "daemon-workers", descriptorKey(socketPath));
 }
@@ -626,6 +699,9 @@ export class DaemonSupervisor {
 				this.scheduleOwnedWorkerCleanup(worker);
 			}
 			this.scheduleIdleEvictionSweep();
+			void this.reapOrphanedWorkerProcesses().catch((error) =>
+				this.log(`Orphan worker reap failed: ${String(error)}`),
+			);
 			await this.ownership.updatePhase("owner");
 			this.log(`Optimus Prime daemon supervisor ${this.generation} listening on ${this.socketPath}`);
 			this.markReady();
@@ -664,6 +740,101 @@ export class DaemonSupervisor {
 		if (!this.idleEvictionTimer) return;
 		clearTimeout(this.idleEvictionTimer);
 		this.idleEvictionTimer = undefined;
+	}
+
+	/**
+	 * Kill daemon worker processes whose supervising daemon is gone. When a
+	 * daemon exits, its workers are reparented to launchd/init and no descriptor
+	 * of any new generation references them, so without this sweep they leak
+	 * indefinitely (observed: 27 orphaned workers holding ~470 MB).
+	 *
+	 * A worker is an orphan when its supervisor key's daemon socket no longer
+	 * accepts connections, or when it belongs to THIS supervisor but has no
+	 * registered descriptor. Workers of other live supervisors are never touched.
+	 */
+	private async reapOrphanedWorkerProcesses(): Promise<number> {
+		if (process.platform === "win32" || this.shuttingDown) return 0;
+		const socketDir = dirname(this.socketPath);
+		let matches: DaemonWorkerProcessMatch[];
+		try {
+			matches = await listDaemonWorkerProcesses(socketDir);
+		} catch {
+			return 0;
+		}
+
+		// Which supervisor generations are still serving? A key is alive while a
+		// client can connect to its daemon socket. Our own key is always alive.
+		const ourKey = descriptorKey(this.socketPath);
+		const keys = new Set(matches.map((match) => match.supervisorKey));
+		keys.add(ourKey);
+		const aliveKeys = new Set<string>([ourKey]);
+		await Promise.all(
+			[...keys]
+				.filter((key) => key !== ourKey)
+				.map(async (key) => {
+					// The daemon sock file name is not derivable from the worker key,
+					// so probe every non-worker sock in the directory.
+					for (const name of readdirSync(socketDir)) {
+						if (!name.endsWith(".sock") || name.startsWith("worker-")) continue;
+						if (descriptorKey(join(socketDir, name)) !== key) continue;
+						if (await isSupervisorSocketAlive(join(socketDir, name))) {
+							aliveKeys.add(key);
+						}
+						break;
+					}
+				}),
+		);
+
+		// A worker id is known to THIS supervisor either through a live ResidentWorker
+		// or through a persisted descriptor; both use the full worker id whose first
+		// 12 characters appear in the socket file name.
+		const knownIds = new Set<string>();
+		for (const worker of this.workers.values()) {
+			knownIds.add(worker.descriptor.workerId.slice(0, 12));
+		}
+		for (const name of readdirSync(this.descriptorDir)) {
+			if (name.endsWith(".json")) knownIds.add(name.slice(0, -5).slice(0, 12));
+		}
+
+		let killed = 0;
+		for (const match of matches) {
+			if (match.pid === process.pid) continue;
+			if (!aliveKeys.has(match.supervisorKey) && match.elapsedSeconds >= ORPHAN_WORKER_MIN_AGE_SECONDS) {
+				signalProcessGroupOrProcess(match.pid, "SIGKILL");
+				this.log(
+					`Killed orphaned daemon worker pid=${match.pid} worker=${match.truncatedWorkerId} supervisor=${match.supervisorKey} age=${match.elapsedSeconds}s (supervisor dead)`,
+				);
+				killed++;
+				continue;
+			}
+			// Workers of a live supervisor are only our business when they are ours.
+			if (
+				match.supervisorKey === ourKey &&
+				!knownIds.has(match.truncatedWorkerId) &&
+				match.elapsedSeconds >= ORPHAN_WORKER_MIN_AGE_SECONDS
+			) {
+				signalProcessGroupOrProcess(match.pid, "SIGKILL");
+				this.log(`Killed unregistered daemon worker pid=${match.pid} worker=${match.truncatedWorkerId}`);
+				killed++;
+			}
+		}
+
+		// Drop socket files left behind by killed or exited workers.
+		try {
+			for (const name of readdirSync(socketDir)) {
+				if (!name.startsWith("worker-") || !name.endsWith(".sock")) continue;
+				const rest = name.slice("worker-".length, -5);
+				const separator = rest.indexOf("-");
+				if (separator <= 0) continue;
+				const key = rest.slice(0, separator);
+				const truncatedId = rest.slice(separator + 1);
+				if (aliveKeys.has(key) && (key === ourKey ? knownIds.has(truncatedId) : true)) continue;
+				rmSync(join(socketDir, name), { force: true });
+			}
+		} catch {
+			// Socket cleanup is best-effort.
+		}
+		return killed;
 	}
 
 	private scheduleIdleEvictionSweep(): void {
@@ -712,6 +883,9 @@ export class DaemonSupervisor {
 		await this.settingsManager.reload();
 		if (this.shuttingDown || this.updateRestartPhase !== undefined) return;
 		const idleEvictionMinutes = this.settingsManager.getIdleEvictionMinutes();
+		await this.reapOrphanedWorkerProcesses().catch((error) =>
+			this.log(`Orphan worker reap failed: ${String(error)}`),
+		);
 		// Whole-worker eviction honors "off"; child retirement never fully stops -
 		// a passive child keeps its on-disk session artifacts, so only the
 		// in-memory copy is dropped.
@@ -4657,6 +4831,10 @@ export class DaemonSupervisor {
 			}
 			this.reportCleanupFailure(`worker rollback state ${worker.descriptor.workerId}`, error);
 		}
+		// Set when the worker acknowledged a graceful socket shutdown: it is
+		// finalizing sessions asynchronously and will exit on its own, so the
+		// post-signal deadline must allow that to finish instead of racing it.
+		let gracefulShutdownAcked = false;
 		const transferError = new Error("Session worker stopped during snapshot transfer");
 		const generationTranscripts = new Set<SnapshotTranscriptCache>();
 		for (const [activeSessionId, generations] of [...(worker.snapshotGenerations ?? new Map())]) {
@@ -4680,13 +4858,13 @@ export class DaemonSupervisor {
 		worker.snapshotCache.clear();
 		worker.snapshotGenerations?.clear();
 		if (worker.client) {
-			if (archiveSession) {
-				await worker.client
-					.requestWorker({ type: "worker_archive_and_shutdown" }, force ? 1000 : 5000)
-					.catch(() => undefined);
-			} else {
-				await worker.client.request({ type: "shutdown" }, force ? 1000 : 5000).catch(() => undefined);
-			}
+			const shutdownRequest = archiveSession
+				? worker.client.requestWorker({ type: "worker_archive_and_shutdown" }, force ? 1000 : 5000)
+				: worker.client.request({ type: "shutdown" }, force ? 1000 : 5000);
+			gracefulShutdownAcked = await shutdownRequest.then(
+				() => true,
+				() => false,
+			);
 			worker.client.close();
 			worker.client = undefined;
 		} else if (directChild) {
@@ -4714,7 +4892,10 @@ export class DaemonSupervisor {
 			}
 			return identityVerdict !== "replaced" && identityVerdict !== "gone";
 		};
-		const gracefulDeadline = Date.now() + (force ? 500 : 2000);
+		// A worker that acknowledged the graceful shutdown is closing its
+		// sessions asynchronously; give that a generous window before signals.
+		const gracefulDeadline =
+			Date.now() + (gracefulShutdownAcked ? GRACEFUL_SHUTDOWN_EXIT_TIMEOUT_MS : force ? 500 : 2000);
 		while (isWorkerProcessAlive() && Date.now() < gracefulDeadline) {
 			await delay(25);
 		}
@@ -4734,13 +4915,23 @@ export class DaemonSupervisor {
 			}
 		}
 		if (isWorkerProcessAlive()) {
-			worker.intentionalStop = worker.descriptor.stopRequestedAt !== undefined;
-			if (removeDescriptor) {
-				this.scheduleWorkerStopFinalization(worker);
+			// One unthrottled identity check before declaring failure: the cached
+			// verdict may be stale or "unknown" from a transient lookup failure,
+			// which previously turned finishing shutdowns into permanent
+			// "did not stop" sweep errors.
+			identityCheckedAt = 0;
+			identityVerdict = this.processIdentity(entryPid, entryStartId);
+			if (identityVerdict !== "current") {
+				this.log(`Session worker ${worker.descriptor.workerId} stop resolved as ${identityVerdict} after signals`);
+			} else {
+				worker.intentionalStop = worker.descriptor.stopRequestedAt !== undefined;
+				if (removeDescriptor) {
+					this.scheduleWorkerStopFinalization(worker);
+				}
+				throw new WorkerStopTimeoutError(
+					`Session worker ${worker.descriptor.workerId} did not stop${sigkillSent ? " after SIGKILL" : ""}`,
+				);
 			}
-			throw new WorkerStopTimeoutError(
-				`Session worker ${worker.descriptor.workerId} did not stop${sigkillSent ? " after SIGKILL" : ""}`,
-			);
 		}
 		if (directChild) {
 			await directChild.closed;
