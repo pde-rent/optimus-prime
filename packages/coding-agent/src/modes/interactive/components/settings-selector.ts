@@ -1,11 +1,12 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import { Container, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { GRAPH_RESOLVER_LEVELS, type GraphResolverLevel } from "../../../core/graph-resolver.js";
 import type { RlmMaxDepthValue } from "../../../core/rlm-max-depth.js";
 import type { IdleEvictionMinutes } from "../../../core/session-action-store.js";
 import type { WarningSettings } from "../../../core/settings-manager.js";
-import { getSettingsListTheme, theme } from "../theme/theme.js";
+import { getSettingsListTheme } from "../theme/theme.js";
+import { MenuPanel } from "./menu-panel.js";
 import { SelectModalComponent } from "./select-modal.js";
 
 /** Shared with the `/effort` modal so both surfaces describe levels identically. */
@@ -402,9 +403,6 @@ export class SettingsSelectorComponent extends Container {
 			values: ["true", "false"],
 		});
 
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Settings")), 0, 0));
-		this.addChild(new Spacer(1));
-
 		this.settingsList = new SettingsList(
 			items,
 			10,
@@ -485,7 +483,10 @@ export class SettingsSelectorComponent extends Container {
 			{ enableSearch: true },
 		);
 
-		this.addChild(this.settingsList);
+		// Shared modal chrome so /settings looks like every other dialog.
+		const panel = new MenuPanel({ title: "Settings" });
+		this.addChild(panel);
+		panel.addChild(this.settingsList);
 	}
 
 	getSettingsList(): SettingsList {

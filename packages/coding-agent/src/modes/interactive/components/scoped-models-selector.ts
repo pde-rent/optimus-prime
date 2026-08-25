@@ -15,6 +15,7 @@ import {
 import { getSelectListTheme, theme } from "../theme/theme.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, keyText, selectionHints } from "./keybinding-hints.js";
+import { MenuPanel } from "./menu-panel.js";
 
 type EnabledIds = string[] | null;
 
@@ -115,15 +116,15 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 		this.enabledIds = config.enabledModelIds === null ? null : [...config.enabledModelIds];
 		this.filteredItems = this.buildItems();
 
-		this.addChild(new Text(theme.fg("accent", theme.bold("Model Configuration")), 0, 0));
-		this.addChild(
-			new Text(theme.fg("muted", `Session-only. ${keyText("app.models.save")} to save to settings.`), 0, 0),
-		);
-		this.addChild(new Spacer(1));
+		const panel = new MenuPanel({
+			title: "Model Configuration",
+			subtitle: `Session-only. ${keyText("app.models.save")} to save to settings.`,
+		});
+		this.addChild(panel);
 
 		this.searchInput = new Input();
-		this.addChild(this.searchInput);
-		this.addChild(new Spacer(1));
+		panel.addChild(this.searchInput);
+		panel.addChild(new Spacer(1));
 
 		this.selectList = new SelectList([], this.maxVisible, getSelectListTheme(), {
 			multiSelect: true,
@@ -133,15 +134,15 @@ export class ScopedModelsSelectorComponent extends Container implements Focusabl
 			renderRow: ({ index, isSelected }) => this.renderModelRow(index, isSelected),
 		});
 		this.selectList.onToggle = (item) => this.toggleModel(item.value);
-		this.addChild(this.selectList);
+		panel.addChild(this.selectList);
 
-		this.addChild(new Spacer(1));
+		panel.addChild(new Spacer(1));
 		this.detailText = new Text("", 0, 0);
-		this.addChild(this.detailText);
+		panel.addChild(this.detailText);
 
-		this.addChild(new Spacer(1));
+		panel.addChild(new Spacer(1));
 		this.footerText = new Text(this.getFooterText(), 0, 0);
-		this.addChild(this.footerText);
+		panel.addChild(this.footerText);
 
 		this.updateList();
 	}

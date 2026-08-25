@@ -9,7 +9,6 @@ import {
 	moveSelection,
 	Spacer,
 	scrollPositionText,
-	Text,
 	TruncatedText,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
@@ -24,6 +23,7 @@ import {
 } from "./edit-summary.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, keyText } from "./keybinding-hints.js";
+import { MenuPanel } from "./menu-panel.js";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -1231,7 +1231,8 @@ export class TreeSelectorComponent extends Container implements Focusable {
 
 		this.labelInputContainer = new Container();
 
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Session Tree")), 1, 0));
+		const panel = new MenuPanel({ title: "Session Tree" });
+		this.addChild(panel);
 		const filterKeys = [
 			keyText("app.tree.filter.default"),
 			keyText("app.tree.filter.noTools"),
@@ -1242,7 +1243,7 @@ export class TreeSelectorComponent extends Container implements Focusable {
 		const cycleKeys = `${keyText("app.tree.filter.cycleForward")}/${keyText("app.tree.filter.cycleBackward")}`;
 		const pageKeys = `${keyText("tui.select.pageUp")}/${keyText("tui.select.pageDown")}`;
 		const foldKeys = `${keyText("app.tree.foldOrUp")}/${keyText("app.tree.unfoldOrDown")}`;
-		this.addChild(
+		panel.addChild(
 			new TruncatedText(
 				theme.fg(
 					"muted",
@@ -1260,10 +1261,10 @@ export class TreeSelectorComponent extends Container implements Focusable {
 				0,
 			),
 		);
-		this.addChild(new SearchLine(this.treeList));
-		this.addChild(new Spacer(1));
-		this.addChild(this.treeContainer);
-		this.addChild(this.labelInputContainer);
+		panel.addChild(new SearchLine(this.treeList));
+		panel.addChild(new Spacer(1));
+		panel.addChild(this.treeContainer);
+		panel.addChild(this.labelInputContainer);
 
 		if (tree.length === 0) {
 			setTimeout(() => onCancel(), 100);

@@ -27,6 +27,9 @@ describe("ModelRegistry dynamic model discovery", () => {
 		setDynamicModelsFetcher("nous", undefined);
 		setDynamicModelsFetcher("grok", undefined);
 		setDynamicModelsFetcher("groq", undefined);
+		setDynamicModelsFetcher("anthropic", undefined);
+		setDynamicModelsFetcher("alibaba-coding-plan", undefined);
+		setDynamicModelsFetcher("github-copilot", undefined);
 
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
@@ -250,5 +253,124 @@ describe("ModelRegistry dynamic model discovery", () => {
 		const plain = nous.find((m) => m.id === "plain-text");
 		expect(plain?.input).toEqual(["text"]);
 		expect(plain?.output).toBeUndefined();
+	});
+
+	test("anthropic discovery maps display_name entries", async () => {
+		authStorage.set("anthropic", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("anthropic", async () =>
+			openAIListResponse([
+				{ type: "model", id: "claude-test-9", display_name: "Claude Test 9" },
+				{ type: "model", id: "claude-test-8", display_name: "Claude Test 8" },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const anthropic = modelsFor(registry, "anthropic");
+		expect(anthropic.map((m) => m.id)).toEqual(["claude-test-9", "claude-test-8"]);
+		expect(anthropic[0]!.name).toBe("Claude Test 9");
+		expect(anthropic[0]!.api satisfies Api).toBe("anthropic-messages");
+		expect(anthropic[0]!.baseUrl).toBe("https://api.anthropic.com");
+		// Static ids absent from discovery are dropped.
+		expect(anthropic.some((m) => m.id.startsWith("claude-opus"))).toBe(false);
+	});
+
+	test("google discovery parses the bespoke catalog and strips the models/ prefix", async () => {
+		authStorage.set("google", { type: "api_key", key: "KEY" });
+		const restoreFetch = globalThis.fetch;
+		// Other configured providers may refresh in parallel with google; record
+		// headers per URL so their requests cannot clobber google's.
+		const headersByUrl = new Map<string, Record<string, string>>();
+		globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+			headersByUrl.set(String(url), (init?.headers ?? {}) as Record<string, string>);
+			return new Response(
+				JSON.stringify({
+					models: [
+						// Known static id: curated catalog metadata must survive.
+						{
+							name: "models/gemini-2.5-flash",
+							displayName: "wrong display name",
+							supportedGenerationMethods: ["generateContent"],
+						},
+						{
+							name: "models/gemini-test-fresh",
+							displayName: "Gemini Test Fresh",
+							inputTokenLimit: 1000000,
+							outputTokenLimit: 65536,
+							supportedGenerationMethods: ["generateContent", "countTokens"],
+						},
+						{
+							name: "models/text-embedding-test",
+							supportedGenerationMethods: ["embedContent"],
+						},
+					],
+				}),
+				{ status: 200 },
+			) as Response;
+		}) as typeof fetch;
+		try {
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			await registry.refreshModelCatalog();
+
+			const googleHeaders = headersByUrl.get("https://generativelanguage.googleapis.com/v1beta/models");
+			expect(googleHeaders?.["x-goog-api-key"]).toBe("KEY");
+			const google = modelsFor(registry, "google");
+			expect(google.map((m) => m.id)).toContain("gemini-test-fresh");
+			expect(google.some((m) => m.id.startsWith("text-embedding"))).toBe(false);
+			// Discovered id enriches against the static catalog via the bare name.
+			const staticGemini = google.find((m) => m.id === "gemini-2.5-flash");
+			expect(staticGemini?.name).toBe("Gemini 2.5 Flash");
+			const added = google.find((m) => m.id === "gemini-test-fresh")!;
+			expect(added.name).toBe("Gemini Test Fresh");
+			expect(added.api satisfies Api).toBe("google-generative-ai");
+			expect(added.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+			expect(added.contextWindow).toBe(1000000);
+			expect(added.maxTokens).toBe(65536);
+		} finally {
+			globalThis.fetch = restoreFetch;
+		}
+	});
+
+	test("alibaba-coding-plan discovery maps OpenAI-shaped entries onto the coding endpoint", async () => {
+		authStorage.set("alibaba-coding-plan", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("alibaba-coding-plan", async () =>
+			openAIListResponse([{ id: "qwen-test-next", object: "model", ownedBy: "system" }]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const alibaba = modelsFor(registry, "alibaba-coding-plan");
+		expect(alibaba.map((m) => m.id)).toEqual(["qwen-test-next"]);
+		expect(alibaba[0]!.api satisfies Api).toBe("openai-completions");
+		expect(alibaba[0]!.baseUrl).toBe("https://coding-intl.dashscope.aliyuncs.com/v1");
+		// Unknown ids fall back to the id for the missing name field.
+		expect(alibaba[0]!.name).toBe("qwen-test-next");
+	});
+
+	test("github-copilot discovery keeps chat models and reads capability limits", async () => {
+		authStorage.set("github-copilot", { type: "api_key", key: "TOKEN" });
+		setDynamicModelsFetcher("github-copilot", async () =>
+			openAIListResponse([
+				{
+					id: "gpt-test-9",
+					name: "GPT Test 9",
+					capabilities: {
+						type: "chat",
+						limits: { max_context_window_tokens: 200000, max_output_tokens: 32000 },
+					},
+				},
+				{ id: "text-embedding-test", capabilities: { type: "embeddings" } },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const copilot = modelsFor(registry, "github-copilot");
+		expect(copilot.some((m) => m.id === "text-embedding-test")).toBe(false);
+		const added = copilot.find((m) => m.id === "gpt-test-9")!;
+		expect(added.name).toBe("GPT Test 9");
+		expect(added.baseUrl).toBe("https://api.individual.githubcopilot.com");
+		expect(added.contextWindow).toBe(200000);
+		expect(added.maxTokens).toBe(32000);
 	});
 });

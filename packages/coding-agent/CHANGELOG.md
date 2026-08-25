@@ -2,10 +2,13 @@
 
 ## [Unreleased]
 
+- Changed every interactive-mode dialog (settings, resource config, session tree, model config, pickers) onto one shared modal chrome, so padding and surface match across surfaces.
+- Fixed stacked dialogs not dimming the dialog beneath them: each overlay layer now dims everything below it progressively, so a provider sign-in prompt opened from /model reads as a distinct layer.
 - Removed never-used agent sessions with no messages from the Done and Archive lists in the agents view; running and failed sessions still show.
 - Fixed leaked daemon workers: workers whose supervising daemon died are now detected and killed at daemon startup and during eviction sweeps instead of lingering forever (observed 27 orphaned workers holding ~440 MB).
 - Fixed idle eviction sweeps failing with "Session worker did not stop": a worker that acknowledged a graceful shutdown now gets up to 30s to finish finalizing its sessions before signals fire, and a failed stop re-verifies process identity once before giving up.
 - Added live model discovery for 12 more providers (cerebras, deepinfra, deepseek, groq, huggingface, moonshotai, moonshotai-cn, prime-inference, siliconflow, togetherai, xai, zai): catalogs refresh from each provider's /models endpoint when auth is configured.
+- Added live model discovery for 20 more providers (anthropic, openai, mistral, vercel-ai-gateway, fireworks, minimax, minimax-cn, opencode-go, kimi-coding, xiaomi, the three xiaomi-token-plan providers, both alibaba-coding-plan providers, zhipuai-coding-plan, tencent-coding-plan, github-copilot, google): static catalogs remain as offline fallback and curated metadata wins for known ids.
 - Added GMI Cloud as a provider with live model discovery; MiniMax M3 is the default model.
 - Added Cursor model discovery: the /model picker now reflects the models actually enabled for your Cursor plan (via AvailableModels), refreshed with the same TTL and cache as other providers.
 - Changed dynamic model discovery to keep curated catalog metadata for known model ids instead of replacing it with bare discovery defaults; static ids absent from the live list are still dropped.

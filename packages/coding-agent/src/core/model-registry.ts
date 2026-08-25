@@ -435,6 +435,10 @@ interface DynamicModelEndpointSource {
 	baseUrl: string;
 	/** Set when the discovery endpoint requires provider credentials; headers are resolved from configured auth. */
 	authenticated?: boolean;
+	/** Credential header scheme for authenticated endpoints; defaults to Bearer. */
+	authStyle?: "bearer" | "anthropic";
+	/** Optional drop rule applied to each raw list entry before mapping (e.g. non-chat endpoints). */
+	entryFilter?: (entry: Record<string, unknown>) => boolean;
 }
 
 /** Bespoke discovery: fetch and map the provider's catalog directly. */
@@ -444,6 +448,15 @@ interface DynamicModelCustomSource {
 }
 
 type DynamicModelSource = DynamicModelEndpointSource | DynamicModelCustomSource;
+
+/** OpenAI lists non-chat endpoints (image, audio, embedding) in /models; they cannot serve chat requests. */
+const OPENAI_NON_CHAT_ID_PATTERN = /(dall-e|whisper|tts|text-embedding|moderation|transcribe|gpt-image|sora)/i;
+
+/** GitHub Copilot marks serving type per model; only chat models belong in the registry. */
+function isCopilotChatEntry(entry: Record<string, unknown>): boolean {
+	const capabilities = isRecord(entry.capabilities) ? entry.capabilities : {};
+	return (capabilities.type ?? "chat") === "chat";
+}
 
 /** Providers whose catalog is refreshed live from an OpenAI-shaped /models endpoint. */
 const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
@@ -555,6 +568,120 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		authenticated: true,
 	},
 
+	google: {
+		authenticated: true,
+		fetchModels: async (apiKey, signal) => parseGoogleModelList(await fetchGoogleModelsPayload(apiKey, signal)),
+	},
+	anthropic: {
+		url: "https://api.anthropic.com/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.anthropic.com",
+		authenticated: true,
+		authStyle: "anthropic",
+	},
+	openai: {
+		url: "https://api.openai.com/v1/models",
+		api: "openai-responses",
+		baseUrl: "https://api.openai.com/v1",
+		authenticated: true,
+		entryFilter: (entry) => !OPENAI_NON_CHAT_ID_PATTERN.test(String(entry.id ?? "")),
+	},
+	mistral: {
+		url: "https://api.mistral.ai/v1/models",
+		api: "mistral-conversations",
+		baseUrl: "https://api.mistral.ai",
+		authenticated: true,
+	},
+	"vercel-ai-gateway": {
+		url: "https://ai-gateway.vercel.sh/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://ai-gateway.vercel.sh",
+	},
+	fireworks: {
+		url: "https://api.fireworks.ai/inference/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.fireworks.ai/inference",
+		authenticated: true,
+	},
+	minimax: {
+		url: "https://api.minimax.io/anthropic/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.minimax.io/anthropic",
+		authenticated: true,
+		authStyle: "anthropic",
+	},
+	"minimax-cn": {
+		url: "https://api.minimaxi.com/anthropic/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.minimaxi.com/anthropic",
+		authenticated: true,
+		authStyle: "anthropic",
+	},
+	"opencode-go": {
+		url: "https://opencode.ai/zen/go/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://opencode.ai/zen/go/v1",
+	},
+	"kimi-coding": {
+		url: "https://api.kimi.com/coding/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.kimi.com/coding",
+		authenticated: true,
+		authStyle: "anthropic",
+	},
+	xiaomi: {
+		url: "https://api.xiaomimimo.com/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://api.xiaomimimo.com/anthropic",
+		authenticated: true,
+	},
+	"xiaomi-token-plan-cn": {
+		url: "https://token-plan-cn.xiaomimimo.com/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
+		authenticated: true,
+	},
+	"xiaomi-token-plan-ams": {
+		url: "https://token-plan-ams.xiaomimimo.com/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://token-plan-ams.xiaomimimo.com/anthropic",
+		authenticated: true,
+	},
+	"xiaomi-token-plan-sgp": {
+		url: "https://token-plan-sgp.xiaomimimo.com/v1/models",
+		api: "anthropic-messages",
+		baseUrl: "https://token-plan-sgp.xiaomimimo.com/anthropic",
+		authenticated: true,
+	},
+	"alibaba-coding-plan": {
+		url: "https://coding-intl.dashscope.aliyuncs.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+	},
+	"alibaba-coding-plan-cn": {
+		url: "https://coding.dashscope.aliyuncs.com/v1/models",
+		api: "openai-completions",
+		baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+	},
+	"zhipuai-coding-plan": {
+		url: "https://open.bigmodel.cn/api/coding/paas/v4/models",
+		api: "openai-completions",
+		baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+		authenticated: true,
+	},
+	"tencent-coding-plan": {
+		url: "https://api.lkeap.cloud.tencent.com/coding/v3/models",
+		api: "openai-completions",
+		baseUrl: "https://api.lkeap.cloud.tencent.com/coding/v3",
+		authenticated: true,
+	},
+	"github-copilot": {
+		url: "https://api.githubcopilot.com/models",
+		api: "openai-completions",
+		baseUrl: "https://api.individual.githubcopilot.com",
+		authenticated: true,
+		entryFilter: isCopilotChatEntry,
+	},
 	cursor: {
 		authenticated: true,
 		fetchModels: async (apiKey, signal) => {
@@ -594,6 +721,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+function displayName(entry: Record<string, unknown>): string | undefined {
+	for (const key of ["name", "display_name", "displayName"]) {
+		const value = entry[key];
+		if (typeof value === "string" && value.length > 0) return value;
+	}
+	return undefined;
+}
+
+function firstPositiveNumber(...values: unknown[]): number | undefined {
+	for (const value of values) {
+		if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+	}
+	return undefined;
+}
+
+async function fetchGoogleModelsPayload(apiKey: string | undefined, signal: AbortSignal): Promise<unknown> {
+	if (!apiKey) throw new Error("google model discovery requires configured auth");
+	const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+		signal,
+		headers: { "x-goog-api-key": apiKey },
+	});
+	if (!response.ok) {
+		throw new Error(`google model discovery failed with HTTP ${response.status}`);
+	}
+	return response.json();
+}
+
+/** Parse the Generative Language `{ models: [...] }` catalog into model candidates. */
+function parseGoogleModelList(payload: unknown): Model<Api>[] {
+	const models = isRecord(payload) ? payload.models : undefined;
+	if (!Array.isArray(models)) {
+		throw new Error("Invalid model list from google");
+	}
+	return models.flatMap((entry) => {
+		if (!isRecord(entry) || typeof entry.name !== "string") return [];
+		const methods = Array.isArray(entry.supportedGenerationMethods) ? entry.supportedGenerationMethods : [];
+		if (!methods.includes("generateContent")) return [];
+		// API names look like "models/gemini-x"; registry ids match the bare name.
+		const id = entry.name.replace(/^models\//, "");
+		if (id.length === 0) return [];
+		return [
+			{
+				id,
+				name: typeof entry.displayName === "string" && entry.displayName.length > 0 ? entry.displayName : id,
+				api: "google-generative-ai" as const,
+				provider: "google",
+				baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+				reasoning: false,
+				input: ["text"] as const,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: firstPositiveNumber(entry.inputTokenLimit) ?? 128000,
+				maxTokens: firstPositiveNumber(entry.outputTokenLimit) ?? 16384,
+			} satisfies Model<Api>,
+		];
+	});
+}
+
 /** Parse an OpenAI-shaped `{ data: [...] }` list into model candidates. */
 function parseDynamicModelList(payload: unknown, provider: string, source: DynamicModelEndpointSource): Model<Api>[] {
 	const data = isRecord(payload) ? payload.data : undefined;
@@ -602,6 +786,7 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 	}
 	return data.flatMap((entry) => {
 		if (!isRecord(entry) || typeof entry.id !== "string" || entry.id.length === 0) return [];
+		if (source.entryFilter && !source.entryFilter(entry)) return [];
 		const pricing = isRecord(entry.pricing) ? entry.pricing : {};
 		const topProvider = isRecord(entry.top_provider) ? entry.top_provider : {};
 		const costPerMTok = (value: unknown): number => {
@@ -609,13 +794,11 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 			return Number.isFinite(parsed) && parsed > 0 ? parsed * 1_000_000 : 0;
 		};
 		const supportedParameters = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : [];
-		const contextWindow =
-			typeof entry.context_length === "number" && entry.context_length > 0 ? entry.context_length : 128000;
-		const maxTokens =
-			typeof topProvider.max_completion_tokens === "number" && topProvider.max_completion_tokens > 0
-				? topProvider.max_completion_tokens
-				: 16384;
 		const architecture = isRecord(entry.architecture) ? entry.architecture : {};
+		const capabilities = isRecord(entry.capabilities) ? entry.capabilities : {};
+		const limits = isRecord(capabilities.limits) ? capabilities.limits : {};
+		const contextWindow = firstPositiveNumber(entry.context_length, limits.max_context_window_tokens) ?? 128000;
+		const maxTokens = firstPositiveNumber(topProvider.max_completion_tokens, limits.max_output_tokens) ?? 16384;
 		const inputModalities = Array.isArray(architecture.input_modalities) ? architecture.input_modalities : [];
 		const outputModalities = Array.isArray(architecture.output_modalities)
 			? architecture.output_modalities.filter(
@@ -626,7 +809,7 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 		return [
 			{
 				id: entry.id,
-				name: typeof entry.name === "string" && entry.name.length > 0 ? entry.name : entry.id,
+				name: displayName(entry) ?? entry.id,
 				api: source.api,
 				provider,
 				baseUrl: source.baseUrl,
@@ -644,6 +827,14 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 			} satisfies Model<Api>,
 		];
 	});
+}
+
+/** Credential headers for an authenticated discovery endpoint. */
+function discoveryAuthHeaders(style: "bearer" | "anthropic" | undefined, apiKey: string): Record<string, string> {
+	if (style === "anthropic") {
+		return { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+	}
+	return { Authorization: `Bearer ${apiKey}` };
 }
 
 interface DynamicModelCacheEntry {
@@ -1056,7 +1247,7 @@ export class ModelRegistry {
 						throw new Error(`${provider} model discovery requires configured auth`);
 					}
 					requestInit.headers = {
-						...(auth.apiKey ? { Authorization: `Bearer ${auth.apiKey}` } : {}),
+						...(auth.apiKey ? discoveryAuthHeaders(source.authStyle, auth.apiKey) : {}),
 						...auth.headers,
 					};
 				}

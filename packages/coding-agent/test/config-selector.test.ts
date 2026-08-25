@@ -66,7 +66,7 @@ function selectedRow(component: Container): string {
 	const line = component
 		.render(80)
 		.map((value) => stripAnsi(value))
-		.find((value) => value.startsWith(">") && value.includes("["));
+		.find((value) => value.trim().startsWith(">") && value.includes("["));
 	return line ?? "";
 }
 

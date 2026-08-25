@@ -12,16 +12,14 @@ import {
 	Spacer,
 	Text,
 	truncateToWidth,
-	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { CONFIG_DIR_NAME } from "../../../config.js";
 import type { PathMetadata, ResolvedPaths, ResolvedResource } from "../../../core/package-manager.js";
 import type { PackageSource, SettingsManager } from "../../../core/settings-manager.js";
 import { theme } from "../theme/theme.js";
-import { DynamicBorder } from "./dynamic-border.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, rawKeyHint } from "./keybinding-hints.js";
-import { MenuSelector } from "./menu-panel.js";
+import { MenuPanel, MenuSelector } from "./menu-panel.js";
 
 type ResourceType = "extensions" | "skills" | "prompts" | "themes";
 
@@ -162,18 +160,9 @@ type FlatEntry =
 class ConfigSelectorHeader implements Component {
 	invalidate(): void {}
 
-	render(width: number): string[] {
-		const title = theme.bold("Resource Configuration");
+	render(_width: number): string[] {
 		const sep = theme.fg("muted", " · ");
-		const hint = rawKeyHint("space", "toggle") + sep + keyHint("tui.select.cancel", "close", { primaryOnly: true });
-		const hintWidth = visibleWidth(hint);
-		const titleWidth = visibleWidth(title);
-		const spacing = Math.max(1, width - titleWidth - hintWidth);
-
-		return [
-			truncateToWidth(`${title}${" ".repeat(spacing)}${hint}`, width, ""),
-			theme.fg("muted", "Type to filter resources"),
-		];
+		return [rawKeyHint("space", "toggle") + sep + keyHint("tui.select.cancel", "close", { primaryOnly: true })];
 	}
 }
 
@@ -527,12 +516,12 @@ export class ConfigSelectorComponent extends Container implements Focusable {
 
 		const groups = buildGroups(resolvedPaths);
 
-		// Add header
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
-		this.addChild(new Spacer(1));
-		this.addChild(new ConfigSelectorHeader());
-		this.addChild(new Spacer(1));
+		// Shared modal chrome so /config looks like every other dialog.
+		const panel = new MenuPanel({
+			title: "Resource Configuration",
+			subtitle: "Type to filter resources",
+		});
+		this.addChild(panel);
 
 		// Resource list
 		this.resourceList = new ResourceList(groups, settingsManager, cwd, agentDir);
@@ -540,11 +529,9 @@ export class ConfigSelectorComponent extends Container implements Focusable {
 		this.resourceList.onCancel = onClose;
 		this.resourceList.onExit = onExit;
 		this.resourceList.onToggle = () => requestRender();
-		this.addChild(this.resourceList);
-
-		// Bottom border
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder());
+		panel.addChild(new ConfigSelectorHeader());
+		panel.addChild(new Spacer(1));
+		panel.addChild(this.resourceList);
 	}
 
 	getResourceList(): ResourceList {

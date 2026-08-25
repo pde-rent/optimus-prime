@@ -626,6 +626,25 @@ export class MenuRow implements Component, FullWidthMenuComponent {
 	}
 }
 
+/**
+ * Wraps a child that paints its own full-width surface (e.g. a selection bar)
+ * so it renders across the whole padded panel width and skips the panel's
+ * per-line padding, which would inset the child's painted surface.
+ */
+export class MenuSurfaceChild implements Component, FullWidthMenuComponent {
+	readonly fillsMenuPanel = true;
+
+	constructor(private readonly component: Component) {}
+
+	invalidate(): void {
+		this.component.invalidate?.();
+	}
+
+	render(width: number): string[] {
+		return this.component.render(width);
+	}
+}
+
 export class MenuList extends Container implements FullWidthMenuComponent {
 	readonly fillsMenuPanel = true;
 

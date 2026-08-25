@@ -6,8 +6,9 @@ import {
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
-import { getSelectListTheme, theme } from "../theme/theme.js";
+import { getSelectListTheme } from "../theme/theme.js";
 import { selectionHints } from "./keybinding-hints.js";
+import { MenuPanel, MenuSurfaceChild } from "./menu-panel.js";
 
 const SELECT_MODAL_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -31,8 +32,8 @@ export interface SelectModalOptions {
 
 /**
  * The one "pick one of these" surface. Every simple selector is this component
- * shown through `showFullPaneOverlay`, so they all share chrome, hints and
- * keybindings; only the item source differs.
+ * shown through `showFullPaneOverlay`, so they all share the MenuPanel chrome,
+ * hints and keybindings; only the item source differs.
  */
 export class SelectModalComponent extends Container {
 	private readonly selectList: SelectList;
@@ -40,11 +41,11 @@ export class SelectModalComponent extends Container {
 	constructor(options: SelectModalOptions) {
 		super();
 
-		this.addChild(new Text(theme.bold(theme.fg("accent", options.title)), 0, 0));
-		if (options.subtitle) {
-			this.addChild(new Text(theme.fg("muted", options.subtitle), 0, 0));
-		}
-		this.addChild(new Spacer(1));
+		const panel = new MenuPanel({
+			title: options.title,
+			subtitle: options.subtitle,
+		});
+		this.addChild(panel);
 
 		this.selectList = new SelectList(
 			options.items,
@@ -64,9 +65,9 @@ export class SelectModalComponent extends Container {
 			this.selectList.onSelectionChange = (item) => options.onPreview?.(item.value);
 		}
 
-		this.addChild(this.selectList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(selectionHints(), 0, 0));
+		panel.addChild(new MenuSurfaceChild(this.selectList));
+		panel.addChild(new Spacer(1));
+		panel.addChild(new Text(selectionHints(), 0, 0));
 	}
 
 	getSelectList(): SelectList {
