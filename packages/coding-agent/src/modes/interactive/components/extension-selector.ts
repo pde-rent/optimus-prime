@@ -74,14 +74,13 @@ export class ExtensionSelectorComponent extends Container {
 			);
 		}
 
-		this.listContainer = new MenuList({ compact: true });
+		this.listContainer = new MenuList({ compact: () => this.selector.isCompact() });
 		this.panel.addChild(this.listContainer);
 		this.selector = new MenuSelector<string>(this.listContainer, {
 			...viewport,
 			preferredVisibleItems: PREFERRED_VISIBLE_OPTIONS,
 			reservedRows: () => reservedRows,
-			comfortableItemRows: 1,
-			compactItemRows: 1,
+			rowShape: "single",
 			scrollIndicatorRows: OPTION_SCROLL_INDICATOR_ROWS,
 		});
 		this.panel.addChild(new Spacer(1));

@@ -9,6 +9,7 @@ import {
 	moveSelection,
 	Spacer,
 	scrollPositionText,
+	Text,
 	TruncatedText,
 	truncateToWidth,
 } from "@earendil-works/pi-tui";
@@ -23,7 +24,7 @@ import {
 } from "./edit-summary.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint, keyText } from "./keybinding-hints.js";
-import { MenuPanel } from "./menu-panel.js";
+import { MenuList, MenuPanel, MenuRow } from "./menu-panel.js";
 
 /** Gutter info: position (displayIndent where connector was) and whether to show │ */
 interface GutterInfo {
@@ -630,12 +631,11 @@ class TreeList implements Component {
 	}
 
 	render(width: number): string[] {
-		const lines: string[] = [];
-
 		if (this.filteredNodes.length === 0) {
-			lines.push(truncateToWidth(theme.fg("muted", "  No entries found"), width));
-			lines.push(truncateToWidth(theme.fg("muted", `  (0/0)${this.getStatusLabels()}`), width));
-			return lines;
+			return [
+				truncateToWidth(theme.fg("muted", "  No entries found"), width),
+				truncateToWidth(theme.fg("muted", `  (0/0)${this.getStatusLabels()}`), width),
+			];
 		}
 
 		const { start: startIndex, end: endIndex } = listWindow(
@@ -644,6 +644,9 @@ class TreeList implements Component {
 			this.maxVisibleLines,
 		);
 
+		// Shared modal list surface: flush rows with the breathing band around
+		// the selection bar, matching every other MenuPanel dialog.
+		const list = new MenuList();
 		for (let i = startIndex; i < endIndex; i++) {
 			const flatNode = this.filteredNodes[i];
 			const entry = flatNode.node.entry;
@@ -708,27 +711,30 @@ class TreeList implements Component {
 					: "";
 			const content = this.getEntryDisplayText(flatNode.node, isSelected);
 
-			let line = cursor + theme.fg("dim", prefix) + foldMarker + pathMarker + label + labelTimestamp + content;
-			if (isSelected) {
-				line = theme.getSelectionBackgroundColor()(line);
-			}
-			lines.push(truncateToWidth(line, width));
+			// MenuRow paints the full-width selection surface.
+			list.addChild(
+				new MenuRow({
+					primary: cursor + theme.fg("dim", prefix) + foldMarker + pathMarker + label + labelTimestamp + content,
+					selected: isSelected,
+				}),
+			);
 			for (const diffRow of this.getDiffRows(entry, width)) {
-				lines.push(diffRow);
+				list.addChild(new Text(diffRow, 0, 0));
 			}
 		}
 
-		lines.push(
-			truncateToWidth(
+		list.addChild(
+			new Text(
 				theme.fg(
 					"muted",
 					scrollPositionText(this.selectedIndex, this.filteredNodes.length) + this.getStatusLabels(),
 				),
-				width,
+				0,
+				0,
 			),
 		);
 
-		return lines;
+		return list.render(width);
 	}
 
 	/** Unified diffs a tool-result entry carries; empty for non-results and reads. */

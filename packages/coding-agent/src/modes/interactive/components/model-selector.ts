@@ -228,8 +228,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			getRows: options.getRows,
 			preferredVisibleItems: PREFERRED_VISIBLE_MODELS,
 			reservedRows: () => this.reservedRows,
-			comfortableItemRows: 3,
-			compactItemRows: 2,
 			scrollIndicatorRows: MODEL_SCROLL_INDICATOR_ROWS,
 			wrapSingleStep: true,
 		});

@@ -44,11 +44,38 @@ export interface MenuListLayout {
 	visibleItems: number;
 }
 
-const PANEL_PADDING_X = 2;
-const PANEL_PADDING_Y = 1;
-const FIELD_PADDING_X = 2;
-const ROW_PADDING_X = 2;
+/**
+ * Shared modal density. Every dialog derives its padding and list rhythm from
+ * this one table so panels read as siblings; tune here, never per component.
+ */
+export const MODAL_METRICS = {
+	/** Blank surface rows above and below the panel content. */
+	panelPaddingY: 1,
+	/** Horizontal panel inset. */
+	panelPaddingX: 2,
+	/** Horizontal inset of the search field. */
+	fieldPaddingX: 2,
+	/** Horizontal inset of list rows. */
+	rowPaddingX: 2,
+	/** Terminal-row budget per single-line list entry. */
+	singleLineItemRows: { comfortable: 2, compact: 1 },
+	/** Terminal-row budget per list entry that carries a secondary line. */
+	detailedItemRows: { comfortable: 3, compact: 2 },
+} as const;
+
+const PANEL_PADDING_X = MODAL_METRICS.panelPaddingX;
+const PANEL_PADDING_Y = MODAL_METRICS.panelPaddingY;
+const FIELD_PADDING_X = MODAL_METRICS.fieldPaddingX;
+const ROW_PADDING_X = MODAL_METRICS.rowPaddingX;
 const ROW_PADDING_Y = 1;
+
+/** Shape of a list entry, mapping to the shared row-height budgets. */
+export type MenuItemShape = "single" | "detailed";
+
+export function getMenuItemRows(shape: MenuItemShape): { comfortableItemRows: number; compactItemRows: number } {
+	const rows = shape === "single" ? MODAL_METRICS.singleLineItemRows : MODAL_METRICS.detailedItemRows;
+	return { comfortableItemRows: rows.comfortable, compactItemRows: rows.compact };
+}
 
 export function getMenuPanelInnerWidth(width: number): number {
 	const safeWidth = Math.max(PANEL_PADDING_X * 2 + 1, width);
@@ -226,8 +253,8 @@ function surfaceWrappedLines(text: string, width: number, paddingX = PANEL_PADDI
  */
 export interface MenuSelectorConfig<T> extends MenuViewportProvider {
 	preferredVisibleItems: number;
-	comfortableItemRows: number;
-	compactItemRows?: number;
+	/** Row shape of this list's entries; picks the shared height budgets. Defaults to "detailed". */
+	rowShape?: MenuItemShape;
 	scrollIndicatorRows?: number;
 	/** Dynamic reserved-row count (headers, tab bars, descriptions). */
 	reservedRows: () => number;
@@ -253,8 +280,7 @@ export class MenuSelector<T> {
 		this.layout = getMenuListLayout({
 			preferredVisibleItems: config.preferredVisibleItems,
 			reservedRows: config.reservedRows(),
-			comfortableItemRows: config.comfortableItemRows,
-			compactItemRows: config.compactItemRows,
+			...getMenuItemRows(config.rowShape ?? "detailed"),
 		});
 	}
 
@@ -331,8 +357,7 @@ export class MenuSelector<T> {
 			preferredVisibleItems: this.config.preferredVisibleItems,
 			totalItems,
 			reservedRows: this.config.reservedRows(),
-			comfortableItemRows: this.config.comfortableItemRows,
-			compactItemRows: this.config.compactItemRows,
+			...getMenuItemRows(this.config.rowShape ?? "detailed"),
 			scrollIndicatorRows: this.config.scrollIndicatorRows,
 		});
 		return previous.compact !== this.layout.compact || previous.visibleItems !== this.layout.visibleItems;
@@ -662,14 +687,14 @@ export class MenuList extends Container implements FullWidthMenuComponent {
 					lines.push(...child.renderContent(width));
 					continue;
 				}
-				const previousChild = this.children[index - 1];
-				const nextChild = this.children[index + 1];
-				const previousRow = previousChild instanceof MenuRow ? previousChild : undefined;
-				const nextRow = nextChild instanceof MenuRow ? nextChild : undefined;
-				lines.push(...child.renderPadding(width, child.selected || previousRow?.selected === true));
+				// Shared density: rows sit flush and the breathing band renders only
+				// around the selection bar, so tall lists stay compact.
+				if (child.selected) {
+					lines.push(...child.renderPadding(width, true));
+				}
 				lines.push(...child.renderContent(width));
-				if (!nextRow) {
-					lines.push(...child.renderPadding(width, child.selected));
+				if (child.selected) {
+					lines.push(...child.renderPadding(width, true));
 				}
 				continue;
 			}

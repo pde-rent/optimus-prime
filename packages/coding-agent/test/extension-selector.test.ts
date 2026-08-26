@@ -18,7 +18,7 @@ describe("ExtensionSelectorComponent", () => {
 		initTheme("dark");
 	});
 
-	it("renders a multiline prompt with compact option rows", () => {
+	it("renders a multiline prompt with shared-density option rows", () => {
 		const selector = new ExtensionSelectorComponent(
 			[
 				"Interrupted REPL cell is still running",
@@ -41,7 +41,8 @@ describe("ExtensionSelectorComponent", () => {
 		expect(output).toContain("Ctrl+C sent an interrupt");
 		expect(output).toContain("Waiting preserves the current kernel state");
 		expect(waitIndex).toBeGreaterThan(-1);
-		expect(killIndex).toBe(waitIndex + 1);
+		// The selected first option carries the shared breathing band above it.
+		expect(killIndex).toBe(waitIndex + 2);
 		expectTrailingBackground(
 			lines.find((line) => line.includes("Interrupted REPL cell is still running")),
 			"Interrupted REPL cell is still running",

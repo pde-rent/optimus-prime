@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Expanded tool-call aliasing to every major harness dialect: Gemini CLI, Cline/Roo, Cursor, PowerShell instincts, git_* verbs (mapped onto the git tool's op union), web_search/WebFetch -> skill, and OpenCode-style Ctrl+C that clears the draft first.
+- Added an apply_patch transpiler: Codex-style V4A patches resolve onto edit/write_file/bash instead of failing, including multi-file patches.
+- Changed bash tool results that contain unified diffs to render with the same rich diff view as write/edit, with a conservative detector and a 2000-line cap.
+- Changed editor input: first Ctrl+C copies a selection, else clears the draft; Ctrl+X cuts a selection. Both are keybinding-configurable.
+- Changed pasted images to downscale to a 1152px long edge by default for cheaper vision processing.
+- Changed modal list density to one shared metric in MenuPanel: rows sit flush and the breathing band renders only around the selection bar, so the model picker is tighter while the session tree gains a padded selection surface.
 - Changed every interactive-mode dialog (settings, resource config, session tree, model config, pickers) onto one shared modal chrome, so padding and surface match across surfaces.
 - Fixed stacked dialogs not dimming the dialog beneath them: each overlay layer now dims everything below it progressively, so a provider sign-in prompt opened from /model reads as a distinct layer.
 - Removed never-used agent sessions with no messages from the Done and Archive lists in the agents view; running and failed sessions still show.

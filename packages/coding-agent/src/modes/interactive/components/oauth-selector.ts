@@ -134,8 +134,6 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 			getRows: options.getRows,
 			preferredVisibleItems: PREFERRED_VISIBLE_PROVIDERS,
 			reservedRows: () => this.reservedRows,
-			comfortableItemRows: 3,
-			compactItemRows: 2,
 			scrollIndicatorRows: PROVIDER_SCROLL_INDICATOR_ROWS,
 		});
 

@@ -13,7 +13,7 @@ import { errorMessage } from "../../../utils/shared.js";
 import type { AgentConnectionHeartbeat } from "../../agent-connection/types.js";
 import { theme } from "../theme/theme.js";
 import { keyHint } from "./keybinding-hints.js";
-import { getMenuListLayout, MenuList, MenuPanel, MenuRow } from "./menu-panel.js";
+import { getMenuItemRows, getMenuListLayout, MenuList, MenuPanel, MenuRow } from "./menu-panel.js";
 import { shouldTreatAsBack } from "./modal-back.js";
 
 const HEARTBEAT_PANEL_MAX_WIDTH = 72;
@@ -277,8 +277,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			preferredVisibleItems: PREFERRED_VISIBLE_HEARTBEATS,
 			totalItems: this.heartbeats.length,
 			reservedRows: HEARTBEAT_LIST_RESERVED_ROWS + (this.error ? 2 : 0),
-			comfortableItemRows: 3,
-			compactItemRows: 2,
+			...getMenuItemRows("detailed"),
 			scrollIndicatorRows: HEARTBEAT_SCROLL_INDICATOR_ROWS,
 		});
 	}

@@ -194,7 +194,7 @@ class ResourceList implements Component, Focusable {
 		this.selector = new MenuSelector<FlatEntry>(this.listContainer, {
 			preferredVisibleItems: 15,
 			reservedRows: () => 0,
-			comfortableItemRows: 1,
+			rowShape: "single",
 			isSelectable: (entry) => entry.type === "item",
 		});
 		this.buildFlatList();
