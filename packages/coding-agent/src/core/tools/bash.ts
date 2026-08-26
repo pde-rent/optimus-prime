@@ -1,10 +1,22 @@
 import { existsSync } from "node:fs";
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import type { Component } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
+import { renderRichDiff } from "../../modes/interactive/components/diff.js";
+import {
+	FILE_CHANGE_DIFF_INDENT,
+	formatFileChangeSummaryLine,
+} from "../../modes/interactive/components/edit-summary.js";
 import { expandCollapseHint } from "../../modes/interactive/components/keybinding-hints.js";
+import {
+	MAX_UNIFIED_DIFF_LINES,
+	type ParsedUnifiedDiff,
+	parseUnifiedDiff,
+	type UnifiedDiffFile,
+} from "../../modes/interactive/components/unified-diff.js";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.js";
-import { theme } from "../../modes/interactive/theme/theme.js";
+import { getLanguageFromPath, theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
 import { formatDuration } from "../../utils/shared.js";
 import {
@@ -280,6 +292,44 @@ function formatBashCall(args: { command?: string; timeout?: number } | undefined
 	return theme.fg("toolTitle", theme.bold(`$ ${commandDisplay}`)) + timeoutSuffix;
 }
 
+/** One detected diff file: `╰─ <path> +N -M` anchor plus indented rich rows. */
+class BashDiffFileComponent implements Component {
+	constructor(
+		private readonly file: UnifiedDiffFile,
+		private readonly cwd: string,
+	) {}
+
+	render(width: number): string[] {
+		const safeWidth = Math.max(1, width);
+		const change = { added: this.file.added, removed: this.file.removed };
+		const lines = [formatFileChangeSummaryLine(this.file.path, this.cwd, change, undefined, safeWidth)];
+		const indent = FILE_CHANGE_DIFF_INDENT.slice(0, Math.max(0, safeWidth - 1));
+		const contentWidth = Math.max(1, safeWidth - indent.length);
+		const language = getLanguageFromPath(this.file.path);
+		for (const row of renderRichDiff(this.file.diffText, contentWidth, { view: "auto", language })) {
+			lines.push(`${indent}${row}`);
+		}
+		return lines;
+	}
+
+	invalidate(): void {}
+}
+
+function appendUnifiedDiffBlocks(component: BashResultRenderComponent, parsed: ParsedUnifiedDiff, cwd: string): void {
+	for (const block of parsed.blocks) {
+		if (block.kind === "text") {
+			const styled = block.text
+				.split("\n")
+				.map((line) => theme.fg("toolOutput", line))
+				.join("\n");
+			component.addChild(new Text(styled, 0, 0));
+		} else {
+			component.addChild(new Spacer(1));
+			component.addChild(new BashDiffFileComponent(block.file, cwd));
+		}
+	}
+}
+
 function rebuildBashResultRenderComponent(
 	component: BashResultRenderComponent,
 	result: {
@@ -292,6 +342,7 @@ function rebuildBashResultRenderComponent(
 	showExpandHint: boolean,
 	startedAt: number | undefined,
 	endedAt: number | undefined,
+	cwd: string,
 ): void {
 	const state = component.state;
 	component.clear();
@@ -299,36 +350,66 @@ function rebuildBashResultRenderComponent(
 	const output = getTextOutput(result, showImages, { includeImageDimensions }).trim();
 
 	if (output) {
+		// Expanded results render detected unified diffs (`git diff`, `git log -p`,
+		// ...) through the rich renderer; anything else keeps the dim tool-output text.
+		const parsedDiff = options.expanded ? parseUnifiedDiff(output) : undefined;
+		let renderedAsDiff = false;
+		if (parsedDiff?.tooLarge) {
+			component.addChild(
+				new Text(
+					`\n${theme.fg("warning", `[Unified diff detected but too large to render richly (> ${MAX_UNIFIED_DIFF_LINES} lines); showing plain output]`)}`,
+					0,
+					0,
+				),
+			);
+			component.addChild(
+				new Text(
+					output
+						.split("\n")
+						.map((line) => theme.fg("toolOutput", line))
+						.join("\n"),
+					0,
+					0,
+				),
+			);
+			renderedAsDiff = true;
+		} else if (parsedDiff && parsedDiff.blocks.length > 0) {
+			appendUnifiedDiffBlocks(component, parsedDiff, cwd);
+			renderedAsDiff = true;
+		}
+
 		const styledOutput = output
 			.split("\n")
 			.map((line) => theme.fg("toolOutput", line))
 			.join("\n");
 
-		if (options.expanded) {
-			component.addChild(new Text(`\n${styledOutput}`, 0, 0));
-		} else {
-			component.addChild({
-				render: (width: number) => {
-					if (state.cachedLines === undefined || state.cachedWidth !== width) {
-						const preview = truncateToVisualLines(styledOutput, BASH_PREVIEW_LINES, width);
-						state.cachedLines = preview.visualLines;
-						state.cachedSkipped = preview.skippedCount;
-						state.cachedWidth = width;
-					}
-					if (state.cachedSkipped && state.cachedSkipped > 0) {
-						const hint = showExpandHint
-							? `${theme.fg("muted", `... ${state.cachedSkipped} earlier lines`)} ${expandCollapseHint("app.tools.expand", false)}`
-							: theme.fg("muted", `... (${state.cachedSkipped} earlier lines)`);
-						return ["", truncateToWidth(hint, width, "..."), ...(state.cachedLines ?? [])];
-					}
-					return ["", ...(state.cachedLines ?? [])];
-				},
-				invalidate: () => {
-					state.cachedWidth = undefined;
-					state.cachedLines = undefined;
-					state.cachedSkipped = undefined;
-				},
-			});
+		if (!renderedAsDiff) {
+			if (options.expanded) {
+				component.addChild(new Text(`\n${styledOutput}`, 0, 0));
+			} else {
+				component.addChild({
+					render: (width: number) => {
+						if (state.cachedLines === undefined || state.cachedWidth !== width) {
+							const preview = truncateToVisualLines(styledOutput, BASH_PREVIEW_LINES, width);
+							state.cachedLines = preview.visualLines;
+							state.cachedSkipped = preview.skippedCount;
+							state.cachedWidth = width;
+						}
+						if (state.cachedSkipped && state.cachedSkipped > 0) {
+							const hint = showExpandHint
+								? `${theme.fg("muted", `... ${state.cachedSkipped} earlier lines`)} ${expandCollapseHint("app.tools.expand", false)}`
+								: theme.fg("muted", `... (${state.cachedSkipped} earlier lines)`);
+							return ["", truncateToWidth(hint, width, "..."), ...(state.cachedLines ?? [])];
+						}
+						return ["", ...(state.cachedLines ?? [])];
+					},
+					invalidate: () => {
+						state.cachedWidth = undefined;
+						state.cachedLines = undefined;
+						state.cachedSkipped = undefined;
+					},
+				});
+			}
 		}
 	}
 
@@ -548,6 +629,7 @@ export function createBashToolDefinition(
 				context.showExpandHint !== false,
 				state.startedAt,
 				state.endedAt,
+				context.cwd,
 			);
 			component.invalidate();
 			return component;
