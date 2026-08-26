@@ -29,6 +29,7 @@ const fakeOverlayHandle: OverlayHandle = {
 const fakeTui = {
 	requestRender: vi.fn(),
 	showOverlay: vi.fn(() => fakeOverlayHandle),
+	copyText: vi.fn(),
 	terminal: { rows: 24, columns: 80 },
 } as unknown as TUI;
 
@@ -62,7 +63,7 @@ describe("CustomEditor", () => {
 		vi.clearAllMocks();
 	});
 
-	it("cancels autocomplete before handling app.clear", async () => {
+	it("ctrl+c over an open autocomplete clears the draft instead of firing app.clear", async () => {
 		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
 		const handler = vi.fn();
 
@@ -73,9 +74,47 @@ describe("CustomEditor", () => {
 
 		editor.handleInput("\x03");
 
+		// OpenCode-style: the first Ctrl+C clears a non-empty draft; app.clear
+		// (interrupt / exit hint) only fires on an empty editor.
 		expect(editor.isShowingAutocomplete()).toBe(false);
+		expect(handler).not.toHaveBeenCalled();
+		expect(editor.getText()).toBe("");
+	});
+
+	it("ctrl+c on an empty editor still fires app.clear", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+		const handler = vi.fn();
+		editor.onAction("app.clear", handler);
+
+		editor.handleInput("\x03");
+
 		expect(handler).toHaveBeenCalledTimes(1);
-		expect(editor.getText()).toBe("/");
+	});
+
+	it("ctrl+c with a selection copies it and collapses the selection without clearing text", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+		const handler = vi.fn();
+		editor.onAction("app.clear", handler);
+
+		editor.setText("hello");
+		editor.handleInput("\x1b[1;2D"); // shift+left extends selection over "o"
+		expect(editor.hasSelection()).toBe(true);
+
+		editor.handleInput("\x03");
+
+		expect(editor.getText()).toBe("hello");
+		expect(editor.hasSelection()).toBe(false);
+	});
+
+	it("ctrl+x with a selection cuts it into the clipboard", () => {
+		const editor = new CustomEditor(fakeTui, editorTheme, new KeybindingsManager());
+
+		editor.setText("hello");
+		editor.handleInput("\x1b[1;2D");
+		editor.handleInput("\x1b[1;2D");
+		editor.handleInput("\x18"); // ctrl+x
+
+		expect(editor.getText()).toBe("hel");
 	});
 
 	it("inserts a newline for a raw \\n byte instead of firing the ctrl+j edit-diff action", () => {

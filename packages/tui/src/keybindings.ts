@@ -30,6 +30,7 @@ export interface Keybindings {
 	"tui.input.submit": true;
 	"tui.input.tab": true;
 	"tui.input.copy": true;
+	"tui.editor.cut": true;
 	"tui.viewport.pageUp": true;
 	"tui.viewport.pageDown": true;
 	"tui.viewport.top": true;
@@ -139,6 +140,7 @@ export const TUI_KEYBINDINGS = {
 	"tui.input.submit": { defaultKeys: "enter", description: "Submit input", defaultKeyScope: "editor" },
 	"tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete", defaultKeyScope: "editor" },
 	"tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection", defaultKeyScope: "editor" },
+	"tui.editor.cut": { defaultKeys: "ctrl+x", description: "Cut selection", defaultKeyScope: "editor" },
 	"tui.viewport.pageUp": {
 		defaultKeys: "pageUp",
 		description: "Scroll transcript up a page (fullscreen)",

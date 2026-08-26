@@ -1,8 +1,8 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 
 export interface ImageResizeOptions {
-	maxWidth?: number; // Default: 2000
-	maxHeight?: number; // Default: 2000
+	maxWidth?: number; // Default: 1152
+	maxHeight?: number; // Default: 1152
 	maxBytes?: number; // Default: 4.5MB of base64 payload (below Anthropic's 5MB limit)
 	jpegQuality?: number; // Default: 80
 }
@@ -21,8 +21,13 @@ export interface ResizedImage {
 const DEFAULT_MAX_BYTES = 4.5 * 1024 * 1024;
 
 const DEFAULT_OPTIONS: Required<ImageResizeOptions> = {
-	maxWidth: 2000,
-	maxHeight: 2000,
+	// Aggressive default: vision token cost scales with pixel count and most
+	// providers cap useful input around ~1-1.6k on the long edge anyway. 1152
+	// keeps 1080p screenshots at native-ish sharpness for text while cutting
+	// larger images hard; the progressive size-reduction loop below stays as
+	// the backstop and never has to go anywhere near illegible (~360p) sizes.
+	maxWidth: 1152,
+	maxHeight: 1152,
 	maxBytes: DEFAULT_MAX_BYTES,
 	jpegQuality: 80,
 };

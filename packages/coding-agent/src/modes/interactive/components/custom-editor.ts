@@ -210,6 +210,32 @@ export class CustomEditor extends Editor {
 			// Fall through to editor handling for delete-char-forward when not empty
 		}
 
+		// Selection-aware Ctrl+C/Ctrl+X, then OpenCode-style clear-first Ctrl+C.
+		// With an active selection Ctrl+C copies and Ctrl+X cuts. Without one,
+		// the first Ctrl+C clears a non-empty draft instead of interrupting; an
+		// empty editor falls through to app.clear (interrupt, second press exits).
+		const matchesClear =
+			this.keybindings.matches(data, "app.clear") || this.keybindings.matches(data, "tui.input.copy");
+		const matchesCut = this.keybindings.matches(data, "tui.editor.cut");
+		if (matchesClear || matchesCut) {
+			if (this.hasSelection()) {
+				const selected = this.getSelectedText();
+				if (selected) {
+					this.tui.copyText(selected);
+				}
+				if (matchesCut) {
+					this.deleteSelectedRange();
+				} else {
+					this.clearSelection();
+				}
+				return;
+			}
+			if (matchesClear && !matchesCut && this.getText().length > 0) {
+				this.setText("");
+				return;
+			}
+		}
+
 		// Check all other app actions. A raw "\n" is Shift+Enter's newline in some
 		// terminals, so it goes to the editor even though it decodes as ctrl+j.
 		for (const [action, handler] of this.actionHandlers) {
