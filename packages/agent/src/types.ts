@@ -288,6 +288,14 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	toolAliases?: ToolAliasResolver;
 
 	/**
+	 * Recover tool calls the model emitted as plain text (fenced json/js blocks,
+	 * `<tool_call>` tags, `[TOOL_CALLS]` prefixes) when the assistant message carries
+	 * no native tool calls, and execute them through the normal tool path. The tool
+	 * result notes that the call was recovered from text. Defaults to `true`.
+	 */
+	recoverTextToolCalls?: boolean;
+
+	/**
 	 * Abort a turn whose streamed text or reasoning collapses into a repetition loop, instead of
 	 * paying for it to max_tokens and persisting it as context. Defaults to `true`.
 	 */

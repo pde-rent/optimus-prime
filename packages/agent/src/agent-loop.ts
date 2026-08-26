@@ -9,9 +9,11 @@ import {
 	type Context,
 	EventStream,
 	streamSimple,
+	type TextContent,
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import { extractToolCallsFromText } from "./content-tool-calls.js";
 import { DegeneracyDetector, type DegeneracyReport, degeneracyErrorMessage } from "./degeneracy.js";
 import {
 	extractTurnProgress,
@@ -431,12 +433,28 @@ async function runLoop(
 				return;
 			}
 
-			const toolCalls = message.content.filter((c) => c.type === "toolCall");
+			let toolCalls = message.content.filter((c) => c.type === "toolCall");
+			let recoveredNotes: ReadonlyMap<string, string> | undefined;
+			if (toolCalls.length === 0 && config.recoverTextToolCalls !== false) {
+				const recovery = recoverPlainTextToolCalls(message);
+				if (recovery.calls.length > 0) {
+					message.content = [...message.content, ...recovery.calls];
+					toolCalls = recovery.calls;
+					recoveredNotes = recovery.notes;
+				}
+			}
 
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
 			if (toolCalls.length > 0) {
-				const executedToolBatch = await executeToolCalls(currentContext, message, config, signal, emit);
+				const executedToolBatch = await executeToolCalls(
+					currentContext,
+					message,
+					config,
+					signal,
+					emit,
+					recoveredNotes,
+				);
 				toolResults.push(...executedToolBatch.messages);
 				hasMoreToolCalls = !executedToolBatch.terminate;
 
@@ -707,21 +725,61 @@ async function streamAssistantResponse(
 	}
 }
 
+const TEXT_TOOL_CALL_RECOVERY_NOTE =
+	"Note: this tool call was recovered from plain-text output; the model did not use native tool calling.";
+
+/**
+ * Models trained for tool calling sometimes degrade to printing calls as text.
+ * When a finished message carries no native tool calls, scan its text content
+ * for recognizable tool-call shapes and convert them into executable calls.
+ */
+function recoverPlainTextToolCalls(message: AssistantMessage): {
+	calls: AgentToolCall[];
+	notes: ReadonlyMap<string, string>;
+} {
+	const text = message.content
+		.filter((part): part is TextContent => part.type === "text")
+		.map((part) => part.text)
+		.join("\n");
+	if (!text) {
+		return { calls: [], notes: new Map() };
+	}
+
+	const extracted = extractToolCallsFromText(text);
+	const calls: AgentToolCall[] = [];
+	const notes = new Map<string, string>();
+	for (const call of extracted) {
+		const id = crypto.randomUUID();
+		calls.push({ type: "toolCall", id, name: call.name, arguments: call.arguments });
+		notes.set(id, TEXT_TOOL_CALL_RECOVERY_NOTE);
+	}
+	return { calls, notes };
+}
+
 async function executeToolCalls(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	recoveredNotes?: ReadonlyMap<string, string>,
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const hasSequentialToolCall = toolCalls.some(
 		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
 	);
 	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
-		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
+		return executeToolCallsSequential(
+			currentContext,
+			assistantMessage,
+			toolCalls,
+			config,
+			signal,
+			emit,
+			recoveredNotes,
+		);
 	}
-	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
+	return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit, recoveredNotes);
 }
 
 type ExecutedToolCallBatch = {
@@ -736,6 +794,7 @@ async function executeToolCallsSequential(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	recoveredNotes?: ReadonlyMap<string, string>,
 ): Promise<ExecutedToolCallBatch> {
 	const finalizedCalls: FinalizedToolCallOutcome[] = [];
 	const messages: ToolResultMessage[] = [];
@@ -769,6 +828,7 @@ async function executeToolCallsSequential(
 				executed,
 				config,
 				signal,
+				recoveredNotes,
 			);
 		}
 
@@ -796,6 +856,7 @@ async function executeToolCallsParallel(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
+	recoveredNotes?: ReadonlyMap<string, string>,
 ): Promise<ExecutedToolCallBatch> {
 	const finalizedCalls: FinalizedToolCallEntry[] = [];
 
@@ -828,6 +889,7 @@ async function executeToolCallsParallel(
 				executed,
 				config,
 				signal,
+				recoveredNotes,
 			);
 			await emitToolExecutionEnd(finalized, emit);
 			return finalized;
@@ -1053,6 +1115,7 @@ async function finalizeExecutedToolCall(
 	executed: ExecutedToolCallOutcome,
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
+	recoveredNotes?: ReadonlyMap<string, string>,
 ): Promise<FinalizedToolCallOutcome> {
 	let result = executed.result;
 	let isError = executed.isError;
@@ -1061,6 +1124,14 @@ async function finalizeExecutedToolCall(
 		result = {
 			...result,
 			content: [...result.content, { type: "text", text: prepared.aliasNote }],
+		};
+	}
+
+	const recoveryNote = recoveredNotes?.get(prepared.toolCall.id);
+	if (recoveryNote) {
+		result = {
+			...result,
+			content: [...result.content, { type: "text", text: recoveryNote }],
 		};
 	}
 
