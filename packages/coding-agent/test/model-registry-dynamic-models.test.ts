@@ -30,6 +30,11 @@ describe("ModelRegistry dynamic model discovery", () => {
 		setDynamicModelsFetcher("anthropic", undefined);
 		setDynamicModelsFetcher("alibaba-coding-plan", undefined);
 		setDynamicModelsFetcher("github-copilot", undefined);
+		setDynamicModelsFetcher("mistral", undefined);
+		setDynamicModelsFetcher("kimi-coding", undefined);
+		setDynamicModelsFetcher("huggingface", undefined);
+		setDynamicModelsFetcher("groq", undefined);
+		setDynamicModelsFetcher("togetherai", undefined);
 
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
@@ -312,7 +317,7 @@ describe("ModelRegistry dynamic model discovery", () => {
 			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
 			await registry.refreshModelCatalog();
 
-			const googleHeaders = headersByUrl.get("https://generativelanguage.googleapis.com/v1beta/models");
+			const googleHeaders = headersByUrl.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100");
 			expect(googleHeaders?.["x-goog-api-key"]).toBe("KEY");
 			const google = modelsFor(registry, "google");
 			expect(google.map((m) => m.id)).toContain("gemini-test-fresh");
@@ -347,6 +352,24 @@ describe("ModelRegistry dynamic model discovery", () => {
 		expect(alibaba[0]!.name).toBe("qwen-test-next");
 	});
 
+	test("duplicate ids in the discovery payload collapse to one entry (GMI free+paid)", async () => {
+		authStorage.set("gmi", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("gmi", async () =>
+			openAIListResponse([
+				{ id: "MiniMaxAI/MiniMax-M3", name: "MiniMax M3 (free)", is_free: true, context_length: 1048576 },
+				{ id: "MiniMaxAI/MiniMax-M3", name: "MiniMax M3", is_free: false, context_length: 1048576 },
+				{ id: "other-model", name: "Other" },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const gmi = modelsFor(registry, "gmi");
+		expect(gmi.map((m) => m.id)).toEqual(["MiniMaxAI/MiniMax-M3", "other-model"]);
+		// Known id keeps its curated catalog name over the discovery payload's.
+		expect(gmi[0]!.name).toBe("MiniMax M3");
+	});
+
 	test("github-copilot discovery keeps chat models and reads capability limits", async () => {
 		authStorage.set("github-copilot", { type: "api_key", key: "TOKEN" });
 		setDynamicModelsFetcher("github-copilot", async () =>
@@ -372,5 +395,96 @@ describe("ModelRegistry dynamic model discovery", () => {
 		expect(added.baseUrl).toBe("https://api.individual.githubcopilot.com");
 		expect(added.contextWindow).toBe(200000);
 		expect(added.maxTokens).toBe(32000);
+	});
+
+	test("discovery accepts top-level arrays and reads anthropic + kimi metadata", async () => {
+		authStorage.set("mistral", { type: "api_key", key: "KEY" });
+		authStorage.set("kimi-coding", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("mistral", async () => [
+			{ id: "mistral-test-chat", max_context_length: 131072, capabilities: { completion_chat: true } },
+			{ id: "ft:test-tune", max_context_length: 32768 },
+			{ id: "mistral-embed-test", max_context_length: 8192 },
+		]);
+		setDynamicModelsFetcher("kimi-coding", async () =>
+			openAIListResponse([
+				{ id: "kimi-test", context_length: 262144, supports_reasoning: true, supports_image_in: false },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const mistral = modelsFor(registry, "mistral");
+		expect(mistral.map((m) => m.id)).toContain("mistral-test-chat");
+		expect(mistral.find((m) => m.id === "mistral-test-chat")!.contextWindow).toBe(131072);
+		const kimi = modelsFor(registry, "kimi-coding");
+		expect(kimi[0]!.reasoning).toBe(true);
+		expect(kimi[0]!.contextWindow).toBe(262144);
+	});
+
+	test("discovery aggregates huggingface provider serving data", async () => {
+		authStorage.set("huggingface", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("huggingface", async () =>
+			openAIListResponse([
+				{
+					id: "hf-test-model",
+					providers: [
+						{ status: "error", context_length: 1000 },
+						{ status: "ok", context_length: 128000, pricing: { input: 0.0000002, output: 0.0000008 } },
+					],
+				},
+				{ id: "hf-broken-model", providers: [{ status: "error" }] },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		const hf = modelsFor(registry, "huggingface");
+		const added = hf.find((m) => m.id === "hf-test-model")!;
+		expect(added.contextWindow).toBe(128000);
+		expect(added.cost.input).toBeCloseTo(0.2, 5);
+		expect(added.cost.output).toBeCloseTo(0.8, 5);
+	});
+
+	test("discovery filters groq inactive entries and together non-chat types", async () => {
+		authStorage.set("groq", { type: "api_key", key: "KEY" });
+		authStorage.set("togetherai", { type: "api_key", key: "KEY" });
+		setDynamicModelsFetcher("groq", async () =>
+			openAIListResponse([
+				{ id: "groq-active", active: true, context_window: 131072 },
+				{ id: "groq-retired", active: false, context_window: 32768 },
+			]),
+		);
+		setDynamicModelsFetcher("togetherai", async () =>
+			openAIListResponse([
+				{ id: "together-chat", type: "chat" },
+				{ id: "together-embed", type: "embedding" },
+			]),
+		);
+		const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+		await registry.refreshModelCatalog();
+
+		expect(modelsFor(registry, "groq").map((m) => m.id)).toEqual(["groq-active"]);
+		expect(modelsFor(registry, "groq")[0]!.contextWindow).toBe(131072);
+		expect(modelsFor(registry, "togetherai").map((m) => m.id)).toEqual(["together-chat"]);
+	});
+
+	test("offline mode applies cache without fetching", async () => {
+		process.env.PI_OFFLINE = "1";
+		try {
+			authStorage.set("nous", { type: "api_key", key: "KEY" });
+			let fetched = false;
+			setDynamicModelsFetcher("nous", async () => {
+				fetched = true;
+				return openAIListResponse([{ id: "nous-live" }]);
+			});
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			await registry.refreshModelCatalog();
+			expect(fetched).toBe(false);
+			// Static catalog still seeds while offline; live id must be absent.
+			expect(modelsFor(registry, "nous").some((m) => m.id === "nous-live")).toBe(false);
+		} finally {
+			delete process.env.PI_OFFLINE;
+			setDynamicModelsFetcher("nous", undefined);
+		}
 	});
 });

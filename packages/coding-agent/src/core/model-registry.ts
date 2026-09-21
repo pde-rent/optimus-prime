@@ -28,7 +28,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { fetchCursorAvailableModels } from "@earendil-works/pi-ai/cursor";
 import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-ai/oauth";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { getAgentDir } from "../config.js";
 import { createAuthSourceFingerprints } from "./auth-source-fingerprint.js";
@@ -439,6 +439,11 @@ interface DynamicModelEndpointSource {
 	authStyle?: "bearer" | "anthropic";
 	/** Optional drop rule applied to each raw list entry before mapping (e.g. non-chat endpoints). */
 	entryFilter?: (entry: Record<string, unknown>) => boolean;
+	/**
+	 * Paginated list endpoints: follow provider cursors, merging pages.
+	 * Unset = single request. Page cap bounds latency.
+	 */
+	paginate?: "anthropic" | "google";
 }
 
 /** Bespoke discovery: fetch and map the provider's catalog directly. */
@@ -488,7 +493,6 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		api: "openai-completions",
 		baseUrl: "https://inference-api.nousresearch.com/v1",
 	},
-
 	cerebras: {
 		url: "https://api.cerebras.ai/v1/models",
 		api: "openai-completions",
@@ -547,6 +551,12 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		api: "openai-completions",
 		baseUrl: "https://api.together.xyz/v1",
 		authenticated: true,
+		// Together serves image/embedding/moderation/rerank models too; only
+		// chat-capable types belong in the registry.
+		entryFilter: (entry) => {
+			const type = entry.type;
+			return type === undefined || type === "chat" || type === "language" || type === "code";
+		},
 	},
 	xai: {
 		url: "https://api.x.ai/v1/models",
@@ -578,6 +588,7 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		baseUrl: "https://api.anthropic.com",
 		authenticated: true,
 		authStyle: "anthropic",
+		paginate: "anthropic",
 	},
 	openai: {
 		url: "https://api.openai.com/v1/models",
@@ -591,6 +602,14 @@ const DYNAMIC_MODEL_SOURCES: Record<string, DynamicModelSource> = {
 		api: "mistral-conversations",
 		baseUrl: "https://api.mistral.ai",
 		authenticated: true,
+		// Mistral lists fine-tunes, embeddings and archived models alongside
+		// chat models; none of those can serve chat requests.
+		entryFilter: (entry) => {
+			const id = entry.id;
+			if (typeof id !== "string") return false;
+			if (id.startsWith("ft:") || id.includes("embed")) return false;
+			return entry.archived !== true;
+		},
 	},
 	"vercel-ai-gateway": {
 		url: "https://ai-gateway.vercel.sh/v1/models",
@@ -738,14 +757,32 @@ function firstPositiveNumber(...values: unknown[]): number | undefined {
 
 async function fetchGoogleModelsPayload(apiKey: string | undefined, signal: AbortSignal): Promise<unknown> {
 	if (!apiKey) throw new Error("google model discovery requires configured auth");
-	const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
-		signal,
-		headers: { "x-goog-api-key": apiKey },
-	});
-	if (!response.ok) {
-		throw new Error(`google model discovery failed with HTTP ${response.status}`);
+	const all: Record<string, unknown>[] = [];
+	let pageToken: string | undefined;
+	// pageSize default is 50; cap follow-ups to bound latency.
+	for (let page = 0; page < 10; page++) {
+		const url =
+			pageToken !== undefined
+				? `https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&pageToken=${encodeURIComponent(pageToken)}`
+				: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100";
+		const response = await fetch(url, {
+			signal,
+			headers: { "x-goog-api-key": apiKey },
+		});
+		if (!response.ok) {
+			throw new Error(`google model discovery failed with HTTP ${response.status}`);
+		}
+		const payload: unknown = await response.json();
+		if (isRecord(payload) && Array.isArray(payload.models)) {
+			all.push(...(payload.models as Record<string, unknown>[]));
+		}
+		pageToken =
+			isRecord(payload) && typeof payload.nextPageToken === "string" && payload.nextPageToken
+				? payload.nextPageToken
+				: undefined;
+		if (!pageToken) break;
 	}
-	return response.json();
+	return { models: all };
 }
 
 /** Parse the Generative Language `{ models: [...] }` catalog into model candidates. */
@@ -768,7 +805,7 @@ function parseGoogleModelList(payload: unknown): Model<Api>[] {
 				api: "google-generative-ai" as const,
 				provider: "google",
 				baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-				reasoning: false,
+				reasoning: entry.thinking === true,
 				input: ["text"] as const,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow: firstPositiveNumber(entry.inputTokenLimit) ?? 128000,
@@ -778,9 +815,9 @@ function parseGoogleModelList(payload: unknown): Model<Api>[] {
 	});
 }
 
-/** Parse an OpenAI-shaped `{ data: [...] }` list into model candidates. */
+/** Parse an OpenAI-shaped `{ data: [...] }` list (or bare array, e.g. Mistral) into model candidates. */
 function parseDynamicModelList(payload: unknown, provider: string, source: DynamicModelEndpointSource): Model<Api>[] {
-	const data = isRecord(payload) ? payload.data : undefined;
+	const data = Array.isArray(payload) ? payload : isRecord(payload) ? payload.data : undefined;
 	if (!Array.isArray(data)) {
 		throw new Error(`Invalid model list from ${provider}`);
 	}
@@ -788,6 +825,8 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 	return data.flatMap((entry) => {
 		if (!isRecord(entry) || typeof entry.id !== "string" || entry.id.length === 0) return [];
 		if (source.entryFilter && !source.entryFilter(entry)) return [];
+		// Inactive gateway entries never serve requests.
+		if (entry.active === false) return [];
 		// Providers may list one id more than once (e.g. GMI Cloud serves free and
 		// paid deployments of the same model under one id); keep the first entry.
 		if (seen.has(entry.id)) return [];
@@ -799,18 +838,64 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 			return Number.isFinite(parsed) && parsed > 0 ? parsed * 1_000_000 : 0;
 		};
 		const supportedParameters = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : [];
+		const supportedFeatures = Array.isArray(entry.supported_features) ? entry.supported_features : [];
 		const architecture = isRecord(entry.architecture) ? entry.architecture : {};
 		const capabilities = isRecord(entry.capabilities) ? entry.capabilities : {};
 		const limits = isRecord(capabilities.limits) ? capabilities.limits : {};
-		const contextWindow = firstPositiveNumber(entry.context_length, limits.max_context_window_tokens) ?? 128000;
-		const maxTokens = firstPositiveNumber(topProvider.max_completion_tokens, limits.max_output_tokens) ?? 16384;
+		// HuggingFace nests per-provider serving data; aggregate the healthy ones.
+		const hfProviders = Array.isArray(entry.providers)
+			? entry.providers.filter((p): p is Record<string, unknown> => isRecord(p) && p.status !== "error")
+			: [];
+		const hfContext = (name: string): unknown =>
+			hfProviders.length > 0
+				? Math.max(
+						...hfProviders.map((p) =>
+							typeof p[name] === "number" && Number.isFinite(p[name]) ? (p[name] as number) : 0,
+						),
+					)
+				: undefined;
+		const hfPricing = (name: string): unknown => {
+			for (const p of hfProviders) {
+				const pricing = isRecord(p.pricing) ? p.pricing : undefined;
+				const value = pricing?.[name];
+				if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+			}
+			return undefined;
+		};
+		const contextWindow =
+			firstPositiveNumber(
+				entry.context_length,
+				entry.context_window,
+				entry.max_context_length,
+				limits.max_context_window_tokens,
+				entry.max_input_tokens,
+				hfContext("context_length"),
+			) ?? 128000;
+		const maxTokens =
+			firstPositiveNumber(
+				topProvider.max_completion_tokens,
+				limits.max_output_tokens,
+				entry.max_tokens,
+				entry.max_output_length,
+			) ?? 16384;
 		const inputModalities = Array.isArray(architecture.input_modalities) ? architecture.input_modalities : [];
+		const imageCapable =
+			inputModalities.includes("image") ||
+			capabilities.image_input === true ||
+			(isRecord(capabilities.image_input) && capabilities.image_input.supported === true);
 		const outputModalities = Array.isArray(architecture.output_modalities)
 			? architecture.output_modalities.filter(
 					(value): value is ModelOutputModality =>
 						value === "text" || value === "image" || value === "audio" || value === "video",
 				)
 			: [];
+		const thinking = capabilities.thinking;
+		const reasoning =
+			supportedParameters.includes("reasoning") ||
+			supportedFeatures.includes("reasoning") ||
+			entry.supports_reasoning === true ||
+			thinking === true ||
+			(isRecord(thinking) && thinking.supported === true);
 		return [
 			{
 				id: entry.id,
@@ -818,12 +903,12 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 				api: source.api,
 				provider,
 				baseUrl: source.baseUrl,
-				reasoning: supportedParameters.includes("reasoning"),
-				input: inputModalities.includes("image") ? ["text", "image"] : ["text"],
+				reasoning,
+				input: imageCapable ? ["text", "image"] : ["text"],
 				...(outputModalities.length > 0 ? { output: outputModalities } : {}),
 				cost: {
-					input: costPerMTok(pricing.prompt),
-					output: costPerMTok(pricing.completion),
+					input: costPerMTok(pricing.prompt ?? hfPricing("input")),
+					output: costPerMTok(pricing.completion ?? hfPricing("output")),
 					cacheRead: 0,
 					cacheWrite: 0,
 				},
@@ -1209,14 +1294,21 @@ export class ModelRegistry {
 	 * static list. Falls back to the on-disk cache when a fetch fails.
 	 */
 	private async refreshDynamicModels(): Promise<void> {
+		const offline = _isOfflineModeEnabled();
 		await Promise.all(
 			Object.entries(DYNAMIC_MODEL_SOURCES)
-				.filter(([provider]) => this.hasConfiguredProviderAuth(provider))
-				.map(([provider, source]) => this.refreshDynamicProviderModels(provider, source)),
+				// Public endpoints need no credentials; authenticated ones need a key.
+				// Offline: never fetch, fall back to cache below.
+				.filter(([provider, source]) => !source.authenticated || this.hasConfiguredProviderAuth(provider))
+				.map(([provider, source]) => this.refreshDynamicProviderModels(provider, source, offline)),
 		);
 	}
 
-	private async refreshDynamicProviderModels(provider: string, source: DynamicModelSource): Promise<void> {
+	private async refreshDynamicProviderModels(
+		provider: string,
+		source: DynamicModelSource,
+		offline = false,
+	): Promise<void> {
 		const now = Date.now();
 		if (now - (this.dynamicModelsRefreshedAt.get(provider) ?? 0) < DYNAMIC_MODELS_TTL_MS) {
 			// refresh() rebuilds the static list, so re-apply the last discovery result.
@@ -1232,6 +1324,13 @@ export class ModelRegistry {
 			return;
 		}
 
+		// Offline: never hit network; stale cache (if any) applies below.
+		if (offline) {
+			this.dynamicModelsRefreshedAt.set(provider, now);
+			if (cached) this.applyDiscoveredModels(provider, cached.models);
+			return;
+		}
+
 		try {
 			let models: Model<Api>[];
 			const fetcher = dynamicModelsFetchers.get(provider);
@@ -1241,30 +1340,31 @@ export class ModelRegistry {
 				}
 				models = parseDynamicModelList(await fetcher(), provider, source);
 			} else if ("fetchModels" in source) {
-				const seedModel = this.models.find((model) => model.provider === provider);
-				const auth = seedModel ? await this.getApiKeyAndHeaders(seedModel) : undefined;
-				if (!auth?.ok || (!auth.apiKey && !auth.headers)) {
+				const apiKey = await this.getApiKeyForProvider(provider);
+				if (!apiKey) {
 					throw new Error(`${provider} model discovery requires configured auth`);
 				}
-				models = await source.fetchModels(auth.apiKey, AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS));
+				models = await source.fetchModels(apiKey, AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS));
 			} else {
 				const requestInit: RequestInit = { signal: AbortSignal.timeout(DYNAMIC_MODELS_TIMEOUT_MS) };
 				if (source.authenticated) {
-					const seedModel = this.models.find((model) => model.provider === provider);
-					const auth = seedModel ? await this.getApiKeyAndHeaders(seedModel) : undefined;
-					if (!auth?.ok || (!auth.apiKey && !auth.headers)) {
+					const apiKey = await this.getApiKeyForProvider(provider);
+					if (!apiKey) {
 						throw new Error(`${provider} model discovery requires configured auth`);
 					}
-					requestInit.headers = {
-						...(auth.apiKey ? discoveryAuthHeaders(source.authStyle, auth.apiKey) : {}),
-						...auth.headers,
-					};
+					requestInit.headers = discoveryAuthHeaders(source.authStyle, apiKey);
 				}
 				const response = await fetch(source.url, requestInit);
 				if (!response.ok) {
 					throw new Error(`${provider} model discovery failed with HTTP ${response.status}`);
 				}
-				models = parseDynamicModelList(await response.json(), provider, source);
+				const firstPage = await response.json();
+				models = parseDynamicModelList(firstPage, provider, source);
+				// Follow provider cursors (anthropic after_id, google pageToken);
+				// single page when the source is not paginated. Cap bounds latency.
+				if (source.paginate) {
+					models = [...models, ...(await this.fetchDynamicModelPages(provider, source, requestInit, firstPage))];
+				}
 			}
 
 			if (models.length === 0) {
@@ -1281,6 +1381,43 @@ export class ModelRegistry {
 			this.applyDiscoveredModels(provider, cached.models);
 			this.discoveredModels.set(provider, cached.models);
 		}
+	}
+
+	/** Follow a paginated discovery endpoint, merging follow-up pages (cap 9). */
+	private async fetchDynamicModelPages(
+		provider: string,
+		source: DynamicModelEndpointSource,
+		requestInit: RequestInit,
+		firstPage: unknown,
+	): Promise<Model<Api>[]> {
+		const extra: Model<Api>[] = [];
+		let cursor: string | undefined;
+		if (source.paginate === "anthropic" && isRecord(firstPage)) {
+			cursor = firstPage.has_more === true && typeof firstPage.last_id === "string" ? firstPage.last_id : undefined;
+		} else if (source.paginate === "google" && isRecord(firstPage)) {
+			cursor =
+				typeof firstPage.nextPageToken === "string" && firstPage.nextPageToken
+					? firstPage.nextPageToken
+					: undefined;
+		}
+		for (let page = 0; page < 9 && cursor; page++) {
+			const url =
+				source.paginate === "anthropic"
+					? `${source.url}?after_id=${encodeURIComponent(cursor)}`
+					: `${source.url}?pageToken=${encodeURIComponent(cursor)}`;
+			const response = await fetch(url, requestInit);
+			if (!response.ok) break;
+			const payload: unknown = await response.json();
+			extra.push(...parseDynamicModelList(payload, provider, source));
+			if (!isRecord(payload)) break;
+			if (source.paginate === "anthropic") {
+				cursor = payload.has_more === true && typeof payload.last_id === "string" ? payload.last_id : undefined;
+			} else {
+				cursor =
+					typeof payload.nextPageToken === "string" && payload.nextPageToken ? payload.nextPageToken : undefined;
+			}
+		}
+		return extra;
 	}
 
 	/** Replace a provider's static entries with discovered ones, keeping models.json models. */
@@ -1334,7 +1471,10 @@ export class ModelRegistry {
 		try {
 			const cache = this.readDynamicModelCache();
 			cache.providers[provider] = entry;
-			writeFileSync(path, JSON.stringify(cache));
+			// Atomic tmp+rename: parallel daemon sessions must never read torn JSON.
+			const tmpPath = `${path}.${process.pid}.tmp`;
+			writeFileSync(tmpPath, JSON.stringify(cache));
+			renameSync(tmpPath, path);
 		} catch {
 			// Cache writes are best-effort; discovery still works in memory.
 		}
