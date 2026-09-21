@@ -18,12 +18,6 @@ export {
 } from "./github-copilot.js";
 export { grokOAuthProvider, loginGrok, refreshGrokToken } from "./grok.js";
 export { loginOpenAICodex, openaiCodexOAuthProvider, refreshOpenAICodexToken } from "./openai-codex.js";
-export {
-	loginOpenCode,
-	opencodeGoOAuthProvider,
-	opencodeOAuthProvider,
-	refreshOpenCodeToken,
-} from "./opencode.js";
 
 export * from "./types.js";
 
@@ -32,7 +26,6 @@ import { cursorOAuthProvider } from "./cursor.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
 import { grokOAuthProvider } from "./grok.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
-import { opencodeGoOAuthProvider, opencodeOAuthProvider } from "./opencode.js";
 import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProviderInterface } from "./types.js";
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
@@ -41,8 +34,6 @@ const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	cursorOAuthProvider,
 	grokOAuthProvider,
 	openaiCodexOAuthProvider,
-	opencodeOAuthProvider,
-	opencodeGoOAuthProvider,
 ];
 
 const oauthProviderRegistry = new Map<string, OAuthProviderInterface>(

@@ -1,0 +1,1 @@
+- Removed the OpenCode OAuth device flow: the gateway exposes no device approval page, so login now uses API-key paste (create a key at https://opencode.ai/auth) matching the official CLI.

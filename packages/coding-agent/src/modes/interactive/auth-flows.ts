@@ -320,6 +320,12 @@ export class ProviderAuthFlows {
 		};
 
 		try {
+			if (providerId === "opencode" || providerId === "opencode-go") {
+				dialog.showInfo([
+					"Sign in at https://opencode.ai/auth, add billing details,",
+					"then create an API key and paste it below.",
+				]);
+			}
 			const apiKey = (await dialog.showPrompt("Enter API key:")).trim();
 			if (!apiKey) {
 				throw new Error("API key cannot be empty.");
