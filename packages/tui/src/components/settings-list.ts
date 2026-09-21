@@ -1,7 +1,6 @@
 import { fuzzyFilter } from "../fuzzy.js";
 import { keyText } from "../keybinding-format.js";
-import { getKeybindings } from "../keybindings.js";
-import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
+import { ListNav } from "../list-window.js";
 import type { Component } from "../tui.js";
 import { dotJoin, padEndAnsi, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 import { Input } from "./input.js";
@@ -37,8 +36,7 @@ export class SettingsList implements Component {
 	private items: SettingItem[];
 	private filteredItems: SettingItem[];
 	private theme: SettingsListTheme;
-	private selectedIndex = 0;
-	private maxVisible: number;
+	private nav: ListNav;
 	private onChange: (id: string, newValue: string) => void;
 	private onCancel: () => void;
 	private searchInput?: Input;
@@ -57,7 +55,7 @@ export class SettingsList implements Component {
 	) {
 		this.items = items;
 		this.filteredItems = items;
-		this.maxVisible = maxVisible;
+		this.nav = new ListNav(maxVisible);
 		this.theme = theme;
 		this.onChange = onChange;
 		this.onCancel = onCancel;
@@ -109,7 +107,7 @@ export class SettingsList implements Component {
 			return lines;
 		}
 
-		const { start: startIndex, end: endIndex } = listWindow(this.selectedIndex, displayItems.length, this.maxVisible);
+		const { start: startIndex, end: endIndex } = this.nav.window(displayItems.length);
 
 		const maxLabelWidth = Math.min(30, Math.max(...this.items.map((item) => visibleWidth(item.label))));
 
@@ -117,7 +115,7 @@ export class SettingsList implements Component {
 			const item = displayItems[i];
 			if (!item) continue;
 
-			const isSelected = i === this.selectedIndex;
+			const isSelected = i === this.nav.getSelectedIndex();
 			const prefix = isSelected ? this.theme.cursor : "  ";
 			const prefixWidth = visibleWidth(prefix);
 
@@ -134,11 +132,11 @@ export class SettingsList implements Component {
 		}
 
 		if (startIndex > 0 || endIndex < displayItems.length) {
-			const scrollText = scrollPositionText(this.selectedIndex, displayItems.length);
+			const scrollText = this.nav.position(displayItems.length);
 			lines.push(this.theme.hint(truncateToWidth(scrollText, width - 2, "")));
 		}
 
-		const selectedItem = displayItems[this.selectedIndex];
+		const selectedItem = displayItems[this.nav.getSelectedIndex()];
 		if (selectedItem?.description) {
 			lines.push("");
 			const wrappedDesc = wrapTextWithAnsi(selectedItem.description, width - 4);
@@ -160,20 +158,15 @@ export class SettingsList implements Component {
 			return;
 		}
 
-		const kb = getKeybindings();
 		const displayItems = this.searchEnabled ? this.filteredItems : this.items;
-		if (kb.matches(data, "tui.select.up")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, -1, true);
-		} else if (kb.matches(data, "tui.select.down")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, 1, true);
-		} else if (kb.matches(data, "tui.select.pageUp")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, -this.maxVisible);
-		} else if (kb.matches(data, "tui.select.pageDown")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, displayItems.length, this.maxVisible);
-		} else if (kb.matches(data, "tui.select.confirm") || data === " ") {
+		const handled = this.nav.handleNavKey(data, {
+			total: displayItems.length,
+			onConfirm: () => this.activateItem(),
+			onCancel: () => this.onCancel(),
+		});
+		if (handled) return;
+		if (data === " ") {
 			this.activateItem();
-		} else if (kb.matches(data, "tui.select.cancel")) {
-			this.onCancel();
 		} else if (this.searchEnabled && this.searchInput) {
 			const sanitized = data.replace(/ /g, "");
 			if (!sanitized) {
@@ -185,11 +178,12 @@ export class SettingsList implements Component {
 	}
 
 	private activateItem(): void {
-		const item = this.searchEnabled ? this.filteredItems[this.selectedIndex] : this.items[this.selectedIndex];
+		const index = this.nav.getSelectedIndex();
+		const item = this.searchEnabled ? this.filteredItems[index] : this.items[index];
 		if (!item) return;
 
 		if (item.submenu) {
-			this.submenuItemIndex = this.selectedIndex;
+			this.submenuItemIndex = index;
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue?: string) => {
 				if (selectedValue !== undefined) {
 					item.currentValue = selectedValue;
@@ -209,14 +203,15 @@ export class SettingsList implements Component {
 	private closeSubmenu(): void {
 		this.submenuComponent = null;
 		if (this.submenuItemIndex !== null) {
-			this.selectedIndex = this.submenuItemIndex;
+			const displayItems = this.searchEnabled ? this.filteredItems : this.items;
+			this.nav.setSelectedIndex(this.submenuItemIndex, displayItems.length);
 			this.submenuItemIndex = null;
 		}
 	}
 
 	private applyFilter(query: string): void {
 		this.filteredItems = fuzzyFilter(this.items, query, (item) => item.label);
-		this.selectedIndex = 0;
+		this.nav.setSelectedIndex(0, this.filteredItems.length);
 	}
 
 	private addHintLine(lines: string[], width: number): void {

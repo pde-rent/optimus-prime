@@ -6,10 +6,6 @@ export { BashExecutionComponent } from "./bash-execution.js";
 export { BorderedLoader } from "./bordered-loader.js";
 export { BranchSummaryMessageComponent } from "./branch-summary-message.js";
 export {
-	CompactionOutcomeMessageComponent,
-	MalformedCompactionOutcomeMessageComponent,
-} from "./compaction-outcome-message.js";
-export {
 	CompactionSummaryMessageComponent,
 	StreamingCompactionComponent,
 } from "./compaction-summary-message.js";
@@ -38,6 +34,10 @@ export {
 export { type ModelsCallbacks, type ModelsConfig, ScopedModelsSelectorComponent } from "./scoped-models-selector.js";
 export { SelectModalComponent, type SelectModalOptions } from "./select-modal.js";
 export { type SettingsCallbacks, type SettingsConfig, SettingsSelectorComponent } from "./settings-selector.js";
+export {
+	CompactionOutcomeMessageComponent,
+	MalformedCompactionOutcomeMessageComponent,
+} from "./simple-message.js";
 export { SkillInvocationMessageComponent } from "./skill-invocation-message.js";
 export { SubagentSummaryLine } from "./subagent-summary-line.js";
 export { ToolExecutionComponent, type ToolExecutionOptions } from "./tool-execution.js";

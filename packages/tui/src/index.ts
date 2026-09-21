@@ -58,7 +58,14 @@ export {
 	setKittyProtocolActive,
 } from "./keys.js";
 export { latexToUnicode } from "./latex.js";
-export { type ListWindow, listWindow, moveSelection, scrollPositionText } from "./list-window.js";
+export {
+	ListNav,
+	type ListNavKeyHandlers,
+	type ListWindow,
+	listWindow,
+	moveSelection,
+	scrollPositionText,
+} from "./list-window.js";
 export {
 	isMouseSequence,
 	isWheelDown,

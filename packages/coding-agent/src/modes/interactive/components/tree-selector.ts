@@ -5,10 +5,8 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
-	listWindow,
-	moveSelection,
+	ListNav,
 	Spacer,
-	scrollPositionText,
 	Text,
 	TruncatedText,
 	truncateToWidth,
@@ -67,9 +65,8 @@ interface ToolCallInfo {
 class TreeList implements Component {
 	private flatNodes: FlatNode[] = [];
 	private filteredNodes: FlatNode[] = [];
-	private selectedIndex = 0;
+	private nav: ListNav;
 	private currentLeafId: string | null;
-	private maxVisibleLines: number;
 	private filterMode: FilterMode = "default";
 	private searchQuery = "";
 	private toolCallMap: Map<string, ToolCallInfo> = new Map();
@@ -98,7 +95,7 @@ class TreeList implements Component {
 	) {
 		this.cwd = options?.cwd;
 		this.currentLeafId = currentLeafId;
-		this.maxVisibleLines = maxVisibleLines;
+		this.nav = new ListNav(maxVisibleLines);
 		this.filterMode = initialFilterMode ?? "default";
 		this.multipleRoots = tree.length > 1;
 		this.flatNodes = this.flattenTree(tree);
@@ -107,8 +104,8 @@ class TreeList implements Component {
 
 		// Start with initialSelectedId if provided, otherwise current leaf
 		const targetId = initialSelectedId ?? currentLeafId;
-		this.selectedIndex = this.findNearestVisibleIndex(targetId);
-		this.lastSelectedId = this.filteredNodes[this.selectedIndex]?.node.entry.id ?? null;
+		this.nav.setSelectedIndex(this.findNearestVisibleIndex(targetId), this.filteredNodes.length);
+		this.lastSelectedId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id ?? null;
 	}
 
 	/**
@@ -296,7 +293,7 @@ class TreeList implements Component {
 		// Update lastSelectedId only when we have a valid selection (non-empty list)
 		// This preserves the selection when switching through empty filter results
 		if (this.filteredNodes.length > 0) {
-			this.lastSelectedId = this.filteredNodes[this.selectedIndex]?.node.entry.id ?? this.lastSelectedId;
+			this.lastSelectedId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id ?? this.lastSelectedId;
 		}
 
 		const searchTokens = this.searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
@@ -380,15 +377,14 @@ class TreeList implements Component {
 
 		// Try to preserve cursor on the same node, or find nearest visible ancestor
 		if (this.lastSelectedId) {
-			this.selectedIndex = this.findNearestVisibleIndex(this.lastSelectedId);
-		} else if (this.selectedIndex >= this.filteredNodes.length) {
-			// Clamp index if out of bounds
-			this.selectedIndex = Math.max(0, this.filteredNodes.length - 1);
+			this.nav.setSelectedIndex(this.findNearestVisibleIndex(this.lastSelectedId), this.filteredNodes.length);
+		} else {
+			this.nav.clamp(this.filteredNodes.length);
 		}
 
 		// Update lastSelectedId to the actual selection (may have changed due to parent walk)
 		if (this.filteredNodes.length > 0) {
-			this.lastSelectedId = this.filteredNodes[this.selectedIndex]?.node.entry.id ?? this.lastSelectedId;
+			this.lastSelectedId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id ?? this.lastSelectedId;
 		}
 	}
 
@@ -595,7 +591,7 @@ class TreeList implements Component {
 	}
 
 	getSelectedNode(): AgentConnectionSessionTreeNode | undefined {
-		return this.filteredNodes[this.selectedIndex]?.node;
+		return this.filteredNodes[this.nav.getSelectedIndex()]?.node;
 	}
 
 	updateNodeLabel(entryId: string, label: string | undefined, labelTimestamp?: string): void {
@@ -638,11 +634,7 @@ class TreeList implements Component {
 			];
 		}
 
-		const { start: startIndex, end: endIndex } = listWindow(
-			this.selectedIndex,
-			this.filteredNodes.length,
-			this.maxVisibleLines,
-		);
+		const { start: startIndex, end: endIndex } = this.nav.window(this.filteredNodes.length);
 
 		// Shared modal list surface: flush rows with the breathing band around
 		// the selection bar, matching every other MenuPanel dialog.
@@ -650,7 +642,7 @@ class TreeList implements Component {
 		for (let i = startIndex; i < endIndex; i++) {
 			const flatNode = this.filteredNodes[i];
 			const entry = flatNode.node.entry;
-			const isSelected = i === this.selectedIndex;
+			const isSelected = i === this.nav.getSelectedIndex();
 
 			// Build line: cursor + prefix + path marker + label + content
 			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
@@ -724,14 +716,7 @@ class TreeList implements Component {
 		}
 
 		list.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					scrollPositionText(this.selectedIndex, this.filteredNodes.length) + this.getStatusLabels(),
-				),
-				0,
-				0,
-			),
+			new Text(theme.fg("muted", this.nav.position(this.filteredNodes.length) + this.getStatusLabels()), 0, 0),
 		);
 
 		return list.render(width);
@@ -971,27 +956,27 @@ class TreeList implements Component {
 	handleInput(keyData: string): void {
 		const kb = getKeybindings();
 		if (kb.matches(keyData, "tui.select.up")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, -1, true);
+			this.nav.moveBy(-1, this.filteredNodes.length, true);
 		} else if (kb.matches(keyData, "tui.select.down")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, 1, true);
+			this.nav.moveBy(1, this.filteredNodes.length, true);
 		} else if (kb.matches(keyData, "app.tree.foldOrUp")) {
-			const currentId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
+			const currentId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id;
 			if (currentId && this.isFoldable(currentId) && !this.foldedNodes.has(currentId)) {
 				this.foldedNodes.add(currentId);
 				this.applyFilter();
 			} else {
-				this.selectedIndex = this.findBranchSegmentStart("up");
+				this.nav.setSelectedIndex(this.findBranchSegmentStart("up"), this.filteredNodes.length);
 			}
 		} else if (kb.matches(keyData, "app.tree.unfoldOrDown")) {
-			const currentId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
+			const currentId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id;
 			if (currentId && this.foldedNodes.has(currentId)) {
 				this.foldedNodes.delete(currentId);
 				this.applyFilter();
 			} else {
-				this.selectedIndex = this.findBranchSegmentStart("down");
+				this.nav.setSelectedIndex(this.findBranchSegmentStart("down"), this.filteredNodes.length);
 			}
 		} else if (kb.matches(keyData, "app.edits.expand")) {
-			const selected = this.filteredNodes[this.selectedIndex]?.node.entry;
+			const selected = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry;
 			if (selected && this.getEntryDiffs(selected).length > 0) {
 				if (this.diffExpandedIds.has(selected.id)) {
 					this.diffExpandedIds.delete(selected.id);
@@ -1000,11 +985,11 @@ class TreeList implements Component {
 				}
 			}
 		} else if (kb.matches(keyData, "tui.editor.cursorLeft") || kb.matches(keyData, "tui.select.pageUp")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, -this.maxVisibleLines);
+			this.nav.moveBy(-this.nav.getMaxVisible(), this.filteredNodes.length);
 		} else if (kb.matches(keyData, "tui.editor.cursorRight") || kb.matches(keyData, "tui.select.pageDown")) {
-			this.selectedIndex = moveSelection(this.selectedIndex, this.filteredNodes.length, this.maxVisibleLines);
+			this.nav.moveBy(this.nav.getMaxVisible(), this.filteredNodes.length);
 		} else if (kb.matches(keyData, "tui.select.confirm")) {
-			const selected = this.filteredNodes[this.selectedIndex];
+			const selected = this.filteredNodes[this.nav.getSelectedIndex()];
 			if (selected && this.onSelect) {
 				this.onSelect(selected.node.entry.id);
 			}
@@ -1062,7 +1047,7 @@ class TreeList implements Component {
 				this.applyFilter();
 			}
 		} else if (kb.matches(keyData, "app.tree.editLabel")) {
-			const selected = this.filteredNodes[this.selectedIndex];
+			const selected = this.filteredNodes[this.nav.getSelectedIndex()];
 			if (selected && this.onLabelEdit) {
 				this.onLabelEdit(selected.node.entry.id, selected.node.label);
 			}
@@ -1103,8 +1088,8 @@ class TreeList implements Component {
 	 * (always following the first child).
 	 */
 	private findBranchSegmentStart(direction: "up" | "down"): number {
-		const selectedId = this.filteredNodes[this.selectedIndex]?.node.entry.id;
-		if (!selectedId) return this.selectedIndex;
+		const selectedId = this.filteredNodes[this.nav.getSelectedIndex()]?.node.entry.id;
+		if (!selectedId) return this.nav.getSelectedIndex();
 
 		const indexByEntryId = new Map(this.filteredNodes.map((node, i) => [node.node.entry.id, i]));
 		let currentId: string = selectedId;
@@ -1124,7 +1109,7 @@ class TreeList implements Component {
 			const children = this.visibleChildrenMap.get(parentId) ?? [];
 			if (children.length > 1) {
 				const segmentStart = indexByEntryId.get(currentId)!;
-				if (segmentStart < this.selectedIndex) {
+				if (segmentStart < this.nav.getSelectedIndex()) {
 					return segmentStart;
 				}
 			}

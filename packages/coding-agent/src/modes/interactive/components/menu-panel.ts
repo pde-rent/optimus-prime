@@ -4,9 +4,7 @@ import {
 	type Focusable,
 	getKeybindings,
 	Input,
-	listWindow,
-	moveSelection,
-	scrollPositionText,
+	ListNav,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
@@ -268,7 +266,7 @@ export interface MenuSelectorConfig<T> extends MenuViewportProvider {
 }
 
 export class MenuSelector<T> {
-	private selectedIndex = 0;
+	private readonly nav = new ListNav(1);
 	private lastFilterQuery = "";
 	private items?: readonly T[];
 	private layout: MenuListLayout;
@@ -282,6 +280,7 @@ export class MenuSelector<T> {
 			reservedRows: config.reservedRows(),
 			...getMenuItemRows(config.rowShape ?? "detailed"),
 		});
+		this.nav.setMaxVisible(Math.max(1, this.layout.visibleItems));
 	}
 
 	get visibleItems(): number {
@@ -293,15 +292,15 @@ export class MenuSelector<T> {
 	}
 
 	getSelectedIndex(): number {
-		return this.selectedIndex;
+		return this.nav.getSelectedIndex();
 	}
 
 	setSelectedIndex(index: number): void {
-		this.selectedIndex = index;
+		this.nav.setSelectedIndex(index, this.items?.length ?? index + 1);
 	}
 
 	clampSelectedIndex(totalItems: number): void {
-		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, Math.max(0, totalItems - 1)));
+		this.nav.clamp(totalItems);
 	}
 
 	/**
@@ -314,11 +313,11 @@ export class MenuSelector<T> {
 		this.lastFilterQuery = query;
 		this.items = matches;
 		if (queryChanged) {
-			this.selectedIndex = this.firstSelectableIndex(matches.length);
+			this.nav.setSelectedIndex(this.firstSelectableIndex(matches.length), matches.length);
 		} else {
-			this.clampSelectedIndex(matches.length);
-			const nearest = this.nearestSelectableIndex(this.selectedIndex);
-			if (nearest >= 0) this.selectedIndex = nearest;
+			this.nav.clamp(matches.length);
+			const nearest = this.nearestSelectableIndex(this.nav.getSelectedIndex());
+			if (nearest >= 0) this.nav.setSelectedIndex(nearest, matches.length);
 		}
 	}
 
@@ -360,15 +359,13 @@ export class MenuSelector<T> {
 			...getMenuItemRows(this.config.rowShape ?? "detailed"),
 			scrollIndicatorRows: this.config.scrollIndicatorRows,
 		});
+		this.nav.setMaxVisible(Math.max(1, this.layout.visibleItems));
 		return previous.compact !== this.layout.compact || previous.visibleItems !== this.layout.visibleItems;
 	}
 
 	/** Move the selection by `delta`; true when the selection changed. */
 	moveBy(delta: number, totalItems: number, wrap = false): boolean {
-		const next = moveSelection(this.selectedIndex, totalItems, delta, wrap);
-		if (next === this.selectedIndex) return false;
-		this.selectedIndex = next;
-		return true;
+		return this.nav.moveBy(delta, totalItems, wrap);
 	}
 
 	/**
@@ -390,7 +387,7 @@ export class MenuSelector<T> {
 		if (kb.matches(keyData, "tui.select.pageUp")) return this.applyPage(-1, options);
 		if (kb.matches(keyData, "tui.select.pageDown")) return this.applyPage(1, options);
 		if (kb.matches(keyData, "tui.select.confirm")) {
-			options.onConfirm(this.selectedIndex);
+			options.onConfirm(this.nav.getSelectedIndex());
 			return true;
 		}
 		if (kb.matches(keyData, "tui.select.cancel")) {
@@ -415,16 +412,16 @@ export class MenuSelector<T> {
 		const wrap = this.config.wrapSingleStep === true;
 		let target = -1;
 		if (wrap && totalItems > 0) {
-			let index = this.selectedIndex;
+			let index = this.nav.getSelectedIndex();
 			do {
 				index = (((index + direction) % totalItems) + totalItems) % totalItems;
 				if (this.isSelectableAt(index)) {
 					target = index;
 					break;
 				}
-			} while (index !== this.selectedIndex);
+			} while (index !== this.nav.getSelectedIndex());
 		} else {
-			let index = this.selectedIndex + direction;
+			let index = this.nav.getSelectedIndex() + direction;
 			while (index >= 0 && index < totalItems) {
 				if (this.isSelectableAt(index)) {
 					target = index;
@@ -433,8 +430,8 @@ export class MenuSelector<T> {
 				index += direction;
 			}
 		}
-		if (target < 0 || target === this.selectedIndex) return true;
-		this.selectedIndex = target;
+		if (target < 0 || target === this.nav.getSelectedIndex()) return true;
+		this.nav.setSelectedIndex(target, totalItems);
 		options.rerender();
 		return true;
 	}
@@ -450,14 +447,14 @@ export class MenuSelector<T> {
 		if (totalItems > 0) {
 			let target: number;
 			if (direction === -1) {
-				target = Math.max(0, this.selectedIndex - pageSize);
+				target = Math.max(0, this.nav.getSelectedIndex() - pageSize);
 				while (target < totalItems && !this.isSelectableAt(target)) target++;
 			} else {
-				target = Math.min(totalItems - 1, this.selectedIndex + pageSize);
+				target = Math.min(totalItems - 1, this.nav.getSelectedIndex() + pageSize);
 				while (target >= 0 && !this.isSelectableAt(target)) target--;
 			}
-			if (target >= 0 && target < totalItems && target !== this.selectedIndex) {
-				this.selectedIndex = target;
+			if (target >= 0 && target < totalItems && target !== this.nav.getSelectedIndex()) {
+				this.nav.setSelectedIndex(target, totalItems);
 				changed = true;
 			}
 		}
@@ -472,14 +469,12 @@ export class MenuSelector<T> {
 		makeScrollIndicator?: (text: string) => Component,
 	): { start: number; end: number } {
 		this.listContainer.clear();
-		const { start, end } = listWindow(this.selectedIndex, items.length, this.layout.visibleItems);
+		const { start, end } = this.nav.window(items.length);
 		for (let i = start; i < end; i++) {
-			this.listContainer.addChild(makeRow(items[i], i === this.selectedIndex));
+			this.listContainer.addChild(makeRow(items[i], i === this.nav.getSelectedIndex()));
 		}
 		if ((start > 0 || end < items.length) && makeScrollIndicator) {
-			this.listContainer.addChild(
-				makeScrollIndicator(theme.fg("muted", scrollPositionText(this.selectedIndex, items.length))),
-			);
+			this.listContainer.addChild(makeScrollIndicator(theme.fg("muted", this.nav.position(items.length))));
 		}
 		return { start, end };
 	}
@@ -651,25 +646,6 @@ export class MenuRow implements Component, FullWidthMenuComponent {
 	}
 }
 
-/**
- * Wraps a child that paints its own full-width surface (e.g. a selection bar)
- * so it renders across the whole padded panel width and skips the panel's
- * per-line padding, which would inset the child's painted surface.
- */
-export class MenuSurfaceChild implements Component, FullWidthMenuComponent {
-	readonly fillsMenuPanel = true;
-
-	constructor(private readonly component: Component) {}
-
-	invalidate(): void {
-		this.component.invalidate?.();
-	}
-
-	render(width: number): string[] {
-		return this.component.render(width);
-	}
-}
-
 export class MenuList extends Container implements FullWidthMenuComponent {
 	readonly fillsMenuPanel = true;
 
@@ -712,4 +688,21 @@ export class MenuList extends Container implements FullWidthMenuComponent {
 		const compact = this.options.compact;
 		return typeof compact === "function" ? compact() : compact === true;
 	}
+}
+
+/** A text input whose cursor position can be inspected. */
+export interface BackGuardInput {
+	getCursor(): number;
+}
+
+/**
+ * True when `data` should dismiss current dialog (acts like Esc).
+ * Dialogs with text field pass input: left arrow acts as back only at column 0,
+ * else available for cursor movement. Dialogs without field omit `input`.
+ */
+export function shouldTreatAsBack(data: string, input?: BackGuardInput): boolean {
+	if (!getKeybindings().matches(data, "app.modal.back")) {
+		return false;
+	}
+	return input === undefined || input.getCursor() === 0;
 }

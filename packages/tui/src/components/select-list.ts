@@ -1,5 +1,4 @@
-import { getKeybindings } from "../keybindings.js";
-import { listWindow, moveSelection, scrollPositionText } from "../list-window.js";
+import { ListNav } from "../list-window.js";
 import type { Component } from "../tui.js";
 import { padEndAnsi, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 
@@ -78,8 +77,7 @@ export interface SelectListLayoutOptions {
 export class SelectList implements Component {
 	private items: SelectItem[] = [];
 	private filteredItems: SelectItem[] = [];
-	private selectedIndex: number = 0;
-	private maxVisible: number = 5;
+	private nav: ListNav;
 	private theme: SelectListTheme;
 	private layout: SelectListLayoutOptions;
 
@@ -91,33 +89,33 @@ export class SelectList implements Component {
 	constructor(items: SelectItem[], maxVisible: number, theme: SelectListTheme, layout: SelectListLayoutOptions = {}) {
 		this.items = items;
 		this.filteredItems = items;
-		this.maxVisible = maxVisible;
+		this.nav = new ListNav(maxVisible);
 		this.theme = theme;
 		this.layout = layout;
 	}
 
 	setFilter(filter: string): void {
 		this.filteredItems = this.items.filter((item) => item.value.toLowerCase().startsWith(filter.toLowerCase()));
-		this.selectedIndex = 0;
+		this.nav.setSelectedIndex(0, this.filteredItems.length);
 	}
 
 	/** Replaces the backing items, keeping the selection in range. */
 	setItems(items: SelectItem[]): void {
 		this.items = items;
 		this.filteredItems = items;
-		this.selectedIndex = Math.max(0, Math.min(this.selectedIndex, items.length - 1));
+		this.nav.clamp(items.length);
 	}
 
 	setSelectedIndex(index: number): void {
-		this.selectedIndex = Math.max(0, Math.min(index, this.filteredItems.length - 1));
+		this.nav.setSelectedIndex(index, this.filteredItems.length);
 	}
 
 	getSelectedIndex(): number {
-		return this.selectedIndex;
+		return this.nav.getSelectedIndex();
 	}
 
 	setMaxVisible(maxVisible: number): void {
-		this.maxVisible = Math.max(1, maxVisible);
+		this.nav.setMaxVisible(maxVisible);
 	}
 
 	invalidate(): void {}
@@ -135,13 +133,13 @@ export class SelectList implements Component {
 		}
 
 		const primaryColumnWidth = this.getPrimaryColumnWidth();
-		const { start, end } = listWindow(this.selectedIndex, total, this.maxVisible);
+		const { start, end } = this.nav.window(total);
 
 		for (let i = start; i < end; i++) {
 			const item = this.filteredItems[i];
 			if (!item) continue;
 
-			const isSelected = i === this.selectedIndex;
+			const isSelected = i === this.nav.getSelectedIndex();
 			if (this.layout.renderRow) {
 				const rendered = this.layout.renderRow({ item, index: i, isSelected, width });
 				lines.push(...(Array.isArray(rendered) ? rendered : [rendered]));
@@ -154,7 +152,7 @@ export class SelectList implements Component {
 		if (this.layout.alwaysShowScrollInfo || start > 0 || end < total) {
 			const scrollText = this.layout.showDirectionalScrollInfo
 				? this.formatDirectionalScrollInfo(start, total - end)
-				: scrollPositionText(this.selectedIndex, total);
+				: this.nav.position(total);
 			lines.push(this.theme.scrollInfo(truncateToWidth(scrollText + this.scrollInfoSuffix(), width - 2, "")));
 		}
 
@@ -166,31 +164,20 @@ export class SelectList implements Component {
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getKeybindings();
-		if (kb.matches(keyData, "tui.select.up")) {
-			this.step(-1, true);
-		} else if (kb.matches(keyData, "tui.select.down")) {
-			this.step(1, true);
-		} else if (kb.matches(keyData, "tui.select.pageUp")) {
-			this.step(-this.maxVisible, false);
-		} else if (kb.matches(keyData, "tui.select.pageDown")) {
-			this.step(this.maxVisible, false);
-		} else if (kb.matches(keyData, "tui.select.confirm")) {
-			const selectedItem = this.filteredItems[this.selectedIndex];
-			if (!selectedItem) return;
-			if (this.layout.multiSelect) {
-				this.onToggle?.(selectedItem);
-			} else {
-				this.onSelect?.(selectedItem);
-			}
-		} else if (kb.matches(keyData, "tui.select.cancel")) {
-			this.onCancel?.();
-		}
-	}
-
-	private step(delta: number, wrap: boolean): void {
-		this.selectedIndex = moveSelection(this.selectedIndex, this.filteredItems.length, delta, wrap);
-		this.notifySelectionChange();
+		this.nav.handleNavKey(keyData, {
+			total: this.filteredItems.length,
+			onConfirm: (index) => {
+				const selectedItem = this.filteredItems[index];
+				if (!selectedItem) return;
+				if (this.layout.multiSelect) {
+					this.onToggle?.(selectedItem);
+				} else {
+					this.onSelect?.(selectedItem);
+				}
+			},
+			onCancel: () => this.onCancel?.(),
+			onMove: () => this.notifySelectionChange(),
+		});
 	}
 
 	private scrollInfoSuffix(): string {
@@ -345,7 +332,7 @@ export class SelectList implements Component {
 	}
 
 	private renderSelectedDescription(lines: string[], width: number): void {
-		const description = this.filteredItems[this.selectedIndex]?.description?.trim();
+		const description = this.filteredItems[this.nav.getSelectedIndex()]?.description?.trim();
 		if (!description) return;
 
 		const indent = width >= 4 ? "  " : "";
@@ -357,14 +344,14 @@ export class SelectList implements Component {
 	}
 
 	private notifySelectionChange(): void {
-		const selectedItem = this.filteredItems[this.selectedIndex];
+		const selectedItem = this.filteredItems[this.nav.getSelectedIndex()];
 		if (selectedItem && this.onSelectionChange) {
 			this.onSelectionChange(selectedItem);
 		}
 	}
 
 	getSelectedItem(): SelectItem | null {
-		const item = this.filteredItems[this.selectedIndex];
+		const item = this.filteredItems[this.nav.getSelectedIndex()];
 		return item || null;
 	}
 }

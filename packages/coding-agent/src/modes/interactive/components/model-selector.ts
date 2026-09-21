@@ -14,8 +14,7 @@ import { errorMessage } from "../../../utils/shared.js";
 import { theme } from "../theme/theme.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { keyHint } from "./keybinding-hints.js";
-import { MenuList, MenuPanel, MenuRow, MenuSearchInput, MenuSelector } from "./menu-panel.js";
-import { shouldTreatAsBack } from "./modal-back.js";
+import { MenuList, MenuPanel, MenuRow, MenuSearchInput, MenuSelector, shouldTreatAsBack } from "./menu-panel.js";
 
 interface ModelItem {
 	provider: string;

@@ -1,4 +1,5 @@
 import {
+	type Component,
 	Container,
 	type SelectItem,
 	SelectList,
@@ -8,7 +9,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "../theme/theme.js";
 import { selectionHints } from "./keybinding-hints.js";
-import { MenuPanel, MenuSurfaceChild } from "./menu-panel.js";
+import { MenuPanel } from "./menu-panel.js";
 
 const SELECT_MODAL_LAYOUT: SelectListLayoutOptions = {
 	minPrimaryColumnWidth: 12,
@@ -16,6 +17,24 @@ const SELECT_MODAL_LAYOUT: SelectListLayoutOptions = {
 };
 
 const DEFAULT_MAX_VISIBLE = 12;
+
+/**
+ * SelectList paints its own full-width selection bar, so it must skip
+ * MenuPanel's per-line padding; `fillsMenuPanel` opts out of that inset.
+ */
+class FullWidthSurface implements Component {
+	readonly fillsMenuPanel = true;
+
+	constructor(private readonly component: Component) {}
+
+	invalidate(): void {
+		this.component.invalidate?.();
+	}
+
+	render(width: number): string[] {
+		return this.component.render(width);
+	}
+}
 
 export interface SelectModalOptions {
 	title: string;
@@ -65,7 +84,7 @@ export class SelectModalComponent extends Container {
 			this.selectList.onSelectionChange = (item) => options.onPreview?.(item.value);
 		}
 
-		panel.addChild(new MenuSurfaceChild(this.selectList));
+		panel.addChild(new FullWidthSurface(this.selectList));
 		panel.addChild(new Spacer(1));
 		panel.addChild(new Text(selectionHints(), 0, 0));
 	}

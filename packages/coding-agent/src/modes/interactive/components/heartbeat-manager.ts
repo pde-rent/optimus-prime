@@ -3,9 +3,8 @@ import {
 	collapseText,
 	type Focusable,
 	getKeybindings,
-	listWindow,
+	ListNav,
 	Spacer,
-	scrollPositionText,
 	TruncatedText,
 } from "@earendil-works/pi-tui";
 import type { AgentHeartbeatManagementAction } from "../../../core/cron-jobs.js";
@@ -13,15 +12,14 @@ import { errorMessage } from "../../../utils/shared.js";
 import type { AgentConnectionHeartbeat } from "../../agent-connection/types.js";
 import { theme } from "../theme/theme.js";
 import { keyHint } from "./keybinding-hints.js";
-import { getMenuItemRows, getMenuListLayout, MenuList, MenuPanel, MenuRow } from "./menu-panel.js";
-import { shouldTreatAsBack } from "./modal-back.js";
+import { getMenuItemRows, getMenuListLayout, MenuList, MenuPanel, MenuRow, shouldTreatAsBack } from "./menu-panel.js";
 
 const HEARTBEAT_PANEL_MAX_WIDTH = 72;
 const PREFERRED_VISIBLE_HEARTBEATS = 8;
 const HEARTBEAT_LIST_RESERVED_ROWS = 7;
 const HEARTBEAT_SCROLL_INDICATOR_ROWS = 1;
 
-type HeartbeatManagerMode = { type: "list" } | { type: "actions"; heartbeatId: string; selectedIndex: number };
+type HeartbeatManagerMode = { type: "list" } | { type: "actions"; heartbeatId: string };
 
 export interface HeartbeatManagerOptions {
 	getRows: () => number;
@@ -32,7 +30,8 @@ export interface HeartbeatManagerOptions {
 
 export class HeartbeatManagerComponent implements Component, Focusable {
 	private heartbeats: AgentConnectionHeartbeat[] = [];
-	private selectedIndex = 0;
+	private listNav = new ListNav(PREFERRED_VISIBLE_HEARTBEATS);
+	private actionNav = new ListNav(PREFERRED_VISIBLE_HEARTBEATS);
 	private mode: HeartbeatManagerMode = { type: "list" };
 	private busy = false;
 	private error: string | undefined;
@@ -56,7 +55,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 	invalidate(): void {}
 
 	setHeartbeats(heartbeats: readonly AgentConnectionHeartbeat[]): void {
-		const selectedId = this.heartbeats[this.selectedIndex]?.job.id;
+		const selectedId = this.heartbeats[this.listNav.getSelectedIndex()]?.job.id;
 		this.heartbeats = [...heartbeats].sort((left, right) => {
 			const sessionOrder = this.sessionLabel(left).localeCompare(this.sessionLabel(right));
 			if (sessionOrder !== 0) return sessionOrder;
@@ -65,8 +64,8 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 		});
 		const nextIndex = selectedId
 			? this.heartbeats.findIndex((heartbeat) => heartbeat.job.id === selectedId)
-			: this.selectedIndex;
-		this.selectedIndex = Math.max(0, Math.min(nextIndex < 0 ? 0 : nextIndex, this.heartbeats.length - 1));
+			: this.listNav.getSelectedIndex();
+		this.listNav.setSelectedIndex(nextIndex < 0 ? 0 : nextIndex, this.heartbeats.length);
 		if (this.mode.type !== "list" && !this.findHeartbeat(this.mode.heartbeatId)) {
 			this.mode = { type: "list" };
 		}
@@ -141,11 +140,8 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			list.addChild(new TruncatedText(theme.fg("muted", "No running or paused heartbeats"), 1, 0));
 			return;
 		}
-		const { start: startIndex, end: endIndex } = listWindow(
-			this.selectedIndex,
-			this.heartbeats.length,
-			this.getListLayout().visibleItems,
-		);
+		this.listNav.setMaxVisible(this.getListLayout().visibleItems);
+		const { start: startIndex, end: endIndex } = this.listNav.window(this.heartbeats.length);
 
 		for (let index = startIndex; index < endIndex; index++) {
 			const heartbeat = this.heartbeats[index];
@@ -161,15 +157,13 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 					primary: label || collapseText(heartbeat.job.prompt) || this.defaultHeartbeatName(heartbeat),
 					secondary: details,
 					meta: this.formatStatus(heartbeat),
-					selected: index === this.selectedIndex,
+					selected: index === this.listNav.getSelectedIndex(),
 				}),
 			);
 		}
 
 		if (startIndex > 0 || endIndex < this.heartbeats.length) {
-			list.addChild(
-				new TruncatedText(theme.fg("muted", scrollPositionText(this.selectedIndex, this.heartbeats.length)), 1, 0),
-			);
+			list.addChild(new TruncatedText(theme.fg("muted", this.listNav.position(this.heartbeats.length)), 1, 0));
 		}
 	}
 
@@ -195,7 +189,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 				new MenuRow({
 					primary: action.label,
 					secondary: this.actionDescription(action.action),
-					selected: index === mode.selectedIndex,
+					selected: index === this.actionNav.getSelectedIndex(),
 				}),
 			);
 		}
@@ -207,20 +201,20 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 
 	private moveSelection(delta: number): void {
 		if (this.mode.type === "list") {
-			if (this.heartbeats.length === 0) return;
-			this.selectedIndex = Math.max(0, Math.min(this.selectedIndex + delta, this.heartbeats.length - 1));
+			this.listNav.moveBy(delta, this.heartbeats.length);
 		} else {
 			const count = this.availableActions(this.findHeartbeat(this.mode.heartbeatId)).length;
-			this.mode = { ...this.mode, selectedIndex: Math.max(0, Math.min(this.mode.selectedIndex + delta, count - 1)) };
+			this.actionNav.moveBy(delta, count);
 		}
 		this.options.requestRender();
 	}
 
 	private async confirmSelection(): Promise<void> {
 		if (this.mode.type === "list") {
-			const heartbeat = this.heartbeats[this.selectedIndex];
+			const heartbeat = this.heartbeats[this.listNav.getSelectedIndex()];
 			if (heartbeat) {
-				this.mode = { type: "actions", heartbeatId: heartbeat.job.id, selectedIndex: 0 };
+				this.mode = { type: "actions", heartbeatId: heartbeat.job.id };
+				this.actionNav.setSelectedIndex(0, this.availableActions(heartbeat).length);
 				this.options.requestRender();
 			}
 			return;
@@ -231,7 +225,7 @@ export class HeartbeatManagerComponent implements Component, Focusable {
 			this.options.requestRender();
 			return;
 		}
-		const selected = this.availableActions(heartbeat)[this.mode.selectedIndex];
+		const selected = this.availableActions(heartbeat)[this.actionNav.getSelectedIndex()];
 		if (!selected) return;
 		await this.runAction(heartbeat, selected.action);
 	}

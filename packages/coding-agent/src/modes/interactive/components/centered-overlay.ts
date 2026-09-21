@@ -159,15 +159,16 @@ function dimLine(line: string, levels: number): string {
 }
 
 /**
- * Wraps a dialog shown through `showFullPaneOverlay` and re-renders it dimmed
- * while any number of other dialogs sit above it in the overlay stack.
+ * Single focus-forwarding overlay wrapper: centers content in the pane and
+ * renders it dimmed while other dialogs sit above it in the modal stack
+ * (zero levels = passthrough undimmed).
  */
-class LayeredModalComponent implements Component, Focusable {
+export class CenteredOverlayComponent implements Component, Focusable {
 	private _focused = false;
 
 	constructor(
 		private readonly component: Component,
-		private readonly entry: ModalOverlayEntry,
+		private readonly options: CenteredOverlayOptions & { dimEntry?: ModalOverlayEntry },
 	) {}
 
 	get focused(): boolean {
@@ -192,10 +193,48 @@ class LayeredModalComponent implements Component, Focusable {
 	}
 
 	render(width: number): string[] {
-		const lines = this.component.render(width);
-		const levels = dimLevelsFor(this.entry);
+		// Sized dialogs ride the TUI compositor's own anchor: render the child
+		// at full width and only apply stack dimming. Plain centered overlays
+		// (no dim entry) get padded + centered here instead.
+		const entry = this.options.dimEntry;
+		const lines = entry ? this.component.render(width) : this.placeContent(width);
+		if (!entry) return lines;
+		const levels = dimLevelsFor(entry);
 		if (levels <= 0) return lines;
 		return lines.map((line) => (line.length === 0 ? line : dimLine(line, levels)));
+	}
+
+	private placeContent(width: number): string[] {
+		const safeWidth = Math.max(1, width);
+		const contentWidth = Math.min(safeWidth, this.options.maxContentWidth ?? safeWidth);
+		const left = Math.max(0, Math.floor((safeWidth - contentWidth) / 2));
+		const contentLines = this.component.render(contentWidth).map((line) => this.place(line, safeWidth, left));
+		const requestedRows = this.options.getRows();
+		const targetRows =
+			Number.isFinite(requestedRows) && requestedRows > 0
+				? Math.max(contentLines.length, Math.floor(requestedRows))
+				: contentLines.length;
+		const centeredTop = Math.floor((targetRows - contentLines.length) / 2) + (this.options.verticalOffset ?? 0);
+		const topPadding = Math.max(0, Math.min(centeredTop, targetRows - contentLines.length));
+		const bottomPadding = Math.max(0, targetRows - contentLines.length - topPadding);
+
+		return [
+			...Array.from({ length: topPadding }, () => this.blank(safeWidth)),
+			...contentLines,
+			...Array.from({ length: bottomPadding }, () => this.blank(safeWidth)),
+		];
+	}
+
+	private place(text: string, width: number, left: number): string {
+		const safeLeft = Math.max(0, Math.min(left, width));
+		const contentWidth = Math.max(0, width - safeLeft);
+		const content = truncateToWidth(text, contentWidth, "");
+		const right = Math.max(0, width - safeLeft - visibleWidth(content));
+		return " ".repeat(safeLeft) + content + " ".repeat(right);
+	}
+
+	private blank(width: number): string {
+		return " ".repeat(width);
 	}
 }
 
@@ -255,69 +294,13 @@ export function showFullPaneOverlay(
 
 	const entry: ModalOverlayEntry = { hidden: false };
 	raiseModalOverlayEntry(entry);
-	const handle = ui.showOverlay(new LayeredModalComponent(component, entry), overlayOptions);
+	const handle = ui.showOverlay(
+		new CenteredOverlayComponent(component, {
+			getRows: () => ui.terminal.rows,
+			maxContentWidth,
+			dimEntry: entry,
+		}),
+		overlayOptions,
+	);
 	return trackModalOverlay(handle, entry);
-}
-
-export class CenteredOverlayComponent implements Component, Focusable {
-	private _focused = false;
-
-	constructor(
-		private readonly component: Component,
-		private readonly options: CenteredOverlayOptions,
-	) {}
-
-	get focused(): boolean {
-		return this._focused;
-	}
-
-	set focused(value: boolean) {
-		this._focused = value;
-		if (isFocusable(this.component)) {
-			this.component.focused = value;
-		}
-	}
-
-	invalidate(): void {
-		this.component.invalidate?.();
-	}
-
-	handleInput(data: string): void {
-		if (hasInputHandler(this.component)) {
-			this.component.handleInput(data);
-		}
-	}
-
-	render(width: number): string[] {
-		const safeWidth = Math.max(1, width);
-		const contentWidth = Math.min(safeWidth, this.options.maxContentWidth ?? safeWidth);
-		const left = Math.max(0, Math.floor((safeWidth - contentWidth) / 2));
-		const contentLines = this.component.render(contentWidth).map((line) => this.place(line, safeWidth, left));
-		const requestedRows = this.options.getRows();
-		const targetRows =
-			Number.isFinite(requestedRows) && requestedRows > 0
-				? Math.max(contentLines.length, Math.floor(requestedRows))
-				: contentLines.length;
-		const centeredTop = Math.floor((targetRows - contentLines.length) / 2) + (this.options.verticalOffset ?? 0);
-		const topPadding = Math.max(0, Math.min(centeredTop, targetRows - contentLines.length));
-		const bottomPadding = Math.max(0, targetRows - contentLines.length - topPadding);
-
-		return [
-			...Array.from({ length: topPadding }, () => this.blank(safeWidth)),
-			...contentLines,
-			...Array.from({ length: bottomPadding }, () => this.blank(safeWidth)),
-		];
-	}
-
-	private place(text: string, width: number, left: number): string {
-		const safeLeft = Math.max(0, Math.min(left, width));
-		const contentWidth = Math.max(0, width - safeLeft);
-		const content = truncateToWidth(text, contentWidth, "");
-		const right = Math.max(0, width - safeLeft - visibleWidth(content));
-		return " ".repeat(safeLeft) + content + " ".repeat(right);
-	}
-
-	private blank(width: number): string {
-		return " ".repeat(width);
-	}
 }

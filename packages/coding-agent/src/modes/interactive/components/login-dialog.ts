@@ -8,28 +8,13 @@ import {
 	Spacer,
 	Text,
 	type TUI,
-	truncateToWidth,
-	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { execFile } from "child_process";
-import { OPTIMUS_LOGO } from "../../../themes/optimus-logo.js";
 import { copyToClipboard } from "../../../utils/clipboard.js";
 import { theme } from "../theme/theme.js";
 import { installFocusForwarder } from "./focus-forwarder.js";
 import { formatKeyText, keyHint } from "./keybinding-hints.js";
-import { MenuPanel, MenuSearchInput } from "./menu-panel.js";
-import { shouldTreatAsBack } from "./modal-back.js";
-
-const PRIME_LOGO_LINES = OPTIMUS_LOGO.split("\n");
-const _PRIME_LOGO_WIDTH = PRIME_LOGO_LINES.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
-
-function _centeredLine(text: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	const content = truncateToWidth(text, safeWidth, "");
-	const padding = Math.max(0, safeWidth - visibleWidth(content));
-	const left = Math.floor(padding / 2);
-	return " ".repeat(left) + content + " ".repeat(padding - left);
-}
+import { MenuPanel, MenuSearchInput, shouldTreatAsBack } from "./menu-panel.js";
 
 function isTextEntryKeybinding(key: string): boolean {
 	const parts = key.toLowerCase().split("+");

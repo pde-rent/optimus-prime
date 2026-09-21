@@ -192,8 +192,6 @@ export class OAuthSelectorComponent extends Container implements Focusable {
 			if (rankDelta !== 0) {
 				return rankDelta;
 			}
-			if (this.mode === "login" && a.id !== b.id) {
-			}
 			return compareAuthSelectorProviders(a, b);
 		});
 	}

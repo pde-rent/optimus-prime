@@ -12,12 +12,9 @@ import {
 import { AgentMessageComponent } from "./agent-message.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { BashExecutionComponent } from "./bash-execution.js";
-import {
-	CompactionOutcomeMessageComponent,
-	MalformedCompactionOutcomeMessageComponent,
-} from "./compaction-outcome-message.js";
 import { InjectedPromptMessageComponent, isInjectedPromptMessage } from "./injected-prompt-message.js";
 import { ReplCellComponent } from "./repl-cell.js";
+import { CompactionOutcomeMessageComponent, MalformedCompactionOutcomeMessageComponent } from "./simple-message.js";
 import { SlashCommandMessageComponent } from "./slash-command-message.js";
 import { SlashCommandResultMessageComponent } from "./slash-command-result-message.js";
 import {
