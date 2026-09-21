@@ -389,7 +389,7 @@ function readOpenAICodexAccountId(token: string): string | undefined {
  *
  * Catalog behaviour measured 2026-08-13; see #702.
  */
-const OPENAI_CODEX_CLIENT_VERSION = "0.147.0";
+const OPENAI_CODEX_CLIENT_VERSION = "0.153.4";
 
 function openAICodexModelsUrl(baseUrl: string): string {
 	const normalized = baseUrl.replace(/\/+$/, "");
@@ -784,9 +784,14 @@ function parseDynamicModelList(payload: unknown, provider: string, source: Dynam
 	if (!Array.isArray(data)) {
 		throw new Error(`Invalid model list from ${provider}`);
 	}
+	const seen = new Set<string>();
 	return data.flatMap((entry) => {
 		if (!isRecord(entry) || typeof entry.id !== "string" || entry.id.length === 0) return [];
 		if (source.entryFilter && !source.entryFilter(entry)) return [];
+		// Providers may list one id more than once (e.g. GMI Cloud serves free and
+		// paid deployments of the same model under one id); keep the first entry.
+		if (seen.has(entry.id)) return [];
+		seen.add(entry.id);
 		const pricing = isRecord(entry.pricing) ? entry.pricing : {};
 		const topProvider = isRecord(entry.top_provider) ? entry.top_provider : {};
 		const costPerMTok = (value: unknown): number => {

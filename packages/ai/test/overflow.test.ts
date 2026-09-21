@@ -2,12 +2,12 @@ import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "../src/types.js";
 import { isContextOverflow } from "../src/utils/overflow.js";
 
-function createErrorMessage(errorMessage: string): AssistantMessage {
+function createErrorMessage(errorMessage: string, provider = "ollama"): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
 		api: "openai-completions",
-		provider: "ollama",
+		provider,
 		model: "qwen3.5:35b",
 		usage: {
 			input: 0,
@@ -55,6 +55,16 @@ describe("isContextOverflow", () => {
 	it("does not treat HTTP 429 style errors as overflow", () => {
 		const message = createErrorMessage("Too many requests. Please slow down.");
 		expect(isContextOverflow(message, 200000)).toBe(false);
+	});
+
+	it("detects z.ai Prompt too long errors", () => {
+		const message = createErrorMessage('{"code":"1261","message":"Prompt too long"}', "zai");
+		expect(isContextOverflow(message, 200000)).toBe(true);
+	});
+
+	it("treats bodyless 400 as overflow only from Cerebras", () => {
+		expect(isContextOverflow(createErrorMessage("400 status code (no body)", "cerebras"), 131072)).toBe(true);
+		expect(isContextOverflow(createErrorMessage("400 status code (no body)", "ollama"), 32768)).toBe(false);
 	});
 
 	function createLengthStopMessage(input: number, cacheRead: number, output: number): AssistantMessage {

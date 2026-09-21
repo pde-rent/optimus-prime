@@ -1,0 +1,1 @@
+- Retry once with a full request body when the Codex server drops the websocket continuation chain (`previous_response_not_found`), and anchor continuations to their owning connection.

@@ -1,0 +1,1 @@
+- Omit `tool_choice` from chat completion payloads when no tools are provided.

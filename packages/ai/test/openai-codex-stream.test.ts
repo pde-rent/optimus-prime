@@ -193,6 +193,49 @@ describe("openai-codex streaming", () => {
 		expect(sawDone).toBe(true);
 	});
 
+	it("processes a terminal SSE event missing its trailing separator", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "pi-codex-stream-"));
+		process.env.PI_CODING_AGENT_DIR = tempDir;
+		const token = mockToken();
+		const encoder = new TextEncoder();
+		// Drop the trailing blank line: server closed the body mid-frame.
+		const sse = buildSSEPayload({ status: "completed" }).replace(/\n\n$/, "");
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(encoder.encode(sse));
+				controller.close();
+			},
+		});
+		global.fetch = (async () => new Response(stream, { status: 200 })) as typeof fetch;
+
+		const model: Model<"openai-codex-responses"> = {
+			id: "gpt-5.1-codex",
+			name: "GPT-5.1 Codex",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400000,
+			maxTokens: 128000,
+		};
+		const context: Context = {
+			systemPrompt: "You are a helpful assistant.",
+			messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+		};
+
+		const streamResult = streamOpenAICodexResponses(model, context, { apiKey: token });
+		let sawDone = false;
+		for await (const event of streamResult) {
+			if (event.type === "done") {
+				sawDone = true;
+				expect(event.message.content.find((c) => c.type === "text")?.text).toBe("Hello");
+			}
+		}
+		expect(sawDone).toBe(true);
+	});
+
 	it("completes after response.completed even when the SSE body stays open", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "pi-codex-stream-"));
 		process.env.PI_CODING_AGENT_DIR = tempDir;
@@ -1008,5 +1051,141 @@ describe("openai-codex streaming", () => {
 			lastDeltaInputItems: 1,
 			lastPreviousResponseId: "resp_1",
 		});
+	});
+
+	it("retries once with a full body when the server drops the continuation chain", async () => {
+		const token = mockToken();
+		const sentBodies: unknown[] = [];
+		let socketsCreated = 0;
+		const script: Array<{ responseId: string; messageId: string; text: string } | { error: string }> = [
+			{ responseId: "resp_1", messageId: "msg_1", text: "Hello" },
+			{ error: "previous_response_not_found" },
+			{ responseId: "resp_2", messageId: "msg_2", text: "Recovered" },
+		];
+
+		class MockWebSocket {
+			static OPEN = 1;
+			readyState = MockWebSocket.OPEN;
+			private listeners = new Map<string, Set<(event: unknown) => void>>();
+
+			constructor(_url: string, _protocols?: string | string[] | { headers?: Record<string, string> }) {
+				socketsCreated++;
+				queueMicrotask(() => this.dispatch("open", {}));
+			}
+
+			addEventListener(type: string, listener: (event: unknown) => void): void {
+				let listeners = this.listeners.get(type);
+				if (!listeners) {
+					listeners = new Set();
+					this.listeners.set(type, listeners);
+				}
+				listeners.add(listener);
+			}
+
+			removeEventListener(type: string, listener: (event: unknown) => void): void {
+				this.listeners.get(type)?.delete(listener);
+			}
+
+			send(data: string): void {
+				sentBodies.push(JSON.parse(data));
+				const next = script.shift();
+				if (!next) throw new Error("unexpected websocket request");
+				if ("error" in next) {
+					queueMicrotask(() => {
+						this.dispatch("message", { data: JSON.stringify({ type: "error", code: next.error }) });
+					});
+					return;
+				}
+				const events = [
+					{ type: "response.created", response: { id: next.responseId } },
+					{
+						type: "response.output_item.added",
+						item: { type: "message", id: next.messageId, role: "assistant", status: "in_progress", content: [] },
+					},
+					{ type: "response.content_part.added", part: { type: "output_text", text: "" } },
+					{ type: "response.output_text.delta", delta: next.text },
+					{
+						type: "response.output_item.done",
+						item: {
+							type: "message",
+							id: next.messageId,
+							role: "assistant",
+							status: "completed",
+							content: [{ type: "output_text", text: next.text }],
+						},
+					},
+					{
+						type: "response.completed",
+						response: {
+							id: next.responseId,
+							status: "completed",
+							usage: {
+								input_tokens: 5,
+								output_tokens: 3,
+								total_tokens: 8,
+								input_tokens_details: { cached_tokens: 0 },
+							},
+						},
+					},
+				];
+				queueMicrotask(() => {
+					for (const event of events) {
+						this.dispatch("message", { data: JSON.stringify(event) });
+					}
+				});
+			}
+
+			close(): void {
+				this.readyState = 3;
+			}
+
+			private dispatch(type: string, event: unknown): void {
+				for (const listener of this.listeners.get(type) ?? []) {
+					listener(event);
+				}
+			}
+		}
+
+		(globalThis as { WebSocket: unknown }).WebSocket = MockWebSocket;
+
+		const model: Model<"openai-codex-responses"> = {
+			id: "gpt-5.1-codex",
+			name: "GPT-5.1 Codex",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 400000,
+			maxTokens: 128000,
+		};
+		const firstContext: Context = {
+			systemPrompt: "You are a helpful assistant.",
+			messages: [{ role: "user", content: "Say hello", timestamp: 1 }],
+		};
+
+		const first = await streamOpenAICodexResponses(model, firstContext, {
+			apiKey: token,
+			sessionId: "session-stale-reset",
+			transport: "websocket-cached",
+		}).result();
+		expect(first.stopReason).toBe("stop");
+
+		const secondContext: Context = {
+			systemPrompt: "You are a helpful assistant.",
+			messages: [...firstContext.messages, first, { role: "user", content: "Again", timestamp: 2 }],
+		};
+		const second = await streamOpenAICodexResponses(model, secondContext, {
+			apiKey: token,
+			sessionId: "session-stale-reset",
+			transport: "websocket-cached",
+		}).result();
+
+		expect(second.stopReason).toBe("stop");
+		expect(socketsCreated).toBe(2);
+		expect(sentBodies).toHaveLength(3);
+		const retryBody = sentBodies[2] as { previous_response_id?: string };
+		expect(retryBody.previous_response_id).toBeUndefined();
 	});
 });

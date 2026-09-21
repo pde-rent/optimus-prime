@@ -66,7 +66,7 @@ describe("issue #702 codex model discovery client version", () => {
 		// once the lockstep package version reaches the pinned constant.
 		expect(clientVersion).toMatch(/^\d+\.\d+\.\d+$/);
 		const [major, minor] = (clientVersion ?? "0.0.0").split(".").map(Number);
-		expect((major ?? 0) > 0 || (minor ?? 0) >= 144).toBe(true);
+		expect((major ?? 0) > 0 || (minor ?? 0) >= 153).toBe(true);
 
 		expect(executable.some((model) => model.provider === "openai-codex")).toBe(true);
 	});

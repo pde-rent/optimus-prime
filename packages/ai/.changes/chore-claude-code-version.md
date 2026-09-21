@@ -1,0 +1,1 @@
+- Bumped the impersonated Claude Code version to 2.1.257 for Fable 5.x models.

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Type } from "../src/index.js";
 import { getModel } from "../src/models.js";
 import { streamOpenAICompletions } from "../src/providers/openai-completions.js";
-import type { AssistantMessage, Model } from "../src/types.js";
+import type { AssistantMessage, Context, Model } from "../src/types.js";
 import { mockOpenAIFetch, type OpenAIFetchMock } from "./openai-fetch-mock.js";
 
 interface CacheControl {
@@ -33,15 +33,16 @@ let fetchMock: OpenAIFetchMock;
 
 async function runCompletion(
 	model: Model<"openai-completions">,
-	options?: { cacheRetention?: "none" | "short" | "long" },
+	options?: { cacheRetention?: "none" | "short" | "long"; messages?: Context["messages"] },
 ): Promise<{ params: CapturedParams; result: AssistantMessage }> {
 	const timestamp = Date.now();
+	const { messages, ...streamOptions } = options ?? {};
 
 	const result = await streamOpenAICompletions(
 		model,
 		{
 			systemPrompt: "System prompt",
-			messages: [{ role: "user", content: "Hello", timestamp }],
+			messages: messages ?? [{ role: "user", content: "Hello", timestamp }],
 			tools: [
 				{
 					name: "read",
@@ -52,7 +53,7 @@ async function runCompletion(
 				},
 			],
 		},
-		{ apiKey: "test-key", ...options },
+		{ apiKey: "test-key", ...streamOptions },
 	).result();
 
 	return { params: fetchMock.lastRequest().body as CapturedParams, result };
@@ -147,6 +148,59 @@ describe("openai-completions cacheControlFormat", () => {
 		const model = getModel("openrouter", "anthropic/claude-sonnet-4");
 		const params = await capturePayload(model);
 		expectAnthropicCacheMarkers(params);
+	});
+
+	it("advances the Anthropic cache marker onto trailing tool results", async () => {
+		const model: Model<"openai-completions"> = {
+			id: "custom-qwen",
+			name: "Custom Qwen",
+			api: "openai-completions",
+			provider: "openrouter",
+			baseUrl: "https://example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 4, output: 12, cacheRead: 0.4, cacheWrite: 9 },
+			contextWindow: 128000,
+			maxTokens: 32000,
+			compat: {
+				cacheControlFormat: "anthropic",
+			},
+		};
+		const timestamp = Date.now();
+		const { params } = await runCompletion(model, {
+			messages: [
+				{ role: "user", content: "Hello", timestamp },
+				{
+					role: "assistant",
+					content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "a" } }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 0,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "toolUse",
+					timestamp,
+				},
+				{
+					role: "toolResult",
+					toolCallId: "call-1",
+					toolName: "read",
+					content: [{ type: "text", text: "contents" }],
+					isError: false,
+					timestamp,
+				},
+			],
+		});
+		const lastMessage = params.messages[params.messages.length - 1];
+		expect(lastMessage.role).toBe("tool");
+		expect(Array.isArray(lastMessage.content)).toBe(true);
+		expect((lastMessage.content as TextPart[])[0]?.cache_control).toEqual({ type: "ephemeral" });
 	});
 
 	it("preserves route-specific cache write pricing for Anthropic models", async () => {

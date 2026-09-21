@@ -982,6 +982,25 @@ bar`,
 			);
 		});
 
+		it("should render h4-h6 without raw # prefix and with tapered styling", () => {
+			const cases: Array<{ source: string; styled: "bold-italic" | "italic" }> = [
+				{ source: "#### Deep heading", styled: "bold-italic" },
+				{ source: "##### Deeper heading", styled: "italic" },
+				{ source: "###### Deepest heading", styled: "italic" },
+			];
+			for (const { source, styled } of cases) {
+				const markdown = new Markdown(source, 0, 0, defaultMarkdownTheme);
+				const joinedOutput = markdown.render(80).join("\n");
+				const plain = joinedOutput.replace(/\x1b\[[0-9;]*m/g, "");
+				assert.ok(!plain.includes("#"), `Raw # prefix leaked for ${source}: ${plain}`);
+				assert.ok(plain.includes(source.replace(/^#+\s*/, "")), `Missing heading text for ${source}`);
+				assert.ok(joinedOutput.includes("\x1b[3m"), `Missing italic for ${source}`);
+				if (styled === "bold-italic") {
+					assert.ok(joinedOutput.includes("\x1b[1m"), `Missing bold for ${source}`);
+				}
+			}
+		});
+
 		it("should preserve heading styling after inline code for h1", () => {
 			const markdown = new Markdown("# Title with `code` inside", 0, 0, defaultMarkdownTheme);
 

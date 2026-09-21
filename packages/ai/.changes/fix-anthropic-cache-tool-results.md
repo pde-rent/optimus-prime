@@ -1,0 +1,1 @@
+- Advance the Anthropic cache marker onto trailing tool-result messages instead of stopping at user/assistant roles.

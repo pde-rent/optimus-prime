@@ -1,0 +1,1 @@
+- Default `supportsStrictMode` to false for OpenAI-completions providers; enable explicitly only where verified.

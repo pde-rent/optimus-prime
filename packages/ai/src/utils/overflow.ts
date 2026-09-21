@@ -23,7 +23,7 @@ import type { AssistantMessage } from "../types.js";
  * - Kimi For Coding: "Your request exceeded model token limit: X (requested: Y)"
  * - Cerebras: "400/413 status code (no body)"
  * - Mistral: "Prompt contains X tokens ... too large for model with Y maximum context length"
- * - z.ai: Does NOT error, accepts overflow silently - handled via usage.input > contextWindow
+ * - z.ai: `{"code":"1261","message":"Prompt too long"}` explicit overflow error
  * - Xiaomi MiMo: Truncates input to fill contextWindow exactly, then returns finish_reason "length"
  *   with output=0 (no room left to generate). Detected via stopReason "length" + zero output +
  *   input filling the context window.
@@ -45,12 +45,14 @@ const OVERFLOW_PATTERNS = [
 	/exceeded model token limit/i, // Kimi For Coding
 	/too large for model with \d+ maximum context length/i, // Mistral
 	/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
-	/prompt too long; exceeded (?:max )?context length/i, // Ollama explicit overflow error
+	/prompt (?:is )?too long/i, // z.ai {"code":"1261"} + Ollama explicit overflow error
 	/context[_ ]length[_ ]exceeded/i, // Generic fallback
 	/too many tokens/i, // Generic fallback
 	/token limit exceeded/i, // Generic fallback
-	/^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i, // Cerebras: 400/413 with no body
 ];
+
+/** Cerebras returns bare 400/413 with no body; only meaningful from Cerebras. */
+const CEREBRAS_BODYLESS_OVERFLOW_PATTERN = /^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i;
 
 /**
  * Patterns that indicate non-overflow errors (e.g. rate limiting, server errors).
@@ -118,6 +120,14 @@ export function isContextOverflow(message: AssistantMessage, contextWindow?: num
 		// Skip messages matching known non-overflow patterns (e.g. throttling / rate-limit)
 		const isNonOverflow = NON_OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!));
 		if (!isNonOverflow && OVERFLOW_PATTERNS.some((p) => p.test(message.errorMessage!))) {
+			return true;
+		}
+		// Bare 400/413 with no body only signals overflow from Cerebras.
+		if (
+			message.provider === "cerebras" &&
+			!isNonOverflow &&
+			CEREBRAS_BODYLESS_OVERFLOW_PATTERN.test(message.errorMessage)
+		) {
 			return true;
 		}
 	}

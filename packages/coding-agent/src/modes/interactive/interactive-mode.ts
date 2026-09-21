@@ -175,10 +175,6 @@ import {
 	setClickTargetsEnabled,
 } from "./components/click-target.js";
 import {
-	CompactionOutcomeMessageComponent,
-	MalformedCompactionOutcomeMessageComponent,
-} from "./components/compaction-outcome-message.js";
-import {
 	CompactionSummaryMessageComponent,
 	StreamingCompactionComponent,
 } from "./components/compaction-summary-message.js";
@@ -204,6 +200,10 @@ import { ScopedModelsSelectorComponent } from "./components/scoped-models-select
 import { SelectModalComponent } from "./components/select-modal.js";
 import { SettingsSelectorComponent, THINKING_LEVEL_DESCRIPTIONS } from "./components/settings-selector.js";
 import { SideQuestionComponent } from "./components/side-question.js";
+import {
+	CompactionOutcomeMessageComponent,
+	MalformedCompactionOutcomeMessageComponent,
+} from "./components/simple-message.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { SlashCommandMessageComponent } from "./components/slash-command-message.js";
 import { SlashCommandResultMessageComponent } from "./components/slash-command-result-message.js";
@@ -6853,7 +6853,7 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(theme.fg("error", `⚠ Error: ${errorMessage}`), 1, 0));
 		this.ui.requestRender();
 	}
 

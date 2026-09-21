@@ -59,6 +59,36 @@ describe("openai-completions tool_choice", () => {
 		expect(params.tools?.length ?? 0).toBeGreaterThan(0);
 	});
 
+	it("omits tool_choice when no tools are provided", async () => {
+		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini")!;
+		const model = { ...baseModel, api: "openai-completions" } as const;
+		let payload: unknown;
+
+		await streamSimple(
+			model,
+			{
+				messages: [
+					{
+						role: "user",
+						content: "Hello",
+						timestamp: Date.now(),
+					},
+				],
+			},
+			{
+				apiKey: "test",
+				toolChoice: "required",
+				onPayload: (params: unknown) => {
+					payload = params;
+				},
+			} as OpenAICompletionsOptions,
+		).result();
+
+		const params = (payload ?? fetchMock.requests.at(-1)?.body) as { tool_choice?: string; tools?: unknown[] };
+		expect(params.tool_choice).toBeUndefined();
+		expect(params.tools ?? []).toHaveLength(0);
+	});
+
 	it("omits strict when compat disables strict mode", async () => {
 		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini")!;
 		const model = {
