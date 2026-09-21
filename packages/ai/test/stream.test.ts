@@ -9,6 +9,7 @@ import { complete, stream } from "../src/stream.js";
 import type { Api, Context, ImageContent, Model, Tool, ToolResultMessage } from "../src/types.js";
 import { StringEnum } from "../src/utils/typebox-helpers.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
+import { getGatewayCompatTestModel } from "./cloudflare-gateway-test-model.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import {
 	describeProviders,
@@ -502,7 +503,7 @@ describe("Generate E2E Tests", () => {
 		{
 			name: "Cloudflare AI Gateway → Workers AI (Kimi K2.6 via /compat)",
 			skipIf: !hasCloudflareAiGatewayCredentials(),
-			model: () => getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6"),
+			model: () => getGatewayCompatTestModel(),
 			cases: [
 				text(),
 				toolCall(),
@@ -581,9 +582,9 @@ describe("Generate E2E Tests", () => {
 			cases: [text(), toolCall(), streaming(), multiTurnCase()],
 		},
 		{
-			name: "Zhipu GLM Coding Plan CN Provider (glm-5.1 via OpenAI Completions)",
+			name: "Zhipu GLM Coding Plan CN Provider (glm-5.3 via OpenAI Completions)",
 			skipIf: !process.env.ZHIPU_API_KEY,
-			model: () => getModel("zhipuai-coding-plan", "glm-5.1"),
+			model: () => getModel("zhipuai-coding-plan", "glm-5.3"),
 			cases: [
 				text(),
 				toolCall(),
@@ -624,9 +625,9 @@ describe("Generate E2E Tests", () => {
 			],
 		},
 		{
-			name: "Nous Portal Provider (stealth/ox-alpha via OpenAI Completions)",
+			name: "Nous Portal Provider (mistralai/voxtral-small-24b-2507 via OpenAI Completions)",
 			skipIf: !process.env.NOUS_API_KEY,
-			model: () => getModel("nous", "stealth/ox-alpha"),
+			model: () => getModel("nous", "mistralai/voxtral-small-24b-2507"),
 			cases: [text(), toolCall(), streaming()],
 		},
 		{
@@ -850,7 +851,7 @@ describe("Generate E2E Tests", () => {
 		{
 			name: "GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages)",
 			skipIf: false,
-			model: () => getModel("github-copilot", "claude-sonnet-4.5"),
+			model: () => getModel("github-copilot", "claude-sonnet-4.6"),
 			cases: [
 				text({ apiKey: githubCopilotToken }),
 				toolCall({ apiKey: githubCopilotToken }),

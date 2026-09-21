@@ -8,11 +8,11 @@ import {
 	type AnthropicMessagesCompat,
 	type Api,
 	type AssistantMessageEventStream,
+	type CatalogProviderId,
 	Compile,
 	type Context,
 	getModels,
 	getProviders,
-	type KnownProvider,
 	type Model,
 	type ModelOutputModality,
 	type OAuthProviderInterface,
@@ -965,7 +965,7 @@ export class ModelRegistry {
 		modelOverrides: Map<string, Map<string, ModelOverride>>,
 	): Model<Api>[] {
 		return getProviders().flatMap((provider) => {
-			const models = getModels(provider as KnownProvider) as Model<Api>[];
+			const models = getModels(provider as CatalogProviderId) as Model<Api>[];
 			const providerOverride = overrides.get(provider);
 			const perModelOverrides = modelOverrides.get(provider);
 
@@ -1124,7 +1124,7 @@ export class ModelRegistry {
 		const getBuiltInDefaults = (providerName: string): { api: string; baseUrl: string } | undefined => {
 			if (!builtInProviders.has(providerName)) return undefined;
 			if (builtInDefaultsCache.has(providerName)) return builtInDefaultsCache.get(providerName);
-			const builtIn = getModels(providerName as KnownProvider) as Model<Api>[];
+			const builtIn = getModels(providerName as CatalogProviderId) as Model<Api>[];
 			if (builtIn.length === 0) return undefined;
 			const defaults = { api: builtIn[0].api, baseUrl: builtIn[0].baseUrl };
 			builtInDefaultsCache.set(providerName, defaults);
@@ -1187,6 +1187,10 @@ export class ModelRegistry {
 
 	async refreshAvailableModels(): Promise<Model<Api>[]> {
 		this.refresh();
+		// Static-only reload would drop live-discovered ids (e.g. models added
+		// upstream after the last catalog regen), making set_model reject them.
+		// TTL-gated + cache-backed, never throws.
+		await this.refreshDynamicModels();
 		return this.getAvailable();
 	}
 
@@ -1286,7 +1290,7 @@ export class ModelRegistry {
 		);
 		const overrides = this.customModelsResult.modelOverrides.get(provider);
 		const staticById = new Map(
-			(getModels(provider as KnownProvider) as Model<Api>[]).map((model) => [model.id, model]),
+			(getModels(provider as CatalogProviderId) as Model<Api>[]).map((model) => [model.id, model]),
 		);
 		const mapped = discovered.map((model) => {
 			// Curated catalog metadata wins when the id is known; discovery only

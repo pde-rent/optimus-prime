@@ -3,6 +3,7 @@ import { getModel } from "../src/models.js";
 import { complete } from "../src/stream.js";
 import type { Api, AssistantMessage, Context, Model, UserMessage } from "../src/types.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
+import { getGatewayCompatTestModel } from "./cloudflare-gateway-test-model.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import {
 	describeProviders,
@@ -197,7 +198,7 @@ describe("AI Providers Empty Message Tests", () => {
 			getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6"),
 		),
 		spec("Cloudflare AI Gateway Provider Empty Messages", !hasCloudflareAiGatewayCredentials(), () =>
-			getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6"),
+			getGatewayCompatTestModel(),
 		),
 		spec("Hugging Face Provider Empty Messages", !process.env.HF_TOKEN, () =>
 			getModel("huggingface", "moonshotai/Kimi-K2.5"),
@@ -244,7 +245,7 @@ describe("AI Providers Empty Message Tests", () => {
 		{
 			name: "GitHub Copilot Provider Empty Messages",
 			skipIf: false,
-			model: () => getModel("github-copilot", "claude-sonnet-4.5"),
+			model: () => getModel("github-copilot", "claude-sonnet-4.6"),
 			cases: emptyCases({ apiKey: githubCopilotToken })
 				.map((testCase) => ({ ...testCase, timeout: 30000, skipIf: !githubCopilotToken }))
 				.map((testCase) => ({ ...testCase, name: `claude-sonnet-4 - ${testCase.name}` })),

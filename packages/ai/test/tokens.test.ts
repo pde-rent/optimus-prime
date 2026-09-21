@@ -3,6 +3,7 @@ import { getModel } from "../src/models.js";
 import { stream } from "../src/stream.js";
 import type { Api, Context, Model } from "../src/types.js";
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
+import { getGatewayCompatTestModel } from "./cloudflare-gateway-test-model.js";
 import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import { describeProviders, type ProviderSpec, type StreamOptionsWithExtras } from "./helpers.js";
 import { getKimiCodingTestModel } from "./kimi-test-model.js";
@@ -131,9 +132,7 @@ describe("Token Statistics on Abort", () => {
 		spec("Cloudflare Workers AI Provider", !hasCloudflareWorkersAICredentials(), () =>
 			getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6"),
 		),
-		spec("Cloudflare AI Gateway Provider", !hasCloudflareAiGatewayCredentials(), () =>
-			getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6"),
-		),
+		spec("Cloudflare AI Gateway Provider", !hasCloudflareAiGatewayCredentials(), () => getGatewayCompatTestModel()),
 		spec("Hugging Face Provider", !process.env.HF_TOKEN, () => getModel("huggingface", "moonshotai/Kimi-K2.5")),
 		spec("zAI Provider", !process.env.ZAI_API_KEY, () => getZaiTestModel()),
 		spec("Mistral Provider", !process.env.MISTRAL_API_KEY, () => getModel("mistral", "devstral-medium-latest")),
@@ -203,7 +202,7 @@ describe("Token Statistics on Abort", () => {
 		{
 			name: "GitHub Copilot Provider",
 			skipIf: false,
-			model: () => getModel("github-copilot", "claude-sonnet-4.5"),
+			model: () => getModel("github-copilot", "claude-sonnet-4.6"),
 			cases: [
 				{
 					name: "claude-sonnet-4 - should include token stats when aborted mid-stream",

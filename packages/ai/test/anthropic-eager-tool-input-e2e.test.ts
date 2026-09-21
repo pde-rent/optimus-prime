@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { getEnvApiKey } from "../src/env-api-keys.js";
 import { Type } from "../src/index.js";
-import { getModels, getProviders } from "../src/models.js";
+import { type CatalogProviderId, getModels, getProviders } from "../src/models.js";
 import { complete } from "../src/stream.js";
 import type { Api, KnownProvider, Model, ProviderStreamOptions, Tool } from "../src/types.js";
 import { resolveApiKey } from "./oauth.js";
@@ -33,7 +33,7 @@ function getE2EApiKey(provider: KnownProvider): string | undefined {
 }
 
 function getAnthropicMessagesModels(provider: KnownProvider): Model<"anthropic-messages">[] {
-	const models = getModels(provider) as Model<Api>[];
+	const models = getModels(provider as CatalogProviderId) as Model<Api>[];
 	return models.filter((model) => model.api === "anthropic-messages") as Model<"anthropic-messages">[];
 }
 

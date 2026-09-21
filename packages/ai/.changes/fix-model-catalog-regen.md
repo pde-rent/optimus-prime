@@ -1,0 +1,1 @@
+- Regenerated the model catalog from models.dev: adds opencode-go/muse-spark-1.3-contributor (openai-responses) plus current provider lineups; retired ids replaced in tests with live equivalents.
