@@ -1,0 +1,1 @@
+- Fixed OAuth device-flow logins failing on `authorization_pending`: token endpoints that report pending states as HTTP 400 are now polled instead of throwing, and relative verification URIs are absolutized so the browser opens correctly.

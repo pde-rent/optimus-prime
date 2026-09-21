@@ -36,6 +36,7 @@ import type {
 	ResponseStatus,
 	ResponseStreamEvent,
 } from "./openai-wire-types.js";
+import { opencodeClientHeaders } from "./opencode-headers.js";
 import { transformMessages } from "./transform-messages.js";
 
 /**
@@ -668,15 +669,18 @@ export function finalizeOpenAIRequest(
 	apiKey: string,
 	headers: Record<string, string>,
 	path: "/chat/completions" | "/responses",
+	opencodeSessionId?: string,
 ): { url: string; headers: Record<string, string> } {
+	const opencodeDefaults = opencodeClientHeaders(model, opencodeSessionId, headers);
 	const defaultHeaders =
 		model.provider === "cloudflare-ai-gateway"
 			? {
+					...opencodeDefaults,
 					...headers,
 					Authorization: headers.Authorization ?? null,
 					"cf-aig-authorization": `Bearer ${apiKey}`,
 				}
-			: headers;
+			: { ...opencodeDefaults, ...headers };
 
 	const baseUrl = isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl;
 

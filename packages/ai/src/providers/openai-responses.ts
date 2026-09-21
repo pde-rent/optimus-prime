@@ -83,6 +83,7 @@ function createClient(
 	apiKey?: string,
 	optionsHeaders?: Record<string, string>,
 	sessionId?: string,
+	opencodeSessionId?: string,
 ) {
 	const key = resolveOpenAIApiKey(apiKey);
 
@@ -101,7 +102,7 @@ function createClient(
 		Object.assign(headers, optionsHeaders);
 	}
 
-	return finalizeOpenAIRequest(model, key, headers, "/responses");
+	return finalizeOpenAIRequest(model, key, headers, "/responses", opencodeSessionId);
 }
 
 function buildParams(model: Model<"openai-responses">, context: Context, options?: OpenAIResponsesOptions) {

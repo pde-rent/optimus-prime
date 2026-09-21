@@ -105,6 +105,47 @@ describe("Grok OAuth device flow", () => {
 		expect(pollTimes).toEqual([startTime.getTime() + 5000, startTime.getTime() + 10000, startTime.getTime() + 20000]);
 	});
 
+	it("keeps polling when x.ai reports pending as HTTP 400", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-09T00:00:00Z"));
+
+		const pollResponses = [
+			jsonResponse({ error: "authorization_pending", error_description: "User has not yet authorized" }, 400),
+			jsonResponse({ access_token: "xai_access_token", refresh_token: "xai_refresh_token", expires_in: 3600 }, 200),
+		];
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: unknown): Promise<Response> => {
+				const url = getUrl(input);
+				if (url === "https://auth.x.ai/oauth2/device/code") {
+					return jsonResponse({
+						device_code: "device-code",
+						user_code: "ABCD-EFGH",
+						verification_uri: "https://accounts.x.ai/oauth2/device",
+						verification_uri_complete: "https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH",
+						interval: 5,
+						expires_in: 900,
+					});
+				}
+				if (url === "https://auth.x.ai/oauth2/token") {
+					const response = pollResponses.shift();
+					if (!response) throw new Error("Unexpected extra token poll");
+					return response;
+				}
+				throw new Error(`Unexpected fetch URL: ${url}`);
+			}),
+		);
+
+		const loginPromise = loginGrok({ onAuth: () => {} });
+		await vi.advanceTimersByTimeAsync(5000);
+		await vi.advanceTimersByTimeAsync(5000);
+		const credentials = await loginPromise;
+
+		expect(credentials.access).toBe("xai_access_token");
+		expect(credentials.refresh).toBe("xai_refresh_token");
+	});
+
 	it("rejects when the device flow times out", async () => {
 		vi.useFakeTimers();
 

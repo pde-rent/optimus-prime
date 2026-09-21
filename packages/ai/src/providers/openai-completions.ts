@@ -45,6 +45,7 @@ import type {
 	ChatCompletionTool,
 	ChatCompletionToolMessageParam,
 } from "./openai-wire-types.js";
+import { opencodeClientHeaders } from "./opencode-headers.js";
 import { buildSimpleBaseOptions, clampSimpleReasoning, resolveCacheRetention } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -129,7 +130,15 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 					? getAnthropicCacheWriteCost(model.cost.input, cacheControl.ttl === "1h" ? "1h" : "5m")
 					: undefined;
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
-			const { url, headers } = createClient(model, context, apiKey, options?.headers, cacheSessionId, compat);
+			const { url, headers } = createClient(
+				model,
+				context,
+				apiKey,
+				options?.headers,
+				cacheSessionId,
+				compat,
+				options?.sessionId,
+			);
 			let params = buildParams(model, context, options, compat, cacheRetention, cacheControl);
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
@@ -437,10 +446,14 @@ function createClient(
 	optionsHeaders?: Record<string, string>,
 	sessionId?: string,
 	compat: ResolvedOpenAICompletionsCompat = getCompat(model),
+	opencodeSessionId?: string,
 ) {
 	const key = resolveOpenAIApiKey(apiKey);
 
-	const headers = { ...model.headers };
+	// Opencode CLI headers go first as defaults; explicit model and caller
+	// headers win. The session header uses the raw session id (not the
+	// cache-gated one) so the gateway can affiliate requests.
+	const headers = { ...opencodeClientHeaders(model, opencodeSessionId, optionsHeaders), ...model.headers };
 	applyCopilotRequestHeaders(model, context, headers);
 
 	if (sessionId && compat.sendSessionAffinityHeaders) {
@@ -512,7 +525,7 @@ function buildParams(
 		applyAnthropicCacheControl(messages, params.tools, cacheControl);
 	}
 
-	if (options?.toolChoice) {
+	if (options?.toolChoice && params.tools?.length) {
 		params.tool_choice = options.toolChoice;
 	}
 
@@ -611,7 +624,7 @@ function addCacheControlToLastConversationMessage(
 ): void {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
-		if (message.role === "user" || message.role === "assistant") {
+		if (message.role === "user" || message.role === "assistant" || message.role === "tool") {
 			if (addCacheControlToMessage(message, cacheControl)) {
 				return;
 			}
@@ -642,7 +655,7 @@ function addCacheControlToMessage(
 	message: ChatCompletionMessageParam,
 	cacheControl: OpenAICompatCacheControl,
 ): boolean {
-	if (message.role === "user" || message.role === "assistant") {
+	if (message.role === "user" || message.role === "assistant" || message.role === "tool") {
 		return addCacheControlToTextContent(message, cacheControl);
 	}
 	return false;
@@ -652,6 +665,7 @@ function addCacheControlToTextContent(
 	message:
 		| ChatCompletionInstructionMessageParam
 		| ChatCompletionAssistantMessageParam
+		| ChatCompletionToolMessageParam
 		| Extract<ChatCompletionMessageParam, { role: "user" }>,
 	cacheControl: OpenAICompatCacheControl,
 ): boolean {
@@ -1073,7 +1087,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		openRouterRouting: {},
 		vercelGatewayRouting: {},
 		zaiToolStream: false,
-		supportsStrictMode: !isMoonshot && !isCloudflareAiGateway,
+		supportsStrictMode: false,
 		cacheControlFormat,
 		sendSessionAffinityHeaders: false,
 		supportsLongCacheRetention: !(isCloudflareWorkersAI || isCloudflareAiGateway),

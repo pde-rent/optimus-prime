@@ -60,6 +60,43 @@ const FORM_HEADERS = {
 	"Content-Type": "application/x-www-form-urlencoded",
 };
 
+/**
+ * POST a form body and parse the JSON reply regardless of HTTP status.
+ *
+ * RFC 8628 device-flow errors (`authorization_pending`, `slow_down`, ...) are
+ * reported as HTTP 400 with a JSON `error` field, so a status-throwing helper
+ * would turn a normal "user has not approved yet" poll into a hard failure.
+ * The parsed body is the source of truth; status is only used when the body
+ * carries no error.
+ */
+export async function postFormJson(
+	url: string,
+	body: Record<string, string>,
+	headers: Record<string, string> = FORM_HEADERS,
+): Promise<{ status: number; ok: boolean; body: unknown }> {
+	const response = await fetch(url, {
+		method: "POST",
+		headers,
+		body: new URLSearchParams(body),
+	});
+	let parsed: unknown;
+	try {
+		parsed = await response.json();
+	} catch {
+		parsed = undefined;
+	}
+	return { status: response.status, ok: response.ok, body: parsed };
+}
+
+/** Absolute URL for a device endpoint that may return a relative verification path. */
+function absoluteUrl(value: string, base: string): string {
+	try {
+		return new URL(value).toString();
+	} catch {
+		return new URL(value, base).toString();
+	}
+}
+
 /** Request a device code. Sends PKCE challenge and scope when provided. */
 export async function startDeviceFlow(options: {
 	deviceUrl: string;
@@ -104,7 +141,7 @@ export async function startDeviceFlow(options: {
 
 	return {
 		device_code: deviceCode,
-		verification_uri_complete: verificationUri,
+		verification_uri_complete: absoluteUrl(verificationUri, options.deviceUrl),
 		interval,
 		expires_in: expiresIn,
 		...(verifier ? { code_verifier: verifier } : {}),
@@ -138,13 +175,10 @@ async function pollForDeviceToken(options: {
 		};
 		if (options.codeVerifier) body.code_verifier = options.codeVerifier;
 
-		const raw = await fetchJson(options.tokenUrl, {
-			method: "POST",
-			headers: FORM_HEADERS,
-			body: new URLSearchParams(body),
-		});
+		const { status, ok, body: raw } = await postFormJson(options.tokenUrl, body);
 
-		if (!raw || typeof raw !== "object") {
+		if (raw === undefined) {
+			if (!ok) throw new Error(`Device flow failed: HTTP ${status}`);
 			continue;
 		}
 
@@ -158,6 +192,10 @@ async function pollForDeviceToken(options: {
 		}
 		if (error === "slow_down") {
 			intervalMs = typeof interval === "number" && interval > 0 ? interval * 1000 : intervalMs + 5000;
+			continue;
+		}
+		if (!error) {
+			if (!ok) throw new Error(`Device flow failed: HTTP ${status}`);
 			continue;
 		}
 		const descriptionSuffix = description ? `: ${description}` : "";

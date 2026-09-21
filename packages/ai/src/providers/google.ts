@@ -31,6 +31,7 @@ import {
 	mapToolChoice,
 	retainThoughtSignature,
 } from "./google-shared.js";
+import { opencodeClientHeaders } from "./opencode-headers.js";
 import { buildSimpleBaseOptions } from "./simple-options.js";
 import { runProviderStream } from "./stream-runner.js";
 
@@ -60,7 +61,7 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			if (nextParams !== undefined) {
 				params = nextParams as GenerateContentParameters;
 			}
-			const googleStream = await generateContentStream(model, apiKey, options?.headers, params);
+			const googleStream = await generateContentStream(model, apiKey, options?.headers, params, options?.sessionId);
 
 			stream.push({ type: "start", partial: output });
 			let currentBlock: TextContent | ThinkingContent | null = null;
@@ -293,12 +294,13 @@ async function generateContentStream(
 	apiKey: string,
 	optionsHeaders: Record<string, string> | undefined,
 	params: GenerateContentParameters,
+	sessionId?: string,
 ): Promise<AsyncGenerator<GenerateContentResponse>> {
 	const signal = params.config?.abortSignal;
 	const response = await requestWithRetry({
 		url: buildStreamUrl(model, params.model),
 		method: "POST",
-		headers: buildRequestHeaders(apiKey, model, optionsHeaders),
+		headers: buildRequestHeaders(apiKey, model, optionsHeaders, sessionId),
 		body: JSON.stringify(buildRequestBody(params)),
 		...(signal ? { signal } : {}),
 		maxRetries: 0,
@@ -310,8 +312,14 @@ function buildRequestHeaders(
 	apiKey: string,
 	model: Model<"google-generative-ai">,
 	optionsHeaders: Record<string, string> | undefined,
+	sessionId?: string,
 ): Record<string, string> {
-	const headers = mergeHeaders({ "Content-Type": "application/json" }, model.headers, optionsHeaders);
+	const headers = mergeHeaders(
+		{ "Content-Type": "application/json" },
+		opencodeClientHeaders(model, sessionId, optionsHeaders),
+		model.headers,
+		optionsHeaders,
+	);
 	// The SDK appends the key header only when the caller has not set one.
 	if (!Object.keys(headers).some((name) => name.toLowerCase() === "x-goog-api-key")) {
 		headers["x-goog-api-key"] = apiKey;

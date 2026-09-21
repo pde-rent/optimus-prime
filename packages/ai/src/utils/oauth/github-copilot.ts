@@ -1,5 +1,12 @@
 import { getModels } from "../../models.js";
 import type { Api, Model } from "../../types.js";
+import {
+	abortableSleep,
+	type DeviceTokenErrorResponse,
+	type DeviceTokenSuccessResponse,
+	fetchJson,
+	postFormJson,
+} from "./common.js";
 import type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderInterface } from "./types.js";
 
 type CopilotCredentials = OAuthCredentials & {
@@ -25,18 +32,6 @@ type DeviceCodeResponse = {
 	verification_uri: string;
 	interval: number;
 	expires_in: number;
-};
-
-type DeviceTokenSuccessResponse = {
-	access_token: string;
-	token_type?: string;
-	scope?: string;
-};
-
-type DeviceTokenErrorResponse = {
-	error: string;
-	error_description?: string;
-	interval?: number;
 };
 
 export function normalizeDomain(input: string): string | null {
@@ -84,32 +79,23 @@ export function getGitHubCopilotBaseUrl(token?: string, enterpriseDomain?: strin
 	return "https://api.individual.githubcopilot.com";
 }
 
-async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
-	const response = await fetch(url, init);
-	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(`${response.status} ${response.statusText}: ${text}`);
-	}
-	return response.json();
-}
-
 async function startDeviceFlow(domain: string): Promise<DeviceCodeResponse> {
 	const urls = getUrls(domain);
-	const data = await fetchJson(urls.deviceCodeUrl, {
-		method: "POST",
-		headers: {
+	const {
+		ok,
+		status,
+		body: data,
+	} = await postFormJson(
+		urls.deviceCodeUrl,
+		{ client_id: CLIENT_ID, scope: "read:user" },
+		{
 			Accept: "application/json",
 			"Content-Type": "application/x-www-form-urlencoded",
 			"User-Agent": "GitHubCopilotChat/0.35.0",
 		},
-		body: new URLSearchParams({
-			client_id: CLIENT_ID,
-			scope: "read:user",
-		}),
-	});
-
-	if (!data || typeof data !== "object") {
-		throw new Error("Invalid device code response");
+	);
+	if (!ok || !data || typeof data !== "object") {
+		throw new Error(`Invalid device code response: HTTP ${status}`);
 	}
 
 	const deviceCode = (data as Record<string, unknown>).device_code;
@@ -137,26 +123,6 @@ async function startDeviceFlow(domain: string): Promise<DeviceCodeResponse> {
 	};
 }
 
-function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (signal?.aborted) {
-			reject(new Error("Login cancelled"));
-			return;
-		}
-
-		const timeout = setTimeout(resolve, ms);
-
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout);
-				reject(new Error("Login cancelled"));
-			},
-			{ once: true },
-		);
-	});
-}
-
 async function pollForGitHubAccessToken(
 	domain: string,
 	deviceCode: string,
@@ -179,25 +145,34 @@ async function pollForGitHubAccessToken(
 		const waitMs = Math.min(Math.ceil(intervalMs * intervalMultiplier), remainingMs);
 		await abortableSleep(waitMs, signal);
 
-		const raw = await fetchJson(urls.accessTokenUrl, {
-			method: "POST",
-			headers: {
+		const {
+			ok,
+			status,
+			body: raw,
+		} = await postFormJson(
+			urls.accessTokenUrl,
+			{
+				client_id: CLIENT_ID,
+				device_code: deviceCode,
+				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+			},
+			{
 				Accept: "application/json",
 				"Content-Type": "application/x-www-form-urlencoded",
 				"User-Agent": "GitHubCopilotChat/0.35.0",
 			},
-			body: new URLSearchParams({
-				client_id: CLIENT_ID,
-				device_code: deviceCode,
-				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-			}),
-		});
+		);
 
 		if (raw && typeof raw === "object" && typeof (raw as DeviceTokenSuccessResponse).access_token === "string") {
 			return (raw as DeviceTokenSuccessResponse).access_token;
 		}
 
-		if (raw && typeof raw === "object" && typeof (raw as DeviceTokenErrorResponse).error === "string") {
+		if (!raw || typeof raw !== "object") {
+			if (!ok) throw new Error(`Device flow failed: HTTP ${status}`);
+			continue;
+		}
+
+		if (typeof (raw as DeviceTokenErrorResponse).error === "string") {
 			const { error, error_description: description, interval } = raw as DeviceTokenErrorResponse;
 			if (error === "authorization_pending") {
 				continue;

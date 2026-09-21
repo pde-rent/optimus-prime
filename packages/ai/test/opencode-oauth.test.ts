@@ -103,6 +103,60 @@ describe("OpenCode OAuth device flow", () => {
 		expect(pollTimes).toEqual([startTime.getTime() + 5000, startTime.getTime() + 10000, startTime.getTime() + 20000]);
 	});
 
+	it("keeps polling when the token endpoint reports pending as HTTP 400", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-09T00:00:00Z"));
+
+		const pollResponses = [
+			jsonResponse(
+				{
+					_tag: "DeviceTokenError",
+					error: "authorization_pending",
+					error_description: "The authorization request is still pending",
+				},
+				400,
+			),
+			jsonResponse({ access_token: "oc_access_token", refresh_token: "oc_refresh_token", expires_in: 3600 }, 200),
+		];
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: unknown): Promise<Response> => {
+				const url = getUrl(input);
+				if (url === "https://console.opencode.ai/auth/device/code") {
+					return jsonResponse({
+						device_code: "device-code",
+						user_code: "ABCD-EFGH",
+						verification_uri: "/console/device",
+						verification_uri_complete: "/console/device?user_code=ABCD-EFGH&client_id=opencode-cli",
+						interval: 5,
+						expires_in: 900,
+					});
+				}
+				if (url === "https://console.opencode.ai/auth/device/token") {
+					const response = pollResponses.shift();
+					if (!response) throw new Error("Unexpected extra token poll");
+					return response;
+				}
+				throw new Error(`Unexpected fetch URL: ${url}`);
+			}),
+		);
+
+		const authUrls: string[] = [];
+		const loginPromise = loginOpenCode({ onAuth: (url) => authUrls.push(url) });
+
+		await vi.advanceTimersByTimeAsync(5000);
+		await vi.advanceTimersByTimeAsync(5000);
+		const credentials = await loginPromise;
+
+		expect(credentials.access).toBe("oc_access_token");
+		// The gateway returns the verification path relative; it must be anchored
+		// to the console origin or the browser open silently fails.
+		expect(authUrls).toEqual([
+			"https://console.opencode.ai/console/device?user_code=ABCD-EFGH&client_id=opencode-cli",
+		]);
+	});
+
 	it("rejects when the device flow times out", async () => {
 		vi.useFakeTimers();
 

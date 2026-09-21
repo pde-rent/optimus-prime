@@ -1,0 +1,1 @@
+- Send a stable `x-opencode-session` derived from the caller session id on OpenCode requests, and apply opencode CLI headers as defaults so explicit caller headers win.

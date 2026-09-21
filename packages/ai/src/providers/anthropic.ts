@@ -43,6 +43,7 @@ import type {
 import { createAssistantMessage } from "./assistant-message.js";
 import { resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
+import { opencodeClientHeaders } from "./opencode-headers.js";
 import { adjustMaxTokensForThinking, buildSimpleBaseOptions, resolveCacheRetention } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 
@@ -62,7 +63,7 @@ function getCacheControl(
 }
 
 // Stealth mode: Mimic Claude Code's tool naming exactly
-const claudeCodeVersion = "2.1.75";
+const claudeCodeVersion = "2.1.257";
 
 /**
  * Version reported in `User-Agent`, matching what `@anthropic-ai/sdk`'s
@@ -349,6 +350,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					shouldUseFineGrainedToolStreamingBeta(model, context),
 					options?.headers,
 					copilotDynamicHeaders,
+					options?.sessionId,
 				);
 				isOAuth = endpoint.isOAuthToken;
 			}
@@ -722,6 +724,7 @@ function createClient(
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
 	dynamicHeaders?: Record<string, string>,
+	opencodeSessionId?: string,
 ): AnthropicEndpoint {
 	// Adaptive thinking models (Opus 4.6, Sonnet 4.6) have interleaved thinking built-in.
 	// The beta header is deprecated on Opus 4.6 and redundant on Sonnet 4.6, so skip it.
@@ -810,6 +813,7 @@ function createClient(
 				"anthropic-dangerous-direct-browser-access": "true",
 				...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
 			},
+			opencodeClientHeaders(model, opencodeSessionId, optionsHeaders),
 			model.headers,
 			optionsHeaders,
 			bodyHeaders,
