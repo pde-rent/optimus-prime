@@ -35,6 +35,17 @@ export type AuthCredential = ApiKeyCredential | OAuthCredential;
 
 export type AuthStorageData = Record<string, AuthCredential>;
 
+/**
+ * Providers sharing one credential namespace: the same API key authorizes
+ * both endpoints (OpenCode Zen + Go). A key stored under either id satisfies
+ * both. Read-only fallback; writes/logout stay per-id. API keys only — OAuth
+ * tokens stay strictly per-provider.
+ */
+const SHARED_CREDENTIAL_PROVIDERS: Record<string, string> = {
+	opencode: "opencode-go",
+	"opencode-go": "opencode",
+};
+
 export type AuthStatus = {
 	configured: boolean;
 	source?:
@@ -299,16 +310,40 @@ export class AuthStorage {
 		};
 	}
 
+	/**
+	 * Resolve the stored credential for a provider, falling back to the
+	 * sibling id for shared-credential providers (opencode ↔ opencode-go).
+	 * Returns the id the credential was found under for fingerprinting.
+	 */
+	private resolveStoredCredential(provider: string): { id: string; credential: AuthCredential } | undefined {
+		const direct = this.data[provider];
+		if (direct) {
+			return { id: provider, credential: direct };
+		}
+		const sibling = SHARED_CREDENTIAL_PROVIDERS[provider];
+		if (sibling) {
+			const credential = this.data[sibling];
+			// Only API keys are shared; OAuth tokens stay per-provider.
+			if (credential?.type === "api_key") {
+				return { id: sibling, credential };
+			}
+		}
+		return undefined;
+	}
+
 	private getStoredAuthCandidate(
 		provider: string,
 		options?: { resolveCommandValue?: boolean; resolvedCommandValue?: string },
 	): AuthSourceCandidate | undefined {
-		const credential = this.data[provider];
-		if (!credential) {
+		const resolved = this.resolveStoredCredential(provider);
+		if (!resolved) {
 			return undefined;
 		}
+		const credential = resolved.credential;
 		const isCommandApiKey = credential.type === "api_key" && credential.key.startsWith("!");
-		const identityMaterial = isCommandApiKey ? `api_key:command:${credential.key}` : `${provider}:${credential.type}`;
+		const identityMaterial = isCommandApiKey
+			? `api_key:command:${credential.key}`
+			: `${resolved.id}:${credential.type}`;
 		const commandValueMaterial =
 			isCommandApiKey && options?.resolvedCommandValue !== undefined
 				? `api_key:command:${credential.key}\0${options.resolvedCommandValue}`
@@ -717,7 +752,8 @@ export class AuthStorage {
 		const envCandidate = this.getEnvironmentAuthCandidate(providerId);
 		const envKey = getEnvApiKey(providerId);
 
-		const cred = this.data[providerId];
+		const resolved = this.resolveStoredCredential(providerId);
+		const cred = resolved?.credential;
 
 		if (cred?.type === "api_key") {
 			const storedCandidate = this.getStoredAuthCandidate(providerId);

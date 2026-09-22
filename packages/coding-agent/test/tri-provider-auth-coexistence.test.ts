@@ -67,4 +67,19 @@ describe("tri-provider auth coexistence", () => {
 		expect(await registry.getApiKeyForProvider("openai-codex")).toBeUndefined();
 		expect(await registry.getApiKeyForProvider("opencode-go")).toBe("KEY");
 	});
+
+	test("opencode-go key authorizes opencode models too", async () => {
+		expect(authStorage.hasAuth("opencode")).toBe(true);
+		expect(await registry.getApiKeyForProvider("opencode")).toBe("KEY");
+		const model = registry.find("opencode", "claude-sonnet-4-5");
+		expect(model).toBeDefined();
+		expect((await registry.getApiKeyAndHeaders(model!)).ok).toBe(true);
+	});
+
+	test("opencode key authorizes opencode-go models too", async () => {
+		authStorage.remove("opencode-go");
+		authStorage.set("opencode", { type: "api_key", key: "ZEN-KEY" });
+		expect(authStorage.hasAuth("opencode-go")).toBe(true);
+		expect(await registry.getApiKeyForProvider("opencode-go")).toBe("ZEN-KEY");
+	});
 });
